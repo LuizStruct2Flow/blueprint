@@ -48,7 +48,7 @@ artifacts) is PUBLIC and should NOT appear under `Ignored files`.
 # 1b. Index state — what would actually publish if you `git push`?
 # .gitignore does NOT untrack already-tracked files. This is the
 # critical check: a tracked file ignores nothing.
-git ls-files | grep -E '^(CLAUDE\.md|AGENTS\.md|AGENT_SIGNAL\.md|docs/(DoD\.md|PUBLISHING\.md|doing/HANDOVER\.md|doing/.+/CODEX_REVIEW\.md)|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "PRIVATE FILES STILL TRACKED — DO NOT PUSH" || echo "index clean"
+git ls-files | grep -E '^(CLAUDE\.md|AGENTS\.md|AGENT_SIGNAL\.md|docs/(DoD\.md|PUBLISHING\.md|doing/HANDOVER\.md|.+/CODEX_REVIEW\.md)|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "PRIVATE FILES STILL TRACKED — DO NOT PUSH" || echo "index clean"
 ```
 
 Expected output: `index clean`.
@@ -144,7 +144,7 @@ done
 
 # Scrub private files that the docs/ copy brought along.
 rm -f docs/DoD.md docs/PUBLISHING.md docs/doing/HANDOVER.md
-find docs/doing -name 'CODEX_REVIEW.md' -delete 2>/dev/null
+find docs -name 'CODEX_REVIEW.md' -delete 2>/dev/null
 
 # Verify nothing private slipped in. This is the §1b check, repeated
 # on the filesystem rather than the git index.
@@ -197,14 +197,14 @@ cd "$(git rev-parse --show-toplevel)"
 git rm --cached \
   CLAUDE.md AGENTS.md AGENT_SIGNAL.md \
   docs/DoD.md docs/PUBLISHING.md docs/doing/HANDOVER.md \
-  $(git ls-files 'docs/doing/**/CODEX_REVIEW.md') \
+  $(git ls-files 'docs/**/CODEX_REVIEW.md') \
   project_config_overview.md project_config_paths.md project_config_dod.md \
   scripts/codex-signal-watch.sh scripts/start-codex-signal-watch.sh scripts/new-project.sh \
   $(git ls-files '.claude/**' 2>/dev/null) \
   .blueprint-source
 
 # Confirm index is now clean — same pattern as §1b:
-git ls-files | grep -E '^(CLAUDE\.md|AGENTS\.md|AGENT_SIGNAL\.md|docs/(DoD\.md|PUBLISHING\.md|doing/HANDOVER\.md|doing/.+/CODEX_REVIEW\.md)|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
+git ls-files | grep -E '^(CLAUDE\.md|AGENTS\.md|AGENT_SIGNAL\.md|docs/(DoD\.md|PUBLISHING\.md|doing/HANDOVER\.md|.+/CODEX_REVIEW\.md)|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
 
 # Commit "private: untrack methodology" then push.
 ```

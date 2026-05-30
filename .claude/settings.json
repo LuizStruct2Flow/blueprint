@@ -100,6 +100,7 @@
       "Bash(curl -s -X GET *)",
       "Bash(curl -sS -X GET *)",
       "Bash(curl -s --request GET *)",
+      "Bash(git *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -113,7 +114,15 @@
       "Bash(npm test*)",
       "Bash(npm run build*)",
       "Bash(npm run lint*)",
-      "Bash(npm *)"
+      "Bash(npm *)",
+      "Bash(ssh -T git@github.com)",
+      "Bash(gh auth *)",
+      "Read(//Users/<HOST>/.ssh/**)",
+      "Bash(ssh-add -l)",
+      "Bash(ssh -v git@github.com)"
+    ],
+    "additionalDirectories": [
+      "/Users/<HOST>/.ssh"
     ]
   }
 }

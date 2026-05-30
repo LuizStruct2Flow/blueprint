@@ -22,15 +22,61 @@ npm-debug.log*
 .vscode/
 .idea/
 
-# Claude Code (ignore everything except shared team skills + project-tracked settings)
-# settings.json is project-shared (read-only allowlist; sync cross-machine via git)
-# settings.local.json stays gitignored (may contain machine-local grants or secrets)
-.claude/*
-!.claude/skills/
-!.claude/settings.json
+# Claude Code (ignore everything except shared team skills)
+# settings.json is gitignored for public-publishability — it reveals the
+# founder's personal toolchain. If your project needs cross-machine
+# permission sync, do it via a private path outside the repo, not via
+# the public repo.
+.claude/
 
 # Test coverage
 coverage/
+
+# ============================================================
+# PUBLIC-PUBLISHING PRIVACY BLOCK
+# ------------------------------------------------------------
+# struct2flow projects are designed to be publishable on public GitHub
+# without leaking AI configurations or operational state. The rules
+# below partition the worktree into PUBLIC (tracked, pushable) and
+# PRIVATE (local-only). Anything that reveals the founder's identity,
+# AI workflow, or operational state lives PRIVATE.
+#
+# Lifecycle artifacts under docs/ (BACKLOG.md, BUGS.md, SLICE-*/PLAN.md,
+# FEATURES.md, ACCEPTANCE_TESTS.md, requirements/, waiting-acceptance/,
+# done/, mocks/, all folder README.md) are PUBLIC by default. Only the
+# four methodology files inside docs/ are PRIVATE — see below.
+#
+# Before pushing to a public remote, read docs/PUBLISHING.md (itself
+# gitignored below) for the §1b index preflight and §3a fresh-repo
+# allowlist publish flow.
+# ============================================================
+
+# --- struct2flow / multi-AI methodology (PRIVATE) ---
+# These files reveal how the founder works with Codex + Claude Code.
+# Lifecycle artifacts under docs/ stay PUBLIC; only the four
+# methodology files inside docs/ are listed here.
+CLAUDE.md
+AGENTS.md
+AGENT_SIGNAL.md
+docs/DoD.md
+docs/PUBLISHING.md
+docs/doing/HANDOVER.md
+docs/doing/**/CODEX_REVIEW.md
+project_config_overview.md
+project_config_paths.md
+project_config_dod.md
+
+# struct2flow agent-protocol scripts (Codex dispatcher etc.).
+# Project-specific scripts that ship publicly go in scripts/ with
+# names that don't match these.
+scripts/codex-signal-watch.sh
+scripts/start-codex-signal-watch.sh
+scripts/new-project.sh
+
+# Bootstrap provenance — points at the founder's local blueprint path
+# and the source commit SHA. Created by scripts/new-project.sh on
+# bootstrap.
+.blueprint-source
 
 # Project-specific ignores: add below in your project's own .gitignore extension.
 # Do NOT edit them between the blueprint markers — they'd come back on next sync.

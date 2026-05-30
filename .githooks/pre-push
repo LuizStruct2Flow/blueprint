@@ -1,0 +1,57 @@
+#!/bin/sh
+# Pre-push hook: block push if any of these fail:
+#   - Build (tsc / compile)
+#   - Lint (--max-warnings ratcheted)
+#   - Tests (unit + integration + data snapshot)
+#   - Project-specific guards (see .githooks/pre-push-project)
+#
+# This file is tracked in the repo at .githooks/pre-push. New clones pick it
+# up automatically via the `postinstall` script in your project's package.json,
+# which runs `git config --local core.hooksPath .githooks`.
+#
+# This is the BLUEPRINT version: generic checks only. Project-specific guards
+# (placeholder injection, asset invariants, release-notes guard, etc.) live
+# in .githooks/pre-push-project and are sourced below if present.
+
+set -e
+
+echo "🔒 Pre-push: build + lint + tests..."
+
+# Adjust these paths / commands to match your project's workspaces.
+# {{PROJECT_NAME}}: edit this block during bootstrap to reflect your layout.
+
+# --- Backend (if present) ---
+if [ -d backend ]; then
+  echo "  → Backend build..."
+  ( cd backend && npm run build ) || { echo "❌ Backend build failed."; exit 1; }
+
+  echo "  → Backend lint..."
+  ( cd backend && npm run lint ) || { echo "❌ Backend lint exceeded --max-warnings threshold."; exit 1; }
+
+  echo "  → Backend tests..."
+  ( cd backend && npm test ) || { echo "❌ Backend tests failed."; exit 1; }
+fi
+
+# --- Frontend (if present) ---
+if [ -d frontend ]; then
+  echo "  → Frontend lint..."
+  ( cd frontend && npm run lint ) || { echo "❌ Frontend lint exceeded --max-warnings threshold."; exit 1; }
+
+  echo "  → Frontend tests..."
+  ( cd frontend && npm test ) || { echo "❌ Frontend tests failed."; exit 1; }
+fi
+
+# --- Project-specific guards (sourced if present) ---
+# Add your project's invariants in .githooks/pre-push-project:
+#   - placeholder / config drift guards
+#   - asset / favicon / head-block invariants
+#   - release-notes guard
+#   - localization parity checks
+# This keeps .githooks/pre-push pristine (blueprint-managed) and lets the
+# blueprint sync forward without trampling your project guards.
+if [ -f .githooks/pre-push-project ]; then
+  echo "  → Project-specific guards..."
+  . .githooks/pre-push-project
+fi
+
+echo "✅ All checks passed. Pushing..."

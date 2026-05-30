@@ -1,0 +1,38 @@
+#!/bin/sh
+# Project-specific pre-push guards. Copy to .githooks/pre-push-project
+# (drop the .example suffix) and edit. Sourced by .githooks/pre-push if
+# present. NOT tracked under blueprint sync — your project owns this file.
+#
+# Examples (uncomment and adapt):
+
+# --- Placeholder / config drift guard ---
+# for HTML_TARGET in frontend/index.html frontend/index.de.html; do
+#   if grep -q "PLACEHOLDER_NEVER_REPLACED" "$HTML_TARGET"; then
+#     echo "❌ $HTML_TARGET has unresolved placeholder."
+#     exit 1
+#   fi
+# done
+
+# --- Favicon / head invariant ---
+# for PUBLIC_HTML in frontend/public/*.html; do
+#   if ! grep -q 'rel="icon"' "$PUBLIC_HTML"; then
+#     echo "❌ $PUBLIC_HTML is missing the favicon."
+#     exit 1
+#   fi
+# done
+
+# --- Release-notes guard ---
+# RANGE=origin/main..HEAD
+# CHANGED=$(git diff --name-only $RANGE 2>/dev/null || true)
+# HTML_CHANGED=$(echo "$CHANGED" | grep -E '^frontend/public/[^/]+\.html$' | grep -v 'release-notes.html' || true)
+# if [ -n "$HTML_CHANGED" ]; then
+#   NOTES_CHANGED=$(echo "$CHANGED" | grep -E '^(docs/RELEASE-NOTES\.md|frontend/public/release-notes\.html)$' || true)
+#   if [ -z "$NOTES_CHANGED" ]; then
+#     if git log $RANGE --pretty=%B 2>/dev/null | grep -q '\[no-release-notes\]'; then
+#       echo "  (release-notes guard skipped: [no-release-notes] in commit message)"
+#     else
+#       echo "❌ Release notes not updated for a user-visible change."
+#       exit 1
+#     fi
+#   fi
+# fi

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.js.map
+
+# Environment files — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code (ignore everything except shared team skills + project-tracked settings)
+# settings.json is project-shared (read-only allowlist; sync cross-machine via git)
+# settings.local.json stays gitignored (may contain machine-local grants or secrets)
+.claude/*
+!.claude/skills/
+!.claude/settings.json
+
+# Test coverage
+coverage/
+
+# Project-specific ignores: add below in your project's own .gitignore extension.
+# Do NOT edit them between the blueprint markers — they'd come back on next sync.

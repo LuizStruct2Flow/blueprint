@@ -35,7 +35,10 @@ struct2flow agent protocol; this file holds what's specific to
 ## Tech stack
 
 > One block per major surface. Keep concise — paths and runtimes, not
-> exhaustive dependency lists.
+> exhaustive dependency lists. Defaults live in
+> [`STACK_DEFAULTS.md`](STACK_DEFAULTS.md) — fill the rows below with the
+> ACTUAL stack chosen for this project; if any row differs from the
+> default, add a one-sentence rationale.
 
 - **Backend:** {{language}} / {{framework}}, runs on {{runtime}}
 - **Frontend:** {{language}} / {{framework}}, served via {{server}}

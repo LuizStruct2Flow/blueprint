@@ -113,10 +113,7 @@
       "Bash(npm test*)",
       "Bash(npm run build*)",
       "Bash(npm run lint*)",
-      "Bash(npm *)",
-      "Bash(cp /Users/<HOST>/sources/struct2flow/storm2flow/scripts/codex-signal-watch.sh ~/sources/struct2flow/blueprint/scripts/codex-signal-watch.sh)",
-      "Bash(cp /Users/<HOST>/sources/struct2flow/storm2flow/.claude/settings.json ~/sources/struct2flow/blueprint/.claude/settings.json)",
-      "Bash(chmod +x ~/sources/struct2flow/blueprint/scripts/codex-signal-watch.sh)"
+      "Bash(npm *)"
     ]
   }
 }

@@ -42,6 +42,7 @@ blueprint/
 ├── CLAUDE.md                       ← generic agent protocol (uses {{PROJECT_NAME}})
 ├── AGENTS.md                       ← Codex wake-up rules
 ├── AGENT_SIGNAL.md                 ← signal template (Task field is a stub)
+├── STACK_DEFAULTS.md               ← default tech stack for new struct2flow projects
 ├── project_config_overview.md      ← project-specific overview (stub)
 ├── project_config_paths.md         ← project-specific paths / URLs (stub)
 ├── project_config_dod.md           ← project-specific DoD extensions (stub)

@@ -172,6 +172,35 @@ internal customer references on public pages, standard `<head>` invariants
 for static HTML, etc.) live in `project_config_dod.md` §"User-surface
 rules". Gate them like tests.
 
+### §5.1 README updates on every push
+
+The repo's top-level `README.md` is part of the doc-sync list **by
+default for every struct2flow project**. Treat it as the canonical
+entry point a new visitor reads first; if a push changes anything a
+visitor would notice, the README moves with the code.
+
+Specifically, before any `git push` to a public remote:
+
+- **New feature or new CLI surface** → README's Quick Start, command
+  list, or feature table mentions it.
+- **Removed feature / deprecated flag** → README no longer claims
+  the feature works.
+- **Architecture change** (e.g. layer reorganization, port/adapter
+  swap) → README's Architecture / Stack section reflects it.
+- **New dependency or runtime requirement** (Node version bump,
+  external service, new env var) → README install / setup section
+  covers it.
+- **Phase / status change** (e.g. SLICE-XX moved waiting-acceptance
+  → done) → README "Status" / "Phases" section updates.
+
+Internal-only changes (refactors that don't change the public
+surface, dev-tooling tweaks, documentation reorganization) do not
+require a README touch — but the founder is the judge. **When in
+doubt, update the README**: a stale README is a worse signal than a
+slightly over-broad commit. The pre-push checklist in §7 includes
+"README updated if user-visible". The reviewer in §7 should refuse
+the handoff if the README claim disagrees with the code state.
+
 ## §6 Quality is non-negotiable
 
 The product's value is the quality of what it generates. Therefore:

@@ -117,12 +117,8 @@
       "Bash(npm *)",
       "Bash(ssh -T git@github.com)",
       "Bash(gh auth *)",
-      "Read(//Users/<HOST>/.ssh/**)",
       "Bash(ssh-add -l)",
       "Bash(ssh -v git@github.com)"
-    ],
-    "additionalDirectories": [
-      "/Users/<HOST>/.ssh"
     ]
   }
 }

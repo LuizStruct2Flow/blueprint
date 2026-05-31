@@ -56,8 +56,11 @@ blueprint/
 │   ├── codex-signal-watch.sh       ← signal poller (whole-file generic)
 │   ├── start-codex-signal-watch.sh ← Codex CLI launcher (uses {{PROJECT_NAME}})
 │   └── new-project.sh              ← bootstrap a new project
+├── config/
+│   └── README.md                   ← two-file config convention (committed *.example, gitignored *)
 └── docs/
     ├── DoD.md                      ← generic Definition of Done
+    ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── doing/
     │   ├── README.md
     │   └── HANDOVER.md             ← canonical resume doc (template stub)
@@ -100,11 +103,12 @@ from blueprint):
 - `CLAUDE.md`
 - `AGENTS.md`
 - `docs/DoD.md`
+- `docs/PUBLISHING.md`
 - `scripts/codex-signal-watch.sh`
 - `scripts/start-codex-signal-watch.sh`
 - `.githooks/pre-push`
 - `.claude/settings.json`
-- The folder skeleton READMEs under `docs/`
+- The folder skeleton READMEs under `docs/` and `config/`
 
 ### 2. Push (project → blueprint, back-propagate)
 

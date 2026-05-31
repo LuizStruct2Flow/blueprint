@@ -5,6 +5,28 @@ own `project_config_overview.md` + `project_config_paths.md` may
 override per surface — but state **why** in one sentence so it's a
 deliberate decision, not drift.
 
+## Architecture
+
+- **Style:** Domain-Driven Design (DDD) + Clean Code + Clean
+  Architecture. Hexagonal (ports & adapters) whenever the surface
+  warrants it — i.e. anything with non-trivial external integration
+  (DB, HTTP, queues, third-party APIs). Pure utilities and one-shot
+  scripts don't need ports.
+- **Why:** keeps the domain pure and testable, makes adapter swaps
+  (DynamoDB → Mongo, REST → GraphQL, sync → event-driven) a
+  bounded change instead of a rewrite, and pushes infrastructure
+  concerns to the edges so the core remains framework-agnostic.
+- **Layering** (inside → out): `domain` (entities, value objects,
+  domain services — no framework imports) → `application`
+  (use-cases / interactors orchestrating the domain) → `ports`
+  (interfaces the application depends on) → `adapters`
+  (infrastructure implementations of the ports — DB, HTTP, AWS
+  SDK, etc.). Dependencies only point inward.
+- **Override:** if a project's surface is genuinely a thin CRUD
+  wrapper or a one-shot script, full hexagonal is overkill — say
+  so in `project_config_overview.md` with one sentence. Default
+  assumption is hexagonal.
+
 ## Backend
 
 - **Language / runtime:** Node.js / TypeScript.

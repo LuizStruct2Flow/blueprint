@@ -20,6 +20,17 @@ echo "🔒 Pre-push: build + lint + tests..."
 # Adjust these paths / commands to match your project's workspaces.
 # {{PROJECT_NAME}}: edit this block during bootstrap to reflect your layout.
 
+# Each workspace runs the same gate order (per docs/DoD.md §4):
+#   build → lint → format:check → test:coverage → project guards
+#
+# Required npm scripts per workspace:
+#   - build         (e.g. tsc)
+#   - lint          (eslint with ratcheted --max-warnings)
+#   - format:check  (prettier --check . — fails if anything unformatted)
+#   - test:coverage (test runner + coverage; fails if project's
+#                    greenfield ≥90% / brownfield ≥70% threshold not met,
+#                    per project_config_dod.md)
+
 # --- Backend (if present) ---
 if [ -d backend ]; then
   echo "  → Backend build..."
@@ -28,8 +39,11 @@ if [ -d backend ]; then
   echo "  → Backend lint..."
   ( cd backend && npm run lint ) || { echo "❌ Backend lint exceeded --max-warnings threshold."; exit 1; }
 
-  echo "  → Backend tests..."
-  ( cd backend && npm test ) || { echo "❌ Backend tests failed."; exit 1; }
+  echo "  → Backend format check (Prettier)..."
+  ( cd backend && npm run format:check ) || { echo "❌ Backend has unformatted files. Run 'npm run format' in backend/ and recommit."; exit 1; }
+
+  echo "  → Backend tests + coverage..."
+  ( cd backend && npm run test:coverage ) || { echo "❌ Backend tests failed or coverage below threshold (see project_config_dod.md)."; exit 1; }
 fi
 
 # --- Frontend (if present) ---
@@ -37,8 +51,11 @@ if [ -d frontend ]; then
   echo "  → Frontend lint..."
   ( cd frontend && npm run lint ) || { echo "❌ Frontend lint exceeded --max-warnings threshold."; exit 1; }
 
-  echo "  → Frontend tests..."
-  ( cd frontend && npm test ) || { echo "❌ Frontend tests failed."; exit 1; }
+  echo "  → Frontend format check (Prettier)..."
+  ( cd frontend && npm run format:check ) || { echo "❌ Frontend has unformatted files. Run 'npm run format' in frontend/ and recommit."; exit 1; }
+
+  echo "  → Frontend tests + coverage..."
+  ( cd frontend && npm run test:coverage ) || { echo "❌ Frontend tests failed or coverage below threshold (see project_config_dod.md)."; exit 1; }
 fi
 
 # --- Project-specific guards (sourced if present) ---

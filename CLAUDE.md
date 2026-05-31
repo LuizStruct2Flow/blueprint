@@ -275,8 +275,24 @@ per the normal team workflow below.
 - **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `test(BUG-XXX): minimal reproducer (failing)` → `fix(BUG-XXX): <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
 - Trunk-based development only — no branches, use feature toggles instead
 - Run and report test coverage before every commit/push
+- **Coverage thresholds** (enforced in the pre-push gate):
+  - **Greenfield projects** (started from the blueprint): **≥90%**
+    statements + branches on the application + domain layers
+    (adapters and generated code excluded).
+  - **Brownfield projects** (existing codebase adopted into the
+    blueprint): **≥70%** on the same scope, **ratcheted** — never
+    let the number drop. New / modified files must hit the
+    greenfield 90% bar.
+  - The project declares its mode (`greenfield` / `brownfield`)
+    and the exact `--coverage` invocation in
+    `project_config_dod.md`.
 - Never push code over the ratcheted ESLint `--max-warnings` threshold;
   the shared pre-push hook at `.githooks/pre-push` enforces this
+- **Always run ESLint and Prettier (`--check`)** in the pre-push
+  gate. Lint catches semantic mistakes; Prettier catches style
+  drift. Both are blocking. Auto-format locally with
+  `npm run format` (or equivalent) before pushing — CI never
+  rewrites files on your behalf.
 
 ## Test Layers
 

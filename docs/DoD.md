@@ -115,7 +115,17 @@ The shipped code is only as good as the tests that gate it.
    command, commit the updated file, review the diff in PR. **CI never
    runs with `-u` / `--update-snapshots`.**
 6. **Coverage report** before every commit/push: know what your change
-   adds to (or removes from) coverage before you ship it.
+   adds to (or removes from) coverage before you ship it. Project
+   declares its mode in `project_config_dod.md`:
+   - **Greenfield** (started from the blueprint): **≥90%** statements
+     + branches on the application + domain layers (adapters /
+     generated code excluded).
+   - **Brownfield** (existing codebase adopted in): **≥70%** on the
+     same scope, **ratcheted** — never let the number drop.
+     New / modified files must clear the greenfield 90% bar.
+   The exact `--coverage` invocation + scope globs live in
+   `project_config_dod.md`. The pre-push gate fails the push if the
+   project mode's threshold isn't met.
 7. **Pre-push gate must complete in ≤30 s** wall-clock. Slower tests
    live in a `npm run test:slow`-style target or the CI pipeline. If a
    test category outgrows the budget, the answer is to move it out of
@@ -129,13 +139,21 @@ struct2flow convention — the project's exact targets are wired in
 
 1. Build (e.g. `tsc` — catches missing imports)
 2. Lint (`--max-warnings` ratcheted; never loosen)
-3. Tests (unit + integration + data snapshot)
-4. Project-specific guards (loaded from
+3. **Formatter check** (`prettier --check` or equivalent — fails if
+   any tracked file is unformatted). Auto-format locally with
+   `npm run format` before pushing; CI never rewrites files.
+4. Tests (unit + integration + data snapshot) + **coverage gate**
+   (greenfield ≥90% / brownfield ≥70% per §3.6 — the project
+   declares its mode in `project_config_dod.md`)
+5. Project-specific guards (loaded from
    `.githooks/pre-push-project` if it exists — placeholder guards,
    placeholder-injection checks, asset invariants, release-notes guard, etc.)
 
 **Lint warnings are ratcheted** — fix any new warnings before pushing;
 never loosen `--max-warnings` without explicit justification.
+**ESLint and Prettier are both blocking** — semantic checks
+(ESLint) and style checks (Prettier) are independent gates and
+neither can be skipped.
 **Never use `--no-verify`** unless the founder explicitly asks. After
 pushing, watch the project's CI pipeline; if red, fix before moving on.
 

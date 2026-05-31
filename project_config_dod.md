@@ -16,10 +16,34 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 |---|---|---|
 | Build | `cd backend && npm run build` | tsc clean |
 | Lint (BE) | `cd backend && npm run lint` | `--max-warnings <N>` ratcheted |
-| Test (BE) | `cd backend && npm test` | all green |
+| Format check (BE) | `cd backend && npm run format:check` | prettier clean |
+| Test + coverage (BE) | `cd backend && npm run test:coverage` | all green; coverage meets project mode (see below) |
 | Lint (FE) | `cd frontend && npm run lint` | `--max-warnings <N>` ratcheted |
-| Test (FE) | `cd frontend && npm test` | all green |
+| Format check (FE) | `cd frontend && npm run format:check` | prettier clean |
+| Test + coverage (FE) | `cd frontend && npm run test:coverage` | all green; coverage meets project mode (see below) |
 | (Project-specific guards) | sourced from `.githooks/pre-push-project` | each guard fails-fast |
+
+## Coverage mode (DoD §3.6)
+
+> Pick exactly one. Greenfield projects must hit the 90% bar from the
+> first push; brownfield projects start wherever they are and ratchet
+> upward — never let the number drop.
+
+- **Mode:** `{{greenfield | brownfield}}` (delete the one that doesn't apply)
+- **Threshold (overall):**
+  - greenfield → **≥90%** statements + branches on `application/` + `domain/`
+  - brownfield → **≥70%** on the same scope, ratcheted; the current floor is `{{N%}}` (commit SHA `{{SHA}}`)
+- **Scope (what counts toward the threshold):**
+  ```
+  include: src/application/**, src/domain/**
+  exclude: src/adapters/**, src/**/__generated__/**, **/*.d.ts
+  ```
+- **New / modified files** always have to clear the **greenfield 90% bar**,
+  regardless of project mode. (Brownfield's lower floor is for legacy code,
+  not for fresh code added today.)
+- **Invocation:** `npm run test:coverage` runs the suite and fails the
+  process if any of the thresholds above aren't met. The pre-push hook
+  blocks on this.
 
 ## Doc-sync list (DoD §5)
 

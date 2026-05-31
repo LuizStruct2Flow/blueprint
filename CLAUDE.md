@@ -280,18 +280,47 @@ per the normal team workflow below.
 
 ## Test Layers
 
-| Layer | Path convention | Runs in |
-|---|---|---|
-| Minimal reproducer | sibling of `*.test.{js,ts}` | pre-push |
-| Unit | `*.test.{js,ts}` | pre-push |
-| Integration / wire | `*.integration.test.{js,ts,jsx,tsx}` | pre-push |
-| Data snapshot | `*.snap.test.{js,ts}` | pre-push |
-| Pixel snapshot | project-defined | manual + CI pipeline |
-| E2E / acceptance | project-defined | CI pipeline |
+| Layer | Filename suffix | Lives next to source? | Runs in |
+|---|---|---|---|
+| Minimal reproducer | sibling of `*.test.{js,ts}` | YES | pre-push |
+| Unit | `*.test.{js,ts}` | YES (side-by-side) | pre-push |
+| Integration / wire | `*.integration.test.{js,ts,jsx,tsx}` | YES (near subject) | pre-push |
+| Data snapshot | `*.snap.test.{js,ts}` | NO (lives in `tests/`) | pre-push |
+| Pixel snapshot | project-defined | NO | manual + CI pipeline |
+| E2E / acceptance | project-defined | NO (lives in `tests/e2e/`) | CI pipeline |
 
 DOM and layout snapshots live next to the deterministic transform they
 pin. A change that ripples across multiple snapshot files is the signal
 we want — it surfaces which layer changed.
+
+## Test directory layout
+
+**Unit and integration tests are co-located with the source file
+they test**, not stashed in a separate `tests/` mirror. So
+`src/domain/rating/decide.ts` is tested by
+`src/domain/rating/decide.test.ts` sitting next to it. One test
+file per source file when reasonable; multiple small files beat one
+giant cross-cutting one.
+
+**Snapshot and E2E tests live separately** under `tests/`
+(typically `tests/` root for snapshots, `tests/e2e/` for E2E).
+Their diff is a cross-cutting review concern; treating them as
+sidebar tests muddies the per-source-file co-location rule.
+
+**Shared test helpers / mocks / fixtures** live under
+`tests/helpers/` or `tests/__helpers__/`, never co-located — they
+serve multiple tests.
+
+**Tooling consequences:**
+
+- `vitest.config.ts` `include`: both `src/**/*.test.ts` (co-located
+  unit/integration) and `tests/**/*.test.ts` (snapshot/e2e).
+- `tsconfig.json`: a `src/**/*.ts` glob already includes
+  `src/**/*.test.ts`; no separate entry needed.
+- If you enforce layering with `eslint-plugin-boundaries` or
+  similar, **exclude `src/**/*.test.ts` from the enforcement** so
+  tests can import freely across layers (a domain test reaching
+  for a fake adapter is normal and good).
 
 ## Snapshot tests — approval-based
 

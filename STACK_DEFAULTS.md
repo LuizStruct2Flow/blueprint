@@ -64,6 +64,41 @@ deliberate decision, not drift.
 - **Pipelines:** AWS CodePipeline + CodeBuild when the repo is on
   CodeCommit; GitHub Actions when the repo is on GitHub.
 
+## Git author identity (fresh-clone bootstrap)
+
+The founder's machine has a **work** git identity set globally
+(e.g. `*.ext@<employer>.de`). That email must NOT appear in
+personal struct2flow project history — it conflates work
+identity with personal open-source work and risks corporate
+IP-assignment ambiguity if the repo is ever published.
+
+**Default personal identity for struct2flow projects:**
+
+- **Name:**  `Luiz Scheidegger`
+- **Email:** `luiz@struct2flow.com`
+
+**On fresh clone / new project bootstrap, before any commit:**
+
+```bash
+git config user.email "luiz@struct2flow.com"
+git config user.name  "Luiz Scheidegger"
+```
+
+Use repo-local (`git config`, NOT `--global`) so work repos keep
+their own identity. The `new-project.sh` bootstrap script should
+set this automatically once; until then, an agent's first action
+on a fresh personal repo is to set + verify the identity.
+
+**If commits already exist under the wrong email**, rewrite with
+`git filter-branch --env-filter` (or `git filter-repo`) after
+creating a backup ref. Always keep the backup ref reachable until
+the founder confirms the rewrite looks right, then drop it.
+
+**Override:** if a struct2flow project is genuinely a work
+project (client engagement, employer-sanctioned), use that
+employer's email — state so in
+`project_config_overview.md`.
+
 ## When to override
 
 Override is normal. The default exists so that "new project, no

@@ -116,6 +116,10 @@ EOF
   cd "$TARGET_DIR"
   git init -q
   git config --local core.hooksPath .githooks
+  # Repo-local personal identity — see STACK_DEFAULTS.md §Git author identity.
+  # Override per-project for genuinely-work projects in project_config_overview.md.
+  git config --local user.email "luiz@struct2flow.com"
+  git config --local user.name  "Luiz Scheidegger"
   git add -A
   git commit -q -m "chore(bootstrap): initialize $PROJECT_NAME from struct2flow blueprint ($BLUEPRINT_SHA)"
 )

@@ -113,6 +113,13 @@ PUBLIC_PATHS=(
   # — code + tests —
   # src/
   # tests/
+  # — scripts: copy each PUBLIC script EXPLICITLY. Do NOT copy the
+  # whole scripts/ folder; it contains struct2flow methodology files
+  # (codex-signal-watch.sh, start-codex-signal-watch.sh, new-project.sh)
+  # that .gitignore correctly prevents from being committed but that
+  # would end up on disk in the public-repo dir as untracked-gitignored
+  # files — a latent leak risk if someone later force-adds.
+  # scripts/<your-public-script>.ts
   # — templates for any private configs your project uses —
   # config/<name>.example.{md,json}
   # — committed synthetic fixtures (NEVER commit real personal data) —

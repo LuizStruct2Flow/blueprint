@@ -196,7 +196,12 @@ Luiz Scheidegger · 2026
 
 # Why this deck
 
-How I ship software, across six concerns:
+Two things make this different from "another opinionated framework":
+
+- **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
+- **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
+
+…on top of **six engineering concerns**, all encoded in tooling:
 
 1. **Architecture** — DDD + Clean + Hexagonal
 2. **Lifecycle** — four states, founder-gated
@@ -204,11 +209,6 @@ How I ship software, across six concerns:
 4. **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing
 5. **Security** — secret-scan, SAST, SCA, IaC scan, DAST
 6. **Infrastructure as Code** — defined, reviewable, reproducible
-
-…plus two **meta-layers** that make it travel:
-
-- **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
-- **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
 
 Everything below is **enforced by tooling**, not memos.
 The rules live in code (hooks, scripts, gates) — not in slides.
@@ -226,6 +226,88 @@ The difference between good and bad systems
 is the **speed-to-fix differential**.
 
 Every section that follows is a way of compressing that gap.
+The two **meta-layers** below are what's new; the six concerns underneath are the engineering substrate they sit on.
+
+---
+
+# The agent layer — radio-over
+
+Codex + Claude Code coordinate through a single file: `AGENT_SIGNAL.md`.
+
+- **One mic at a time** — state: `IDLE` / `ACTIVE` / `OVER_TO_*`
+- **Read-only and out-of-scope work** allowed in parallel
+- **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
+- **Codex dispatched by flipping the signal**, not by direct CLI call
+- **`HANDOVER.md`** lets a fresh prompt resume cold
+
+> Two AI engineers on the same repo, **without overwrites or duplicate work.**
+
+---
+
+# The blueprint — a living operating system
+
+> *Continuously evolving. Derived from production experience.
+> Intentionally incomplete.*
+
+```
+  storm2flow         ◄──►┐
+                           ├──►   BLUEPRINT   ──►   acme-flow, …
+  linkedin-watcher   ◄──►┘                          (future projects)
+```
+
+The evolutionary loop:
+
+1. **Projects create requirements** — real customers, real incidents, real production.
+2. **Requirements harden into patterns** — what worked, captured as a recipe.
+3. **Patterns become blueprint capabilities** — promoted upstream via `blueprint a2bp`.
+4. **Capabilities become defaults** — for the next project *and* for every existing one, pulled via `blueprint pull`.
+
+**The flow is bidirectional.** Existing projects ship patterns *up*; every project — current *and* future — pulls capabilities back *down*. A lesson learned in storm2flow improves linkedin-watcher the same week.
+
+The blueprint contains **only what has been proven in production** — that's why what it does carry, you can rely on.
+
+---
+
+# The blueprint — one repo, every project
+
+Every struct2flow project is **forked from a single blueprint**:
+all six concerns below, plus the agent infra, live in one git repo.
+
+- **Bootstrap** — `new-project.sh acme` copies the blueprint into a new project
+  directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.
+- **Pull** — `blueprint drift` shows what's changed in the blueprint
+  since the project's last sync. `blueprint pull` brings the
+  improvements forward.
+- **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
+  improvement lands in a project, it travels back to the blueprint
+  so *every other project* inherits it next time they pull.
+
+> A rule tightened once in any project benefits every project. The blueprint is the multiplier.
+
+---
+
+# Blueprint sync — the CLI
+
+A single `blueprint` command, four subcommands:
+
+```
+blueprint drift            # what's drifted vs blueprint HEAD + commits since bootstrap
+blueprint pull [FILE...]   # pull blueprint changes forward (interactive, founder approves)
+blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement upstream
+blueprint files            # list the blueprint-managed files (single source of truth)
+```
+
+**What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`, `Brewfile`, every
+recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),
+`DoD.md`, the agent scripts, the pre-push hook, this deck itself.
+
+**What's NOT managed** — `project_config_*.md` (templates seeded once
+at bootstrap, then drift on purpose), `BUGS.md`, `HANDOVER.md`,
+`AGENT_SIGNAL.md`, all source code.
+
+The agent calls `blueprint drift` on every wake. Drift between blueprint
+and project is treated like drift between code and prod: **detected, not
+assumed away**.
 
 ---
 
@@ -462,86 +544,6 @@ Drift between code and prod is the silent killer of reproducibility.
   `OutOfSync` is the native drift detector.
 
 Environments / ownership / cost ceilings / rollback: `project_config_infra.md`.
-
----
-
-# The agent layer — radio-over
-
-Codex + Claude Code coordinate through a single file: `AGENT_SIGNAL.md`.
-
-- **One mic at a time** — state: `IDLE` / `ACTIVE` / `OVER_TO_*`
-- **Read-only and out-of-scope work** allowed in parallel
-- **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
-- **Codex dispatched by flipping the signal**, not by direct CLI call
-- **`HANDOVER.md`** lets a fresh prompt resume cold
-
-> Two AI engineers on the same repo, **without overwrites or duplicate work.**
-
----
-
-# The blueprint — a living operating system
-
-> *Continuously evolving. Derived from production experience.
-> Intentionally incomplete.*
-
-```
-  storm2flow        ──┐
-                       ├──►   BLUEPRINT   ──►   future projects
-  linkedin-watcher  ──┘                          (acme-flow, …)
-```
-
-The evolutionary loop:
-
-1. **Projects create requirements** — real customers, real incidents, real production.
-2. **Requirements harden into patterns** — what worked, captured as a recipe.
-3. **Patterns become blueprint capabilities** — promoted upstream via `blueprint a2bp`.
-4. **Capabilities become defaults** for the next project — pulled forward via `blueprint pull`.
-
-The blueprint contains **only what has been proven in production.**
-That's why it's intentionally incomplete — and why what it does carry, you can rely on.
-
----
-
-# The blueprint — one repo, every project
-
-Every struct2flow project is **forked from a single blueprint**:
-all six concerns above, plus the agent infra, live in one git repo.
-
-- **Bootstrap** — `new-project.sh acme` copies the blueprint into a new project
-  directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.
-- **Pull** — `blueprint drift` shows what's changed in the blueprint
-  since the project's last sync. `blueprint pull` brings the
-  improvements forward.
-- **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
-  improvement lands in a project, it travels back to the blueprint
-  so *every other project* inherits it next time they pull.
-
-> A rule tightened once in any project benefits every project. The blueprint is the multiplier.
-
----
-
-# Blueprint sync — the CLI
-
-A single `blueprint` command, four subcommands:
-
-```
-blueprint drift            # what's drifted vs blueprint HEAD + commits since bootstrap
-blueprint pull [FILE...]   # pull blueprint changes forward (interactive, founder approves)
-blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement upstream
-blueprint files            # list the blueprint-managed files (single source of truth)
-```
-
-**What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`, `Brewfile`, every
-recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),
-`DoD.md`, the agent scripts, the pre-push hook, this deck itself.
-
-**What's NOT managed** — `project_config_*.md` (templates seeded once
-at bootstrap, then drift on purpose), `BUGS.md`, `HANDOVER.md`,
-`AGENT_SIGNAL.md`, all source code.
-
-The agent calls `blueprint drift` on every wake. Drift between blueprint
-and project is treated like drift between code and prod: **detected, not
-assumed away**.
 
 ---
 

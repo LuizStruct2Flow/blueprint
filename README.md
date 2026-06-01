@@ -247,10 +247,51 @@ Current placeholders:
 
 ## Editing the blueprint
 
-The blueprint is itself a git repo. Edit freely; commit with descriptive
-messages. To roll forward improvements into existing projects, work
-through each project's agent and let the sync model do the pull.
+### Founder workflow (direct commits)
 
-Anything project-specific you find leaking into a blueprint file (a
-storm2flow path, a customer name, a feature flag) is a bug — move it
+The blueprint is itself a git repo. I commit directly on `main` with
+descriptive messages. To roll forward improvements into existing
+projects, I work through each project's agent and let the sync model
+do the pull.
+
+Anything project-specific that leaks into a blueprint file (a
+storm2flow path, a customer name, a feature flag) is a bug — moved
 into the equivalent `project_config_*.md` template instead.
+
+### Contributing (PRs welcome)
+
+Issues and pull requests are open. Two kinds of contributions land at
+different speeds:
+
+- **Fast track** — typos, clarity fixes, missing edge cases, broken
+  links, doc improvements, bug fixes in the agent scripts or the
+  pre-push gate. Open a PR with a [Conventional
+  Commits](https://www.conventionalcommits.org/) message
+  (`fix(scripts): …`, `docs(dod): …`); CI runs the pre-push gate
+  locally so make sure `brew bundle && .githooks/pre-push` passes
+  before opening the PR.
+- **Slower track — new capabilities or new concerns.** The blueprint
+  is **derived, not designed** ([CLAUDE.md](CLAUDE.md) §"The
+  blueprint is derived, not designed"): capabilities are admitted
+  only after they have proven themselves in a real struct2flow
+  project. If you want to propose a new recipe / gate / concern,
+  open an **issue first** describing where it has been used in
+  production and how it survived a follow-up round of work. We can
+  discuss before any code lands. This isn't to be precious about
+  the surface area — it's because intentional incompleteness is
+  what makes the blueprint reliable.
+
+**Out of scope:** project-specific content (customer names, internal
+URLs, feature flags) belongs in a downstream project's
+`project_config_*.md`, never in a blueprint-managed file. PRs that
+hard-code such content will be asked to refactor.
+
+**Before opening a PR:**
+- `brew bundle` to install `gitleaks` + `semgrep` + `osv-scanner`.
+- `.githooks/pre-push` to run the full gate locally (security +
+  build + lint + format + tests + IaC validate).
+- For any change to [docs/DoD.md](docs/DoD.md), [CLAUDE.md](CLAUDE.md),
+  or a recipe doc, also update [docs/way-of-working.md](docs/way-of-working.md) in
+  the same commit — the deck is the canonical pitch surface and
+  must stay current with the rules (see CLAUDE.md §"docs/way-of-working.md
+  is the canonical pitch surface").

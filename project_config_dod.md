@@ -28,12 +28,17 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 
 **Security tooling install** (each developer's machine):
 ```bash
-brew install gitleaks semgrep osv-scanner
+brew bundle   # uses ./Brewfile at the repo root
 ```
+The blueprint Brewfile pins `gitleaks`, `semgrep`, and `osv-scanner`.
 If a binary is missing, the hook skips its step with a warning rather
 than blocking — CI re-runs the same gate as a backstop. See
 [docs/SECURITY.md](docs/SECURITY.md) for the full per-stack recipe
 (CI deep-SAST packs, container scan, IaC scan, DAST baseline).
+
+Project-specific tooling (CDK, AWS CLI, Node version pin, etc.) goes
+in the `Brewfile` below the `# Project-specific extensions` marker —
+the blueprint sync preserves your additions.
 
 ## Coverage mode (DoD §3.6)
 

@@ -34,12 +34,24 @@ if command -v gitleaks >/dev/null 2>&1; then
   }
 else
   echo "  ⚠ gitleaks not installed locally — secret scan skipped (CI will catch it)."
-  echo "     Install: brew install gitleaks"
+  echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
 fi
 
 if command -v semgrep >/dev/null 2>&1; then
-  echo "  → SAST (semgrep --config=auto)..."
-  semgrep --config=auto --error --quiet --timeout=20 --metrics=off . || {
+  echo "  → SAST (semgrep p/owasp-top-ten)..."
+  # Bundled rulesets (no network call). p/owasp-top-ten is the conservative
+  # baseline; projects can add more packs in .githooks/pre-push-project.
+  # Explicit --severity flags rather than --error — some packs flag INFO,
+  # which we don't want blocking pre-push.
+  semgrep \
+    --config=p/owasp-top-ten \
+    --severity=WARNING \
+    --severity=ERROR \
+    --error \
+    --quiet \
+    --timeout=20 \
+    --metrics=off \
+    . || {
     echo "❌ Semgrep found a WARNING+ finding."
     echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
     echo "   naming the threat-model entry in project_config_security.md that makes it safe."
@@ -47,7 +59,7 @@ if command -v semgrep >/dev/null 2>&1; then
   }
 else
   echo "  ⚠ semgrep not installed locally — SAST skipped (CI will catch it)."
-  echo "     Install: brew install semgrep"
+  echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
 fi
 
 if command -v osv-scanner >/dev/null 2>&1; then
@@ -61,7 +73,7 @@ if command -v osv-scanner >/dev/null 2>&1; then
   }
 else
   echo "  ⚠ osv-scanner not installed locally — SCA skipped (CI will catch it)."
-  echo "     Install: brew install osv-scanner"
+  echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
 fi
 
 # Adjust these paths / commands to match your project's workspaces.

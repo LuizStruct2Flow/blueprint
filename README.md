@@ -26,10 +26,11 @@ After bootstrap:
 
 1. `cd ~/sources/struct2flow/acme-flow`
 2. `code .` (open in VS Code)
-3. Fill out `project_config_overview.md`, `project_config_paths.md`,
-   `project_config_dod.md`
-4. Start adding code under `backend/`, `frontend/`, etc.
-5. Optional: copy `.githooks/pre-push-project.example` to
+3. `brew bundle` (installs `gitleaks` + `semgrep` + `osv-scanner` for the pre-push gate)
+4. Fill out `project_config_overview.md`, `project_config_paths.md`,
+   `project_config_dod.md`, `project_config_security.md`
+5. Start adding code under `backend/`, `frontend/`, etc.
+6. Optional: copy `.githooks/pre-push-project.example` to
    `.githooks/pre-push-project` and add your project-specific guards
 
 ---
@@ -43,12 +44,14 @@ blueprint/
 ├── AGENTS.md                       ← Codex wake-up rules
 ├── AGENT_SIGNAL.md                 ← signal template (Task field is a stub)
 ├── STACK_DEFAULTS.md               ← default tech stack for new struct2flow projects
+├── Brewfile                        ← brew bundle: gitleaks + semgrep + osv-scanner (security gate deps)
 ├── project_config_overview.md      ← project-specific overview (stub)
 ├── project_config_paths.md         ← project-specific paths / URLs (stub)
 ├── project_config_dod.md           ← project-specific DoD extensions (stub)
+├── project_config_security.md      ← project-specific threat model + scan thresholds (stub)
 ├── .gitignore                      ← generic node + agent ignores
 ├── .githooks/
-│   ├── pre-push                    ← generic build/lint/test gate
+│   ├── pre-push                    ← generic security + build/lint/format/coverage gate
 │   └── pre-push-project.example    ← copy → edit for project-specific guards
 ├── .claude/
 │   └── settings.json               ← generic AWS / git / shell permission allow-list
@@ -61,6 +64,8 @@ blueprint/
 └── docs/
     ├── DoD.md                      ← generic Definition of Done
     ├── OBSERVABILITY.md            ← capture / retrieve / alert recipes per runtime
+    ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST / IaC recipes per runtime
+    ├── way-of-working.md           ← Marp deck: how struct2flow ships software (architecture / lifecycle / quality / MALT / security)
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── backlog/
     │   ├── README.md               ← parked-state lifecycle + categories (KEEP/DEFER/OBSOLETE)

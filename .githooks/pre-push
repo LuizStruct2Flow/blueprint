@@ -1,8 +1,10 @@
 #!/bin/sh
 # Pre-push hook: block push if any of these fail:
+#   - Security (gitleaks + Semgrep + osv-scanner — see docs/SECURITY.md)
 #   - Build (tsc / compile)
 #   - Lint (--max-warnings ratcheted)
-#   - Tests (unit + integration + data snapshot)
+#   - Format check (Prettier)
+#   - Tests + coverage (per docs/DoD.md §3)
 #   - Project-specific guards (see .githooks/pre-push-project)
 #
 # This file is tracked in the repo at .githooks/pre-push. New clones pick it
@@ -15,7 +17,52 @@
 
 set -e
 
-echo "🔒 Pre-push: build + lint + tests..."
+echo "🔒 Pre-push: security + build + lint + tests..."
+
+# --- Security: gitleaks + Semgrep + osv-scanner (docs/SECURITY.md cross-recipe rules) ---
+# All three are skipped with a warning if the binary isn't installed locally
+# — CI re-runs them as a backstop. This keeps a fresh clone from being
+# blocked on day 1 while still nudging the developer to install them.
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "  → Secret scan (gitleaks)..."
+  gitleaks protect --staged --redact --no-banner || {
+    echo "❌ gitleaks found a secret in staged changes."
+    echo "   Unstage + rotate the credential. A leaked secret is compromised the"
+    echo "   moment it lands on origin; rotating is non-negotiable."
+    exit 1
+  }
+else
+  echo "  ⚠ gitleaks not installed locally — secret scan skipped (CI will catch it)."
+  echo "     Install: brew install gitleaks"
+fi
+
+if command -v semgrep >/dev/null 2>&1; then
+  echo "  → SAST (semgrep --config=auto)..."
+  semgrep --config=auto --error --quiet --timeout=20 --metrics=off . || {
+    echo "❌ Semgrep found a WARNING+ finding."
+    echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
+    echo "   naming the threat-model entry in project_config_security.md that makes it safe."
+    exit 1
+  }
+else
+  echo "  ⚠ semgrep not installed locally — SAST skipped (CI will catch it)."
+  echo "     Install: brew install semgrep"
+fi
+
+if command -v osv-scanner >/dev/null 2>&1; then
+  echo "  → SCA (osv-scanner over lockfiles)..."
+  # Scan every lockfile in the repo; the tool no-ops on workspaces that lack one.
+  osv-scanner --recursive --skip-git --fail-on-vuln . >/dev/null 2>&1 || {
+    echo "❌ osv-scanner found a HIGH+ CVE in a dependency."
+    echo "   Upgrade or pin to a known-good version. Track lower-severity CVEs"
+    echo "   in docs/config/findings.md with a planned upgrade date."
+    exit 1
+  }
+else
+  echo "  ⚠ osv-scanner not installed locally — SCA skipped (CI will catch it)."
+  echo "     Install: brew install osv-scanner"
+fi
 
 # Adjust these paths / commands to match your project's workspaces.
 # {{PROJECT_NAME}}: edit this block during bootstrap to reflect your layout.

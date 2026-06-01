@@ -14,6 +14,9 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 
 | Step | Command | Threshold |
 |---|---|---|
+| Secret scan | `gitleaks protect --staged --redact` | zero findings |
+| SAST | `semgrep --config=auto --error --timeout=20` | zero `WARNING+` |
+| SCA | `osv-scanner --recursive --skip-git --fail-on-vuln .` | zero `HIGH+` CVE |
 | Build | `cd backend && npm run build` | tsc clean |
 | Lint (BE) | `cd backend && npm run lint` | `--max-warnings <N>` ratcheted |
 | Format check (BE) | `cd backend && npm run format:check` | prettier clean |
@@ -22,6 +25,15 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 | Format check (FE) | `cd frontend && npm run format:check` | prettier clean |
 | Test + coverage (FE) | `cd frontend && npm run test:coverage` | all green; coverage meets project mode (see below) |
 | (Project-specific guards) | sourced from `.githooks/pre-push-project` | each guard fails-fast |
+
+**Security tooling install** (each developer's machine):
+```bash
+brew install gitleaks semgrep osv-scanner
+```
+If a binary is missing, the hook skips its step with a warning rather
+than blocking — CI re-runs the same gate as a backstop. See
+[docs/SECURITY.md](docs/SECURITY.md) for the full per-stack recipe
+(CI deep-SAST packs, container scan, IaC scan, DAST baseline).
 
 ## Coverage mode (DoD §3.6)
 

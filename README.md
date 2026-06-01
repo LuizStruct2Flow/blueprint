@@ -1,15 +1,57 @@
 # struct2flow — blueprint
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
+[![Status: alpha](https://img.shields.io/badge/Status-alpha-orange.svg)](#status)
 
-The **living template** for new struct2flow projects. Holds the generic
-agent-coordination protocol (Codex + Claude Code radio-over), the
-lifecycle-managed `docs/` skeleton, the pre-push gate, and the
-bootstrap-a-new-project script.
+> **A living operating system for AI-native software development.**
 
-This repo is the canonical home for everything generic. Project-specific
-overrides live in three `project_config_*.md` files at the root of each
-project (see [What's in the blueprint](#whats-in-the-blueprint) below).
+One git repo that codifies how I ship software — architecture, lifecycle,
+quality, observability, security, IaC — plus the two AIs that operate it.
+Every project I build forks from here; every lesson learned travels back
+upstream so every other project inherits it.
+
+## What makes this different from "another opinionated framework"
+
+- **Two AIs share the mic.** Codex and Claude Code coordinate through a
+  single `AGENT_SIGNAL.md` file — radio-over handoff, one mic at a time,
+  no overwrites or duplicate work. See [CLAUDE.md](CLAUDE.md) §"Agent
+  Coordination Signal".
+- **The blueprint evolves with every project.** Patterns proven in
+  production travel back upstream via `blueprint a2bp`; every project —
+  current *and* future — gets every improvement within the same week
+  one project learned it.
+- **Enforced by tooling, not memos.** Six concerns, all gated by code:
+  pre-push hooks, scripts, CI. Rules live in code, not in docs nobody
+  reads.
+
+## The six concerns it encodes
+
+| Concern | Where | Pre-push gate |
+|---|---|---|
+| **Architecture** — DDD + Clean + Hexagonal | [STACK_DEFAULTS.md](STACK_DEFAULTS.md) | — |
+| **Lifecycle** — four founder-gated states | [docs/DoD.md](docs/DoD.md) §1 | — |
+| **Quality** — DoD, two-commit pattern, ≥90% coverage | [docs/DoD.md](docs/DoD.md) §3, §6 | build · lint · prettier · test:coverage |
+| **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | — |
+| **Security** — secret-scan, SAST, SCA, IaC scan, DAST | [docs/SECURITY.md](docs/SECURITY.md) | gitleaks · semgrep · osv-scanner |
+| **Infrastructure as Code** — defined, reviewable, reproducible | [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | cdk synth / terraform / helm lint |
+
+## Read the deck
+
+The full pitch — 26 slides — covering all six concerns plus the two
+meta-layers (agent + blueprint):
+
+- **Source:** [`docs/way-of-working.md`](docs/way-of-working.md) (Marp markdown)
+- **Render to PDF:** `scripts/build-deck.sh` (needs `node`)
+
+## Status
+
+This repo is a **framework / template**, not a runnable application. It
+bootstraps new struct2flow projects via `scripts/new-project.sh` and
+stays alive across them via two-way sync (see [The sync model](#the-sync-model)).
+
+**Alpha.** The patterns are stable; the names may still move. The
+blueprint is intentionally incomplete — it contains *only what has been
+proven in production* across struct2flow's existing projects.
 
 ---
 

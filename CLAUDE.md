@@ -642,3 +642,31 @@ The canonical list of synced files is the `MANAGED_FILES` array in
 `scripts/blueprint` — run `blueprint files` to print it. If you catch
 yourself adding a project-specific incident or path to a blueprint-managed
 file, move it to the right `project_config_*.md` before committing.
+
+### docs/way-of-working.md is the canonical pitch surface
+
+The deck at [`docs/way-of-working.md`](docs/way-of-working.md) is how
+struct2flow is presented to customers, investors, hires, and at talks.
+**Every change to a blueprint-level concern lands in the deck in the
+same commit** — not "I'll update the deck later". The concerns the
+deck currently mirrors:
+
+1. Architecture (DDD + Clean + Hexagonal — `STACK_DEFAULTS.md`)
+2. Lifecycle (four states — `docs/DoD.md` §1)
+3. Quality (DoD — `docs/DoD.md`)
+4. Observability / MALT (`docs/OBSERVABILITY.md` + CLAUDE.md §"Observability is a main concern")
+5. Security (`docs/SECURITY.md` + CLAUDE.md §"Security is a main concern")
+6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
+7. Agent layer (radio-over — CLAUDE.md §"Agent Coordination Signal")
+8. Blueprint sync (this section + README.md §"The sync model" + `scripts/blueprint`)
+
+Tightening a rule in DoD §3? Touch the matching deck slide. Adding a
+new principle to CLAUDE.md? New slide(s) under the right section
+number. Adding a new CLI to `scripts/`? Update the agent-layer or
+sync slide. **Drift between deck and reality reads to a customer the
+same way a stale README reads to a new hire** — and the deck is the
+pitch surface, so drift is more costly here than anywhere else.
+
+If a change is genuinely internal-only and the deck doesn't need to
+mention it (e.g. a typo fix in a comment), say so in the commit
+message. Default to updating the deck.

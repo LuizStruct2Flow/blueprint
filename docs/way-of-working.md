@@ -39,6 +39,11 @@ How I ship software, across six concerns:
 5. **Security** — secret-scan, SAST, SCA, IaC scan, DAST
 6. **Infrastructure as Code** — defined, reviewable, reproducible
 
+…plus two **meta-layers** that make it travel:
+
+- **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
+- **The blueprint** — one repo that defines all six concerns above, with two-way sync to every project
+
 Everything below is **enforced by tooling**, not memos.
 The rules live in code (hooks, scripts, gates) — not in slides.
 
@@ -308,6 +313,49 @@ Codex + Claude Code coordinate through a single file: `AGENT_SIGNAL.md`.
 
 ---
 
+# The blueprint — one repo, every project
+
+Every struct2flow project is **forked from a single blueprint**:
+all six concerns above, plus the agent infra, live in one git repo.
+
+- **Bootstrap** — `new-project.sh acme` copies the blueprint into a new project
+  directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.
+- **Pull** — `blueprint drift` shows what's changed in the blueprint
+  since the project's last sync. `blueprint pull` brings the
+  improvements forward.
+- **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
+  improvement lands in a project, it travels back to the blueprint
+  so *every other project* inherits it next time they pull.
+
+> A rule tightened once in any project benefits every project. The blueprint is the multiplier.
+
+---
+
+# Blueprint sync — the CLI
+
+A single `blueprint` command, four subcommands:
+
+```
+blueprint drift            # what's drifted vs blueprint HEAD + commits since bootstrap
+blueprint pull [FILE...]   # pull blueprint changes forward (interactive, founder approves)
+blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement upstream
+blueprint files            # list the blueprint-managed files (single source of truth)
+```
+
+**What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`, `Brewfile`, every
+recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),
+`DoD.md`, the agent scripts, the pre-push hook, this deck itself.
+
+**What's NOT managed** — `project_config_*.md` (templates seeded once
+at bootstrap, then drift on purpose), `BUGS.md`, `HANDOVER.md`,
+`AGENT_SIGNAL.md`, all source code.
+
+The agent calls `blueprint drift` on every wake. Drift between blueprint
+and project is treated like drift between code and prod: **detected, not
+assumed away**.
+
+---
+
 # What this gets you
 
 | If you are… | What you get |
@@ -331,6 +379,10 @@ Each rule is small. The compounding is the point:
 
 The output is a system where **speed-to-fix shrinks every week.**
 
+…and because every project is forked from the same blueprint and
+sync'd both ways, **every project gets every improvement** — within
+the same week one project learned it.
+
 ---
 
 # Where to read more
@@ -342,6 +394,7 @@ The output is a system where **speed-to-fix shrinks every week.**
 - `docs/OBSERVABILITY.md` — MALT recipes per runtime
 - `docs/SECURITY.md` — security recipes per runtime
 - `docs/INFRASTRUCTURE.md` — IaC recipes per runtime
+- `scripts/blueprint` — sync CLI: `drift` / `pull` / `a2bp` / `files`
 - `project_config_*.md` — per-project overrides
 
 All open source at:

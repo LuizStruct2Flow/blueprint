@@ -145,7 +145,14 @@ struct2flow convention — the project's exact targets are wired in
 4. Tests (unit + integration + data snapshot) + **coverage gate**
    (greenfield ≥90% / brownfield ≥70% per §3.6 — the project
    declares its mode in `project_config_dod.md`)
-5. Project-specific guards (loaded from
+5. **`.claude/settings.json` host-path guard** — fails the push if the
+   COMMITTED `settings.json` contains absolute paths under `/Users/<name>/`
+   or `/home/<name>/`. Host-specific entries belong in
+   `.claude/settings.local.json` (gitignored). Three drift cycles in a row
+   landed `~/.ssh`, `~/sources/`, and `~/Library/Containers/...` in the
+   shared settings via Claude Code's auto-allowlist; this guard prevents
+   the fourth.
+6. Project-specific guards (loaded from
    `.githooks/pre-push-project` if it exists — placeholder guards,
    placeholder-injection checks, asset invariants, release-notes guard, etc.)
 

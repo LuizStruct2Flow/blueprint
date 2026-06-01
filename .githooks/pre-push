@@ -58,6 +58,32 @@ if [ -d frontend ]; then
   ( cd frontend && npm run test:coverage ) || { echo "❌ Frontend tests failed or coverage below threshold (see project_config_dod.md)."; exit 1; }
 fi
 
+# --- .claude/settings.json host-path guard (generic struct2flow rule) ---
+# The COMMITTED settings.json must be host-agnostic — it travels with the
+# repo to every machine and (when public) every fork. Absolute paths to a
+# specific machine's home directory leak via Claude Code's auto-allowlist
+# every time the agent runs a Bash command with such a path. They belong
+# in .claude/settings.local.json (gitignored), never in settings.json.
+#
+# Three drift cycles in a row landed paths like /Users/<name>/.ssh,
+# /Users/<name>/sources/, /Users/<name>/Library/Containers/... in
+# settings.json. This guard blocks any future occurrence.
+#
+# To allow-list a legitimate generic path that happens to contain /Users
+# or /home as a literal substring (rare), add a comment line above the
+# entry: this grep is line-based and won't match across lines.
+echo "  → .claude/settings.json host-path guard..."
+if [ -f .claude/settings.json ]; then
+  HOST_PATHS=$(grep -nE '/(Users|home)/[A-Za-z0-9_.-]+/' .claude/settings.json || true)
+  if [ -n "$HOST_PATHS" ]; then
+    echo "❌ .claude/settings.json contains host-specific paths."
+    echo "   Move them to .claude/settings.local.json (gitignored) — settings.json"
+    echo "   is committed and must stay host-agnostic."
+    echo "$HOST_PATHS" | sed 's/^/     /'
+    exit 1
+  fi
+fi
+
 # --- Project-specific guards (sourced if present) ---
 # Add your project's invariants in .githooks/pre-push-project:
 #   - placeholder / config drift guards

@@ -24,8 +24,9 @@ style: |
     background: var(--paper);
     color: var(--ink);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-size: 26px;
-    padding: 70px 80px 80px;
+    font-size: 21px;
+    line-height: 1.4;
+    padding: 44px 60px 56px;
   }
 
   section h1, section h2, section h3 {
@@ -33,20 +34,24 @@ style: |
     color: var(--ink);
     font-weight: 600;
     letter-spacing: -0.015em;
+    line-height: 1.2;
   }
 
   section h1 {
     border-bottom: 3px solid var(--teal);
-    padding-bottom: 14px;
-    margin-bottom: 28px;
-    font-size: 40px;
+    padding-bottom: 8px;
+    margin: 0 0 18px;
+    font-size: 32px;
   }
 
   section h2 {
     color: var(--teal);
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 500;
+    margin: 12px 0 6px;
   }
+
+  section p { margin: 8px 0; }
 
   section strong { color: var(--teal); font-weight: 600; }
 
@@ -55,39 +60,42 @@ style: |
     color: var(--ink);
     border-left: 4px solid var(--teal);
     background: var(--teal-50);
-    padding: 16px 22px;
+    padding: 10px 18px;
     border-radius: 0 6px 6px 0;
-    margin: 16px 0;
+    margin: 10px 0;
   }
 
   section code {
     background: var(--teal-50);
     color: var(--teal);
-    padding: 2px 6px;
+    padding: 1px 5px;
     border-radius: 3px;
     font-family: 'JetBrains Mono', 'SF Mono', monospace;
-    font-size: 0.88em;
+    font-size: 0.86em;
   }
 
   section pre {
     background: var(--ink);
     color: var(--paper);
     font-family: 'JetBrains Mono', 'SF Mono', monospace;
-    font-size: 18px;
-    padding: 18px 22px;
+    font-size: 15px;
+    line-height: 1.45;
+    padding: 12px 18px;
     border-radius: 6px;
+    margin: 10px 0;
   }
 
   section pre code {
     background: transparent;
     color: var(--paper);
     padding: 0;
+    font-size: inherit;
   }
 
   section table {
-    font-size: 22px;
+    font-size: 18px;
     border-collapse: collapse;
-    margin: 12px 0;
+    margin: 8px 0;
   }
 
   section th {
@@ -95,26 +103,26 @@ style: |
     color: var(--paper);
     font-family: 'Space Grotesk', sans-serif;
     font-weight: 600;
-    padding: 10px 16px;
+    padding: 7px 12px;
     text-align: left;
   }
 
   section td {
-    padding: 10px 16px;
+    padding: 7px 12px;
     border-bottom: 1px solid var(--teal-100);
   }
 
-  section ul, section ol { margin: 8px 0; }
-  section li { margin: 6px 0; }
+  section ul, section ol { margin: 6px 0; padding-left: 28px; }
+  section li { margin: 3px 0; }
 
-  /* Logo top-right on body slides */
+  /* Logo top-right on body slides — smaller + higher so it doesn't crash into H1 */
   section::before {
     content: '';
     position: absolute;
-    top: 28px;
-    right: 36px;
-    width: 56px;
-    height: 56px;
+    top: 18px;
+    right: 28px;
+    width: 42px;
+    height: 42px;
     background-image: url('assets/brand/struct2flow-mark.svg');
     background-repeat: no-repeat;
     background-size: contain;

@@ -64,6 +64,37 @@ deliberate decision, not drift.
 - **Pipelines:** AWS CodePipeline + CodeBuild when the repo is on
   CodeCommit; GitHub Actions when the repo is on GitHub.
 
+## Observability
+
+The four non-negotiable capabilities (capture, agent-query, alert,
+agent-diagnose-first) are defined in CLAUDE.md §"Observability is a main
+concern" and DoD §6.1. The mechanism is project-specific — pick one of
+the three recipes in [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md):
+
+- **AWS-hosted / serverless (default for hosted projects):** CloudWatch
+  structured JSON logs + a MALT-style admin debug route
+  (`/api/admin/debug/last-failures`) + CloudWatch alarms → SNS → Slack.
+  Frontend errors captured via a tiny `/api/client-errors` Lambda. No
+  Sentry — the agent-led triage model makes a separate error UI
+  redundant; Slack covers alerting and the agent reads CloudWatch
+  directly.
+- **Local app / desktop / CLI:** rotating file logs under
+  `~/.{{PROJECT_NAME}}/logs/` + a `--diagnose` CLI flag the agent runs +
+  desktop notification + Slack webhook on crash. Used in
+  `linkedin-watcher-agent`.
+- **Containerized service:** JSON to stdout + the platform-native log
+  aggregator (CloudWatch for ECS / Loki or Elastic for k8s / journald
+  for Docker-on-VM) + an admin route wrapping the aggregator's query
+  API + platform-native alarms → Slack.
+
+Each project declares its mechanism row in `project_config_overview.md`
+§"Observability stack" — that table is the agent's first stop when it
+needs to diagnose a production error.
+
+**Product analytics (separate from error observability):** Plausible,
+EU-hosted, cookie-free. The agent reads usage data via the Plausible
+Stats API.
+
 ## Git author identity (fresh-clone bootstrap)
 
 The founder's machine has a **work** git identity set globally

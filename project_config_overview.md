@@ -46,6 +46,28 @@ struct2flow agent protocol; this file holds what's specific to
 - **CI:** {{pipeline}}
 - **Data:** {{databases / stores}}
 
+## Observability stack
+
+Implements the blueprint's §6.1 observability rule (CLAUDE.md
+§"Observability is a main concern"). The four capabilities are
+non-negotiable; the mechanism below is this project's choice. Pick a
+recipe from [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) and fill in
+the rows.
+
+| Capability | Mechanism in this project |
+|---|---|
+| Error capture (backend) | {{e.g. CloudWatch structured JSON logs via shared `logger` module / rotating file logs in `~/.{{PROJECT_NAME}}/logs/` / journald JSON}} |
+| Error capture (frontend) | {{e.g. `/api/client-errors` Lambda / `electron-log` to main-process logger / N/A (no frontend)}} |
+| Agent-readable retrieval (MALT) | {{e.g. `GET /api/admin/debug/last-failures?since=30m` + `aws logs filter-log-events ...` / CLI `{{PROJECT_NAME}} --diagnose --last 20`}} |
+| Alert routing | {{e.g. CloudWatch alarm errors>N/5min → SNS topic `arn:...` → Slack `#alerts-prod` / Slack webhook from `project_config_paths.md` on crash}} |
+| Alert thresholds | {{e.g. error rate > 5/min for 5min; p99 latency > 2s for 10min — declare per service}} |
+| Diagnosis runbook | {{path — e.g. CLAUDE.md "Project-specific diagnosis" section / `docs/diagnosis.md` / memory entry name}} |
+| Product analytics | {{e.g. Plausible site ID `myapp.com` + dashboard URL / N/A (local app)}} |
+
+**Reminder:** the agent uses the "Agent-readable retrieval (MALT)" entry
+before asking the founder to paste logs (per memory
+`feedback_use_malt_dont_ask_for_logs`).
+
 ## Domain glossary
 
 > Project-specific terminology the agents need to use correctly. Avoid

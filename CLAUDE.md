@@ -193,8 +193,10 @@ Project documentation lives under `docs/`:
 ```
 docs/
 ├── DoD.md                ← Definition of Done — handoff checklist (READ FIRST)
+├── OBSERVABILITY.md      ← capture / retrieve / alert recipes per runtime
 ├── config/               ← stable reference docs (FEATURES.md, ACCEPTANCE_TESTS.md, findings.md)
-├── doing/                ← active work being implemented (BACKLOG.md, BUGS.md, PLAN-*.md, HANDOVER.md)
+├── backlog/              ← PARKED work (KEEP / DEFER / OBSOLETE — not active)
+├── doing/                ← active work being implemented (BUGS.md, PLAN-*.md, HANDOVER.md)
 ├── waiting-acceptance/   ← pushed to main, awaiting user acceptance testing
 ├── done/                 ← user-accepted completed work
 ├── requirements/         ← cross-cutting normative specs referenced by multiple plans
@@ -221,20 +223,52 @@ spike outcome promotes one arm to production, that arm's code is
 *re-implemented* (or carefully copied) into `src/` as part of the
 implementation sprint — never `mv`'d wholesale from the spike folder.
 
-**Lifecycle — three-state flow (user-acceptance gated):**
+**Lifecycle — four-state flow (parked + three founder-gated):**
 
-1. **`doing/`** — work starts here. Bugs tracked in `doing/BUGS.md`, backlog items in `doing/BACKLOG.md`, major-bug/feature plans as `doing/PLAN-*.md`.
+```
+backlog/  →  doing/  →  waiting-acceptance/  →  done/
+         (promote)   (push to main)        (founder accepts)
+                ↑          ↑
+                └──────────┴─── reopen / regression
+```
+
+0. **`backlog/`** — **parked** items. Bugs, features, plans, decision records
+   that exist but are not actively being worked on. Each row carries a state:
+   `KEEP` (will be pulled when prioritised), `DEFER` (re-open trigger
+   documented), or `OBSOLETE` (audit trail, deleted at next grooming). Items
+   leave only by **promotion** (move the row / `PLAN-*.md` / multi-file folder
+   into `doing/`) or **cancellation** (delete + leave a one-line pointer in
+   `docs/config/findings.md`).
+1. **`doing/`** — active work being implemented. Bugs tracked in
+   `doing/BUGS.md`, major-bug / feature plans as `doing/PLAN-*.md`,
+   multi-file epics in their own folder, and the canonical
+   `doing/HANDOVER.md` resume doc.
 2. **After pushing** the fix/feature to `main` → move to **`waiting-acceptance/`**:
    - Move the bug row from `doing/BUGS.md` to `waiting-acceptance/BUGS.md`.
-   - Move the backlog row from `doing/BACKLOG.md` to `waiting-acceptance/BACKLOG.md`.
    - Move the `PLAN-*.md` file from `doing/` to `waiting-acceptance/`.
-3. **User tests and confirms** (explicit signal like "BUG-0XX is done" / "accept item Y") → move from `waiting-acceptance/` to `done/`. Claude does NOT auto-promote to `done/`.
-4. **User reopens** (rejects acceptance, finds regression, asks for rework) → move from `waiting-acceptance/` back to `doing/`.
+   - Behaviour changes (no underlying defect) → row in
+     `waiting-acceptance/CHANGES.md`.
+3. **User tests and confirms** (explicit signal like "BUG-0XX is done" /
+   "accept item Y") → move from `waiting-acceptance/` to `done/`. Claude
+   does NOT auto-promote to `done/`.
+4. **User reopens** (rejects acceptance, finds regression, asks for rework)
+   → move from `waiting-acceptance/` back to `doing/`.
 
 **Key rules:**
-- Never skip `waiting-acceptance/`. Pushing is the trigger to leave `doing/`; user acceptance is the only trigger to enter `done/`.
-- If the user hasn't said "done" or "reopen", the item stays in `waiting-acceptance/`.
-- `done/` is user-accepted work only — the source of truth for "what has been delivered", not "what has been merged".
+- `backlog/` is **not** a graveyard: every parked item carries an explicit
+  re-open trigger or an OBSOLETE marker. Items without one get groomed out.
+- Never skip `waiting-acceptance/`. Pushing is the trigger to leave `doing/`;
+  user acceptance is the only trigger to enter `done/`.
+- If the user hasn't said "done" or "reopen", the item stays in
+  `waiting-acceptance/`.
+- `done/` is user-accepted work only — the source of truth for "what has
+  been delivered", not "what has been merged".
+
+**When to put something in `backlog/` vs `doing/`:** if a thought is
+"someday / maybe / depends on X" — it's `backlog/`. If you're starting work
+in the next session — it's `doing/`. The grooming pass (an explicit founder
+session — see storm2flow's `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent)
+is what moves items between them.
 
 ## Bug Management
 
@@ -382,6 +416,45 @@ This product's value is the quality of what it delivers. Therefore:
 When in doubt between a quick patch and a slower clean rewrite, pick
 the clean rewrite. Document why in the plan file and push for team +
 Codex alignment before committing.
+
+## Observability is a main concern
+
+**Since quality is non-negotiable, the quality of the working software is
+fundamental. The difference between good and bad systems is how quickly
+we can find and fix errors when they happen — the speed-to-fix
+differential.** Observability is therefore a first-class concern, not an
+afterthought.
+
+Four capabilities are non-negotiable for every struct2flow project:
+
+1. **Every error path is captured.** No silent swallowing, no
+   default-value fallbacks that hide failures, no `try/catch` that
+   returns success. If it broke, it logs.
+2. **Every captured error is agent-queryable** without human ferrying.
+   The agent has a documented retrieval path (log query, debug route,
+   CLI flag — project's choice) and uses it **before** asking the
+   founder. Cf. memory `feedback_use_malt_dont_ask_for_logs`.
+3. **Every shipped capability is alertable** when it starts failing in
+   production. Threshold + destination are declared in
+   `project_config_dod.md`.
+4. **The agent diagnoses first.** Humans get pinged only when the agent
+   can't resolve autonomously — not as the first responder. The agent's
+   diagnosis runbook is documented somewhere it can find (CLAUDE.md
+   project section, memory entry, or the project's `docs/diagnosis.md`).
+
+The **mechanism** is project-specific — choose one of the three recipes
+in [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md):
+
+- **AWS-hosted / serverless** — CloudWatch structured logs + a MALT-style
+  admin debug route + CloudWatch alarms → SNS → Slack.
+- **Local app / desktop / CLI** — rotating file logs + a `--diagnose` CLI
+  flag + a crash-time Slack webhook.
+- **Containerized service** — journald or stdout JSON + a log aggregator
+  + the same Slack/email alert routing.
+
+The **capabilities** are non-negotiable. The mechanism row goes in
+`project_config_overview.md` §"Observability stack" — every project
+declares its choice.
 
 ## Code Quality
 

@@ -60,7 +60,12 @@ blueprint/
 │   └── README.md                   ← two-file config convention (committed *.example, gitignored *)
 └── docs/
     ├── DoD.md                      ← generic Definition of Done
+    ├── OBSERVABILITY.md            ← capture / retrieve / alert recipes per runtime
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
+    ├── backlog/
+    │   ├── README.md               ← parked-state lifecycle + categories (KEEP/DEFER/OBSOLETE)
+    │   ├── BACKLOG.md              ← stub: parked feature / polish rows
+    │   └── BUGS.md                 ← stub: parked bugs awaiting re-open triggers
     ├── doing/
     │   ├── README.md
     │   └── HANDOVER.md             ← canonical resume doc (template stub)
@@ -102,13 +107,15 @@ from blueprint):
 
 - `CLAUDE.md`
 - `AGENTS.md`
+- `STACK_DEFAULTS.md`
 - `docs/DoD.md`
+- `docs/OBSERVABILITY.md`
 - `docs/PUBLISHING.md`
 - `scripts/codex-signal-watch.sh`
 - `scripts/start-codex-signal-watch.sh`
 - `.githooks/pre-push`
 - `.claude/settings.json`
-- The folder skeleton READMEs under `docs/` and `config/`
+- The folder skeleton READMEs under `docs/` (including `docs/backlog/README.md`) and `config/`
 
 ### 2. Push (project → blueprint, back-propagate)
 

@@ -21,28 +21,39 @@ checklist you read before every handoff. Both agents are bound by it.
 
 ---
 
-## §1 Lifecycle (three states, founder-gated)
+## §1 Lifecycle (parked + three founder-gated states)
 
 ```
-docs/doing/   →   docs/waiting-acceptance/   →   docs/done/
-            (push to main)              (founder explicitly accepts)
+docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
+              (promote)        (push to main)              (founder explicitly accepts)
 ```
 
 | State | What lives here | How items leave |
 |---|---|---|
-| `doing/` | Active work being implemented. `BUGS.md` rows, `BACKLOG.md` rows, `PLAN-*.md` files, `CHANGES.md` rows for non-bug changes in flight. | The push to `main` that ships the fix/feature. |
-| `waiting-acceptance/` | Pushed to `main`, awaiting founder acceptance testing. Bug rows in `BUGS.md`, behavior changes in `CHANGES.md`, backlog items in `BACKLOG.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
+| `backlog/` | **Parked** work. Bugs, features, plans, decision records that exist but are not active. Every item carries a state: `KEEP` (will be pulled), `DEFER` (re-open trigger documented), or `OBSOLETE` (audit trail before deletion). | **Promotion** (move row / `PLAN-*.md` / folder into `doing/`) or **cancellation** (delete + one-line pointer in `docs/config/findings.md`). |
+| `doing/` | Active work being implemented. `BUGS.md` rows, `PLAN-*.md` files, `HANDOVER.md`, `CHANGES.md` rows for non-bug changes in flight. | The push to `main` that ships the fix/feature. |
+| `waiting-acceptance/` | Pushed to `main`, awaiting founder acceptance testing. Bug rows in `BUGS.md`, behavior changes in `CHANGES.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
 | `done/` | Founder-accepted, fully delivered work. | Items don't leave; this is the source of truth for "what we have delivered". |
 
 **Reopen path**: if the founder rejects acceptance, finds a regression, or
 asks for rework → move the row back from `waiting-acceptance/` to `doing/`
 in the same handoff turn.
 
-**Three folders are not optional**:
-- `doing/` is not a graveyard — if it's pushed, move it.
+**Four folders, each with a non-optional rule**:
+- `backlog/` is **not** a graveyard — every parked row carries an explicit
+  re-open trigger or an OBSOLETE marker. Rows without one get groomed out
+  at the next grooming pass.
+- `doing/` is not a graveyard either — if it's pushed, move it.
 - `waiting-acceptance/` is the only path into `done/`. Never promote
-  straight from `doing/` to `done/`.
+  straight from `doing/` to `done/` (and never from `backlog/`).
 - `done/` is founder-only — agents never auto-promote.
+
+**`backlog/` vs `doing/` — when to use which.** A thought of the shape
+"someday / maybe / depends on X" lives in `backlog/`. Work you're starting
+this session or the next lives in `doing/`. Movement between them happens
+in an explicit **grooming pass** — a founder-led session that triages
+parked items and pulls a handful into `doing/` (see storm2flow's
+`PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent for the format).
 
 ## §2 Bug management
 
@@ -247,6 +258,39 @@ The product's value is the quality of what it generates. Therefore:
 When in doubt between quick patch and slower clean rewrite: pick the
 clean rewrite. Document why in the plan file and push for team + Codex
 alignment before committing.
+
+### §6.1 Observability — speed-to-fix is the quality differential
+
+The quality of working software is measured by how quickly we can find
+and fix errors when they happen. The difference between good and bad
+systems is the speed-to-fix differential. See CLAUDE.md §"Observability
+is a main concern" for the principle and `docs/OBSERVABILITY.md` for the
+recipes.
+
+For every new user-facing route, command, or job:
+
+- [ ] **Error capture** — structured error boundaries (level, event,
+      correlation id, error.message, error.stack). No silent swallowing,
+      no default-value fallbacks that hide failures.
+- [ ] **Agent-readable retrieval path** — the project's MALT-equivalent
+      pattern is documented and works: the agent can run one command (a
+      log-grep, an admin debug route, a `--diagnose` CLI flag) and get
+      the last N failures with full context. **No "paste me the log"
+      asks to the founder.**
+- [ ] **Alert wired** — threshold + destination declared in
+      `project_config_dod.md` §"Alerting". A capability live in
+      production without an alarm is not done.
+- [ ] **Diagnosis runbook** — the agent has tried-and-true diagnosis
+      steps for this error class, documented in CLAUDE.md (project
+      section), a memory entry, or `docs/diagnosis.md`.
+
+What you don't ship:
+- Silent fallbacks that swallow errors with a default value.
+- Unstructured log lines that can't be queried by field.
+- Errors the user sees but the agent can't.
+
+The §7 handoff checklist §E pulls these boxes in for any push that adds
+a new user-facing capability.
 
 ---
 

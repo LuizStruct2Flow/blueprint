@@ -3,19 +3,177 @@ marp: true
 theme: default
 paginate: true
 size: 16:9
-header: 'struct2flow — way of working'
 footer: 'Luiz Scheidegger · luiz@struct2flow.com'
 style: |
-  section { font-size: 26px; }
-  section.lead { text-align: center; }
-  section.lead h1 { font-size: 64px; }
-  section.lead h2 { font-size: 36px; color: #555; }
-  h1 { color: #1a1a1a; }
-  h2 { color: #333; }
-  blockquote { font-style: italic; color: #444; border-left: 4px solid #888; padding-left: 16px; }
-  table { font-size: 22px; }
-  code { background: #f3f3f3; padding: 2px 6px; border-radius: 3px; }
-  pre { font-size: 20px; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --teal: #006B5F;
+    --teal-700: #006B5F;
+    --teal-500: #0F8F80;
+    --teal-300: #66B3A8;
+    --teal-100: #CCE5E1;
+    --teal-50:  #E6F2F0;
+    --ink: #0A0A0A;
+    --ink-soft: #1d1d1b;
+    --paper: #FAFAF7;
+    --muted: #6B6B66;
+  }
+
+  section {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 26px;
+    padding: 70px 80px 80px;
+  }
+
+  section h1, section h2, section h3 {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    color: var(--ink);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+
+  section h1 {
+    border-bottom: 3px solid var(--teal);
+    padding-bottom: 14px;
+    margin-bottom: 28px;
+    font-size: 40px;
+  }
+
+  section h2 {
+    color: var(--teal);
+    font-size: 28px;
+    font-weight: 500;
+  }
+
+  section strong { color: var(--teal); font-weight: 600; }
+
+  section blockquote {
+    font-style: italic;
+    color: var(--ink);
+    border-left: 4px solid var(--teal);
+    background: var(--teal-50);
+    padding: 16px 22px;
+    border-radius: 0 6px 6px 0;
+    margin: 16px 0;
+  }
+
+  section code {
+    background: var(--teal-50);
+    color: var(--teal);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 0.88em;
+  }
+
+  section pre {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 18px;
+    padding: 18px 22px;
+    border-radius: 6px;
+  }
+
+  section pre code {
+    background: transparent;
+    color: var(--paper);
+    padding: 0;
+  }
+
+  section table {
+    font-size: 22px;
+    border-collapse: collapse;
+    margin: 12px 0;
+  }
+
+  section th {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    padding: 10px 16px;
+    text-align: left;
+  }
+
+  section td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--teal-100);
+  }
+
+  section ul, section ol { margin: 8px 0; }
+  section li { margin: 6px 0; }
+
+  /* Logo top-right on body slides */
+  section::before {
+    content: '';
+    position: absolute;
+    top: 28px;
+    right: 36px;
+    width: 56px;
+    height: 56px;
+    background-image: url('assets/brand/struct2flow-mark.svg');
+    background-repeat: no-repeat;
+    background-size: contain;
+    background-position: right top;
+    opacity: 0.85;
+  }
+
+  /* Pagination */
+  section::after {
+    color: var(--muted);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  footer {
+    color: var(--muted);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+  }
+
+  /* Lead (title / divider / closing) slides */
+  section.lead {
+    background: var(--ink);
+    color: var(--paper);
+    text-align: center;
+    justify-content: center;
+  }
+
+  section.lead h1 {
+    color: var(--paper);
+    border: none;
+    font-size: 72px;
+    margin-bottom: 16px;
+    padding-bottom: 0;
+  }
+
+  section.lead h2 {
+    color: var(--teal-300);
+    font-size: 32px;
+    font-weight: 500;
+  }
+
+  section.lead p, section.lead a { color: var(--teal-50); }
+  section.lead strong { color: var(--teal-300); }
+
+  /* Logo top-left on lead slides, recoloured to paper via filter */
+  section.lead::before {
+    top: 32px;
+    left: 40px;
+    right: auto;
+    width: 64px;
+    height: 64px;
+    background-position: left top;
+    filter: invert(98%) sepia(2%) saturate(180%) hue-rotate(40deg) brightness(102%) contrast(91%);
+    opacity: 1;
+  }
+
+  section.lead footer { color: var(--teal-300); }
 ---
 
 <!-- _class: lead -->

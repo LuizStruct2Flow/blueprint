@@ -61,7 +61,8 @@ blueprint/
 │   ├── codex-signal-watch.sh       ← signal poller (whole-file generic)
 │   ├── start-codex-signal-watch.sh ← Codex CLI launcher (uses {{PROJECT_NAME}})
 │   ├── new-project.sh              ← bootstrap a new project
-│   └── blueprint                   ← sync CLI: drift / pull / a2bp (add to PATH)
+│   ├── blueprint                   ← sync CLI: drift / pull / a2bp (add to PATH)
+│   └── build-deck.sh               ← render docs/way-of-working.md → PDF (via marp-cli)
 ├── config/
 │   └── README.md                   ← two-file config convention (committed *.example, gitignored *)
 └── docs/
@@ -69,7 +70,8 @@ blueprint/
     ├── OBSERVABILITY.md            ← capture / retrieve / alert recipes per runtime
     ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST recipes per runtime
     ├── INFRASTRUCTURE.md           ← IaC recipes per stack (CDK / Terraform / Helm-ArgoCD)
-    ├── way-of-working.md           ← Marp deck: how struct2flow ships software (architecture / lifecycle / quality / MALT / security / IaC)
+    ├── way-of-working.md           ← Marp deck source: how struct2flow ships software (architecture / lifecycle / quality / MALT / security / IaC)
+    ├── assets/brand/               ← struct2flow CI: logo SVGs (blueprint-only; not synced to projects)
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── backlog/
     │   ├── README.md               ← parked-state lifecycle + categories (KEEP/DEFER/OBSOLETE)

@@ -6,6 +6,9 @@ dist/
 build/
 *.js.map
 
+# Rendered presentation (regenerate with scripts/build-deck.sh)
+docs/way-of-working.pdf
+
 # Environment files — never commit secrets
 .env
 .env.local

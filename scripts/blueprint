@@ -66,6 +66,7 @@ MANAGED_FILES=(
   "scripts/start-codex-signal-watch.sh"
   "scripts/new-project.sh"
   "scripts/blueprint"
+  "scripts/build-deck.sh"
 
   # .githooks/ — generic gate
   ".githooks/pre-push"

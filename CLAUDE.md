@@ -636,6 +636,38 @@ incident specific to this codebase, or a path/URL belonging to this
 project. Project-specific edits go in the `project_config_*.md` files,
 never back-propagated.
 
+### The blueprint is derived, not designed
+
+The blueprint is a **living operating system**, not a top-down
+specification. Its capabilities are admitted only after they have
+**proved themselves in a real project**:
+
+1. A project hits a real requirement (a customer ask, an incident,
+   a bug that couldn't have been caught by what already existed).
+2. The team builds the fix and captures it as a pattern in that
+   project's `project_config_*.md` or `docs/` tree.
+3. Once the pattern has survived contact with production — typically
+   after the next round of bugs has *not* regressed on it — the
+   generic core is back-propagated via `blueprint a2bp`.
+4. The next project bootstrapped from the blueprint inherits the
+   capability as a default.
+
+What this means for the agent:
+
+- **Do not invent capabilities directly in the blueprint.** New
+  capabilities land in a project first, prove themselves, then
+  travel up. The exception is when the founder explicitly asks for
+  a blueprint-level edit (this file, `docs/DoD.md`, the recipe docs,
+  etc.) — those are evolutionary improvements based on lessons
+  already accumulated.
+- **Don't over-engineer the blueprint** trying to anticipate
+  every project's future needs. Intentional incompleteness is a
+  feature — what the blueprint *does* carry, you can rely on.
+- **When proposing a `blueprint a2bp`**, the founder will ask: has
+  this pattern actually held up here? "We tightened the rule and
+  it worked one time" usually isn't enough; "we tightened the rule
+  and the next two bugs in this area didn't regress" usually is.
+
 ### What blueprint sync covers
 
 The canonical list of synced files is the `MANAGED_FILES` array in

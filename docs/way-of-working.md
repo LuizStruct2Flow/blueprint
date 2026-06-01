@@ -208,7 +208,7 @@ How I ship software, across six concerns:
 …plus two **meta-layers** that make it travel:
 
 - **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
-- **The blueprint** — one repo that defines all six concerns above, with two-way sync to every project
+- **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
 
 Everything below is **enforced by tooling**, not memos.
 The rules live in code (hooks, scripts, gates) — not in slides.
@@ -476,6 +476,29 @@ Codex + Claude Code coordinate through a single file: `AGENT_SIGNAL.md`.
 - **`HANDOVER.md`** lets a fresh prompt resume cold
 
 > Two AI engineers on the same repo, **without overwrites or duplicate work.**
+
+---
+
+# The blueprint — a living operating system
+
+> *Continuously evolving. Derived from production experience.
+> Intentionally incomplete.*
+
+```
+  storm2flow        ──┐
+                       ├──►   BLUEPRINT   ──►   future projects
+  linkedin-watcher  ──┘                          (acme-flow, …)
+```
+
+The evolutionary loop:
+
+1. **Projects create requirements** — real customers, real incidents, real production.
+2. **Requirements harden into patterns** — what worked, captured as a recipe.
+3. **Patterns become blueprint capabilities** — promoted upstream via `blueprint a2bp`.
+4. **Capabilities become defaults** for the next project — pulled forward via `blueprint pull`.
+
+The blueprint contains **only what has been proven in production.**
+That's why it's intentionally incomplete — and why what it does carry, you can rely on.
 
 ---
 

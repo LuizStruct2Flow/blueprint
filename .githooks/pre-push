@@ -5,6 +5,7 @@
 #   - Lint (--max-warnings ratcheted)
 #   - Format check (Prettier)
 #   - Tests + coverage (per docs/DoD.md §3)
+#   - IaC validate (cdk synth / terraform / helm — see docs/INFRASTRUCTURE.md)
 #   - Project-specific guards (see .githooks/pre-push-project)
 #
 # This file is tracked in the repo at .githooks/pre-push. New clones pick it
@@ -115,6 +116,67 @@ if [ -d frontend ]; then
 
   echo "  → Frontend tests + coverage..."
   ( cd frontend && npm run test:coverage ) || { echo "❌ Frontend tests failed or coverage below threshold (see project_config_dod.md)."; exit 1; }
+fi
+
+# --- IaC validate: cdk synth / terraform validate / helm lint (docs/INFRASTRUCTURE.md cross-recipe rules) ---
+# Each step runs only if the corresponding infra layout is present and the
+# tool is installed. Missing tool prints a hint and skips — CI re-runs as
+# the backstop. Same UX pattern as the security gate above.
+
+if [ -d infra ]; then
+  # Recipe A — CDK (TypeScript): detect by infra/cdk.json
+  if [ -f infra/cdk.json ]; then
+    if command -v cdk >/dev/null 2>&1; then
+      echo "  → IaC synth (cdk)..."
+      ( cd infra && cdk synth --quiet >/dev/null ) || {
+        echo "❌ cdk synth failed. Fix the IaC errors before pushing."
+        echo "   Run 'cd infra && cdk synth' locally to see the full output."
+        exit 1
+      }
+    else
+      echo "  ⚠ cdk not installed locally — IaC synth skipped (CI will catch it)."
+      echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+    fi
+  fi
+
+  # Recipe B — Terraform: detect by any infra/**/*.tf
+  if ls infra/**/*.tf >/dev/null 2>&1 || ls infra/*.tf >/dev/null 2>&1; then
+    if command -v terraform >/dev/null 2>&1; then
+      echo "  → IaC validate (terraform)..."
+      ( cd infra && terraform fmt -check -recursive >/dev/null ) || {
+        echo "❌ Terraform files are unformatted. Run 'terraform fmt -recursive' in infra/ and recommit."
+        exit 1
+      }
+      # terraform validate needs init; skip if .terraform/ isn't present (CI does the deeper validate)
+      if [ -d infra/.terraform ]; then
+        ( cd infra && terraform validate >/dev/null ) || {
+          echo "❌ terraform validate failed. Fix the IaC errors before pushing."
+          exit 1
+        }
+      else
+        echo "    (skipping terraform validate — run 'terraform init' in infra/ to enable locally)"
+      fi
+    else
+      echo "  ⚠ terraform not installed locally — IaC validate skipped (CI will catch it)."
+      echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+    fi
+  fi
+
+  # Recipe C — Helm charts: detect by infra/charts/*/Chart.yaml
+  if ls infra/charts/*/Chart.yaml >/dev/null 2>&1; then
+    if command -v helm >/dev/null 2>&1; then
+      echo "  → IaC lint (helm)..."
+      for chart in infra/charts/*/; do
+        helm lint "$chart" >/dev/null || {
+          echo "❌ helm lint failed on $chart"
+          exit 1
+        }
+      done
+    else
+      echo "  ⚠ helm not installed locally — chart lint skipped (CI will catch it)."
+      echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+    fi
+  fi
 fi
 
 # --- .claude/settings.json host-path guard (generic struct2flow rule) ---

@@ -15,8 +15,11 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 | Step | Command | Threshold |
 |---|---|---|
 | Secret scan | `gitleaks protect --staged --redact` | zero findings |
-| SAST | `semgrep --config=auto --error --timeout=20` | zero `WARNING+` |
+| SAST | `semgrep --config=p/owasp-top-ten --severity=WARNING --severity=ERROR --error --timeout=20` | zero `WARNING+` |
 | SCA | `osv-scanner --recursive --skip-git --fail-on-vuln .` | zero `HIGH+` CVE |
+| IaC validate (Recipe A) | `cd infra && cdk synth --quiet` | synth clean |
+| IaC validate (Recipe B) | `cd infra && terraform fmt -check -recursive` + `terraform validate` | clean (init required for validate) |
+| IaC validate (Recipe C) | `helm lint infra/charts/*/` | each chart clean |
 | Build | `cd backend && npm run build` | tsc clean |
 | Lint (BE) | `cd backend && npm run lint` | `--max-warnings <N>` ratcheted |
 | Format check (BE) | `cd backend && npm run format:check` | prettier clean |
@@ -26,19 +29,24 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 | Test + coverage (FE) | `cd frontend && npm run test:coverage` | all green; coverage meets project mode (see below) |
 | (Project-specific guards) | sourced from `.githooks/pre-push-project` | each guard fails-fast |
 
-**Security tooling install** (each developer's machine):
+**Security + IaC tooling install** (each developer's machine):
 ```bash
 brew bundle   # uses ./Brewfile at the repo root
 ```
-The blueprint Brewfile pins `gitleaks`, `semgrep`, and `osv-scanner`.
-If a binary is missing, the hook skips its step with a warning rather
-than blocking — CI re-runs the same gate as a backstop. See
-[docs/SECURITY.md](docs/SECURITY.md) for the full per-stack recipe
-(CI deep-SAST packs, container scan, IaC scan, DAST baseline).
+The blueprint Brewfile pins the security gate (`gitleaks`, `semgrep`,
+`osv-scanner`) plus the IaC tooling (`awscli`, `aws-cdk`, `terraform`,
+`helm` — install only what your recipe needs).
 
-Project-specific tooling (CDK, AWS CLI, Node version pin, etc.) goes
-in the `Brewfile` below the `# Project-specific extensions` marker —
-the blueprint sync preserves your additions.
+If a binary is missing, the pre-push hook **skips** its step with a
+warning rather than blocking — CI re-runs the same gate as a backstop.
+See [docs/SECURITY.md](docs/SECURITY.md) and
+[docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) for the full per-stack
+recipes (CI deep-SAST packs, container scan, plan-diff posting,
+nightly drift watch, DAST baseline).
+
+Project-specific tooling (Node version pin, `kubectl`, `argocd`,
+etc.) goes in the `Brewfile` below the `# Project-specific extensions`
+marker — the blueprint sync preserves your additions.
 
 ## Coverage mode (DoD §3.6)
 

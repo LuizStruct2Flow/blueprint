@@ -28,7 +28,8 @@ After bootstrap:
 2. `code .` (open in VS Code)
 3. `brew bundle` (installs `gitleaks` + `semgrep` + `osv-scanner` for the pre-push gate)
 4. Fill out `project_config_overview.md`, `project_config_paths.md`,
-   `project_config_dod.md`, `project_config_security.md`
+   `project_config_dod.md`, `project_config_security.md`,
+   `project_config_infra.md`
 5. Start adding code under `backend/`, `frontend/`, etc.
 6. Optional: copy `.githooks/pre-push-project.example` to
    `.githooks/pre-push-project` and add your project-specific guards
@@ -49,6 +50,7 @@ blueprint/
 ├── project_config_paths.md         ← project-specific paths / URLs (stub)
 ├── project_config_dod.md           ← project-specific DoD extensions (stub)
 ├── project_config_security.md      ← project-specific threat model + scan thresholds (stub)
+├── project_config_infra.md         ← project-specific envs / state / cost ceilings / rollback (stub)
 ├── .gitignore                      ← generic node + agent ignores
 ├── .githooks/
 │   ├── pre-push                    ← generic security + build/lint/format/coverage gate
@@ -64,8 +66,9 @@ blueprint/
 └── docs/
     ├── DoD.md                      ← generic Definition of Done
     ├── OBSERVABILITY.md            ← capture / retrieve / alert recipes per runtime
-    ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST / IaC recipes per runtime
-    ├── way-of-working.md           ← Marp deck: how struct2flow ships software (architecture / lifecycle / quality / MALT / security)
+    ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST recipes per runtime
+    ├── INFRASTRUCTURE.md           ← IaC recipes per stack (CDK / Terraform / Helm-ArgoCD)
+    ├── way-of-working.md           ← Marp deck: how struct2flow ships software (architecture / lifecycle / quality / MALT / security / IaC)
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── backlog/
     │   ├── README.md               ← parked-state lifecycle + categories (KEEP/DEFER/OBSOLETE)

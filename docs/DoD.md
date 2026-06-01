@@ -336,6 +336,57 @@ What you don't ship:
 The §7 handoff checklist §E pulls these boxes in alongside §6.1's
 observability boxes.
 
+### §6.3 Infrastructure as Code — defined, reviewable, reproducible
+
+Quality of working software depends on the environment matching its
+definition. See CLAUDE.md §"Infrastructure as Code is a main concern"
+for the principle and `docs/INFRASTRUCTURE.md` for the recipes.
+
+For every push that touches `infra/` (CDK / Terraform / Helm):
+
+- [ ] **Synth/plan clean** — `cdk synth` / `terraform validate` /
+      `helm lint` succeeds. The pre-push gate (§4) blocks otherwise.
+- [ ] **Reviewable diff in the PR** — `cdk diff` / `terraform plan` /
+      `helm diff upgrade` output is attached as a PR comment. The
+      diff is the review artifact, not the TypeScript / HCL alone.
+- [ ] **No out-of-band resources referenced** — no hand-created ARNs
+      being imported by string, no "create this in the console first"
+      steps assumed.
+- [ ] **Environment parity** — change applies cleanly to all declared
+      envs (dev / staging / prod) per `project_config_infra.md`, not
+      just one.
+- [ ] **Cost impact named** — if change adds resources whose monthly
+      cost exceeds the threshold in `project_config_infra.md`
+      §"Cost ceilings", PR body calls it out and the founder
+      approves explicitly before merge.
+- [ ] **Drift report from last nightly scan attached** if a relevant
+      drift alert is open on a resource the PR touches.
+
+For every push that adds a **new prod resource** (anything
+customer-traffic-bearing or state-holding):
+
+- [ ] **Rollback procedure named** — `project_config_infra.md`
+      §"Rollback procedure" covers the new resource, including any
+      stateful-resource reversal steps.
+- [ ] **Deploy traversal documented** — PR shows the dev → staging →
+      prod path the change will take. Emergency-fix exceptions land
+      in the next `docs/done/INCIDENT-YYYY-MM-DD.md`.
+
+What you don't ship:
+- A resource clicked together in the cloud console with "I'll codify
+  it later".
+- An IaC string literal containing a real secret (use Secrets Manager
+  / SSM / Vault).
+- A prod apply / deploy from a laptop. Ever.
+- An infra change deployed straight to prod without traversing
+  dev → staging → prod, unless it's an emergency fix documented as
+  such.
+- A drift alert left open >24h without either a "codify" or
+  "revert + add alarm" PR linked.
+
+The §7 handoff checklist §E pulls these boxes in alongside §6.1's
+observability boxes and §6.2's security boxes.
+
 ---
 
 ## §7 Handoff checklist (run BEFORE flipping the mic)

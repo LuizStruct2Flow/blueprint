@@ -30,13 +30,14 @@ Luiz Scheidegger · 2026
 
 # Why this deck
 
-How I ship software, across five concerns:
+How I ship software, across six concerns:
 
 1. **Architecture** — DDD + Clean + Hexagonal
 2. **Lifecycle** — four states, founder-gated
 3. **Quality** — Definition of Done, non-negotiable
 4. **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing
-5. **Security** — current posture and roadmap
+5. **Security** — secret-scan, SAST, SCA, IaC scan, DAST
+6. **Infrastructure as Code** — defined, reviewable, reproducible
 
 Everything below is **enforced by tooling**, not memos.
 The rules live in code (hooks, scripts, gates) — not in slides.
@@ -252,6 +253,47 @@ Threat model + thresholds per project: `project_config_security.md`.
 
 ---
 
+# 6 · Infrastructure as Code — four non-negotiable capabilities
+
+> *Quality of working software depends on
+> the environment matching its definition.*
+
+Drift between code and prod is the silent killer of reproducibility.
+
+1. **Everything in prod is in code.**
+   No console clicks; no "I'll codify it later". Imported or deleted within the week.
+
+2. **Every change is reviewable as a diff.**
+   `cdk diff` / `terraform plan` / `helm diff` is the review artifact, not the source.
+
+3. **Environments are reproducible from the same code.**
+   New env = one row of config + one command. Never a hand-crafted sandbox.
+
+4. **Drift is detected, not assumed away.**
+   Nightly diff; out-of-band changes are codified or reverted, never ignored.
+
+---
+
+# 6 · IaC — recipes per stack
+
+`docs/INFRASTRUCTURE.md` — same recipe-per-stack model as `SECURITY.md` / `OBSERVABILITY.md`:
+
+- **Recipe A — AWS-first (CDK TypeScript)** — struct2flow default
+  CodePipeline-driven applies; manual approval before prod;
+  CDK Nag + Infracost gating posture + cost.
+
+- **Recipe B — Multi-cloud / portable (Terraform / Pulumi)**
+  S3 + DynamoDB state/lock; pipeline-only prod-apply;
+  `tfsec` + `infracost` gating.
+
+- **Recipe C — Kubernetes-native (Helm + ArgoCD / Flux)**
+  GitOps; ArgoCD pulls cluster state from a branch;
+  `OutOfSync` is the native drift detector.
+
+Environments / ownership / cost ceilings / rollback: `project_config_infra.md`.
+
+---
+
 # The agent layer — radio-over
 
 Codex + Claude Code coordinate through a single file: `AGENT_SIGNAL.md`.
@@ -298,6 +340,8 @@ The output is a system where **speed-to-fix shrinks every week.**
 - `docs/DoD.md` — Definition of Done (the handoff gate)
 - `STACK_DEFAULTS.md` — architecture + stack defaults
 - `docs/OBSERVABILITY.md` — MALT recipes per runtime
+- `docs/SECURITY.md` — security recipes per runtime
+- `docs/INFRASTRUCTURE.md` — IaC recipes per runtime
 - `project_config_*.md` — per-project overrides
 
 All open source at:

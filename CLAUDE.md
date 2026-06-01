@@ -500,6 +500,52 @@ The **capabilities** are non-negotiable. The mechanism row goes in
 + thresholds live in `project_config_security.md` — every project
 declares its choice.
 
+## Infrastructure as Code is a main concern
+
+**Quality of working software depends on the environment matching its
+definition.** Drift between code and prod is the silent killer of
+reproducibility — and reproducibility is what makes "it worked in
+staging" meaningful. IaC is therefore a first-class concern, sitting
+alongside observability and security at the runtime edge.
+
+Four capabilities are non-negotiable for every struct2flow project:
+
+1. **Everything in prod is defined in code.** No console clicks, no
+   out-of-band changes that "we'll codify later." If a resource exists
+   in prod and isn't in CDK/Terraform/Helm, it's either imported into
+   the IaC tree within the same week or it's deleted.
+2. **Every change is reviewable as a diff.** `cdk diff` / `terraform
+   plan` / `helm diff` is the artifact reviewers look at, not the
+   TypeScript/HCL source. A PR touching `infra/` without that diff
+   attached is incomplete.
+3. **Environments are reproducible from the same code.** Dev /
+   staging / prod are *parameters*, not copy-pasted apps. Spinning a
+   new env is one command + one row of config, never a hand-crafted
+   sandbox that diverges.
+4. **Drift is detected, not assumed away.** A nightly diff/plan job
+   alerts on out-of-band changes; the resolution is always "codify"
+   or "revert + add an alarm," never "ignore and hope." Drift open
+   >24h becomes a `findings.md` entry.
+
+The **mechanism** is project-specific — choose one of the three
+recipes in [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md):
+
+- **AWS-first / CDK TypeScript** — struct2flow default. Single CDK
+  app, multiple stacks, CodePipeline-driven applies, manual approval
+  before prod, CDK Nag + Infracost gating cost + posture.
+- **Multi-cloud / portable (Terraform / Pulumi)** — when the project
+  ships into customer-managed accounts or stays cloud-agnostic. S3 +
+  DynamoDB state/lock, pipeline-only prod-apply, `tfsec` + `infracost`
+  gating.
+- **Kubernetes-native (Helm + ArgoCD / Flux)** — GitOps. ArgoCD pulls
+  cluster state from a branch; PR diff = the plan; `OutOfSync` is the
+  native drift detector.
+
+The **capabilities** are non-negotiable. The mechanism row goes in
+`project_config_overview.md` §"Infra stack"; the environments,
+ownership, drift cadence, cost ceilings, and rollback procedure go in
+`project_config_infra.md` — every project declares its choices.
+
 ## Code Quality
 
 - Run periodic code reviews using multiple perspectives (reuse, quality, efficiency, junior comprehension)

@@ -77,6 +77,7 @@ TARGETS=(
   "docs/DoD.md"
   "docs/OBSERVABILITY.md"
   "docs/SECURITY.md"
+  "docs/INFRASTRUCTURE.md"
   "docs/PUBLISHING.md"
   "docs/doing/HANDOVER.md"
   "scripts/codex-signal-watch.sh"
@@ -87,6 +88,7 @@ TARGETS=(
   "project_config_paths.md"
   "project_config_dod.md"
   "project_config_security.md"
+  "project_config_infra.md"
 )
 
 for f in "${TARGETS[@]}"; do
@@ -145,7 +147,7 @@ Next steps:
   1. cd $TARGET_DIR
   2. Open in VS Code: code .
   3. brew bundle    (installs gitleaks + semgrep + osv-scanner for the pre-push gate)
-  4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md
+  4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md, project_config_infra.md
   5. Create your backend/frontend src tree as needed
   6. Optional: copy .githooks/pre-push-project.example to .githooks/pre-push-project and edit
 

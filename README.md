@@ -1,5 +1,7 @@
 # struct2flow — blueprint
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
+
 The **living template** for new struct2flow projects. Holds the generic
 agent-coordination protocol (Codex + Claude Code radio-over), the
 lifecycle-managed `docs/` skeleton, the pre-push gate, and the

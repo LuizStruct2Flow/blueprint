@@ -569,15 +569,76 @@ ownership, drift cadence, cost ceilings, and rollback procedure go in
 
 This CLAUDE.md is sourced from the struct2flow **blueprint** at
 `~/sources/struct2flow/blueprint/`. Project-specific extensions live in
-`project_config_overview.md`, `project_config_paths.md`, and
-`project_config_dod.md` at the repo root.
+`project_config_overview.md`, `project_config_paths.md`,
+`project_config_dod.md`, `project_config_security.md`, and
+`project_config_infra.md` at the repo root.
 
-Two sync directions (see the blueprint README):
-- **Pull**: on wake, if the blueprint's `CLAUDE.md` has changed since
-  this file was last synced, surface the diff and offer to pull forward.
-- **Push (back-propagate)**: when you improve a generic rule in this
-  file, offer to back-propagate to the blueprint so other projects
-  inherit the improvement.
+Sync is driven by a single CLI — `blueprint` — installed by adding the
+blueprint's `scripts/` to PATH (or symlinking). The agent uses it
+directly; do not hand-roll `diff -ru` invocations.
 
-If you catch yourself adding a project-specific incident or path to
-this file, move it to the right `project_config_*.md` before committing.
+### Wake-time drift check (mandatory on every fresh session)
+
+```bash
+blueprint drift
+```
+
+Output: which managed files differ from the blueprint HEAD, plus the
+commit log in the blueprint since this project's `.blueprint-source`
+bootstrap_sha. Three cases:
+
+1. **Clean** — `blueprint drift` reports `✓ All blueprint-managed files
+   match the blueprint HEAD.` → proceed with founder's task.
+2. **Drifted** — surface a short summary to the founder ("blueprint has
+   N commit(s); files M, P drifted"). Offer to pull. Do **not**
+   silently pull — the founder may want to vet a specific change.
+3. **Stale blueprint** — `blueprint drift` reports commits ahead but no
+   file-level drift (rare; happens if the project already back-propagated
+   everything). Bump `.blueprint-source` bootstrap_sha to the new HEAD
+   (next `blueprint pull` does this automatically) and proceed.
+
+### Pulling forward
+
+```bash
+blueprint pull                # interactive: y/n/quit per file
+blueprint pull docs/DoD.md    # single file
+blueprint pull --yes          # batch, no prompt (only when founder asks for it)
+```
+
+After a non-empty pull, **review with `git diff` and commit in the
+project repo**. `.blueprint-source` bootstrap_sha is updated by
+`blueprint pull` automatically — don't edit it by hand.
+
+### Back-propagating (apply-to-blueprint)
+
+When you improve a generic rule in a blueprint-managed file (a tighter
+DoD wording, a new failure mode, a dispatcher bug fix), **offer to
+back-propagate** rather than silently committing only in the project:
+
+> "This change to `docs/DoD.md` §3.4 looks generic — back-propagate to
+> the blueprint so other projects inherit it?"
+
+If yes:
+
+```bash
+blueprint a2bp docs/DoD.md
+```
+
+`a2bp` copies the project's version into the blueprint working tree
+(staged, not committed). Then in the blueprint repo: `git diff`, commit,
+push. After the blueprint commit lands, re-run `blueprint drift` in the
+project to confirm the project matches HEAD again.
+
+**A change is generic** if it would benefit every struct2flow project
+(tighter rule, better wording, missing capability). **A change is
+project-specific** if it names the project, an internal customer, an
+incident specific to this codebase, or a path/URL belonging to this
+project. Project-specific edits go in the `project_config_*.md` files,
+never back-propagated.
+
+### What blueprint sync covers
+
+The canonical list of synced files is the `MANAGED_FILES` array in
+`scripts/blueprint` — run `blueprint files` to print it. If you catch
+yourself adding a project-specific incident or path to a blueprint-managed
+file, move it to the right `project_config_*.md` before committing.

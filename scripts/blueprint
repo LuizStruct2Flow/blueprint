@@ -1,0 +1,368 @@
+#!/usr/bin/env bash
+#
+# blueprint — sync CLI for struct2flow projects.
+#
+# Subcommands:
+#   blueprint drift             Show which blueprint-managed files in this project
+#                               have drifted from the blueprint HEAD, and what's
+#                               changed in the blueprint since this project was
+#                               last synced.
+#   blueprint pull [FILE...]    Pull blueprint-managed files forward into this
+#                               project. Interactive per file unless --yes.
+#                               With no FILE, pulls every file that's drifted.
+#   blueprint a2bp FILE [...]   Apply-to-blueprint: copy this project's version
+#                               of FILE(s) BACK to the blueprint working tree as
+#                               a staged change. You then review + commit + push
+#                               in the blueprint repo yourself.
+#   blueprint files             List the blueprint-managed files (source of truth).
+#   blueprint help              This message.
+#
+# The "blueprint" location is read from .blueprint-source in the current
+# project (created by new-project.sh on bootstrap). All commands except
+# `files` and `help` must run from inside a struct2flow project.
+#
+# Add this directory to PATH so the command is callable as `blueprint`:
+#   export PATH="$HOME/sources/struct2flow/blueprint/scripts:$PATH"
+# Or symlink it:
+#   ln -s ~/sources/struct2flow/blueprint/scripts/blueprint /usr/local/bin/blueprint
+
+set -euo pipefail
+
+# --- Canonical list of blueprint-managed files ---
+# This is the SINGLE SOURCE OF TRUTH for "which files does the blueprint
+# own". The README.md and CLAUDE.md link here; do not duplicate the list
+# elsewhere.
+#
+# Rules for what belongs in this list:
+#   - Generic to every struct2flow project (no {{PROJECT_NAME}} after
+#     bootstrap substitution → the file's content is the same everywhere).
+#   - Improving it in one project should benefit every project (that's
+#     what blueprint sync is for).
+#
+# What does NOT belong (project-owned, never synced):
+#   - project_config_*.md  (the whole point of these files is project drift)
+#   - AGENT_SIGNAL.md, HANDOVER.md, BUGS.md, BACKLOG.md, PLAN-*.md, etc.
+#   - .githooks/pre-push-project  (project guards)
+#   - backend/, frontend/, infra/, src/, anywhere with project code
+#   - .claude/settings.local.json (host-specific)
+
+MANAGED_FILES=(
+  # Top-level agent protocol
+  "CLAUDE.md"
+  "AGENTS.md"
+  "STACK_DEFAULTS.md"
+  "Brewfile"
+
+  # docs/ — the canonical reference docs
+  "docs/DoD.md"
+  "docs/OBSERVABILITY.md"
+  "docs/SECURITY.md"
+  "docs/INFRASTRUCTURE.md"
+  "docs/PUBLISHING.md"
+  "docs/way-of-working.md"
+
+  # scripts/ — the agent infra
+  "scripts/codex-signal-watch.sh"
+  "scripts/start-codex-signal-watch.sh"
+  "scripts/new-project.sh"
+  "scripts/blueprint"
+
+  # .githooks/ — generic gate
+  ".githooks/pre-push"
+  ".githooks/pre-push-project.example"
+
+  # .claude/ — generic permission allowlist (host-specific bits live in
+  # .claude/settings.local.json which is gitignored)
+  ".claude/settings.json"
+
+  # Folder skeleton READMEs — describe the conventions, never project content
+  "docs/backlog/README.md"
+  "docs/doing/README.md"
+  "docs/waiting-acceptance/README.md"
+  "docs/done/README.md"
+  "docs/config/README.md"
+  "docs/mocks/README.md"
+  "docs/requirements/README.md"
+  "config/README.md"
+)
+
+# Files that are BOOTSTRAPPED from the blueprint as templates but then
+# project-owned. New projects get them via new-project.sh; they're NOT
+# synced afterward (improvements to the template propagate to *new*
+# projects only).
+TEMPLATE_FILES=(
+  "project_config_overview.md"
+  "project_config_paths.md"
+  "project_config_dod.md"
+  "project_config_security.md"
+  "project_config_infra.md"
+)
+
+# --- ANSI ---
+if [ -t 1 ]; then
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_BLUE=$'\033[34m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
+  C_RESET=$'\033[0m'
+else
+  C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_BOLD=""; C_DIM=""; C_RESET=""
+fi
+
+# --- Helpers ---
+die() {
+  echo "${C_RED}error:${C_RESET} $*" >&2
+  exit 1
+}
+
+read_blueprint_source() {
+  if [ ! -f .blueprint-source ]; then
+    die "no .blueprint-source in $(pwd) — not a struct2flow project (run from project root)"
+  fi
+  BLUEPRINT_ROOT=$(grep '^blueprint_source' .blueprint-source | cut -d= -f2- | xargs)
+  BOOTSTRAP_SHA=$(grep '^bootstrap_sha' .blueprint-source | cut -d= -f2- | xargs)
+  BOOTSTRAP_DATE=$(grep '^bootstrap_date' .blueprint-source | cut -d= -f2- | xargs)
+  if [ -z "$BLUEPRINT_ROOT" ] || [ ! -d "$BLUEPRINT_ROOT" ]; then
+    die ".blueprint-source points at '$BLUEPRINT_ROOT' which does not exist"
+  fi
+}
+
+# --- Subcommand: files ---
+cmd_files() {
+  echo "${C_BOLD}Blueprint-managed files (synced by 'blueprint pull'):${C_RESET}"
+  for f in "${MANAGED_FILES[@]}"; do
+    echo "  $f"
+  done
+  echo
+  echo "${C_BOLD}Template files (seeded once at bootstrap, then project-owned):${C_RESET}"
+  for f in "${TEMPLATE_FILES[@]}"; do
+    echo "  $f"
+  done
+  echo
+  echo "${C_DIM}Source of truth: scripts/blueprint MANAGED_FILES array.${C_RESET}"
+}
+
+# --- Subcommand: drift ---
+cmd_drift() {
+  read_blueprint_source
+
+  echo "${C_BOLD}Blueprint drift check${C_RESET}"
+  echo "  project:    $(pwd)"
+  echo "  blueprint:  $BLUEPRINT_ROOT"
+  echo "  bootstrap:  $BOOTSTRAP_SHA ($BOOTSTRAP_DATE)"
+
+  CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
+  echo "  blueprint HEAD: $CURRENT_SHA"
+  echo
+
+  if [ "$CURRENT_SHA" != "$BOOTSTRAP_SHA" ] && [ "$BOOTSTRAP_SHA" != "no-sha" ]; then
+    AHEAD_COUNT=$(git -C "$BLUEPRINT_ROOT" rev-list --count "$BOOTSTRAP_SHA..$CURRENT_SHA" 2>/dev/null || echo "?")
+    echo "${C_BLUE}Blueprint has $AHEAD_COUNT commit(s) since this project was last synced:${C_RESET}"
+    git -C "$BLUEPRINT_ROOT" log --oneline "$BOOTSTRAP_SHA..$CURRENT_SHA" 2>/dev/null | sed 's/^/  /'
+    echo
+  fi
+
+  DRIFTED=()
+  MISSING_BLUEPRINT=()
+  MISSING_PROJECT=()
+
+  for f in "${MANAGED_FILES[@]}"; do
+    bp="$BLUEPRINT_ROOT/$f"
+    if [ ! -f "$bp" ]; then
+      MISSING_BLUEPRINT+=("$f")
+      continue
+    fi
+    if [ ! -f "$f" ]; then
+      MISSING_PROJECT+=("$f")
+      continue
+    fi
+    if ! diff -q "$bp" "$f" >/dev/null 2>&1; then
+      DRIFTED+=("$f")
+    fi
+  done
+
+  if [ ${#DRIFTED[@]} -eq 0 ] && [ ${#MISSING_BLUEPRINT[@]} -eq 0 ] && [ ${#MISSING_PROJECT[@]} -eq 0 ]; then
+    echo "${C_GREEN}✓ All blueprint-managed files match the blueprint HEAD.${C_RESET}"
+    return 0
+  fi
+
+  if [ ${#DRIFTED[@]} -gt 0 ]; then
+    echo "${C_YELLOW}Drifted (project ≠ blueprint HEAD): ${#DRIFTED[@]}${C_RESET}"
+    for f in "${DRIFTED[@]}"; do echo "  ${C_YELLOW}~${C_RESET} $f"; done
+    echo
+  fi
+  if [ ${#MISSING_PROJECT[@]} -gt 0 ]; then
+    echo "${C_BLUE}New in blueprint (not in this project): ${#MISSING_PROJECT[@]}${C_RESET}"
+    for f in "${MISSING_PROJECT[@]}"; do echo "  ${C_BLUE}+${C_RESET} $f"; done
+    echo
+  fi
+  if [ ${#MISSING_BLUEPRINT[@]} -gt 0 ]; then
+    echo "${C_RED}Listed managed but missing in blueprint: ${#MISSING_BLUEPRINT[@]}${C_RESET}"
+    for f in "${MISSING_BLUEPRINT[@]}"; do echo "  ${C_RED}!${C_RESET} $f"; done
+    echo "${C_DIM}  (the MANAGED_FILES array in scripts/blueprint may be ahead of the blueprint itself)${C_RESET}"
+    echo
+  fi
+
+  echo "Next:"
+  echo "  ${C_DIM}blueprint pull${C_RESET}             # pull all drifted + new forward"
+  echo "  ${C_DIM}blueprint pull <file>${C_RESET}      # pull one file"
+  echo "  ${C_DIM}blueprint pull <file> --yes${C_RESET}  # skip the per-file prompt"
+}
+
+# --- Subcommand: pull ---
+cmd_pull() {
+  read_blueprint_source
+
+  local auto_yes=0
+  local files=()
+  for arg in "$@"; do
+    case "$arg" in
+      --yes|-y) auto_yes=1 ;;
+      -*) die "unknown option: $arg" ;;
+      *) files+=("$arg") ;;
+    esac
+  done
+
+  # Default: every drifted or missing file
+  if [ ${#files[@]} -eq 0 ]; then
+    for f in "${MANAGED_FILES[@]}"; do
+      bp="$BLUEPRINT_ROOT/$f"
+      if [ ! -f "$bp" ]; then continue; fi
+      if [ ! -f "$f" ] || ! diff -q "$bp" "$f" >/dev/null 2>&1; then
+        files+=("$f")
+      fi
+    done
+  fi
+
+  if [ ${#files[@]} -eq 0 ]; then
+    echo "${C_GREEN}✓ Nothing to pull. Project matches blueprint HEAD.${C_RESET}"
+    return 0
+  fi
+
+  echo "${C_BOLD}Pulling from $BLUEPRINT_ROOT${C_RESET}"
+  local pulled=0
+  for f in "${files[@]}"; do
+    bp="$BLUEPRINT_ROOT/$f"
+    if [ ! -f "$bp" ]; then
+      echo "  ${C_RED}skip${C_RESET}  $f  (not in blueprint)"
+      continue
+    fi
+    if [ -f "$f" ] && diff -q "$bp" "$f" >/dev/null 2>&1; then
+      echo "  ${C_DIM}same${C_RESET}  $f"
+      continue
+    fi
+    echo
+    echo "${C_BOLD}── $f${C_RESET}"
+    if [ ! -f "$f" ]; then
+      echo "  ${C_BLUE}new file${C_RESET} (blueprint adds it; project doesn't have it yet)"
+    else
+      diff -u "$f" "$bp" | head -60 || true
+      echo "  ${C_DIM}(diff truncated at 60 lines — open the file to see all)${C_RESET}"
+    fi
+    if [ "$auto_yes" -eq 0 ]; then
+      printf "  Pull this file? [y/N/q] "
+      read -r ans </dev/tty
+      case "$ans" in
+        y|Y) ;;
+        q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; break ;;
+        *) echo "  ${C_DIM}skipped${C_RESET}"; continue ;;
+      esac
+    fi
+    mkdir -p "$(dirname "$f")"
+    cp "$bp" "$f"
+    echo "  ${C_GREEN}pulled${C_RESET} $f"
+    pulled=$((pulled+1))
+  done
+
+  echo
+  if [ $pulled -gt 0 ]; then
+    CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
+    if [ -f .blueprint-source ] && [ "$CURRENT_SHA" != "no-sha" ]; then
+      # Update bootstrap_sha to blueprint HEAD
+      sed -i.bak "s/^bootstrap_sha.*=.*/bootstrap_sha    = $CURRENT_SHA/" .blueprint-source
+      rm -f .blueprint-source.bak
+      echo "Updated .blueprint-source bootstrap_sha → $CURRENT_SHA"
+    fi
+    echo "${C_GREEN}✓ Pulled $pulled file(s). Review with 'git diff' and commit.${C_RESET}"
+  else
+    echo "${C_DIM}Nothing pulled.${C_RESET}"
+  fi
+}
+
+# --- Subcommand: a2bp ---
+cmd_a2bp() {
+  read_blueprint_source
+  if [ "$#" -eq 0 ]; then
+    die "usage: blueprint a2bp FILE [FILE...]"
+  fi
+
+  echo "${C_BOLD}Apply-to-blueprint${C_RESET}"
+  echo "  project:    $(pwd)"
+  echo "  blueprint:  $BLUEPRINT_ROOT"
+  echo
+
+  local copied=0
+  for f in "$@"; do
+    # Validate that this file is blueprint-managed
+    local is_managed=0
+    for m in "${MANAGED_FILES[@]}"; do
+      if [ "$m" = "$f" ]; then is_managed=1; break; fi
+    done
+    if [ "$is_managed" -eq 0 ]; then
+      echo "  ${C_RED}reject${C_RESET}  $f"
+      echo "    ${C_DIM}not in the blueprint-managed list — see 'blueprint files'.${C_RESET}"
+      echo "    ${C_DIM}If this file SHOULD be blueprint-managed, add it to the MANAGED_FILES${C_RESET}"
+      echo "    ${C_DIM}array in scripts/blueprint first.${C_RESET}"
+      continue
+    fi
+    if [ ! -f "$f" ]; then
+      echo "  ${C_RED}skip${C_RESET}    $f  (not present in project)"
+      continue
+    fi
+    local bp="$BLUEPRINT_ROOT/$f"
+    if [ -f "$bp" ] && diff -q "$f" "$bp" >/dev/null 2>&1; then
+      echo "  ${C_DIM}same${C_RESET}    $f  (project version already matches blueprint)"
+      continue
+    fi
+    mkdir -p "$(dirname "$bp")"
+    cp "$f" "$bp"
+    echo "  ${C_GREEN}copied${C_RESET}  $f → blueprint"
+    copied=$((copied+1))
+  done
+
+  echo
+  if [ $copied -gt 0 ]; then
+    echo "${C_GREEN}✓ Copied $copied file(s) into the blueprint working tree.${C_RESET}"
+    echo
+    echo "Next:"
+    echo "  cd $BLUEPRINT_ROOT"
+    echo "  git diff                       # review what changed"
+    echo "  git add <files> && git commit  # commit the back-propagation"
+    echo "  git push                       # publish so other projects can pull"
+    echo
+    echo "After you've committed in the blueprint, come back here and run:"
+    echo "  blueprint drift                # confirm this project now matches blueprint HEAD"
+    echo "  (the 'commits since last sync' count should drop to your one back-propagated commit)"
+  else
+    echo "${C_DIM}Nothing copied.${C_RESET}"
+  fi
+}
+
+# --- Subcommand: help ---
+cmd_help() {
+  sed -n '2,28p' "$0" | sed 's/^# //; s/^#//'
+}
+
+# --- Dispatch ---
+SUBCMD="${1:-help}"
+shift || true
+case "$SUBCMD" in
+  drift)  cmd_drift "$@" ;;
+  pull)   cmd_pull "$@" ;;
+  a2bp|push) cmd_a2bp "$@" ;;
+  files|list) cmd_files "$@" ;;
+  help|--help|-h) cmd_help ;;
+  *) die "unknown subcommand: $SUBCMD (try 'blueprint help')" ;;
+esac

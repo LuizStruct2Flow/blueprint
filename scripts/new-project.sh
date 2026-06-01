@@ -152,7 +152,14 @@ Next steps:
   6. Optional: copy .githooks/pre-push-project.example to .githooks/pre-push-project and edit
 
 Blueprint sync:
-  - On any new conversation, ask the agent to check 'blueprint drift'
+  - Add the blueprint CLI to PATH (once per machine):
+      export PATH="\$HOME/sources/struct2flow/blueprint/scripts:\$PATH"
+    (or symlink: ln -s ~/sources/struct2flow/blueprint/scripts/blueprint /usr/local/bin/blueprint)
+  - From this project root:
+      blueprint drift        # see what's changed in the blueprint since bootstrap
+      blueprint pull         # pull blueprint changes forward (interactive)
+      blueprint a2bp <file>  # back-propagate a generic improvement to the blueprint
+      blueprint files        # show which files are blueprint-managed
   - The blueprint commit you bootstrapped from is recorded in .blueprint-source
 
 Happy struct2flowing.

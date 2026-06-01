@@ -456,6 +456,50 @@ The **capabilities** are non-negotiable. The mechanism row goes in
 `project_config_overview.md` §"Observability stack" — every project
 declares its choice.
 
+## Security is a main concern
+
+**Quality of working software degrades to zero the moment something is
+exploited in production.** Security is therefore a first-class concern,
+not a checkbox at the end. It lives next to observability — both protect
+the working software, just at different timescales.
+
+Four capabilities are non-negotiable for every struct2flow project:
+
+1. **No secrets in code or git history.** `gitleaks` blocks the push;
+   if one slips through, the credential is rotated **before** the
+   commit is investigated. A leaked secret is compromised the moment
+   it lands on `origin`.
+2. **Static analysis catches the OWASP top-10 patterns at commit
+   time.** Semgrep + the lint security plugins run in pre-push and
+   block on `WARNING+` findings. Suppressions need a justification
+   comment naming the threat-model entry that makes them safe.
+3. **Dependencies and infra are scanned continuously.** `osv-scanner`
+   on every push for new CVEs in pinned deps; `trivy config` over IaC
+   before any deploy; nightly re-scan catches CVEs that drop *after*
+   we shipped.
+4. **The agent fixes security findings autonomously when possible.**
+   Same pattern as the MALT diagnosis-first rule (§"Observability is
+   a main concern"): the agent triages, patches, and verifies before
+   pinging the founder — humans get pulled in only for risk-acceptance
+   decisions or supply-chain incidents.
+
+The **mechanism** is project-specific — choose one of the three
+recipes in [`docs/SECURITY.md`](docs/SECURITY.md):
+
+- **AWS-hosted / serverless** — gitleaks + Semgrep + osv-scanner in
+  pre-push; trivy + ZAP baseline in CI; nightly active scan + new-CVE
+  watcher.
+- **Local app / desktop / CLI** — same SAST + SCA + secret-scan; signed
+  releases instead of DAST (no remote surface).
+- **Containerized service** — same SAST + SCA + secret-scan; `trivy
+  image` blocks vulnerable base images; ZAP against the service's
+  HTTP surface.
+
+The **capabilities** are non-negotiable. The mechanism row goes in
+`project_config_overview.md` §"Security stack" and the threat model
++ thresholds live in `project_config_security.md` — every project
+declares its choice.
+
 ## Code Quality
 
 - Run periodic code reviews using multiple perspectives (reuse, quality, efficiency, junior comprehension)

@@ -292,6 +292,50 @@ What you don't ship:
 The §7 handoff checklist §E pulls these boxes in for any push that adds
 a new user-facing capability.
 
+### §6.2 Security — secrets out, vulns fixed before deploy
+
+Quality of working software degrades to zero the moment something is
+exploited in production. See CLAUDE.md §"Security is a main concern"
+for the principle and `docs/SECURITY.md` for the recipes per stack.
+
+For every push:
+
+- [ ] **Secret scan clean** — `gitleaks protect --staged` passed in
+      pre-push. No `--no-verify` shortcut. If a secret was *ever*
+      committed, it's been rotated, not just unstaged.
+- [ ] **SAST clean** — Semgrep + lint security plugins ran clean
+      (or every suppression has a justification comment naming the
+      threat-model entry that makes it safe).
+- [ ] **SCA clean** — `osv-scanner` reports zero `HIGH`+ CVEs in
+      project lockfiles. New CVEs below `HIGH` tracked in
+      `docs/config/findings.md` with a planned upgrade date.
+- [ ] **IaC clean** (if the push touches CDK / Terraform / k8s
+      manifests) — `trivy config` reports zero `HIGH`+ findings.
+
+For every push that adds a **new public surface** (route, command,
+container with ingress):
+
+- [ ] **Threat-model entry exists** — `project_config_security.md`
+      §"Trust boundaries" / §"Auth surfaces" / §"Sensitive data
+      classes" covers the new surface.
+- [ ] **DAST baseline scheduled** — CI ZAP baseline against the
+      preview environment is wired and passing (Recipe A / C) OR a
+      written justification why no DAST applies (Recipe B).
+- [ ] **Findings register reviewed** — every `[SEC]` finding in
+      `docs/config/findings.md` is either fixed, deferred with a
+      date, or `Status: Accepted` with a sign-off.
+
+What you don't ship:
+- Hard-coded secrets, even "just for local dev".
+- `// eslint-disable-next-line` / `// nosemgrep` / `# nosec`
+  without a justification comment.
+- A new public route without a corresponding ZAP baseline run.
+- A dep upgrade that introduces a new `HIGH`+ CVE without an
+  immediate rollback or pin.
+
+The §7 handoff checklist §E pulls these boxes in alongside §6.1's
+observability boxes.
+
 ---
 
 ## §7 Handoff checklist (run BEFORE flipping the mic)

@@ -456,6 +456,76 @@ The **capabilities** are non-negotiable. The mechanism row goes in
 `project_config_overview.md` §"Observability stack" — every project
 declares its choice.
 
+## Cost is a main concern
+
+**Working software that quietly bankrupts the founder is broken software.**
+Any code path that calls a metered third-party API (LLM, search, OCR,
+storage, egress) burns real money on every invocation, and the failure
+mode is silent until the bill arrives. Cost is therefore a first-class
+concern, encoded in the design — not a number the founder watches
+manually.
+
+The pattern that bites: a previously-broken call path gets fixed (good!)
+and now processes an unbounded backlog of work that built up while it
+was broken. The fix is correct; the absence of a guardrail turns the
+correctness into a runaway charge. **Every billable path must be
+priced + capped + alertable BEFORE it is wired into a loop.**
+
+Four capabilities are non-negotiable for every struct2flow project with
+a billable code path:
+
+1. **Every billable code path declares a budget cap.** Per-call,
+   per-batch, per-tick, or per-day — the limit is in code and enforced
+   as a hard stop, not a soft warning. Cap reached → halt the loop, do
+   not just log. The cap value (in dollars or tokens) is declared in
+   `project_config_overview.md` §"Cost stack" alongside the model /
+   service it applies to.
+2. **Every billable code path logs its actual spend per invocation.**
+   Input tokens, output tokens, dollars-or-currency-units, model id —
+   all structured so the agent can answer "how much did we spend
+   yesterday / this tick / on this source?" without the founder
+   ferrying numbers from a vendor dashboard. Cf.
+   `feedback_use_malt_dont_ask_for_logs`.
+3. **Every billable code path alerts when spend exceeds the cap, or
+   when daily spend trends to exceed budget.** Same Slack lane as
+   observability alerts; same transition-edge contract — fire once on
+   the rising edge, not every tick the cap is still hit.
+4. **Backlog-replay paths require explicit opt-in.** "Process
+   everything that has piled up since the last successful run" is
+   never the default. The founder (or the operator running the CLI)
+   types a flag — `--catch-up`, `--first-run`, `--replay-since=…` —
+   that says "I have looked at the size of this backlog and I'm
+   willing to pay for it." Implicit replay is a defect.
+
+The **mechanism** is project-specific. Typical recipes:
+
+- **LLM-backed agent** — Anthropic/OpenAI token-cost SDK helper,
+  per-tick budget gate that halts further calls when cumulative
+  spend > cap, structured `{model, input_tokens, output_tokens, usd}`
+  log line per call, transition-edge Slack alert when daily cap is
+  hit. The freshness gate and dedup store are the upstream defences
+  that prevent the call from happening in the first place; the cap
+  is the last-line backstop.
+- **External API consumer** (Twilio, Stripe webhooks fan-out, etc.) —
+  same shape: declared cap, per-call cost logged, alert on transition,
+  explicit opt-in for backlog replay.
+- **Storage / egress** — per-tick byte budget, structured per-call
+  size log, alert on transition, explicit opt-in for large historical
+  syncs.
+
+The **capabilities** are non-negotiable. The mechanism row goes in
+`project_config_overview.md` §"Cost stack" — every project with a
+billable path declares its choice (model + cap + monitoring path +
+backlog-replay flag).
+
+A real incident shows the shape: the linkedin-watcher-agent took a
+single $10 hit when a fetcher bug fix (BUG-001) unblocked a 374-post
+backlog and the freshness gate didn't exist yet (BUG-003). BUG-003
+became the canonical capability-#4 instance (explicit opt-in needed
+for backlog replay); the freshness gate is enforced before any
+billable call. Future projects should design the cap + the explicit-
+opt-in flag together, not retrofit them after the first surprise bill.
+
 ## Security is a main concern
 
 **Quality of working software degrades to zero the moment something is

@@ -118,6 +118,139 @@ die() {
   exit 1
 }
 
+# --- Marker pattern ---
+# Blueprint-managed regions in a project file are bounded by lines
+# matching BLUEPRINT:BEGIN / BLUEPRINT:END. The marker text is just a
+# substring — the surrounding comment syntax (HTML, shell, JS) is up to
+# the file's language. Pull behavior:
+#
+#   - Both files have matched markers → marker-aware merge: project's
+#     outside-marker content is preserved byte-identical; only the
+#     inside-marker regions are replaced with blueprint's.
+#   - Neither file has markers → legacy whole-file copy.
+#   - Asymmetric (one has markers, the other doesn't) → fall back to
+#     whole-file copy with a `.bp-bak` backup of the project file and
+#     a loud warning. Project owner reconciles.
+#   - Marker structure mismatch (different region count, unbalanced
+#     BEGIN/END) → fall back to whole-file copy with `.bp-bak` and a
+#     warning.
+
+# marker_aware_merge BP_FILE PROJ_FILE OUT_FILE
+# Returns 0 on success, 1 on structural mismatch.
+marker_aware_merge() {
+  local bp_file="$1"
+  local proj_file="$2"
+  local out_file="$3"
+
+  local bp_begin proj_begin bp_end proj_end
+  bp_begin=$(grep -c 'BLUEPRINT:BEGIN' "$bp_file" 2>/dev/null || true)
+  bp_end=$(grep -c 'BLUEPRINT:END' "$bp_file" 2>/dev/null || true)
+  proj_begin=$(grep -c 'BLUEPRINT:BEGIN' "$proj_file" 2>/dev/null || true)
+  proj_end=$(grep -c 'BLUEPRINT:END' "$proj_file" 2>/dev/null || true)
+
+  [ -z "$bp_begin" ] && bp_begin=0
+  [ -z "$bp_end" ] && bp_end=0
+  [ -z "$proj_begin" ] && proj_begin=0
+  [ -z "$proj_end" ] && proj_end=0
+
+  if [ "$bp_begin" -ne "$bp_end" ] || [ "$proj_begin" -ne "$proj_end" ] || [ "$bp_begin" -ne "$proj_begin" ]; then
+    return 1
+  fi
+
+  awk -v bp_file="$bp_file" '
+    function read_bp_inside_regions(   line, region_idx, capture) {
+      region_idx = 0
+      capture = 0
+      while ((getline line < bp_file) > 0) {
+        if (line ~ /BLUEPRINT:BEGIN/) {
+          capture = 1
+          region_idx++
+          bp_inside[region_idx] = ""
+          continue
+        }
+        if (line ~ /BLUEPRINT:END/) {
+          capture = 0
+          continue
+        }
+        if (capture) {
+          bp_inside[region_idx] = bp_inside[region_idx] line "\n"
+        }
+      }
+      close(bp_file)
+      bp_n_regions = region_idx
+    }
+    BEGIN { read_bp_inside_regions() ; cur_region = 0 ; in_inside = 0 }
+    /BLUEPRINT:BEGIN/ {
+      print
+      cur_region++
+      printf "%s", bp_inside[cur_region]
+      in_inside = 1
+      next
+    }
+    /BLUEPRINT:END/ {
+      print
+      in_inside = 0
+      next
+    }
+    in_inside { next }
+    { print }
+  ' "$proj_file" > "$out_file"
+}
+
+# pull_file BP_FILE PROJ_FILE
+# Decides between marker-aware merge and whole-file copy. Backs up the
+# project file as PROJ_FILE.bp-bak when falling back due to a marker
+# mismatch (so the project owner can recover the local content).
+pull_file() {
+  local bp="$1"
+  local f="$2"
+
+  # New file in project → whole-file copy (no merging possible).
+  if [ ! -f "$f" ]; then
+    cp "$bp" "$f"
+    return 0
+  fi
+
+  local bp_has=0 proj_has=0
+  grep -q 'BLUEPRINT:BEGIN' "$bp" 2>/dev/null && bp_has=1
+  grep -q 'BLUEPRINT:BEGIN' "$f"  2>/dev/null && proj_has=1
+
+  if [ "$bp_has" -eq 1 ] && [ "$proj_has" -eq 1 ]; then
+    local tmp
+    tmp=$(mktemp)
+    if marker_aware_merge "$bp" "$f" "$tmp"; then
+      mv "$tmp" "$f"
+      echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}"
+      return 0
+    else
+      rm -f "$tmp"
+      echo "  ${C_YELLOW}    warn: marker structure mismatch — backing up + whole-file copy${C_RESET}"
+      cp "$f" "$f.bp-bak"
+      cp "$bp" "$f"
+      echo "  ${C_DIM}    backup at $f.bp-bak — reconcile manually${C_RESET}"
+      return 0
+    fi
+  fi
+
+  if [ "$bp_has" -eq 1 ] && [ "$proj_has" -eq 0 ]; then
+    echo "  ${C_YELLOW}    warn: blueprint uses markers, project doesn't — backing up + whole-file copy${C_RESET}"
+    cp "$f" "$f.bp-bak"
+    cp "$bp" "$f"
+    echo "  ${C_DIM}    backup at $f.bp-bak — add markers in the project to preserve content next pull${C_RESET}"
+    return 0
+  fi
+
+  if [ "$bp_has" -eq 0 ] && [ "$proj_has" -eq 1 ]; then
+    echo "  ${C_RED}    refuse: project has markers but blueprint doesn't — pull would strip them${C_RESET}"
+    echo "  ${C_DIM}    either the blueprint version is stale (run a2bp from another project),${C_RESET}"
+    echo "  ${C_DIM}    or remove markers locally if they're no longer wanted. Skipping this file.${C_RESET}"
+    return 1
+  fi
+
+  # Neither has markers — legacy whole-file copy.
+  cp "$bp" "$f"
+}
+
 read_blueprint_source() {
   if [ ! -f .blueprint-source ]; then
     die "no .blueprint-source in $(pwd) — not a struct2flow project (run from project root)"
@@ -272,9 +405,12 @@ cmd_pull() {
       esac
     fi
     mkdir -p "$(dirname "$f")"
-    cp "$bp" "$f"
-    echo "  ${C_GREEN}pulled${C_RESET} $f"
-    pulled=$((pulled+1))
+    if pull_file "$bp" "$f"; then
+      echo "  ${C_GREEN}pulled${C_RESET} $f"
+      pulled=$((pulled+1))
+    else
+      echo "  ${C_RED}skipped${C_RESET} $f (see warning above)"
+    fi
   done
 
   echo

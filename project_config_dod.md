@@ -70,17 +70,63 @@ marker — the blueprint sync preserves your additions.
   process if any of the thresholds above aren't met. The pre-push hook
   blocks on this.
 
-## Doc-sync list (DoD §5)
+## Doc-sync list (DoD §6.4)
 
-> The files that must move together for any user-facing change. The
-> blueprint names the rule; you name the file set. Add a row per file;
-> the agent uses this list to gate handoffs (DoD §D).
+> The files that must move together with code changes. The blueprint
+> names the rule; you name the file set. The agent uses these lists
+> to gate handoffs (DoD §7.D).
+>
+> Pick a recipe in [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)
+> (A / B / C) and the rows below are the starting set — extend per
+> your project's surfaces.
 
-| File | Audience | Why it must stay in sync |
-|---|---|---|
-| `docs/config/FEATURES.md` | Internal | Catalog of what exists |
-| `frontend/public/help.html` | Customer | In-app help page |
-| | | |
+### External (customer-facing)
+
+> Updated in the **same commit** as any change a user can see / click /
+> read. "Same commit" means the code commit, not just the same PR.
+
+| File / surface | Audience | Trigger | Sync rule |
+|---|---|---|---|
+| `README.md` | Visitor / future hire | Architecture / install / CLI surface change | Same commit |
+| `docs/RELEASE-NOTES.md` *(or `docs-site/content/release-notes/YYYY-MM-DD.md`)* | Customer | Every push shipping a user-noticed change | Append-only; never edit history |
+| `docs-site/content/features/*.md` *(Recipe B/C)* | Customer | New / removed / renamed feature | Same commit |
+| `docs-site/content/pricing.md` *(Recipe B/C)* | Customer | Plan / tier / price change | Same commit as billing code |
+| `frontend/public/help.html` *(Recipe A)* | Customer | New / changed user-facing feature | Same commit |
+| Help portal article index *(Recipe C)* | Customer / support | New article published or retired | Index entry same commit; article same week |
+| `docs-site/content/legal/privacy-vYYYY-MM-DD.md` *(Recipe C)* | Customer / regulator | New data class, processor, region | Same commit + `legal-reviewed` PR label |
+| `docs-site/content/legal/terms-vYYYY-MM-DD.md` *(Recipe C)* | Customer / regulator | Pricing / liability / dispute terms | Same commit + `legal-reviewed` PR label |
+| Public status page *(Recipe C)* | Customer | Outage / planned maintenance / postmortem | Real-time (tooling) for incidents; same-day manual for postmortem |
+| Public roadmap *(Recipe C — Productboard / Canny)* | Customer / investor | Lifecycle move (`backlog/` → `doing/` → `waiting-acceptance/`) | Same week |
+| `docs-site/content/api/*.md` + OpenAPI spec *(Recipe B/C)* | Customer / integrator | API surface change | Same commit; spec generated from code |
+| | | | |
+
+### Internal (team-facing)
+
+> Updated in the **same commit** as the code-state change they describe.
+> Not user-noticeable, but stale internal docs make every future
+> decision worse.
+
+| File / surface | Audience | Trigger | Sync rule |
+|---|---|---|---|
+| `docs/config/FEATURES.md` | Team / agent | New / removed / renamed feature | Same commit as the code |
+| `docs/config/ACCEPTANCE_TESTS.md` | Team / QA | New acceptance test catalogued / retired | Same commit as the test |
+| `docs/config/findings.md` | Team / Codex review | Finding raised, fixed, or accepted | `Status: Fixed` block same commit as the fix |
+| `docs/doing/BUGS.md` → `waiting-acceptance/` → `done/` | Team / agent | Bug numbered, fixed, founder-accepted | Lifecycle move in same commit as the action (DoD §1) |
+| `docs/doing/PLAN-*.md` | Team / Codex | Plan-driven work in flight | Lifecycle move at each transition |
+| `project_config_security.md` (threat model) | Team / agent | New trust boundary / auth surface / data class | Same commit as the route / data path |
+| `project_config_infra.md` (rollback) | Team / on-call | New prod resource | Same commit as the IaC change |
+| `docs/architecture/ADR-*.md` *(Recipe C)* | Team / new hire | Architectural decision taken or reversed | Numbered, dated, same commit as embodying code |
+| `docs/runbooks/*.md` *(Recipe C)* | On-call / agent | New alert wired | Same PR as the alert; link in the alert payload |
+| `docs/done/INCIDENT-YYYY-MM-DD.md` | Team / regulator | Production incident | Within 48h of resolution (DoD §6.2) |
+| `docs/doing/HANDOVER.md` | Future-self / next session | End of any meaningful unit of work | Overwrite in place (DoD §10) |
+| | | | |
+
+**Promotion / removal** — see [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) §"Promotion criteria for the sync list". Changes to the lists above are committed as part of a doc-sync-list change PR, not silently.
+
+**Pre-push drift hint** — declare project-specific grep patterns in
+§"User-surface rules" below; the hook in `.githooks/pre-push-project`
+runs them on every push. Best-effort, not exhaustive — the
+§7.D handoff checklist is the human gate.
 
 ## User-surface rules
 

@@ -20,11 +20,11 @@ upstream so every other project inherits it.
   production travel back upstream via `blueprint a2bp`; every project —
   current *and* future — gets every improvement within the same week
   one project learned it.
-- **Enforced by tooling, not memos.** Seven concerns, all gated by code:
+- **Enforced by tooling, not memos.** Eight concerns, all gated by code:
   pre-push hooks, scripts, CI. Rules live in code, not in docs nobody
   reads.
 
-## The seven concerns it encodes
+## The eight concerns it encodes
 
 | Concern | Where | Pre-push gate |
 |---|---|---|
@@ -35,10 +35,11 @@ upstream so every other project inherits it.
 | **Security** — secret-scan, SAST, SCA, IaC scan, DAST | [docs/SECURITY.md](docs/SECURITY.md) | gitleaks · semgrep · osv-scanner |
 | **Infrastructure as Code** — defined, reviewable, reproducible | [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | cdk synth / terraform / helm lint |
 | **Cost** — billable paths capped, logged, alerted; backlog-replay opt-in | [CLAUDE.md §"Cost is a main concern"](CLAUDE.md) | — |
+| **Documentation** — internal + external, same-commit rule | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) + [docs/DoD.md §6.4](docs/DoD.md) | per-project grep hints in `pre-push-project` |
 
 ## Read the deck
 
-The full pitch — 28 slides — covering all seven concerns plus the two
+The full pitch — 30 slides — covering all eight concerns plus the two
 meta-layers (agent + blueprint):
 
 - **Source:** [`docs/way-of-working.md`](docs/way-of-working.md) (Marp markdown)
@@ -115,7 +116,8 @@ blueprint/
     ├── OBSERVABILITY.md            ← capture / retrieve / alert recipes per runtime
     ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST recipes per runtime
     ├── INFRASTRUCTURE.md           ← IaC recipes per stack (CDK / Terraform / Helm-ArgoCD)
-    ├── way-of-working.md           ← Marp deck source: how struct2flow ships software (architecture / lifecycle / quality / MALT / security / IaC)
+    ├── DOCUMENTATION.md            ← doc-sync recipes (internal + external; per-project shape)
+    ├── way-of-working.md           ← Marp deck source: how struct2flow ships software (8 concerns + 2 meta-layers)
     ├── assets/brand/               ← struct2flow CI: logo SVGs (blueprint-only; not synced to projects)
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── backlog/

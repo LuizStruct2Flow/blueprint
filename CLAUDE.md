@@ -616,6 +616,75 @@ The **capabilities** are non-negotiable. The mechanism row goes in
 ownership, drift cadence, cost ceilings, and rollback procedure go in
 `project_config_infra.md` — every project declares its choices.
 
+## Documentation is a main concern
+
+**Working software with stale documentation is software no one trusts.**
+Customers stop believing the help page; investors stop believing the
+deck; new hires can't onboard; agents make wrong assumptions and ship
+regressions. Documentation drift is the *silent* failure mode of every
+otherwise-healthy project — there's no exception thrown, no alert
+firing. Just compounding embarrassment until someone notices.
+
+Two distinct audiences, both non-negotiable:
+
+- **External (customer-facing)** — README, help page, release notes,
+  pricing / landing copy, public status page, privacy policy, terms,
+  API docs, the way-of-working deck. A user can see / click / read
+  the surface change; if the doc disagrees with the running product,
+  the doc is wrong.
+- **Internal (team-facing)** — feature catalog, acceptance test list,
+  findings register, threat model, architecture decision records,
+  plan docs. The code's state changed; the artefact that *describes*
+  the state must move with it.
+
+Four capabilities are non-negotiable for every struct2flow project:
+
+1. **Every user-facing change touches every external doc in the
+   project's sync list, in the same commit.** New feature → feature
+   table + release notes + help page in one PR. Removed feature →
+   delete from feature table, "Sunset" entry in release notes,
+   delete from help page. Same-commit rule is what stops "I'll do
+   docs later" from rotting.
+2. **Every code-state-changing internal artefact moves with the
+   state it describes.** New bug → row in `BUGS.md` *and* the fix
+   commit references it. Codex finding fixed → finding block gets
+   `Status: Fixed` (not just the backlog row). Threat-model entry
+   added → `project_config_security.md` updated *before* the route
+   ships.
+3. **Every blueprint-level concern change updates the deck + the
+   per-concern recipe doc in the same commit.** `docs/way-of-working.md`
+   is the canonical pitch surface (§"docs/way-of-working.md is the
+   canonical pitch surface" below); drift between deck and rule is
+   treated the same as drift between code and prod — and it has
+   self-violated twice this week alone. The same applies to the
+   per-concern recipe docs (`OBSERVABILITY.md`, `SECURITY.md`,
+   `INFRASTRUCTURE.md`, `DOCUMENTATION.md`).
+4. **Drift is detected, not assumed away.** Promotion criteria for
+   adding a doc to the sync list, a pre-push grep-based drift hint
+   for known mismatch patterns (e.g. new route under
+   `frontend/pages/` with no entry in `FEATURES.md`), and a
+   handoff-time checklist box that refuses the mic flip if any
+   sync-list file is stale. Same recipe as security drift, just
+   for prose.
+
+The **mechanism** is project-specific — choose one of the three
+recipes in [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md):
+
+- **Single-repo README-only** — small projects, internal tools, CLIs.
+  Sync list is short: README, RELEASE-NOTES, FEATURES catalog.
+- **Static-site marketing + docs** — most struct2flow projects with a
+  customer-facing app. Docs in `docs-site/` (Mintlify / Astro Starlight
+  / Nextra), customer help + release notes generated from markdown,
+  per-page-type sync rules.
+- **Customer help portal + public status + privacy/TOS** — mature
+  SaaS. Separate `help.html` / `status.html` / `privacy.html` /
+  `terms.html`, each with its own sync trigger and editorial owner.
+
+The **capabilities** are non-negotiable. The project's sync list goes
+in `project_config_dod.md` §"Doc-sync list" with two tables (Internal /
+External), and the per-stack mechanism row goes in
+`project_config_overview.md` §"Documentation stack".
+
 ## Code Quality
 
 - Run periodic code reviews using multiple perspectives (reuse, quality, efficiency, junior comprehension)
@@ -759,8 +828,10 @@ deck currently mirrors:
 4. Observability / MALT (`docs/OBSERVABILITY.md` + CLAUDE.md §"Observability is a main concern")
 5. Security (`docs/SECURITY.md` + CLAUDE.md §"Security is a main concern")
 6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
-7. Agent layer (radio-over — CLAUDE.md §"Agent Coordination Signal")
-8. Blueprint sync (this section + README.md §"The sync model" + `scripts/blueprint`)
+7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
+8. Documentation (`docs/DOCUMENTATION.md` + CLAUDE.md §"Documentation is a main concern" + DoD §6.4)
+9. Agent layer (radio-over — CLAUDE.md §"Agent Coordination Signal")
+10. Blueprint sync (this section + README.md §"The sync model" + `scripts/blueprint`)
 
 Tightening a rule in DoD §3? Touch the matching deck slide. Adding a
 new principle to CLAUDE.md? New slide(s) under the right section

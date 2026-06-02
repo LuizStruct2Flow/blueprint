@@ -201,7 +201,7 @@ Two things make this different from "another opinionated framework":
 - **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
 - **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
 
-…on top of **seven engineering concerns**, all encoded in tooling:
+…on top of **eight engineering concerns**, all encoded in tooling:
 
 1. **Architecture** — DDD + Clean + Hexagonal
 2. **Lifecycle** — four states, founder-gated
@@ -210,6 +210,7 @@ Two things make this different from "another opinionated framework":
 5. **Security** — secret-scan, SAST, SCA, IaC scan, DAST
 6. **Infrastructure as Code** — defined, reviewable, reproducible
 7. **Cost** — billable paths capped, logged, alerted, explicit backlog-opt-in
+8. **Documentation** — external + internal, in sync with reality, same-commit rule
 
 Everything below is **enforced by tooling**, not memos.
 The rules live in code (hooks, scripts, gates) — not in slides.
@@ -227,7 +228,7 @@ The difference between good and bad systems
 is the **speed-to-fix differential**.
 
 Every section that follows is a way of compressing that gap.
-The two **meta-layers** below are what's new; the seven concerns underneath are the engineering substrate they sit on.
+The two **meta-layers** below are what's new; the eight concerns underneath are the engineering substrate they sit on.
 
 ---
 
@@ -272,7 +273,7 @@ The blueprint contains **only what has been proven in production** — that's wh
 # The blueprint — one repo, every project
 
 Every struct2flow project is **forked from a single blueprint**:
-all seven concerns below, plus the agent infra, live in one git repo.
+all eight concerns below, plus the agent infra, live in one git repo.
 
 - **Bootstrap** — `new-project.sh acme` copies the blueprint into a new project
   directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.
@@ -582,6 +583,43 @@ Mechanism is project-specific; the **capabilities** are not. Declared in `projec
 
 ---
 
+# 8 · Documentation — four non-negotiable capabilities
+
+> *Working software with stale docs is software no one trusts.*
+
+The **silent** failure mode: no exception, no alert, just compounding embarrassment until a customer notices.
+
+1. **Same-commit rule for external docs.**
+   User-facing change → README, release notes, feature page, help article, pricing — all touched in the **same commit**, not "same PR".
+
+2. **Internal artefacts move with the state they describe.**
+   `FEATURES.md`, `findings.md`, threat-model entries, ADRs, runbooks — updated *as* the code changes, not after.
+
+3. **Blueprint-level changes update the deck + recipe doc in the same commit.**
+   `docs/way-of-working.md` is the pitch surface. It has self-violated **three times this week** (Cost concern, "six" → "seven", Documentation itself).
+
+4. **Drift is detected, not assumed away.**
+   Promotion criteria for the sync list; pre-push grep-based hints for known drift patterns; handoff-time checklist box that refuses the mic flip if any sync-list file is stale.
+
+---
+
+# 8 · Documentation — recipes per project shape
+
+[`docs/DOCUMENTATION.md`](DOCUMENTATION.md) — same recipe-per-stack model as `OBSERVABILITY.md` / `SECURITY.md`:
+
+- **Recipe A — Single-repo README-only**
+  Small projects, CLIs, internal tools. Sync list: README + release-notes + FEATURES + findings. Append-only release notes; same-commit rule on every push.
+
+- **Recipe B — Static-site marketing + docs**
+  Customer-facing app + `docs-site/` (Mintlify / Astro Starlight / Nextra). Per-page-type sync rules; OpenAPI generated from code; PR preview deploys.
+
+- **Recipe C — Customer help portal + status + privacy/TOS**
+  Mature SaaS. Help portal (Intercom / Zendesk) with `help-index.md` in repo; public status page; **versioned** legal docs; ADRs; runbooks co-located with alerts.
+
+Two-table sync list (External / Internal) in `project_config_dod.md` §"Doc-sync list". DoD §6.4 is the per-push gate.
+
+---
+
 # What this gets you
 
 | If you are… | What you get |
@@ -620,6 +658,7 @@ the same week one project learned it.
 - `docs/OBSERVABILITY.md` — MALT recipes per runtime
 - `docs/SECURITY.md` — security recipes per runtime
 - `docs/INFRASTRUCTURE.md` — IaC recipes per runtime
+- `docs/DOCUMENTATION.md` — doc-sync recipes (internal + external)
 - `scripts/blueprint` — sync CLI: `drift` / `pull` / `a2bp` / `files`
 - `project_config_*.md` — per-project overrides
 

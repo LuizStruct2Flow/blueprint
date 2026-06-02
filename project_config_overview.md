@@ -87,6 +87,32 @@ first defence. A previously-broken path being repaired must NOT
 default to processing the backlog — that requires an explicit operator
 flag (capability #4).
 
+## Documentation stack
+
+Implements the blueprint's documentation rule (CLAUDE.md §"Documentation
+is a main concern"). The four capabilities are non-negotiable; the
+mechanism below is this project's choice. Pick a recipe from
+[`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) and fill in the rows.
+
+- **Recipe:** `{{A — single-repo README-only | B — static-site marketing + docs | C — customer help portal + status + privacy/TOS}}`
+
+| Surface | Mechanism in this project |
+|---|---|
+| External release notes | {{e.g. append-only `docs/RELEASE-NOTES.md` / `docs-site/content/release-notes/YYYY-MM-DD.md` per push / in-app changelog UI fed by build}} |
+| Customer help | {{e.g. `frontend/public/help.html` / `docs-site/content/features/*.md` / Intercom portal with `help-index.md` in repo}} |
+| Public status / changelog | {{e.g. N/A / `docs-site/content/changelog.md` generated / Statuspage at status.{{PROJECT_NAME}}.com}} |
+| Legal (privacy / TOS) | {{e.g. N/A (internal tool) / `docs-site/content/legal/privacy-vYYYY-MM-DD.md` versioned / hand-managed at legal.{{PROJECT_NAME}}.com}} |
+| API reference | {{e.g. N/A / generated OpenAPI + markdown summaries / Stripe-style hand-curated reference}} |
+| Pricing | {{e.g. N/A / `docs-site/content/pricing.md` / split between marketing page + billing config}} |
+
+**Doc-sync list lives in [`project_config_dod.md`](project_config_dod.md)
+§"Doc-sync list"** — two tables (External / Internal). The handoff
+checklist (DoD §7.D) walks both before any `OVER_TO_USER` flip.
+
+**Pre-push drift hint** — declare project-specific grep patterns in
+`project_config_dod.md` §"User-surface rules"; the hook in
+`.githooks/pre-push-project` runs them on every push.
+
 ## Domain glossary
 
 > Project-specific terminology the agents need to use correctly. Avoid

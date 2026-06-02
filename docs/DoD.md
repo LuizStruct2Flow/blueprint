@@ -177,6 +177,11 @@ pushing, watch the project's CI pipeline; if red, fix before moving on.
 
 ## §5 Documentation in sync
 
+> **Canonical treatment lives in §6.4 + `docs/DOCUMENTATION.md`.** This
+> section is the short-form rule that originated the discipline; §6.4
+> is the per-push gate with two tables (External / Internal); the
+> recipes doc names mechanisms per project shape.
+
 For any **user-facing** change (new feature, changed behavior, new error
 the user can see), the project's **doc-sync list** moves in lockstep with
 the code commit.
@@ -386,6 +391,69 @@ What you don't ship:
 
 The §7 handoff checklist §E pulls these boxes in alongside §6.1's
 observability boxes and §6.2's security boxes.
+
+### §6.4 Documentation — internal + external in sync
+
+Working software with stale documentation is software no one trusts.
+See CLAUDE.md §"Documentation is a main concern" for the principle and
+`docs/DOCUMENTATION.md` for the recipes.
+
+The project's sync list lives in `project_config_dod.md` §"Doc-sync
+list" as **two tables**: External (customer-facing) and Internal
+(team-facing). Both tables are non-optional.
+
+For every push that includes a **user-facing change** (a customer can
+see / click / read it):
+
+- [ ] **External sync clean** — every file in the External table
+      touched in the same commit as the code. README, release notes,
+      feature page, help article (or index entry), pricing,
+      changelog, API docs — whichever rows apply. Same commit, not
+      "same PR".
+- [ ] **Privacy / TOS check** — if the change adds a new data class
+      collected, a new processor, a new region, or material liability
+      / pricing terms, the privacy policy / TOS gets the matching
+      clause **in the same commit**, with a `legal-reviewed` label
+      requested.
+- [ ] **Public roadmap moves** — if the project uses one (Recipe C),
+      the roadmap status (`backlog/` → `doing/` → `waiting-acceptance/`)
+      is reflected publicly in the same week.
+
+For every push that **changes code state** (regardless of user
+visibility):
+
+- [ ] **Internal sync clean** — every file in the Internal table
+      affected by the change is updated in the same commit.
+      `FEATURES.md`, `ACCEPTANCE_TESTS.md`, `findings.md` (with
+      `Status: Fixed`), `PLAN-*.md` lifecycle move, threat-model
+      entry, ADR (if architectural), runbook (if new alert).
+- [ ] **`HANDOVER.md` current** — per §10. A fresh prompt reading
+      only `HANDOVER.md` + `AGENT_SIGNAL.md` + `CLAUDE.md` + `MEMORY.md`
+      can resume.
+
+For every push that **changes a blueprint-level concern** (this repo:
+blueprint only):
+
+- [ ] **Deck updated in the same commit** — `docs/way-of-working.md`
+      reflects the new concern count, principle, or recipe. PDF
+      regenerated (`scripts/build-deck.sh`).
+- [ ] **Per-concern recipe doc updated** — if the change touched
+      Observability, Security, IaC, Documentation, or Cost, the
+      corresponding `docs/<CONCERN>.md` matches.
+- [ ] **README concern table matches** — if the change added,
+      removed, or renamed a concern, the README table reflects the
+      new shape.
+
+What you don't ship:
+- A user-facing change without the matching external sync-list entry.
+- A doc that quotes a flag, route, or feature that no longer exists.
+- A new data class collected without a privacy clause.
+- A blueprint-level concern change with the deck left at the old
+  count (it self-violated twice this week — this gate is the third-
+  time backstop).
+
+The §7 handoff checklist §D pulls these boxes in for any push that
+modifies tracked code or docs.
 
 ---
 

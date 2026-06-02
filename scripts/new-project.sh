@@ -78,6 +78,7 @@ TARGETS=(
   "docs/OBSERVABILITY.md"
   "docs/SECURITY.md"
   "docs/INFRASTRUCTURE.md"
+  "docs/DOCUMENTATION.md"
   "docs/PUBLISHING.md"
   "docs/doing/HANDOVER.md"
   "scripts/codex-signal-watch.sh"

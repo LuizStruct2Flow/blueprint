@@ -227,7 +227,7 @@ The difference between good and bad systems
 is the **speed-to-fix differential**.
 
 Every section that follows is a way of compressing that gap.
-The two **meta-layers** below are what's new; the six concerns underneath are the engineering substrate they sit on.
+The two **meta-layers** below are what's new; the seven concerns underneath are the engineering substrate they sit on.
 
 ---
 
@@ -272,7 +272,7 @@ The blueprint contains **only what has been proven in production** — that's wh
 # The blueprint — one repo, every project
 
 Every struct2flow project is **forked from a single blueprint**:
-all six concerns below, plus the agent infra, live in one git repo.
+all seven concerns below, plus the agent infra, live in one git repo.
 
 - **Bootstrap** — `new-project.sh acme` copies the blueprint into a new project
   directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.

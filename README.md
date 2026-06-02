@@ -20,7 +20,7 @@ upstream so every other project inherits it.
   production travel back upstream via `blueprint a2bp`; every project —
   current *and* future — gets every improvement within the same week
   one project learned it.
-- **Enforced by tooling, not memos.** Six concerns, all gated by code:
+- **Enforced by tooling, not memos.** Seven concerns, all gated by code:
   pre-push hooks, scripts, CI. Rules live in code, not in docs nobody
   reads.
 
@@ -38,7 +38,7 @@ upstream so every other project inherits it.
 
 ## Read the deck
 
-The full pitch — 26 slides — covering all six concerns plus the two
+The full pitch — 28 slides — covering all seven concerns plus the two
 meta-layers (agent + blueprint):
 
 - **Source:** [`docs/way-of-working.md`](docs/way-of-working.md) (Marp markdown)

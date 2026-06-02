@@ -100,6 +100,8 @@
       "Bash(curl -s -X GET *)",
       "Bash(curl -sS -X GET *)",
       "Bash(curl -s --request GET *)",
+      "Bash(curl -sS -u *)",
+      "Bash(curl -s -u *)",
       "Bash(git *)",
       "Bash(git status*)",
       "Bash(git diff*)",

@@ -201,7 +201,7 @@ Two things make this different from "another opinionated framework":
 - **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
 - **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
 
-…on top of **six engineering concerns**, all encoded in tooling:
+…on top of **seven engineering concerns**, all encoded in tooling:
 
 1. **Architecture** — DDD + Clean + Hexagonal
 2. **Lifecycle** — four states, founder-gated
@@ -209,6 +209,7 @@ Two things make this different from "another opinionated framework":
 4. **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing
 5. **Security** — secret-scan, SAST, SCA, IaC scan, DAST
 6. **Infrastructure as Code** — defined, reviewable, reproducible
+7. **Cost** — billable paths capped, logged, alerted, explicit backlog-opt-in
 
 Everything below is **enforced by tooling**, not memos.
 The rules live in code (hooks, scripts, gates) — not in slides.
@@ -544,6 +545,40 @@ Drift between code and prod is the silent killer of reproducibility.
   `OutOfSync` is the native drift detector.
 
 Environments / ownership / cost ceilings / rollback: `project_config_infra.md`.
+
+---
+
+# 7 · Cost — four non-negotiable capabilities
+
+> *Working software that quietly bankrupts the founder is broken software.*
+
+Any billable code path (LLM, search, OCR, storage, egress) burns real money. The failure mode is **silent** until the bill arrives.
+
+1. **Every billable path declares a budget cap.**
+   Per-call / per-tick / per-day, in code. Cap reached → **halt the loop**, not "log and continue".
+
+2. **Every invocation logs structured spend.**
+   `{model, input_tokens, output_tokens, usd}` — so the agent can answer "how much did we spend today?" without a vendor dashboard.
+
+3. **Alerts fire on the rising edge.**
+   Same Slack lane as MALT. Once when cap is hit — not every tick after.
+
+4. **Backlog-replay needs explicit opt-in.**
+   `--catch-up` / `--first-run` / `--replay-since=…` — never implicit. "Process everything piled up" is opt-in by the operator who priced it.
+
+---
+
+# 7 · Cost — recipes per stack
+
+Mechanism is project-specific; the **capabilities** are not. Declared in `project_config_overview.md` §"Cost stack".
+
+- **LLM-backed agent** — token-cost SDK helper; per-tick budget gate halts further calls when cumulative > cap; structured `{model, tokens, usd}` log; transition-edge Slack alert when daily cap hit. Freshness gate + dedup store are the **upstream** defences; the cap is the last-line backstop.
+
+- **External API consumer** (Twilio, Stripe webhook fan-out) — same shape: declared cap, per-call cost logged, alert on transition, explicit opt-in for backlog replay.
+
+- **Storage / egress** — per-tick byte budget; structured per-call size log; alert on transition; explicit opt-in for large historical syncs.
+
+> **Real incident:** linkedin-watcher-agent took a single **$10 hit** when a fetcher bug fix (`BUG-001`) unblocked a 374-post backlog before the freshness gate existed (`BUG-003`). The fix was correct; the missing guardrail made it expensive. Now: design the cap + the explicit-opt-in flag *together*, not retrofit after the first surprise bill.
 
 ---
 

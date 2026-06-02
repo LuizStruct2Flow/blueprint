@@ -24,7 +24,7 @@ upstream so every other project inherits it.
   pre-push hooks, scripts, CI. Rules live in code, not in docs nobody
   reads.
 
-## The six concerns it encodes
+## The seven concerns it encodes
 
 | Concern | Where | Pre-push gate |
 |---|---|---|
@@ -34,6 +34,7 @@ upstream so every other project inherits it.
 | **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | — |
 | **Security** — secret-scan, SAST, SCA, IaC scan, DAST | [docs/SECURITY.md](docs/SECURITY.md) | gitleaks · semgrep · osv-scanner |
 | **Infrastructure as Code** — defined, reviewable, reproducible | [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | cdk synth / terraform / helm lint |
+| **Cost** — billable paths capped, logged, alerted; backlog-replay opt-in | [CLAUDE.md §"Cost is a main concern"](CLAUDE.md) | — |
 
 ## Read the deck
 

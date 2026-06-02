@@ -68,6 +68,25 @@ the rows.
 before asking the founder to paste logs (per memory
 `feedback_use_malt_dont_ask_for_logs`).
 
+## Cost stack
+
+Implements the blueprint's cost rule (CLAUDE.md §"Cost is a main
+concern"). The four capabilities are non-negotiable; the mechanism
+below is this project's choice. Fill one row per billable code path
+(LLM, paid external API, metered storage / egress).
+
+| Billable path | Service / model | Budget cap | Per-call spend log | Cap-breach alert | Backlog-replay flag |
+|---|---|---|---|---|---|
+| {{e.g. summarization}} | {{anthropic claude-opus-4-7}} | {{$5 / tick, $50 / day}} | {{structured `{model, input_tokens, output_tokens, usd}` per call}} | {{transition-edge alert to `#alerts-cost` Slack on rising-edge of `daily_usd > cap`}} | {{`--catch-up` flag required for replay; default skips}} |
+| {{e.g. embedding store sync}} | {{pinecone / openai-embeddings}} | {{$2 / day}} | {{call size + dollar log}} | {{same Slack lane as observability}} | {{`--replay-since=YYYY-MM-DD` required}} |
+| | | | | | |
+
+**Reminder:** every row should have a freshness gate or dedup store
+*upstream* of the call so the cap is the last-line backstop, not the
+first defence. A previously-broken path being repaired must NOT
+default to processing the backlog — that requires an explicit operator
+flag (capability #4).
+
 ## Domain glossary
 
 > Project-specific terminology the agents need to use correctly. Avoid

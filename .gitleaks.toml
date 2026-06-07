@@ -1,0 +1,33 @@
+# gitleaks config — generic working-tree false-positive allowlist.
+#
+# Shipped in the blueprint baseline so every project bootstrapped from it
+# inherits the categories that triage as false-positives on the project's
+# OWN ground (gitignored `.env`, template-variable shell sites, etc.).
+#
+# Project-specific allowlist entries go in the project's own .gitleaks.toml
+# (this file is pulled into the project by `blueprint pull` and then
+# extended).
+#
+# This config only suppresses categories that hit on `gitleaks detect
+# --no-git` audits over the working tree. The `gitleaks protect --staged`
+# gate in .githooks/pre-push is NOT affected — staged-content scanning
+# continues with the full default rule set, catching any real leak that
+# would slip into a commit.
+
+[allowlist]
+description = "Generic working-tree false positives (blueprint baseline)"
+paths = [
+  # .env IS the canonical location for operator secrets and is gitignored
+  # in every struct2flow project. The pre-push staged scan catches any
+  # attempt to `git add .env`. --no-git audits would always report .env
+  # as "leaky" by design — that's the same as saying "the secret vault
+  # contains secrets".
+  '''(^|/)\.env$''',
+  '''(^|/)\.env\..*$''',
+
+  # `${TOKEN}` / `${SECRET}` template variables in shell scripts are
+  # patterns, not hardcoded values — the real value lives in .env at
+  # runtime. This catches the curl auth pattern in scripts/sonar-api.sh
+  # and similar.
+  '''scripts/sonar-api\.sh$''',
+]

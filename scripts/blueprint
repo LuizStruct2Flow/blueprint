@@ -82,6 +82,10 @@ MANAGED_FILES=(
   ".githooks/pre-push"
   ".githooks/pre-push-project.example"
 
+  # gitleaks generic false-positive allowlist (working-tree scans only;
+  # staged-scan gate runs the full default rule set)
+  ".gitleaks.toml"
+
   # .claude/ — generic permission allowlist (host-specific bits live in
   # .claude/settings.local.json which is gitignored)
   ".claude/settings.json"

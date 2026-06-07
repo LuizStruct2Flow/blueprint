@@ -66,8 +66,10 @@ fi
 if command -v osv-scanner >/dev/null 2>&1; then
   echo "  → SCA (osv-scanner over lockfiles)..."
   # Scan every lockfile in the repo; the tool no-ops on workspaces that lack one.
-  osv-scanner --recursive --skip-git --fail-on-vuln . >/dev/null 2>&1 || {
-    echo "❌ osv-scanner found a HIGH+ CVE in a dependency."
+  # v2.x uses a `scan` subcommand and exits non-zero on findings by default
+  # (--fail-on-vuln removed; --skip-git removed).
+  osv-scanner scan --recursive . >/dev/null 2>&1 || {
+    echo "❌ osv-scanner found a CVE in a dependency."
     echo "   Upgrade or pin to a known-good version. Track lower-severity CVEs"
     echo "   in docs/config/findings.md with a planned upgrade date."
     exit 1

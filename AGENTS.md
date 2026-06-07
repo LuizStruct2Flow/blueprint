@@ -22,10 +22,13 @@ substantive work:
 - `docs/doing/*.md` — active bugs, backlog items, and plans.
 - `docs/waiting-acceptance/*.md` — pushed work awaiting founder acceptance.
 
-The **first** agent to wake also starts the live activity feed —
+The Claude Code prompt the founder talks to **directly** is the **Orchestrator**
+(default persona **Sylvia**, see [AGENT_ROSTER.md](AGENT_ROSTER.md)). On wake it
+**adopts that persona** (its `Holder` value) and **starts the live activity feed** —
 `bash scripts/agent-activity.sh` — which cleans the log and opens a tail terminal
-(see [Watching it live](#watching-it-live)). It is idempotent, so later agents
-that run it simply no-op.
+(see [Watching it live](#watching-it-live)). The feed is idempotent, so later /
+spawned agents that run it simply no-op (and they adopt their own assigned persona,
+not the Orchestrator's). See `CLAUDE.md` §"On wake" for the exact first-wake steps.
 
 ## The mic (radio-over)
 

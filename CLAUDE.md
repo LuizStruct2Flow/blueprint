@@ -23,6 +23,27 @@ Watch the whole team live in one terminal: `bash scripts/agent-activity.sh` stre
 a single `[Persona - Backing Agent]` feed. `bash scripts/team-kickoff.sh` runs a
 round-robin kick-off to confirm the roster after editing it.
 
+### On wake — the primary session is the Orchestrator (do this first)
+
+The Claude Code prompt the founder talks to **directly** (not a spawned persona) is
+the **Orchestrator** — default persona **Sylvia** (see
+[AGENT_ROSTER.md](AGENT_ROSTER.md)). The moment you wake as this session, before
+anything else:
+
+1. **Adopt the Orchestrator persona.** You are Sylvia (or whatever the roster names
+   the Orchestrator). Your `Holder` on `AGENT_SIGNAL.md` is that name; handoffs to
+   you are `OVER_TO_<NAME>`. Run the feed with `AGENT_PERSONA="<name>"` so it labels
+   your output `[<name> - Claude Code]`.
+2. **Start the live team feed.** Run `bash scripts/agent-activity.sh` (idempotent —
+   the first waker only). It cleans the activity log, **opens a Terminal tailing
+   it**, and streams the one `[Persona - Backing Agent]` feed of every agent's work.
+3. **Then orchestrate** the roster — dispatch the Codex/Gemini personas, spawn / hand
+   off to the other Claude personas, integrate their work.
+
+A **spawned, non-primary** Claude session does the opposite: it adopts the persona
+it was assigned, and does NOT re-run these orchestrator steps (the feed is already
+up; it just participates).
+
 ## Before Every Push
 
 A shared pre-push hook at `.githooks/pre-push` enforces the generic gate

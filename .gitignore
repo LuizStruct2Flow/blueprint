@@ -83,3 +83,6 @@ scripts/new-project.sh
 
 # Project-specific ignores: add below in your project's own .gitignore extension.
 # Do NOT edit them between the blueprint markers — they'd come back on next sync.
+
+# Agent activity feed logs (scripts/agent-activity.sh)
+logs/

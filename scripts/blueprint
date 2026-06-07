@@ -50,6 +50,7 @@ MANAGED_FILES=(
   # Top-level agent protocol
   "CLAUDE.md"
   "AGENTS.md"
+  "AGENT_ROSTER.md"
   "STACK_DEFAULTS.md"
   "Brewfile"
 
@@ -65,9 +66,16 @@ MANAGED_FILES=(
   # scripts/ — the agent infra
   "scripts/codex-signal-watch.sh"
   "scripts/start-codex-signal-watch.sh"
+  "scripts/start-gemini-signal-watch.sh"
+  "scripts/start-copilot-signal-watch.sh"
+  "scripts/start-all-watchers.sh"
+  "scripts/agent-activity.sh"
+  "scripts/team-kickoff.sh"
   "scripts/new-project.sh"
   "scripts/blueprint"
   "scripts/build-deck.sh"
+  "scripts/sonar.sh"
+  "scripts/sonar-api.sh"
 
   # .githooks/ — generic gate
   ".githooks/pre-push"
@@ -98,6 +106,7 @@ TEMPLATE_FILES=(
   "project_config_dod.md"
   "project_config_security.md"
   "project_config_infra.md"
+  "sonar-project.properties"
 )
 
 # --- ANSI ---

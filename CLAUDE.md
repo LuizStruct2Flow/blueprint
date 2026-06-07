@@ -4,160 +4,24 @@ This file is the struct2flow **generic** agent protocol. Project-specific
 overrides live in `project_config_overview.md`, `project_config_paths.md`,
 and `project_config_dod.md` at the repo root. Read those alongside this file.
 
-## Agent Coordination Signal
+## Agent Coordination
 
-Codex and Claude Code coordinate through [AGENT_SIGNAL.md](AGENT_SIGNAL.md),
-the shared "radio over" file.
+The agents on this project coordinate through [AGENT_SIGNAL.md](AGENT_SIGNAL.md)
+— the slim live "radio over" baton (Holder / State / Task / Last update; history
+in `git log`). `Holder` is a **persona name** from the team roster, not a bare
+agent type.
 
-Before doing substantive work, **read the signal first** and confirm the mic is
-available:
+- **[AGENT_ROSTER.md](AGENT_ROSTER.md)** — the team (who's who): each persona, its
+  role, and its backing agent. This is the DEFAULT setup; each team edits it to fit
+  the agents and credits it has.
+- **[AGENTS.md](AGENTS.md)** — the coordination protocol: mic states, the ACTIVE-on-claim rule
+  (claiming the mic means setting `State = ACTIVE` first), reactivity / Monitor
+  setup, and how each backing agent (Codex, Gemini, Copilot) is dispatched/watched.
+  Read it before any coordinated work.
 
-- proceed if `State = IDLE`
-- proceed if `State = OVER_TO_<your agent>`
-- proceed if `Holder = <your agent>`
-- otherwise stop and report that another actor has the mic
-
-After confirming the mic is available, claim it by updating:
-
-- `Holder` — who currently owns the mic (`Codex`, `Claude Code`, or `User`)
-- `State` — set to `ACTIVE` while working, or to `OVER_TO_CODEX`, `OVER_TO_CLAUDE`, `OVER_TO_USER`, or `IDLE` when handing off
-- `Task` — one short sentence naming the current work
-- `Last update` — absolute date
-
-Rules:
-
-- The `ACTIVE` state locks WHO IS COORDINATING THE SIGNAL, not WHO MAY EDIT
-  FILES. While another agent is `ACTIVE`:
-  - **Always allowed**: investigative / read-only work (Read, Grep, log
-    lookups, infra API queries), planning work (drafting `PLAN-*.md`,
-    designing approaches), and writing prompts for subagents.
-  - **Allowed in parallel**: implementation work on files outside the
-    active holder's declared `Task` scope. Surface what you did in your
-    next signal flip — don't silently land changes mid-handoff.
-  - **Blocked**: edits to files that overlap with the active holder's
-    declared `Task` scope, unless the founder explicitly interrupts or
-    the signal is clearly stale.
-- If the state is `OVER_TO_CODEX` or `OVER_TO_CLAUDE`, that agent may proceed
-  directly with its review/fix without waiting for the founder to ask again.
-- When handing off, update the state to the target actor and include `OVER` in
-  the state value, e.g. `OVER_TO_CODEX`.
-- Use `OVER_TO_USER` when founder acceptance, rejection, or product direction
-  is needed.
-
-**Claude Code stays active after a handoff** — after flipping the state to
-`OVER_TO_CODEX` or `OVER_TO_USER`, Claude Code does NOT go silent waiting
-for a prompt. It keeps re-reading `AGENT_SIGNAL.md` until the state
-advances (e.g. `OVER_TO_CLAUDE`), then claims the mic and continues.
-Claude Code only stops when there's genuinely nothing to do (signal
-`IDLE`, no open plans, all bugs in `done/`).
-
-**Reactivity — what's possible.** Three mechanisms, preferred order:
-
-1. **`Monitor`-based mtime poll (push-style, preferred).** Spawn a
-   persistent `Monitor` task at the start of any session where the
-   signal is non-IDLE. The script polls `AGENT_SIGNAL.md`'s mtime
-   every 2 s and emits one stdout line per change — each line arrives
-   as a task notification that wakes the session asynchronously,
-   even between turns. Exact command:
-
-   ```bash
-   cd <project-root>
-   last=$(stat -f %m AGENT_SIGNAL.md 2>/dev/null)
-   while true; do
-     sleep 2
-     new=$(stat -f %m AGENT_SIGNAL.md 2>/dev/null)
-     if [ -n "$new" ] && [ "$new" != "$last" ]; then
-       last=$new
-       holder=$(grep '^| Holder ' AGENT_SIGNAL.md | head -1 | sed 's/^| Holder *| //; s/ *|$//')
-       state=$(grep '^| State ' AGENT_SIGNAL.md | head -1 | sed 's/^| State *| //; s/ *|$//')
-       echo "[signal-change] Holder=$holder State=$state"
-     fi
-   done
-   ```
-
-   Invoke via the `Monitor` tool with `persistent: true`,
-   `timeout_ms: 3600000` (1 h — the tool's hard max), description
-   `"AGENT_SIGNAL.md state-line change watcher (Holder + State)"`.
-   Latency ~2 s, zero token cost between events, self-noise
-   tolerable (fires on own writes too — just re-read and continue).
-   Portable: works on any POSIX shell.
-
-   **1-hour cliff.** The Monitor tool caps `timeout_ms` at 3 600 000
-   (1 h). The watcher dies silently at that point. Mitigation:
-   respawn it **at the top of every new user turn** if
-   (a) state is non-IDLE and (b) the previous event hasn't arrived
-   within the last ~45 min. Don't blindly respawn every turn — that
-   burns tool calls and the existing task is still usable until the
-   cliff.
-
-2. **`ScheduleWakeup` polling (fallback for `/loop` mode).** Every
-   15–30 min Claude Code wakes up, re-reads the signal, and either
-   resumes (if state advanced) or reschedules. Costs tokens per
-   poll.
-
-3. **Turn-triggered read (passive fallback).** Claude Code always
-   re-reads the signal at the start of every founder turn. Zero
-   cost between turns, but only reacts when the founder next sends
-   a message.
-
-**Set up Monitor at the top of any session** where a handoff is open
-or likely. If the signal is `IDLE` with no open plans, skip it. If
-the user asks you to "stop polling" or "just wait for my next
-message", cancel via `TaskStop` and rely on mechanism 3.
-
-### Dispatching Codex (signal-driven, not a direct CLI call)
-
-Claude Code does **not** invoke `codex` directly. Codex is woken by a
-**signal-driven dispatcher** that watches `AGENT_SIGNAL.md` and runs the
-real Codex CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
-
-1. **The dispatcher (start once, leave running).** Launch
-   `scripts/start-codex-signal-watch.sh` (which delegates to
-   `scripts/codex-signal-watch.sh`) via the **`Monitor` tool with
-   `persistent: true`** so it survives in the background and streams its
-   run markers back as notifications:
-
-   ```
-   Monitor (persistent): cd <repo> && bash scripts/start-codex-signal-watch.sh 2>&1
-   ```
-
-   It polls every 2 s; on each poll where `State = OVER_TO_CODEX` with a
-   `Holder|State|Task` key it hasn't fired yet, it runs:
-
-   ```
-   codex exec --cd <repo> --sandbox workspace-write --skip-git-repo-check \
-     --output-last-message ~/.{{PROJECT_NAME}}/codex-last-message.md \
-     "<radio-over preamble> + the verbatim Task field"
-   ```
-
-   **Trigger is state-based, not mtime-based:** because `last_trigger_key`
-   starts empty, **starting the dispatcher while the signal is already
-   `OVER_TO_CODEX` fires it on the first poll** — no re-flip needed.
-
-2. **Trigger Codex by flipping the signal, never by calling `codex`.** Edit
-   `AGENT_SIGNAL.md`: `State -> OVER_TO_CODEX` and put the actual prompt for
-   Codex in the `Task` field (Codex receives `Task` verbatim, wrapped in the
-   coordination preamble). **The dispatcher must already be running before
-   you flip** — otherwise the trigger fires into the void.
-
-3. **Where output lands.** `~/.{{PROJECT_NAME}}/codex-runs.log` (full run
-   log; `tail -f`), `~/.{{PROJECT_NAME}}/codex-last-message.md` (Codex's
-   final message), and `~/.{{PROJECT_NAME}}/signal.log` (trigger log).
-   Codex writes its file edits + flips `AGENT_SIGNAL.md` back to
-   `Holder=Claude Code / State=OVER_TO_CLAUDE` (or `ACTIVE`) itself, as
-   instructed by the preamble. Keep a separate signal-change `Monitor`
-   (mechanism 1) armed so Claude Code wakes on that flip-back.
-
-**Codex binary discovery** (in `start-codex-signal-watch.sh`): `$CODEX_BIN`,
-then `codex` on `PATH`, then `~/.vscode/extensions/*/bin/*/codex` (the CLI
-bundled with the OpenAI / ChatGPT VS Code extension). It is normally **not on
-a non-interactive shell's `PATH`** — that is expected; the launcher resolves
-the extension binary. Set `CODEX_BIN=/path/to/codex` to override.
-
-**Common failure modes:** dispatcher not running when the signal flips
-(fires into the void); calling `codex` directly (bypasses the radio-over
-protocol so Codex never sees the handoff); binary not found (set
-`CODEX_BIN`); wrong log path (it is `~/.{{PROJECT_NAME}}/`, not `~/`).
+Watch the whole team live in one terminal: `bash scripts/agent-activity.sh` streams
+a single `[Persona - Backing Agent]` feed. `bash scripts/team-kickoff.sh` runs a
+round-robin kick-off to confirm the roster after editing it.
 
 ## Before Every Push
 
@@ -691,6 +555,70 @@ External), and the per-stack mechanism row goes in
 - Eliminate redundant DB reads — cache data in middleware, don't re-fetch
 - Remove dead code: unused imports, parameters, constants, state fields
 - Don't duplicate logic — extract shared helpers
+
+### Static-analysis audit — SonarQube
+
+Every struct2flow project ships with a SonarQube wiring so the agent
+can audit bugs, vulnerabilities, code smells, and coverage without
+asking the founder to interpret raw output.
+
+**Files** (synced from blueprint, project-owned after bootstrap):
+
+- `scripts/sonar.sh` — runs `npm run test:coverage` to regenerate
+  `coverage/lcov.info`, then invokes `sonar-scanner`. Sources
+  `SONAR_TOKEN` + `SONAR_HOST_URL` from gitignored `.env`. Skip
+  the coverage regen with `--no-coverage` when you just ran the
+  pre-push gate and want to re-upload.
+- `scripts/sonar-api.sh` — calls SonarQube's REST API with auth
+  from `.env`. Usage: `bash scripts/sonar-api.sh /api/<path>?<query>`.
+  The wrapper exists so Claude can query the API without chaining
+  the env-load + curl + jq across permission prompts.
+- `sonar-project.properties` — projectKey + scanner config. Template
+  in the blueprint uses `{{PROJECT_NAME}}`; `new-project.sh`
+  substitutes on bootstrap.
+
+**Workflow** (agent-driven, founder rarely opens the UI):
+
+1. **Run the scan.** `npm run sonar` (wraps `scripts/sonar.sh`).
+   Auto-creates the project on the SonarQube instance on first
+   push if the token has create-on-the-fly privileges.
+2. **Triage by severity.** Query via the helper:
+
+   ```bash
+   bash scripts/sonar-api.sh "/api/issues/search?componentKeys={{PROJECT_NAME}}&types=BUG&ps=20" | jq '.issues[] | {severity, component, line, rule, message}'
+   bash scripts/sonar-api.sh "/api/issues/search?componentKeys={{PROJECT_NAME}}&types=CODE_SMELL&severities=BLOCKER,CRITICAL&ps=20" | jq '.issues[] | {severity, component, line, rule, message}'
+   ```
+
+   Priority order: **BUG → BLOCKER/CRITICAL code smell → MAJOR
+   code smell → MINOR code smell**. Fix in that order.
+3. **Fix or defer with rationale.** Each finding is either:
+   - **Fixed** — narrow edit + tests stay green.
+   - **Deferred** — commit message names the rule, the count, and
+     the reason (e.g. "S7735 negated condition — 17 sites; defer
+     until each can be reviewed in context"). Silent deferral is
+     a smell of its own.
+4. **Re-scan + verify Quality Gate.** `npm run sonar` again, then
+   `bash scripts/sonar-api.sh "/api/qualitygates/project_status?projectKey={{PROJECT_NAME}}"`.
+   Gate `OK` is the bar; `ERROR` blocks the handoff to the founder.
+5. **Per-commit hygiene.** The Sonar gate evaluates "new code
+   period" violations independently — touching a line can re-flag
+   it even when the rest of the file improves. After each fix
+   commit, re-scan and check the gate; if it goes ERROR on new
+   violations, address those before moving on.
+
+**Coverage gating.** SonarQube's coverage measure mirrors the
+project's `--coverage` reporter — vitest writes `coverage/lcov.info`,
+sonar reads `sonar.javascript.lcov.reportPaths=coverage/lcov.info`
+(the JS scanner covers both `.js` and `.ts`). The pre-push gate
+enforces the same threshold locally; SonarQube is the
+post-commit / cross-time-window view (e.g. "did this PR drop
+new-code coverage below 80%?").
+
+**Mechanism row goes in `project_config_overview.md`** §"Code
+quality stack" — alongside the observability/security/cost/infra
+declarations. The mechanism is project-specific (the SonarQube
+instance URL, the projectKey, the quality-profile chosen); the
+capability is non-negotiable.
 
 ## Architecture Principles
 

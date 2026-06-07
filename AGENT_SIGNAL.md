@@ -1,6 +1,8 @@
 # Agent Signal
 
-Shared "radio over" file for Codex and Claude Code coordination.
+Shared "radio over" baton for the agent team. `Holder` is a **persona name** from
+[AGENT_ROSTER.md](AGENT_ROSTER.md) (e.g. `Sylvia`); the coordination protocol is in
+[AGENTS.md](AGENTS.md). On claiming the mic, set `State = ACTIVE` (A2BP).
 
 **Before flipping the mic to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md)
 §A–§G.** If `ls docs/waiting-acceptance/` doesn't show the artefacts the

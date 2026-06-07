@@ -212,6 +212,67 @@ marker_aware_merge() {
 # Decides between marker-aware merge and whole-file copy. Backs up the
 # project file as PROJ_FILE.bp-bak when falling back due to a marker
 # mismatch (so the project owner can recover the local content).
+# Substitute the blueprint template placeholders with the project's
+# name. The blueprint stores template tokens like `{{PROJECT_NAME}}`
+# / `{{PROJECT_NAME_UPPER}}` so the same managed file can serve every
+# project. `new-project.sh` runs this on bootstrap; this function
+# repeats it after each `pull` so a pulled file lands as a real,
+# usable file instead of leaking the literal placeholder. The project
+# name is the basename of the project root.
+_should_substitute() {
+  # Skip files that legitimately document or implement the substitution
+  # itself. The placeholder tokens appear in their source as code/docs,
+  # NOT as template tokens — substituting would corrupt the tool.
+  case "$1" in
+    *scripts/blueprint|*scripts/new-project.sh) return 1 ;;
+  esac
+  return 0
+}
+
+# Write a placeholder-substituted COPY of the blueprint file to a
+# temp path and print the temp path. Used by drift comparison +
+# pull's "same?" check so the templated blueprint side is compared
+# against the substituted project side instead of producing infinite
+# false drift.
+substituted_blueprint_copy() {
+  local bp="$1"
+  if ! _should_substitute "$bp"; then
+    echo "$bp"
+    return 0
+  fi
+  local proj_name
+  proj_name=$(basename "$(pwd)")
+  local proj_upper
+  proj_upper=$(echo "$proj_name" | tr 'a-z-' 'A-Z_')
+  local tmp
+  tmp=$(mktemp)
+  sed \
+    -e "s/{{PROJECT_NAME_UPPER}}/${proj_upper}/g" \
+    -e "s/{{PROJECT_NAME}}/${proj_name}/g" \
+    "$bp" > "$tmp"
+  echo "$tmp"
+}
+
+# Substitute placeholders in a file in-place. Called after every pull
+# `cp` so the project file lands as a real, usable file instead of
+# leaking the literal `{{PROJECT_NAME}}` token.
+substitute_placeholders() {
+  local f="$1"
+  if ! _should_substitute "$f"; then return 0; fi
+  local proj_name
+  proj_name=$(basename "$(pwd)")
+  local proj_upper
+  proj_upper=$(echo "$proj_name" | tr 'a-z-' 'A-Z_')
+  if grep -q '{{PROJECT_NAME' "$f" 2>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    sed \
+      -e "s/{{PROJECT_NAME_UPPER}}/${proj_upper}/g" \
+      -e "s/{{PROJECT_NAME}}/${proj_name}/g" \
+      "$f" > "$tmp" && mv "$tmp" "$f"
+  fi
+}
+
 pull_file() {
   local bp="$1"
   local f="$2"
@@ -219,6 +280,7 @@ pull_file() {
   # New file in project → whole-file copy (no merging possible).
   if [ ! -f "$f" ]; then
     cp "$bp" "$f"
+    substitute_placeholders "$f"
     return 0
   fi
 
@@ -231,6 +293,7 @@ pull_file() {
     tmp=$(mktemp)
     if marker_aware_merge "$bp" "$f" "$tmp"; then
       mv "$tmp" "$f"
+      substitute_placeholders "$f"
       echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}"
       return 0
     else
@@ -238,6 +301,7 @@ pull_file() {
       echo "  ${C_YELLOW}    warn: marker structure mismatch — backing up + whole-file copy${C_RESET}"
       cp "$f" "$f.bp-bak"
       cp "$bp" "$f"
+      substitute_placeholders "$f"
       echo "  ${C_DIM}    backup at $f.bp-bak — reconcile manually${C_RESET}"
       return 0
     fi
@@ -247,6 +311,7 @@ pull_file() {
     echo "  ${C_YELLOW}    warn: blueprint uses markers, project doesn't — backing up + whole-file copy${C_RESET}"
     cp "$f" "$f.bp-bak"
     cp "$bp" "$f"
+    substitute_placeholders "$f"
     echo "  ${C_DIM}    backup at $f.bp-bak — add markers in the project to preserve content next pull${C_RESET}"
     return 0
   fi
@@ -260,6 +325,7 @@ pull_file() {
 
   # Neither has markers — legacy whole-file copy.
   cp "$bp" "$f"
+  substitute_placeholders "$f"
 }
 
 read_blueprint_source() {
@@ -323,9 +389,15 @@ cmd_drift() {
       MISSING_PROJECT+=("$f")
       continue
     fi
-    if ! diff -q "$bp" "$f" >/dev/null 2>&1; then
+    # Substitute placeholders on the blueprint side before comparing,
+    # otherwise every templated file looks "drifted" forever after
+    # the first substitute-on-pull.
+    local bp_cmp
+    bp_cmp=$(substituted_blueprint_copy "$bp")
+    if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
       DRIFTED+=("$f")
     fi
+    [ "$bp_cmp" != "$bp" ] && rm -f "$bp_cmp"
   done
 
   if [ ${#DRIFTED[@]} -eq 0 ] && [ ${#MISSING_BLUEPRINT[@]} -eq 0 ] && [ ${#MISSING_PROJECT[@]} -eq 0 ]; then
@@ -375,9 +447,16 @@ cmd_pull() {
     for f in "${MANAGED_FILES[@]}"; do
       bp="$BLUEPRINT_ROOT/$f"
       if [ ! -f "$bp" ]; then continue; fi
-      if [ ! -f "$f" ] || ! diff -q "$bp" "$f" >/dev/null 2>&1; then
+      if [ ! -f "$f" ]; then
+        files+=("$f")
+        continue
+      fi
+      local bp_cmp
+      bp_cmp=$(substituted_blueprint_copy "$bp")
+      if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
         files+=("$f")
       fi
+      [ "$bp_cmp" != "$bp" ] && rm -f "$bp_cmp"
     done
   fi
 
@@ -394,7 +473,13 @@ cmd_pull() {
       echo "  ${C_RED}skip${C_RESET}  $f  (not in blueprint)"
       continue
     fi
-    if [ -f "$f" ] && diff -q "$bp" "$f" >/dev/null 2>&1; then
+    # Compare against the substituted blueprint copy so templated
+    # files that have already been substituted in the project don't
+    # show as "different" forever.
+    local bp_cmp_pull
+    bp_cmp_pull=$(substituted_blueprint_copy "$bp")
+    if [ -f "$f" ] && diff -q "$bp_cmp_pull" "$f" >/dev/null 2>&1; then
+      [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
       echo "  ${C_DIM}same${C_RESET}  $f"
       continue
     fi
@@ -403,9 +488,13 @@ cmd_pull() {
     if [ ! -f "$f" ]; then
       echo "  ${C_BLUE}new file${C_RESET} (blueprint adds it; project doesn't have it yet)"
     else
-      diff -u "$f" "$bp" | head -60 || true
+      # Diff against the substituted blueprint copy so the user sees
+      # what would actually land in their tree, not noise from the
+      # placeholder tokens.
+      diff -u "$f" "$bp_cmp_pull" | head -60 || true
       echo "  ${C_DIM}(diff truncated at 60 lines — open the file to see all)${C_RESET}"
     fi
+    [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
     if [ "$auto_yes" -eq 0 ]; then
       printf "  Pull this file? [y/N/q] "
       read -r ans </dev/tty

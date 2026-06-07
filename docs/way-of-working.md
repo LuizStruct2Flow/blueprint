@@ -598,7 +598,7 @@ The **silent** failure mode: no exception, no alert, just compounding embarrassm
    `FEATURES.md`, `findings.md`, threat-model entries, ADRs, runbooks — updated *as* the code changes, not after.
 
 3. **Blueprint-level changes update the deck + recipe doc in the same commit.**
-   `docs/way-of-working.md` is the pitch surface. It has self-violated **three times this week** (Cost concern, "six" → "seven", Documentation itself).
+   `docs/way-of-working.md` is the pitch surface. It has self-violated **four times this week** (Cost; "six"→"seven"; Documentation itself; persona-team framing). Fix in flight: `docs/A2BP_PLAYBOOK.md`.
 
 4. **Drift is detected, not assumed away.**
    Promotion criteria for the sync list; pre-push grep-based hints for known drift patterns; handoff-time checklist box that refuses the mic flip if any sync-list file is stale.

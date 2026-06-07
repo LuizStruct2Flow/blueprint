@@ -79,6 +79,7 @@ TARGETS=(
   "docs/SECURITY.md"
   "docs/INFRASTRUCTURE.md"
   "docs/DOCUMENTATION.md"
+  "docs/A2BP_PLAYBOOK.md"
   "docs/PUBLISHING.md"
   "docs/doing/HANDOVER.md"
   "scripts/codex-signal-watch.sh"

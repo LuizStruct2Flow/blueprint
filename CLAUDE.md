@@ -692,9 +692,23 @@ blueprint a2bp docs/DoD.md
 ```
 
 `a2bp` copies the project's version into the blueprint working tree
-(staged, not committed). Then in the blueprint repo: `git diff`, commit,
-push. After the blueprint commit lands, re-run `blueprint drift` in the
-project to confirm the project matches HEAD again.
+(staged, not committed). It also prints a class-based ripple checklist
+naming every file that has to be touched in the same commit and a
+strong reminder pointing at the playbook below.
+
+> **Do NOT open a new prompt in the blueprint repo to "do the docs".**
+> The agent doing `a2bp` is the agent who completes the
+> back-propagation, from the same session. You already have
+> `$BLUEPRINT_ROOT` from `.blueprint-source`; you can `cat`, `edit`,
+> and `git -C $BLUEPRINT_ROOT ...` from here. Splitting the work
+> across two prompts is exactly how doc-sync slips (the §6.4 rule
+> self-violated four times in a single week from this habit).
+
+The full post-`a2bp` procedure — classify the change, walk the
+ripples, do the deck dance, commit + push from `$BLUEPRINT_ROOT`,
+verify drift closed — lives in [`docs/A2BP_PLAYBOOK.md`](docs/A2BP_PLAYBOOK.md).
+The `blueprint a2bp` output points at it and includes class hints for
+every file you copied. Read both before touching `git commit`.
 
 **A change is generic** if it would benefit every struct2flow project
 (tighter rule, better wording, missing capability). **A change is

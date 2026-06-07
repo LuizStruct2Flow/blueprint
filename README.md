@@ -121,6 +121,7 @@ blueprint/
     ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST recipes per runtime
     ├── INFRASTRUCTURE.md           ← IaC recipes per stack (CDK / Terraform / Helm-ArgoCD)
     ├── DOCUMENTATION.md            ← doc-sync recipes (internal + external; per-project shape)
+    ├── A2BP_PLAYBOOK.md            ← post-`blueprint a2bp` ripple checklist (no context-switch)
     ├── way-of-working.md           ← Marp deck source: how struct2flow ships software (8 concerns + 2 meta-layers)
     ├── assets/brand/               ← struct2flow CI: logo SVGs (blueprint-only; not synced to projects)
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly

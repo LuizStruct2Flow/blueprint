@@ -60,6 +60,7 @@ MANAGED_FILES=(
   "docs/SECURITY.md"
   "docs/INFRASTRUCTURE.md"
   "docs/DOCUMENTATION.md"
+  "docs/A2BP_PLAYBOOK.md"
   "docs/PUBLISHING.md"
   "docs/way-of-working.md"
 
@@ -451,6 +452,7 @@ cmd_a2bp() {
   echo
 
   local copied=0
+  local copied_files=()
   for f in "$@"; do
     # Validate that this file is blueprint-managed
     local is_managed=0
@@ -477,24 +479,141 @@ cmd_a2bp() {
     cp "$f" "$bp"
     echo "  ${C_GREEN}copied${C_RESET}  $f → blueprint"
     copied=$((copied+1))
+    copied_files+=("$f")
   done
 
   echo
-  if [ $copied -gt 0 ]; then
-    echo "${C_GREEN}✓ Copied $copied file(s) into the blueprint working tree.${C_RESET}"
-    echo
-    echo "Next:"
-    echo "  cd $BLUEPRINT_ROOT"
-    echo "  git diff                       # review what changed"
-    echo "  git add <files> && git commit  # commit the back-propagation"
-    echo "  git push                       # publish so other projects can pull"
-    echo
-    echo "After you've committed in the blueprint, come back here and run:"
-    echo "  blueprint drift                # confirm this project now matches blueprint HEAD"
-    echo "  (the 'commits since last sync' count should drop to your one back-propagated commit)"
-  else
+  if [ $copied -eq 0 ]; then
     echo "${C_DIM}Nothing copied.${C_RESET}"
+    return 0
   fi
+
+  echo "${C_GREEN}✓ Copied $copied file(s) into the blueprint working tree.${C_RESET}"
+  echo
+
+  # --- Strong "no context switch" header ---
+  echo "${C_BOLD}━━━ Back-propagation is NOT complete. ━━━${C_RESET}"
+  echo "${C_BOLD}Walk this from the CURRENT session (no new prompt in the blueprint repo):${C_RESET}"
+  echo "${C_DIM}  $BLUEPRINT_ROOT/docs/A2BP_PLAYBOOK.md${C_RESET}"
+  echo "${C_DIM}  The four §6.4 violations of the last week were all caused by deferring${C_RESET}"
+  echo "${C_DIM}  the doc-sync ripples to a 'next session in the blueprint'. Don't.${C_RESET}"
+  echo
+
+  # --- Per-file ripple hints (class-based; matches A2BP_PLAYBOOK.md Step A) ---
+  echo "${C_BOLD}Step A — Ripples to check (per file you just copied):${C_RESET}"
+  local touched_deck=0
+  local touched_recipe=0
+  local touched_principle=0
+  local touched_agent=0
+  local touched_sync=0
+  local touched_stack=0
+  local touched_gate=0
+  local touched_prepush=0
+  for f in "${copied_files[@]}"; do
+    case "$f" in
+      CLAUDE.md)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class A (Principle) or F (Agent layer) — also check:"
+        echo "        • docs/way-of-working.md intro slide + concern slides for any concern touched"
+        echo "        • the concern's recipe doc (OBSERVABILITY/SECURITY/INFRASTRUCTURE/DOCUMENTATION/etc.)"
+        echo "        • README.md hero concern table"
+        echo "        • CLAUDE.md §\"docs/way-of-working.md is the canonical pitch surface\" mirror list (10 items)"
+        touched_principle=1
+        touched_deck=1
+        ;;
+      docs/OBSERVABILITY.md|docs/SECURITY.md|docs/INFRASTRUCTURE.md|docs/DOCUMENTATION.md)
+        local concern
+        concern=$(basename "$f" .md)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class B (Recipe) — also check:"
+        echo "        • docs/way-of-working.md '<concern> — recipes per stack' slide"
+        echo "        • project_config_overview.md §\"$(echo $concern | tr A-Z a-z) stack\" if a new mechanism row was implied"
+        touched_recipe=1
+        touched_deck=1
+        ;;
+      docs/DoD.md)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class C (Gate) — also check:"
+        echo "        • docs/way-of-working.md Quality slides if §3 or §4 changed"
+        echo "        • project_config_dod.md if a new table row was implied"
+        echo "        • DoD §7 handoff checklist for cross-references"
+        touched_gate=1
+        ;;
+      .githooks/pre-push|Brewfile)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class D (Pre-push) — also check:"
+        echo "        • docs/DoD.md §4 (pre-push gate description)"
+        echo "        • CLAUDE.md §\"Before Every Push\""
+        echo "        • README.md \"What's in the blueprint\" tree if file list changed"
+        echo "        • project_config_dod.md §\"Pre-push gate — project commands\" table"
+        touched_prepush=1
+        ;;
+      scripts/blueprint|scripts/new-project.sh)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class E (Sync layer) — also check:"
+        echo "        • README.md §\"The sync model\""
+        echo "        • CLAUDE.md §\"Blueprint sync\""
+        echo "        • docs/A2BP_PLAYBOOK.md if the calling pattern changed"
+        touched_sync=1
+        ;;
+      AGENTS.md|AGENT_ROSTER.md|scripts/agent-activity.sh|scripts/start-codex-signal-watch.sh|scripts/start-gemini-signal-watch.sh)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class F (Agent layer) — also check:"
+        echo "        • docs/way-of-working.md 'persona team — radio-over' slide"
+        echo "        • CLAUDE.md §\"docs/way-of-working.md is the canonical pitch surface\" item #9"
+        echo "        • README.md hero paragraph if framing changed"
+        touched_agent=1
+        touched_deck=1
+        ;;
+      STACK_DEFAULTS.md)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Class G (Stack default) — also check:"
+        echo "        • docs/way-of-working.md Architecture slide (slide 1 of the concern block)"
+        echo "        • CLAUDE.md §\"Architecture Principles\""
+        touched_stack=1
+        touched_deck=1
+        ;;
+      docs/way-of-working.md)
+        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
+        echo "      → Deck source changed — REBUILD the PDF (see Step C below)"
+        touched_deck=1
+        ;;
+      *)
+        echo "  ${C_DIM}~${C_RESET} ${C_DIM}$f${C_RESET}  (Class H cosmetic / unclassified — no ripples assumed; verify in playbook §A)"
+        ;;
+    esac
+  done
+
+  # --- Step C — Deck dance reminder if anything touched the deck ---
+  if [ "$touched_deck" -eq 1 ] || [ "$touched_principle" -eq 1 ]; then
+    echo
+    echo "${C_BOLD}Step C — Deck dance:${C_RESET}"
+    echo "  1. Edit slide(s) in $BLUEPRINT_ROOT/docs/way-of-working.md"
+    echo "  2. Sweep count words: ${C_DIM}grep -niE '\\bsix\\b|\\bseven\\b|\\beight\\b' $BLUEPRINT_ROOT/{docs/way-of-working.md,README.md}${C_RESET}"
+    echo "  3. Rebuild PDF:        ${C_DIM}( cd $BLUEPRINT_ROOT && scripts/build-deck.sh )${C_RESET}"
+    echo "  4. Visual-check the changed slides (PNG render + Read tool)"
+    echo "  5. Stage the .md source AND the .pdf together"
+  fi
+
+  # --- Step D — Commit + push from the originating session ---
+  echo
+  echo "${C_BOLD}Step D — Commit + push (run from THIS session):${C_RESET}"
+  echo "  ( cd $BLUEPRINT_ROOT &&"
+  echo "    git checkout .claude/settings.json &&    ${C_DIM}# revert any auto-allowlist pollution${C_RESET}"
+  echo "    git status &&"
+  echo "    git add <every-file-touched-including-PDF> &&"
+  echo "    git commit -m \"<conventional commit; list every ripple in the body>\" &&"
+  echo "    git push origin main"
+  echo "  )"
+
+  # --- Step E — Verify ---
+  echo
+  echo "${C_BOLD}Step E — Verify drift closed:${C_RESET}"
+  echo "  blueprint drift               ${C_DIM}# expect: '✓ All blueprint-managed files match the blueprint HEAD.'${C_RESET}"
+  echo "  blueprint pull --yes          ${C_DIM}# if any ripple files now drift forward${C_RESET}"
+
+  echo
+  echo "${C_DIM}Full playbook: $BLUEPRINT_ROOT/docs/A2BP_PLAYBOOK.md${C_RESET}"
 }
 
 # --- Subcommand: help ---

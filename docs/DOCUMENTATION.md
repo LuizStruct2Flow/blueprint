@@ -256,9 +256,26 @@ per-concern recipe docs (`OBSERVABILITY.md` / `SECURITY.md` /
 
 The same-commit rule applies: any blueprint-level concern change touches
 the deck + the per-concern recipe doc + the README concern table in the
-same commit. This rule has self-violated twice in the past week
-(adding Cost; adding Documentation); the §6.4 gate is meant to catch
-the third occurrence at commit time.
+same commit. This rule has self-violated **four** times in the past week
+(Cost concern, "six" → "seven", Documentation itself, persona-team
+framing); the §6.4 gate is meant to catch the next occurrence at commit
+time.
+
+### Back-propagation: the same rule applies, from a different session
+
+When a generic improvement is `blueprint a2bp`-ed from a downstream
+project into the blueprint, the same-commit rule applies to **that
+back-propagation commit** — touched in the originating project's
+session, not a new prompt opened in the blueprint repo.
+
+Every one of the four self-violations above was the same shape: a file
+landed in the blueprint via `a2bp` (or a direct edit), and the
+ripples were deferred to "a future session in the blueprint", which
+never happened. The fix is procedural: [`docs/A2BP_PLAYBOOK.md`](A2BP_PLAYBOOK.md)
+walks the post-`a2bp` ripple checklist; `scripts/blueprint a2bp`
+output emits class-based hints per file copied; CLAUDE.md §"Back-propagating"
+forbids the context-switch. Read all three before committing a
+back-propagation.
 
 ---
 

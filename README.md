@@ -6,7 +6,7 @@
 > **A living operating system for AI-native software development.**
 
 One git repo that codifies how I ship software — architecture, lifecycle,
-quality, observability, security, IaC — plus the two AIs that operate it.
+quality, observability, security, IaC — plus the persona team of AIs that operates it.
 Every project I build forks from here; every lesson learned travels back
 upstream so every other project inherits it.
 

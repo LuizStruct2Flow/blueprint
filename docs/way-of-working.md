@@ -198,7 +198,7 @@ Luiz Scheidegger · 2026
 
 Two things make this different from "another opinionated framework":
 
-- **The agent layer** — two AIs (Codex + Claude Code) coordinating via radio-over
+- **The persona team** — named AI personas (Sylvia, Christian, Kathrin, …) on Claude Code / Codex / Gemini, coordinating via radio-over
 - **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
 
 …on top of **eight engineering concerns**, all encoded in tooling:
@@ -232,17 +232,19 @@ The two **meta-layers** below are what's new; the eight concerns underneath are 
 
 ---
 
-# The agent layer — radio-over
+# The persona team — radio-over
 
-Codex + Claude Code coordinate through a single file: `AGENT_SIGNAL.md`.
+A configurable team of **named personas** (Sylvia · Klaus · Kathrin · …), each backed by Claude Code / Codex / Gemini / GitHub Copilot. Defined in [`AGENT_ROSTER.md`](AGENT_ROSTER.md); coordinated via [`AGENTS.md`](AGENTS.md) + `AGENT_SIGNAL.md`.
 
-- **One mic at a time** — state: `IDLE` / `ACTIVE` / `OVER_TO_*`
-- **Read-only and out-of-scope work** allowed in parallel
+- **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
+- **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_SYLVIA` ≠ `OVER_TO_CHRISTIAN`)
+- **Read-only + out-of-scope work** allowed in parallel
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
-- **Codex dispatched by flipping the signal**, not by direct CLI call
+- **Codex / Gemini dispatched by flipping the signal**, not by direct CLI call
 - **`HANDOVER.md`** lets a fresh prompt resume cold
+- **Live feed:** `scripts/agent-activity.sh` — every persona's mic moves in one tail
 
-> Two AI engineers on the same repo, **without overwrites or duplicate work.**
+> A **configurable team of AI engineers** on the same repo — without overwrites or duplicate work.
 
 ---
 

@@ -128,15 +128,21 @@ The shipped code is only as good as the tests that gate it.
 6. **Coverage report** before every commit/push: know what your change
    adds to (or removes from) coverage before you ship it. Project
    declares its mode in `project_config_dod.md`:
-   - **Greenfield** (started from the blueprint): **≥90%** statements
-     + branches on the application + domain layers (adapters /
-     generated code excluded).
-   - **Brownfield** (existing codebase adopted in): **≥70%** on the
-     same scope, **ratcheted** — never let the number drop.
-     New / modified files must clear the greenfield 90% bar.
-   The exact `--coverage` invocation + scope globs live in
-   `project_config_dod.md`. The pre-push gate fails the push if the
-   project mode's threshold isn't met.
+   Coverage is measured over the **whole `src/**` tree**, not a curated
+   subset — a high % over a hand-picked slice is theatre (cf. CLAUDE.md
+   §"Coverage thresholds"). Thresholds are **tiered + ratcheted**:
+   - **Greenfield** — domain / application **≥90%**, adapters **≥80%**,
+     CLI entry points **≥75%** (statements + branches, aggregate per layer).
+   - **Brownfield** — start each tier at its current true number and
+     **ratchet**; new / modified files clear the greenfield bar for
+     their layer.
+   Exclude only genuinely non-executable / unit-untestable files,
+   per-file with a stated reason (`*.d.ts`, pure schema files, bootstrap
+   entry points, live-browser drivers) — never a wholesale directory
+   exclude — and mirror that set into the SAST tool's coverage
+   exclusions. The exact `--coverage` invocation + per-layer globs live
+   in `project_config_dod.md`. The pre-push gate fails the push if any
+   tier's threshold isn't met.
 7. **Pre-push gate must complete in ≤30 s** wall-clock. Slower tests
    live in a `npm run test:slow`-style target or the CI pipeline. If a
    test category outgrows the budget, the answer is to move it out of
@@ -154,8 +160,9 @@ struct2flow convention — the project's exact targets are wired in
    any tracked file is unformatted). Auto-format locally with
    `npm run format` before pushing; CI never rewrites files.
 4. Tests (unit + integration + data snapshot) + **coverage gate**
-   (greenfield ≥90% / brownfield ≥70% per §3.6 — the project
-   declares its mode in `project_config_dod.md`)
+   (whole-tree, tiered per §3.6: domain/app ≥90%, adapters ≥80%, CLI
+   ≥75%; brownfield ratcheted — the project declares its per-layer
+   thresholds in `project_config_dod.md`)
 5. **`.claude/settings.json` host-path guard** — fails the push if the
    COMMITTED `settings.json` contains absolute paths under `/Users/<name>/`
    or `/home/<name>/`. Host-specific entries belong in

@@ -195,15 +195,33 @@ per the normal team workflow below.
 - Trunk-based development only — no branches, use feature toggles instead
 - Run and report test coverage before every commit/push
 - **Coverage thresholds** (enforced in the pre-push gate):
-  - **Greenfield projects** (started from the blueprint): **≥90%**
-    statements + branches on the application + domain layers
-    (adapters and generated code excluded).
-  - **Brownfield projects** (existing codebase adopted into the
-    blueprint): **≥70%** on the same scope, **ratcheted** — never
-    let the number drop. New / modified files must hit the
-    greenfield 90% bar.
-  - The project declares its mode (`greenfield` / `brownfield`)
-    and the exact `--coverage` invocation in
+  - **Measure over the WHOLE source tree, not a curated subset.** A high
+    % over a hand-picked slice is theatre — "94% coverage" over the
+    domain+application layers while adapters and CLI sit unmeasured can
+    mean 90% over ~9% of the code. The headline number must reflect real
+    risk, so coverage `include` is the entire `src/**`.
+  - **Tiered, ratcheted thresholds** (aggregate per layer) keep the bar
+    highest on business logic while still holding the edges to a real
+    floor:
+    - **domain / application** (greenfield): **≥90%** statements + branches.
+    - **adapters**: **≥80%** (I/O wrappers are testable against temp
+      dirs / fakes — exercise the round-trip + error branches).
+    - **CLI entry points**: **≥75%** (inject fakes, stub `process.exit`,
+      assert wiring + error→exit paths; `main()` orchestration IS testable).
+    - **Brownfield**: start each tier at the current true number and
+      **ratchet** — never let a tier drop; new / modified files hit the
+      greenfield bar for their layer.
+  - **Exclude only genuinely non-executable or unit-untestable files, and
+    only per-file with a stated reason** — never a wholesale `src/cli/**`
+    or `src/adapters/**` directory exclude (that is how the subset-metric
+    trap creeps back). Legitimate per-file exclusions: type-only `*.d.ts`,
+    pure schema declaration files, composition-root bootstrap entry points,
+    and real-browser/external-process drivers covered by integration smoke.
+  - The same exclusion set MUST be mirrored in the static-analysis tool's
+    `*.coverage.exclusions` (e.g. SonarQube) so both gates measure the
+    same surface.
+  - The project declares its mode (`greenfield` / `brownfield`), the
+    per-layer thresholds, and the exact `--coverage` invocation in
     `project_config_dod.md`.
 - Never push code over the ratcheted ESLint `--max-warnings` threshold;
   the shared pre-push hook at `.githooks/pre-push` enforces this

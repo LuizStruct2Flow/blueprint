@@ -333,7 +333,7 @@ assumed away**.
 - **Domain stays pure and testable** — no framework imports in the core
 - **Adapter swaps are bounded** — DynamoDB → Mongo, REST → GraphQL, sync → event-driven
 - **Infrastructure pushed to the edges** — core survives stack changes
-- **Coverage thresholds bite where it counts** — domain + application layers
+- **Coverage is measured whole-tree, tiered by layer** — domain/app ≥90%, adapters ≥80%, CLI ≥75% (a high % over a curated slice is theatre)
 
 The point isn't dogma. It's that the *most expensive layer to get wrong*
 (the domain) is the *easiest to keep clean* — if you keep frameworks out of it.
@@ -376,7 +376,7 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
 **Non-optional rules:**
 
 - **Two-commit pattern** — reproducer test (failing) → fix
-- **Coverage thresholds** — greenfield ≥90%, brownfield ≥70% (ratcheted)
+- **Coverage thresholds** — whole-tree, tiered: domain/app ≥90%, adapters ≥80%, CLI ≥75% (brownfield ratcheted)
 - **ESLint + Prettier** — both blocking, independent gates
 - **Pre-push ≤30 s** wall-clock — slower tests go to CI
 - **Snapshots are approval-based** — CI never runs with `-u`

@@ -130,7 +130,13 @@
       "Bash(lsof *)",
       "Bash(launchctl list*)",
       "Bash(curl -s *)",
-      "Bash(curl -sS *)"
+      "Bash(curl -sS *)",
+      "Bash(node *)",
+      "Bash(python3 *)",
+      "Bash(magick *)",
+      "Bash(montage *)",
+      "Bash(identify *)",
+      "Bash(mkdir *)"
     ]
   }
 }

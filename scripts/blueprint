@@ -86,6 +86,10 @@ MANAGED_FILES=(
   # staged-scan gate runs the full default rule set)
   ".gitleaks.toml"
 
+  # CI security gate — gitleaks + semgrep scan + osv-scanner on every
+  # push, plus nightly osv-scanner cron for new CVEs
+  ".github/workflows/security.yml"
+
   # .claude/ — generic permission allowlist (host-specific bits live in
   # .claude/settings.local.json which is gitignored)
   ".claude/settings.json"

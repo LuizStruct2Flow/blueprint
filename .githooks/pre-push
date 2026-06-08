@@ -65,15 +65,24 @@ fi
 
 if command -v osv-scanner >/dev/null 2>&1; then
   echo "  → SCA (osv-scanner over lockfiles)..."
-  # Scan every lockfile in the repo; the tool no-ops on workspaces that lack one.
-  # v2.x uses a `scan` subcommand and exits non-zero on findings by default
-  # (--fail-on-vuln removed; --skip-git removed).
-  osv-scanner scan --recursive . >/dev/null 2>&1 || {
+  # Scan every lockfile in the repo. osv-scanner v2 exits non-zero BOTH on a real
+  # finding AND when there are no lockfiles at all ("No package sources found",
+  # exit 128) — so a repo without lockfiles (this template before bootstrap, or a
+  # workspace not yet `npm install`ed) must be a clean no-op, not a CVE. Only a
+  # non-zero exit WITH actual scan output is a failure.
+  # `if assign=$(cmd); then` keeps the failing exit OUT of `set -e`'s reach (a bare
+  # `osv_out=$(failing)` aborts the hook under /bin/sh before we can inspect it).
+  if osv_out=$(osv-scanner scan --recursive . 2>&1); then
+    :  # clean — no vulnerabilities
+  elif printf '%s' "$osv_out" | grep -q "No package sources found"; then
+    :  # no lockfiles in this repo (template / pre-bootstrap) — nothing to scan
+  else
+    printf '%s\n' "$osv_out" | tail -20
     echo "❌ osv-scanner found a CVE in a dependency."
     echo "   Upgrade or pin to a known-good version. Track lower-severity CVEs"
     echo "   in docs/config/findings.md with a planned upgrade date."
     exit 1
-  }
+  fi
 else
   echo "  ⚠ osv-scanner not installed locally — SCA skipped (CI will catch it)."
   echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"

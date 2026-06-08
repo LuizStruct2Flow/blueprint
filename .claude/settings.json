@@ -171,7 +171,28 @@
       "Bash(cut *)",
       "Bash(basename *)",
       "Bash(dirname *)",
-      "Bash(realpath *)"
+      "Bash(realpath *)",
+      "Bash(git log *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git stash *)",
+      "Bash(git ls-files *)",
+      "Bash(git ls-tree *)",
+      "Bash(git archive *)",
+      "Bash(npm ls *)",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(npx *)",
+      "Bash(cd * && git *)",
+      "Bash(cd * && bash *)",
+      "Bash(cd * && npm *)",
+      "Bash(cd * && npx *)",
+      "Bash(cd ~/sources/* *)",
+      "Bash(* && * && *)",
+      "Bash(* && *)"
     ]
   }
 }

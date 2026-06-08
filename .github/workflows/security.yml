@@ -1,0 +1,80 @@
+# Security CI — backs the pre-push hook's "skipped (CI will catch it)"
+# soft-warn UX with a real per-push + nightly-cron pipeline.
+#
+# Per project_config_overview.md §Security stack:
+#   gitleaks  → any leak blocks
+#   semgrep   → WARNING+ blocks
+#   osv-scanner → MEDIUM+ blocks
+#
+# Per project_config_security.md §6 Findings register: failures land
+# as `[SEC-XXX]` entries in docs/config/findings.md.
+
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nightly osv-scanner re-scan for new CVEs landing on already-pinned deps.
+    # 03:17 UTC chosen to avoid the usual cron-storm windows.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  secret-scan:
+    name: secret-scan (gitleaks)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # gitleaks scans full history
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  sast:
+    name: SAST (semgrep p/owasp-top-ten)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+      security-events: write
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+      - name: Run semgrep
+        # `semgrep ci` doesn't accept --severity/--error; those are
+        # `semgrep scan` flags. `scan` with `--error` exits non-zero
+        # on any finding at or above the requested severity.
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/javascript \
+            --config p/typescript \
+            --severity WARNING --severity ERROR \
+            --error
+
+  sca:
+    name: SCA (osv-scanner)
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8
+    with:
+      scan-args: |-
+        --recursive
+        --lockfile=package-lock.json
+        --severity=MEDIUM
+        ./

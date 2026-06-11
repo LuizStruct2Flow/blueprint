@@ -95,6 +95,38 @@ until the state advances (e.g. `OVER_TO_CLAUDE`), then claims the mic and
 continues. Stop only when there's genuinely nothing to do (signal `IDLE`, no open
 plans, all bugs in `done/`).
 
+## Four-eyes cross-provider review (mandatory before push)
+
+**Every change is reviewed by a DIFFERENT backing provider than the one that wrote
+it, before it is pushed.** Claude Code and Codex (and Gemini / Copilot) cross-check
+each other — no provider both writes and blesses-for-push the same code. The loop:
+
+1. **Provider A implements and commits** its slice (`Holder` = an A persona).
+2. A **flips the mic to a Provider-B persona** (`OVER_TO_<B>`), naming the
+   commit(s) to review.
+3. **B reviews.** The reviewer's job is **both** code correctness **and** ensuring
+   the change honors the **blueprint rules and the DoD** (`docs/DoD.md` §A–§H:
+   co-located tests, coverage tiers, lint/format, two-commit reproducer for
+   bug-class fixes, doc-sync, etc.). A change that is "correct" but violates a
+   blueprint/DoD rule is **not** clean.
+4. If B needs **no changes** → **B is the only one allowed to `push`.**
+5. If B needs changes → **B makes the changes itself, commits, documents the
+   reasons** (commit message / plan file), and **flips back to A for review**.
+6. Repeat: each round the reviewer either pushes (zero changes) or becomes the new
+   writer (made changes) and hands back. **Push happens only from a clean
+   cross-provider review.**
+
+**Invariant:** the last agent to write/commit always hands to the OTHER provider;
+only a reviewer who needed zero changes pushes. Every line is seen by both
+providers before it reaches the remote.
+
+**Git-hand for sandboxed providers.** If a provider's sandbox cannot run `git`
+(e.g. Codex `workspace-write` blocks `.git`), the orchestrator (Claude Code
+primary) acts as the git-hand — committing / pushing on that provider's behalf
+with explicit attribution (`Co-Authored-By` + persona name in the message). The
+**review alternation is preserved exactly**: the provider that did NOT write the
+code is the one whose clean review authorizes the push.
+
 ## Reactivity — three mechanisms (preferred order)
 
 1. **`Monitor`-based mtime poll (push-style, preferred).** Spawn a persistent

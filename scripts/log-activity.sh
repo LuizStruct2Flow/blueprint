@@ -44,7 +44,17 @@ summary="$(printf '%s' "$summary" | tr -d '\n' | cut -c1-110)"
 # generic. This is what makes .claude/agents/<persona>.md real in the feed.
 plabel="$(extract '.subagent_type // .agent_type // .agent_name')"
 label="${plabel:-${LWA_FEED_LABEL:-subagent}}"
-ts="$(date -u +%H:%M:%S)"
+ts="$(date +%H:%M:%S)"
+
+# Map this subagent's id → persona so the live feed (agent-activity.sh's
+# subagent_feed) can label the STREAMED internal lines from
+# <session>/subagents/agent-<agent_id>.jsonl with the persona name, not just
+# bracket them with the dispatch/finish markers below. agent_id matches the
+# transcript filename; agent_type is the roster persona. Best-effort, never fatal.
+aid="$(extract '.agent_id')"
+if [ -n "$aid" ] && [ -n "$plabel" ]; then
+  printf '%s %s\n' "$aid" "$plabel" >> "$repo_root/logs/.subagent-map" 2>/dev/null || true
+fi
 case "$event" in
   SubagentStart) marker="→ dispatched" ;;
   SubagentStop)  marker="← finished" ;;

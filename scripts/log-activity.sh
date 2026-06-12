@@ -36,10 +36,14 @@ extract() { # extract <jq-filter> — empty string if jq missing / no match
 event="$(extract '.hook_event_name')"; [ -n "$event" ] || event="Subagent"
 # Best-effort summary across the fields different events expose. The Agent
 # tool's description is the most useful; fall back through plausible keys.
-summary="$(extract '.agent_description // .description // .subagent_type // .agent_type // .prompt // .last_message // .reason')"
+summary="$(extract '.agent_description // .description // .prompt // .last_message // .reason')"
 summary="$(printf '%s' "$summary" | tr -d '\n' | cut -c1-110)"
 
-label="${LWA_FEED_LABEL:-subagent}"
+# Label by the roster persona when the payload names the agent (so the feed
+# shows "[matthias - Claude Code]", matching AGENT_ROSTER.md), else env, else
+# generic. This is what makes .claude/agents/<persona>.md real in the feed.
+plabel="$(extract '.subagent_type // .agent_type // .agent_name')"
+label="${plabel:-${LWA_FEED_LABEL:-subagent}}"
 ts="$(date -u +%H:%M:%S)"
 case "$event" in
   SubagentStart) marker="→ dispatched" ;;

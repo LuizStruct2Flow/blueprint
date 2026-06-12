@@ -66,13 +66,17 @@ set -u
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
-"$CODEX_BIN" exec \
+# --json + codex-feed-filter.sh keeps the activity feed at one concise line per
+# action (codex prose, commands, file changes) instead of echoing every file
+# codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
+# --output-last-message still captures the final message for verdict reading.
+"$CODEX_BIN" exec --json \
   --cd "$ROOT" \
   --sandbox workspace-write \
   --skip-git-repo-check \
   --output-last-message "$OUTPUT_LAST" \
   "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The shared signal lives at AGENT_SIGNAL.md. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then flip AGENT_SIGNAL.md back to Holder=Claude Code / State=OVER_TO_CLAUDE (or ACTIVE if you finished the whole thread) and update the Task field with what you did. Commit your changes if appropriate." \
-  >>"$RUN_LOG" 2>&1
+  2>>"$RUN_LOG" | bash "$ROOT/scripts/codex-feed-filter.sh" >>"$RUN_LOG"
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
 '

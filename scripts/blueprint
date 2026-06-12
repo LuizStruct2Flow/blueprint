@@ -71,6 +71,8 @@ MANAGED_FILES=(
   "scripts/start-copilot-signal-watch.sh"
   "scripts/start-all-watchers.sh"
   "scripts/agent-activity.sh"
+  "scripts/codex-feed-filter.sh"
+  "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
   "scripts/new-project.sh"
   "scripts/blueprint"

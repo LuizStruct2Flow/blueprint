@@ -171,5 +171,21 @@
     "additionalDirectories": [
       "/private/tmp"
     ]
+  },
+  "hooks": {
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash scripts/log-activity.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash scripts/log-activity.sh", "timeout": 5 }
+        ]
+      }
+    ]
   }
 }

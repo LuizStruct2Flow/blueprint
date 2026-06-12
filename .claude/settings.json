@@ -8,7 +8,6 @@
       "Bash(rm -rf ~/*)",
       "Bash(rm -rf $HOME*)",
       "Bash(rm -rf /Users/*)",
-      "Bash(:(){*)",
       "Bash(curl * | sh*)",
       "Bash(curl * | bash*)",
       "Bash(wget * | sh*)",

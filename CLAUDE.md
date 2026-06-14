@@ -155,6 +155,27 @@ in the next session — it's `doing/`. The grooming pass (an explicit founder
 session — see storm2flow's `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent)
 is what moves items between them.
 
+**Lifecycle management pass (`lcm`):** when the founder says `lcm` (or
+"lifecycle management"), reconcile every lifecycle folder against reality —
+a read-only audit plus the non-gated moves it implies. Walk this checklist:
+
+1. **Each item is in the right folder for its TRUE state.** A row/plan
+   marked "defer" or "someday" stranded in `doing/` belongs in `backlog/`
+   (with a re-open trigger). A deliverable pushed to `main` belongs in
+   `waiting-acceptance/`, and **its plan/folder moves with it** (plans
+   travel with the work — see §"Major Bug Process").
+2. **`AGENT_SIGNAL.md` matches the folders.** If the `Task` field claims
+   artefacts are waiting, `ls docs/waiting-acceptance/` must show them.
+3. **`backlog/` carries triggers.** Every parked item has a re-open
+   trigger or an `OBSOLETE` marker; flag any that don't.
+4. **`done/` is user-accepted only.** Nothing auto-promoted there.
+
+The pass performs the **non-founder-gated** moves itself (`doing/`↔`backlog/`,
+`doing/`→`waiting-acceptance/` on push) and only *surfaces* the gated ones
+(→`done/` on acceptance, reopen) for the founder to confirm. It is the
+between-grooming hygiene check; grooming is the heavier `backlog/`↔`doing/`
+re-prioritisation session.
+
 ## Bug Management
 
 - Every bug gets a sequential number: BUG-001, BUG-002, etc.

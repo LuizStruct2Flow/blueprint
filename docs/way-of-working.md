@@ -363,6 +363,7 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
 - **`done/` is founder-only** — agents never auto-promote
 - **Reopen path:** rejected acceptance → row goes back to `doing/`
 - **Grooming pass:** founder-led session pulls parked items into `doing/`
+- **`lcm` pass:** founder says `lcm` → agent reconciles every folder against reality (right state, signal matches folders, triggers present), performs the non-gated moves, surfaces the gated ones
 
 > The lifecycle answers **"what has been delivered?"** —
 > not "what has been merged?" Those are different questions.

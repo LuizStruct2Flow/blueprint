@@ -399,6 +399,12 @@ Verified by stash-test-restore — `git log` proves it.
 
 This single rule kills the "I'll write the test later" anti-pattern at source.
 
+**Commit-message convention.** Every commit subject is prefixed with the
+bug or feature number it serves (`fix(BUG-XXX):` / `feat(FEATURE-YYY):` /
+`test(BUG-XXX):`), and the body explains **why** the change is being made,
+not just what changed. The "what" is in the diff; the "why" is the reason
+the diff exists — what a future reader (or `git blame`) actually needs.
+
 ---
 
 # 3 · Quality — the pre-push gate

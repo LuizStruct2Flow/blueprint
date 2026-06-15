@@ -212,6 +212,7 @@ per the normal team workflow below.
 - Use agents for all non-trivial work — even small bug fixes should be
   delegated rather than quick-fixed inline
 - Every bug fix needs a numbered entry in `docs/doing/BUGS.md` + a regression test
+- **Commit-message convention.** Every commit subject is prefixed with the bug or feature number it serves (`fix(BUG-XXX):` / `feat(FEATURE-YYY):` / `test(BUG-XXX):`), and the body explains *why* the change is being made, not just what changed. The "what" is in the diff; the "why" is the reason the diff exists, and is what a future reader (or `git blame`) actually needs. Commits with no associated number (chore, tooling) still carry a why in the body.
 - **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `test(BUG-XXX): minimal reproducer (failing)` → `fix(BUG-XXX): <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
 - Trunk-based development only — no branches, use feature toggles instead
 - Run and report test coverage before every commit/push

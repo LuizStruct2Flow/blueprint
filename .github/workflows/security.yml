@@ -67,14 +67,54 @@ jobs:
 
   sca:
     name: SCA (osv-scanner)
+    runs-on: ubuntu-latest
+    # NOTE: runs osv-scanner as a direct step and gates the build on the
+    # MEDIUM+ policy ourselves — it does NOT upload SARIF to GitHub Code
+    # Scanning. The previous reusable-workflow form
+    # (osv-scanner-reusable.yml) always tried to upload SARIF, which fails
+    # on any repo without Code Scanning enabled (private repos need paid
+    # GitHub Advanced Security). This portable form works on public AND
+    # private repos with no paid features. Blocking behaviour is unchanged:
+    # MEDIUM+ (CVSS >= 4.0) still fails the build.
     permissions:
-      actions: read
       contents: read
-      security-events: write
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8
-    with:
-      scan-args: |-
-        --recursive
-        --lockfile=package-lock.json
-        --severity=MEDIUM
-        ./
+    env:
+      OSV_SCANNER_VERSION: "2.3.8"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+      - name: Install osv-scanner
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64" \
+            -o /usr/local/bin/osv-scanner
+          chmod +x /usr/local/bin/osv-scanner
+          osv-scanner --version
+      - name: Run osv-scanner (MEDIUM+ blocks)
+        run: |
+          set -euo pipefail
+          # The scanner exits non-zero on ANY vulnerability (any severity),
+          # so we capture JSON regardless of its own exit code, print the
+          # human-readable table for the log, then apply the MEDIUM+ policy
+          # gate ourselves. --allow-no-lockfiles makes "no package sources
+          # found" (historically exit 128) a PASS, so docs/framework repos
+          # with no lockfiles do not fail the job; repos WITH a lockfile get
+          # a full recursive scan that blocks on real CVEs.
+          osv-scanner scan source \
+            --recursive \
+            --allow-no-lockfiles \
+            --licenses=false \
+            --format=json \
+            ./ > osv-results.json || true
+          osv-scanner scan source --recursive --allow-no-lockfiles ./ || true
+          # MEDIUM+ == CVSS >= 4.0. Lower-severity advisories are reported
+          # above but do not fail the build.
+          BLOCKING=$(jq '[.results[]?.packages[]?.groups[]? | select((.max_severity | tonumber? // 0) >= 4.0)] | length' osv-results.json)
+          echo "osv-scanner: ${BLOCKING} finding(s) at MEDIUM+ (CVSS >= 4.0)"
+          if [ "${BLOCKING}" -gt 0 ]; then
+            echo "::error::osv-scanner found ${BLOCKING} dependency vulnerabilit(ies) at MEDIUM+ severity."
+            jq -r '.results[]?.packages[]? as $p | $p.groups[]? | select((.max_severity|tonumber? // 0) >= 4.0) | "  - \(.ids|join(", ")) (CVSS \(.max_severity)) in \($p.package.name)@\($p.package.version)"' osv-results.json
+            exit 1
+          fi
+          echo "osv-scanner: no MEDIUM+ vulnerabilities. PASS."

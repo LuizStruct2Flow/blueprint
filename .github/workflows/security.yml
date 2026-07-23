@@ -129,11 +129,14 @@ jobs:
       - name: Check out
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Blueprint shell regression tests
-        # The FULL agent-activity suite, including the slow cases pre-push runs
-        # with --fast: #10 append-during-read, #18 short sink, #2 transcript
-        # scaling, and foreground mode. Pre-push has a 30s ceiling; CI does not,
-        # so the split keeps both halves actually executing rather than letting
-        # the expensive half quietly run nowhere.
+        # The FULL agent-activity suite. Beyond what the blocking pre-push gate
+        # already runs with --fast, this ADDS: #10 append-during-read, #18 short
+        # sink, and foreground mode. It does NOT add #2 (transcript scaling) —
+        # that runs in pre-push, because resident count staying independent of
+        # watched-file count is the shipped BUG-001 mechanism and belongs in the
+        # blocking gate. Pre-push has a 30s ceiling; CI does not, so the split
+        # keeps both halves executing rather than letting the expensive half
+        # quietly run nowhere.
         run: |
           set -euo pipefail
           bash tests/marker-merge/test.sh

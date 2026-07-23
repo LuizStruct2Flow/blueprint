@@ -19,6 +19,8 @@
 # The hook is driven in an isolated fixture with shim scanners on PATH, so every
 # exit-code path is deterministic rather than waiting for the flake to recur.
 #
+# Runs in the blocking pre-push gate (~0.2s) and in CI.
+#
 # Run from the blueprint repo root:
 #   bash tests/pre-push-scanners/test.sh
 #
@@ -127,7 +129,11 @@ else fail "a transient semgrep failure should retry and pass (rc=$rc)"; fi
 mk_shim gitleaks 1; mk_shim semgrep 0
 rc="$(run_hook)"
 if [ "$rc" -ne 0 ] && saw "found a secret" && ! saw "could not complete"; then
-  pass "gitleaks exit 1 → blocks as a secret"
+  # Output must be surfaced too. BUG-003's diagnosis was that suppressed
+  # diagnostics made the gate untrustworthy, so classification alone is not
+  # enough to pin — assert the scanner's own output reaches the operator.
+  saw "SIMULATED-FINDING" && pass "gitleaks exit 1 → blocks as a secret, output shown" \
+                          || fail "gitleaks exit 1 blocked but hid the scanner output"
 else fail "gitleaks exit 1 must block and be labelled a secret (rc=$rc)"; fi
 
 # ===========================================================================
@@ -139,7 +145,8 @@ else fail "gitleaks exit 1 must block and be labelled a secret (rc=$rc)"; fi
 mk_shim gitleaks 2; mk_shim semgrep 0
 rc="$(run_hook)"
 if [ "$rc" -ne 0 ] && saw "gitleaks could not complete" && ! saw "found a secret"; then
-  pass "gitleaks exit 2 → blocks as a tool failure, NOT as a secret"
+  saw "shim gitleaks call" && pass "gitleaks exit 2 → blocks as a tool failure, output shown" \
+                           || fail "gitleaks tool-failure path hid the diagnostic output"
 else fail "gitleaks tool error must not be reported as a secret (rc=$rc)"; fi
 [ "$(calls_of gitleaks)" -eq 1 ] && pass "gitleaks is classified but not retried (documented asymmetry)" \
                                  || fail "gitleaks was called $(calls_of gitleaks) times; no retry is intended"

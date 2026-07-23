@@ -31,11 +31,11 @@ jobs:
       contents: read
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0 # gitleaks scans full history
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
@@ -52,7 +52,7 @@ jobs:
       image: returntocorp/semgrep
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Run semgrep
         # `semgrep ci` doesn't accept --severity/--error; those are
         # `semgrep scan` flags. `scan` with `--error` exits non-zero
@@ -82,7 +82,7 @@ jobs:
       OSV_SCANNER_VERSION: "2.3.8"
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install osv-scanner
         run: |
           set -euo pipefail

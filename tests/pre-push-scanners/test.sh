@@ -114,6 +114,26 @@ saw "shim semgrep call" && pass "tool-failure path exposes the scanner's own out
                         || { fail "tool-failure path hid the diagnostic output"; tail -6 "$WORK/out"; }
 
 # ===========================================================================
+# R-3. semgrep exit 1 with NO valid JSON on stdout — an OSError BEFORE the scan
+#      (e.g. an unwritable ~/.semgrep settings dir, observed in review) — must be
+#      a TOOL FAILURE, not a finding. The exit-code classifier said "exit 1 =
+#      finding", so it reported a crash as a vulnerability. Findings must come
+#      from semgrep's JSON `results`, which an OSError never produces.
+# ===========================================================================
+cat >"$FIX/bin/semgrep" <<'SH'
+#!/bin/sh
+echo "Traceback (most recent call last):" >&2
+echo "PermissionError: [Errno 13] Permission denied: '/ro/.semgrep/settings.yml'" >&2
+exit 1
+SH
+chmod +x "$FIX/bin/semgrep"
+mk_shim gitleaks 0
+rc="$(run_hook)"
+if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "found a WARNING+ finding"; then
+  pass "R-3: semgrep exit 1 with no JSON → tool failure, not a finding"
+else fail "R-3: semgrep OSError (exit 1, no JSON) misclassified as a finding (rc=$rc)"; fi
+
+# ===========================================================================
 # 4. semgrep exit 2 then 0 → retries once and passes (transient recovery).
 # ===========================================================================
 mk_shim gitleaks 0; mk_shim semgrep "2 0"

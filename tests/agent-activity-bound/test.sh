@@ -46,6 +46,21 @@ pass(){ echo "  ok — $*"; }
 
 [ -f "$SCRIPT" ] || { echo "FAIL: missing $SCRIPT"; exit 1; }
 
+# Case #19 only exercises the LC_ALL=C fix under a MULTIBYTE locale — in the C
+# locale awk already counts bytes, so the case would pass vacuously against the
+# very implementation it exists to catch. Select one explicitly.
+UTF8_LOCALE=""
+for l in "${LANG:-}" en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
+  case "$l" in *[Uu][Tt][Ff]*) locale -a 2>/dev/null | grep -qix "$(printf '%s' "$l" | sed 's/UTF-8/utf8/I')" && { UTF8_LOCALE="$l"; break; } ;;
+  esac
+done
+if [ -n "$UTF8_LOCALE" ]; then
+  export LC_ALL="$UTF8_LOCALE"
+  echo "  (multibyte locale for #19: $UTF8_LOCALE)"
+else
+  echo "  WARNING: no UTF-8 locale available — case #19 cannot prove the LC_ALL=C fix on this host."
+fi
+
 # --- fixture ----------------------------------------------------------------
 REPO="$WORK/repo"; HOMEDIR="$WORK/home"; STATE="$WORK/state"
 mkdir -p "$REPO/scripts" "$REPO/logs" "$HOMEDIR" "$STATE"
@@ -107,11 +122,11 @@ wait_sup(){ local want="$1" i=0
 # #1 Concurrency — EXACTLY one supervisor (not "at most": zero would mean the
 #    daemon never started, and the plan requires one survivor).
 # ===========================================================================
-i=0; while [ $i -lt 20 ]; do start_feed >/dev/null 2>&1 & i=$((i+1)); done
+i=0; while [ $i -lt 50 ]; do start_feed >/dev/null 2>&1 & i=$((i+1)); done
 wait 2>/dev/null; wait_sup 1
 n="$(supervisors)"
-if [ "$n" -eq 1 ]; then pass "20 concurrent starts → exactly 1 supervisor"
-else fail "#1 20 concurrent starts produced $n supervisors, expected exactly 1 (RC-1)"; fi
+if [ "$n" -eq 1 ]; then pass "#1 50 concurrent starts → exactly 1 supervisor"
+else fail "#1 50 concurrent starts produced $n supervisors, expected exactly 1 (RC-1)"; fi
 
 # ===========================================================================
 # #15 Resident bound is ONE — no `tee`, no per-file followers.
@@ -137,7 +152,18 @@ else fail "#16 pre-existing transcript content was replayed"; fi
 #     (This is the assertion that fails against the $() formulation.)
 # ===========================================================================
 printf 'SOLO-RECORD\n' >>"$CODEXLOG"
-if wait_for "SOLO-RECORD" 8; then pass "#17 lone complete record emitted promptly"
+# "The very next tick": TICK is 0.25s, so 2s is many ticks — but crucially this
+# must not need a FOLLOWING record or the force-flush to shake it loose.
+if wait_for "SOLO-RECORD" 2; then
+  [ "$(count_in_log "SOLO-RECORD")" -eq 1 ] \
+    && pass "#17 lone complete record emitted once, on the next tick" \
+    || fail "#17 lone record emitted $(count_in_log "SOLO-RECORD") times, expected exactly 1"
+  # Offset really advanced: a second record must follow, and the first must not
+  # be re-emitted. A stalled offset would either re-emit or swallow this.
+  printf 'SOLO-NEXT\n' >>"$CODEXLOG"
+  if wait_for "SOLO-NEXT" 3 && [ "$(count_in_log "SOLO-RECORD")" -eq 1 ]; then
+    pass "#17 offset advanced by the record (successor emitted, no re-emission)"
+  else fail "#17 offset did not advance correctly after a lone record"; fi
 else fail "#17 a single complete newline-terminated record was never emitted (R3: \$() strips the delimiter)"; fi
 
 # ===========================================================================
@@ -147,7 +173,7 @@ else fail "#17 a single complete newline-terminated record was never emitted (R3
 printf 'SPLIT-héllo-→' >>"$CODEXLOG"
 sleep 1
 if [ "$(count_in_log "SPLIT-héllo")" -eq 0 ]; then pass "#11/#19 incomplete multibyte record withheld"
-else fail "#11/#19 an incomplete record was emitted before its newline (R4: byte/char mismatch)"; fi
+else fail "#11/#19 an incomplete record was emitted before its newline (R4: byte/char mismatch, locale=${UTF8_LOCALE:-none})"; fi
 printf -- '-TAIL\n' >>"$CODEXLOG"
 if wait_for "SPLIT-héllo-→-TAIL" 8; then
   [ "$(count_in_log "SPLIT-héllo-→-TAIL")" -eq 1 ] \
@@ -170,7 +196,14 @@ else fail "#3 a file that went quiet stopped being followed"; fi
 stop_feed >/dev/null 2>&1; wait_sup 0
 MAXFRAG=64 start_feed >/dev/null 2>&1; wait_sup 1
 printf 'X%.0s' $(seq 1 200) >>"$CODEXLOG"
-if wait_for "force-flushed" 8; then pass "#12 oversized newline-less line force-flushed once"
+if wait_for "force-flushed" 8; then
+  sleep 1
+  n="$(count_in_log "force-flushed")"
+  [ "$n" -eq 1 ] && pass "#12 oversized newline-less line force-flushed exactly once" \
+                 || fail "#12 force-flush fired $n times — the offset did not advance past the fragment (re-read loop)"
+  printf 'AFTER-FLUSH\n' >>"$CODEXLOG"
+  wait_for "AFTER-FLUSH" 4 && pass "#12 stream continues after a force-flush" \
+                           || fail "#12 stream stalled after the force-flush"
 else fail "#12 MAX_FRAGMENT force-flush never fired; a newline-less writer would re-read forever"; fi
 printf '\n' >>"$CODEXLOG"; stop_feed >/dev/null 2>&1; wait_sup 0
 unset MAXFRAG; start_feed >/dev/null 2>&1; wait_sup 1
@@ -215,10 +248,13 @@ else fail "#5b --stop left $(supervisors) supervisor(s) running"; fi
 if ! status_feed >/dev/null 2>&1; then pass "#5c --status reports not running after stop"
 else fail "#5c --status still reports running after --stop"; fi
 
-stop_feed >/dev/null 2>&1 & start_feed >/dev/null 2>&1 & wait 2>/dev/null; sleep 1
-n="$(supervisors)"
-if [ "$n" -le 1 ]; then pass "#6 concurrent stop/start does not wedge or double-start (n=$n)"
-else fail "#6 concurrent stop/start produced $n supervisors"; fi
+stop_feed >/dev/null 2>&1 & start_feed >/dev/null 2>&1 & wait 2>/dev/null
+# Converge deliberately: a race may legitimately land on 0, but the CONTRACT is
+# "no wedged lock, no double start" — so a follow-up start must reach exactly 1.
+start_feed >/dev/null 2>&1
+if wait_sup 1; then pass "#6 concurrent stop/start converges to exactly one supervisor"
+else fail "#6 concurrent stop/start left $(supervisors) supervisors — 0 is the wedged/no-feed outcome and is not a pass"; fi
+stop_feed >/dev/null 2>&1; wait_sup 0
 
 # ===========================================================================
 # #13 Stale state after SIGKILL: --status says NOT running, --stop signals
@@ -232,6 +268,9 @@ if wait_sup 1; then
     kill -9 "$pid" 2>/dev/null; wait_sup 0
     if ! status_feed >/dev/null 2>&1; then pass "#13 stale state after SIGKILL reports not running"
     else fail "#13 --status trusted a stale state file after SIGKILL"; fi
+    # Stale --stop must be a clean no-op: exit 0, nothing signalled.
+    if stop_feed >/dev/null 2>&1; then pass "#13b stale --stop exits cleanly without signalling"
+    else fail "#13b stale --stop did not exit cleanly (rc=$?)"; fi
     dbg="$(start_feed 2>&1)"
     if wait_sup 1; then
       pass "#4 lock released by SIGKILL; restart yields exactly one supervisor"
@@ -261,9 +300,21 @@ if wait_sup 1; then
   else fail "#14 --stop signalled a process whose identity did not match (rc=$rc)"; fi
   kill -9 "$victim" 2>/dev/null; wait "$victim" 2>/dev/null
 
-  { echo "pid=$$"; echo "token=whatever"; } >"$STATEF"
-  if ! stop_feed >/dev/null 2>&1; then pass "#14b missing nonce fails closed (I-2)"
-  else fail "#14b a state file with no nonce was accepted"; fi
+  # Restore a REAL supervisor, then omit ONLY the nonce — real pid, real token.
+  # Anything else and the baseline rejects on the token instead, so the case
+  # would pass against the very implementation it is meant to catch.
+  mv -f "$STATEF.bak" "$STATEF" 2>/dev/null
+  stop_feed >/dev/null 2>&1; wait_sup 0
+  start_feed >/dev/null 2>&1
+  if wait_sup 1; then
+    rpid="$(sup_pid)"
+    rtok="$(sed -n 's/^token=//p' "$STATEF" | head -1)"
+    cp "$STATEF" "$STATEF.bak"
+    { echo "pid=$rpid"; echo "token=$rtok"; } >"$STATEF"   # nonce omitted, ONLY
+    if ! stop_feed >/dev/null 2>&1; then pass "#14b missing nonce alone fails closed (I-2)"
+    else fail "#14b a state file with a valid pid+token but NO nonce was accepted"; fi
+    mv -f "$STATEF.bak" "$STATEF" 2>/dev/null
+  else fail "#14b could not start a supervisor for the nonce case"; fi
   mv -f "$STATEF.bak" "$STATEF" 2>/dev/null
   stop_feed >/dev/null 2>&1; wait_sup 0
 else fail "#14 could not start a supervisor for the identity cases"; fi
@@ -285,16 +336,92 @@ else fail "#7 a path with spaces broke the reader (word splitting)"; fi
 # ===========================================================================
 PROJ="$HOMEDIR/.claude/projects/$(printf '%s' "$REPO" | sed 's#/#-#g')/sess/subagents"
 mkdir -p "$PROJ"
-i=0; while [ $i -lt 30 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"a%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
+i=0; while [ $i -lt 40 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"a%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
 start_feed >/dev/null 2>&1; wait_sup 1; sleep 1
 n1="$(supervisors)"; t1="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
-i=30; while [ $i -lt 90 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"b%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
+i=40; while [ $i -lt 80 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"b%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
 sleep 1
 n2="$(supervisors)"; t2="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
 if [ "$n1" -eq 1 ] && [ "$n2" -eq 1 ] && [ "$t1" -eq 0 ] && [ "$t2" -eq 0 ]; then
-  pass "#2 process count independent of transcript count (30→90 files: 1 supervisor, 0 tails)"
+  pass "#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)"
 else fail "#2 process count grew with transcripts (sup $n1→$n2, tails $t1→$t2) — the RC-2 leak"; fi
 stop_feed >/dev/null 2>&1
+
+# ===========================================================================
+# #10 Append DURING the bounded read (R-1). The read window is widened by a
+#     test seam so the race is deterministic rather than timing-luck. Every
+#     record must appear exactly once: advancing short duplicates, advancing
+#     long skips.
+# ===========================================================================
+stop_feed >/dev/null 2>&1; wait_sup 0
+: >"$CODEXLOG"
+( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
+  AGENT_FEED_TEST_SLOW_READ=1 bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
+if wait_sup 1; then
+  printf 'RACE-A\n' >>"$CODEXLOG"     # in the snapshot
+  sleep 0.3
+  printf 'RACE-B\n' >>"$CODEXLOG"     # lands DURING the slowed read
+  sleep 0.3
+  printf 'RACE-C\n' >>"$CODEXLOG"
+  wait_for RACE-C 6; sleep 1
+  a="$(count_in_log RACE-A)"; b="$(count_in_log RACE-B)"; c="$(count_in_log RACE-C)"
+  if [ "$a" -eq 1 ] && [ "$b" -eq 1 ] && [ "$c" -eq 1 ]; then
+    pass "#10 append during a slowed read: every record emitted exactly once"
+  else fail "#10 append-during-read lost or duplicated records (A=$a B=$b C=$c; each must be 1)"; fi
+else fail "#10 could not start a supervisor with the slow-read seam"; fi
+stop_feed >/dev/null 2>&1; wait_sup 0
+
+# ===========================================================================
+# #18 Short sink (R-1): if the bounded capture comes up short, the tick must
+#     emit NOTHING and advance NOTHING — then deliver the full range intact
+#     once the sink behaves. Cleared mid-run on the SAME supervisor, because a
+#     restart would legitimately re-seed at EOF and mask the property.
+# ===========================================================================
+: >"$CODEXLOG"
+SENTINEL="$WORK/short-sink-active"; : >"$SENTINEL"
+( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
+  AGENT_FEED_TEST_SHORT_SINK="$SENTINEL" bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
+if wait_sup 1; then
+  printf 'SHORTSINK-PAYLOAD\n' >>"$CODEXLOG"
+  sleep 1.5
+  if [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 0 ]; then
+    pass "#18 short sink emits nothing and consumes nothing"
+  else fail "#18 a short capture was emitted — partial bytes escaped the bounded read"; fi
+  rm -f "$SENTINEL"                                  # sink healthy again
+  if wait_for "SHORTSINK-PAYLOAD" 5; then
+    [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 1 ] \
+      && pass "#18 deferred range delivered intact, exactly once, by the same supervisor" \
+      || fail "#18 range delivered $(count_in_log "SHORTSINK-PAYLOAD") times after recovery"
+  else fail "#18 the deferred range was never delivered — bytes were consumed but not emitted"; fi
+else fail "#18 could not start a supervisor with the short-sink seam"; fi
+stop_feed >/dev/null 2>&1; wait_sup 0
+
+# ===========================================================================
+# #5f/#15f Foreground mode (R-3): must BLOCK, hold exactly one resident
+#     process, spawn no `tee`, and write BOTH stdout and the log itself.
+# ===========================================================================
+: >"$CODEXLOG"
+FGOUT="$WORK/fg.out"
+( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
+  bash scripts/agent-activity.sh >"$FGOUT" 2>&1 ) & fgjob=$!
+sleep 1.5
+if kill -0 "$fgjob" 2>/dev/null; then pass "#5f foreground blocks (does not return like --daemon)"
+else fail "#5f foreground returned immediately — it must block"; fi
+
+fgpid="$(ps -eo pid,ppid,args | awk -v P="$fgjob" '$2==P && /agent-activity/ {print $1; exit}')"
+[ -n "$fgpid" ] || fgpid="$fgjob"
+kids="$(ps -eo ppid,args 2>/dev/null | awk -v P="$fgpid" '$1==P' | grep -c '[t]ee')"
+if [ "$kids" -eq 0 ]; then pass "#15f foreground spawns no 'tee' (supervisor writes both sinks)"
+else fail "#15f foreground spawned a 'tee' — the one-resident-process contract is false"; fi
+
+printf 'FOREGROUND-LINE\n' >>"$CODEXLOG"
+sleep 1.5
+if grep -qF "FOREGROUND-LINE" "$FGOUT" 2>/dev/null; then pass "#5f foreground writes to stdout"
+else fail "#5f foreground did not write to stdout"; fi
+if grep -qF "FOREGROUND-LINE" "$LOG" 2>/dev/null; then pass "#5f foreground also writes the log itself"
+else fail "#5f foreground did not write the log"; fi
+kill -TERM "$fgpid" 2>/dev/null; sleep 0.5; kill -9 "$fgjob" 2>/dev/null; wait "$fgjob" 2>/dev/null
+wait_sup 0
 
 # ===========================================================================
 # Static backstops — cheap guards against the exact idioms that caused the

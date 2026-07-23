@@ -256,8 +256,28 @@ pump(){
   [ "$size" -lt "$off" ] && off=0               # truncated
   [ "$size" -eq "$off" ] && { OFFSET["$f"]=$off; return 0; }
 
+  # --- test hooks (inert unless explicitly set) ---------------------------
+  # PLAN §4 cases #10 and #18 pin the two hardest properties of this loop:
+  # exactly-once delivery when a writer appends DURING the bounded read, and
+  # no-consumption when the sink comes up short. Neither is observable from
+  # outside without making the race deterministic, so the seams live here.
+  # Both are no-ops in normal operation.
+  local want=$(( size - off ))
+  if [ -n "${AGENT_FEED_TEST_SLOW_READ:-}" ]; then
+    sleep "$AGENT_FEED_TEST_SLOW_READ"     # #10: widen the snapshot→read window
+  fi
+  # #18: the variable names a SENTINEL PATH, and the short capture applies only
+  # while that path exists — so a test can clear the fault mid-run and assert
+  # the same supervisor then delivers the deferred range. A static toggle can't
+  # express that: restarting re-seeds the offset at EOF (see seed_offset), which
+  # is correct behaviour but would look like data loss.
+  if [ -n "${AGENT_FEED_TEST_SHORT_SINK:-}" ] && [ -e "$AGENT_FEED_TEST_SHORT_SINK" ] \
+     && [ "$want" -gt 1 ]; then
+    want=$(( want - 1 ))
+  fi
+
   tmp="$log_dir/.delta.$$"
-  tail -c +$((off+1)) "$f" 2>/dev/null 9>&- | head -c $((size - off)) 9>&- >"$tmp"
+  tail -c +$((off+1)) "$f" 2>/dev/null 9>&- | head -c "$want" 9>&- >"$tmp"
   got=$(wc -c <"$tmp" 2>/dev/null | tr -d ' ')
   # Success is "the bounded sink captured the whole range", NOT the pipeline's
   # exit status: head -c closing early can SIGPIPE tail during a concurrent

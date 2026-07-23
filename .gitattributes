@@ -1,0 +1,37 @@
+# Controls what `git archive` ships — which is what `scripts/new-project.sh`
+# uses to bootstrap a derived project (A-05).
+#
+# The blueprint is both a TEMPLATE and a working repo. Its own lifecycle folders
+# therefore hold real, tracked work items — BUG plans, audit registers, review
+# records. Without this, a freshly bootstrapped project opens with the
+# BLUEPRINT's active bugs sitting in its docs/doing/, which its agents then read
+# as their own. Observed: a test bootstrap inherited BLUEPRINT-AUDIT-2026-07-23.md
+# and PLAN-BUG-001.md as if they described the new project.
+#
+# Switching bootstrap to `git archive HEAD` stopped untracked and gitignored
+# files (a .env holding SONAR_TOKEN, logs/, node_modules/) from shipping. It does
+# NOT stop TRACKED work items — those need an explicit export boundary, which is
+# what this file is.
+#
+# The structure ships; this repo's contents do not. README.md explains each
+# lifecycle state and HANDOVER.md is the canonical resume template a new project
+# fills in — both are template material and stay.
+
+docs/doing/**                      export-ignore
+docs/doing/README.md              -export-ignore
+docs/doing/HANDOVER.md            -export-ignore
+
+docs/waiting-acceptance/**         export-ignore
+docs/waiting-acceptance/README.md -export-ignore
+
+docs/done/**                       export-ignore
+docs/done/README.md               -export-ignore
+
+# backlog/ additionally keeps BACKLOG.md and BUGS.md: unlike the folders above,
+# those are empty tables with only a header row — genuine templates a new project
+# fills in, not this repo's parked work. If the blueprint ever parks real items
+# there, they need listing here too.
+docs/backlog/**                    export-ignore
+docs/backlog/README.md            -export-ignore
+docs/backlog/BACKLOG.md           -export-ignore
+docs/backlog/BUGS.md              -export-ignore

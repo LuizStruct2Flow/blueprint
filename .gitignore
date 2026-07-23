@@ -75,6 +75,16 @@ docs/**/CODEX_REVIEW.md
 project_config_overview.md
 project_config_paths.md
 project_config_dod.md
+# A-27: security + infra were omitted while docs/PUBLISHING.md's preflight has
+# always required ALL FIVE `project_config_*.md` to be ignored. They are the two
+# most sensitive of the set — the threat model, adversary assumptions and
+# incident playbook, and the infra account IDs and state backends — so on a
+# derived project's first public push they were exactly the wrong two to leak.
+# (In the blueprint itself all five stay tracked as templates: git ignores
+# .gitignore for already-tracked paths, which is how the other three already
+# behave.)
+project_config_security.md
+project_config_infra.md
 
 # struct2flow agent-protocol scripts (Codex dispatcher etc.).
 # Project-specific scripts that ship publicly go in scripts/ with

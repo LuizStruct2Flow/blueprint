@@ -8,7 +8,8 @@
 # That gap was audit finding A-15.
 #
 # Keep every check here fast: the whole pre-push gate has a 30 s ceiling
-# (CLAUDE.md §"Pre-push tolerance"). Current total for this file: well under 1 s.
+# (CLAUDE.md §"Pre-push tolerance"). Measured total for this file: ~19 s, almost
+# all of it the agent-activity --fast suite. The whole hook measures ~20 s.
 
 echo "  → Blueprint shell regression tests..."
 
@@ -25,12 +26,21 @@ fi
 # BUG-001 — the activity feed must hold exactly one instance with a bounded
 # process set, and must read file deltas byte-correctly. Guards the fork-bomb
 # regression plus the two silent-data-loss defects found in review rounds 3/4.
-# --fast: the full suite is ~29s on its own and the WHOLE gate has a 30s
+# --fast: the full suite is ~29 s on its own and the WHOLE gate has a 30 s
 # ceiling (CLAUDE.md §"Pre-push tolerance"). The rule is to move work out of
-# pre-push, not to weaken the ceiling. --fast keeps every case pinning a defect
-# that actually shipped; the slow concurrency/failure-injection cases run in CI
-# on every push (.github/workflows/security.yml). Both run — a suite nothing
-# executes is the A-15 defect this repo already had once.
+# pre-push, not to weaken the ceiling.
+#
+# What --fast runs: the shipped BUG-001 mechanisms (RC-1 instance guard, RC-2
+# per-transcript followers INCLUDING #2's 40→80 scaling assertion, RC-3
+# teardown, RC-6 change detection) plus the cheap review-found regressions worth
+# blocking on (R3 command-substitution, R4 byte/char, I-2 nonce, I-3 change
+# token). Those four were caught in review and never shipped, so "covers what
+# shipped" would be the wrong criterion — the criterion is "shipped mechanisms
+# plus cheap regressions worth blocking on".
+#
+# What CI adds (.github/workflows/security.yml): the deterministic race /
+# fault-injection cases #10 and #18, and foreground mode. Both halves run — a
+# suite nothing executes is the A-15 defect this repo already had once.
 if [ -f tests/agent-activity-bound/test.sh ]; then
   bash tests/agent-activity-bound/test.sh --fast || {
     echo "❌ tests/agent-activity-bound/test.sh failed (BUG-001)."

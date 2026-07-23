@@ -76,6 +76,7 @@ pass(){ echo "  ok — $*"; }
 # locale awk already counts bytes, so the case would pass vacuously against the
 # very implementation it exists to catch. Select one explicitly.
 UTF8_LOCALE=""
+[ -n "${AGENT_FEED_TEST_NO_UTF8:-}" ] || \
 for l in "${LANG:-}" en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
   case "$l" in *[Uu][Tt][Ff]*) locale -a 2>/dev/null | grep -qix "$(printf '%s' "$l" | sed 's/UTF-8/utf8/I')" && { UTF8_LOCALE="$l"; break; } ;;
   esac
@@ -86,6 +87,7 @@ if [ -n "$UTF8_LOCALE" ]; then
 else
   echo "  WARNING: no UTF-8 locale available — case #19 cannot prove the LC_ALL=C fix on this host."
 fi
+SKIPPED=0
 
 # --- fixture ----------------------------------------------------------------
 REPO="$WORK/repo"; HOMEDIR="$WORK/home"; STATE="$WORK/state"
@@ -173,16 +175,20 @@ if [ "$(count_in_log "PRE-EXISTING-must-not-replay")" -eq 0 ]; then pass "#16 pr
 else fail "#16 pre-existing transcript content was replayed"; fi
 
 # ===========================================================================
-# #17 A single complete record on a quiet file emits on the next tick,
-#     without a following record and without the force-flush.
-#     (This is the assertion that fails against the $() formulation.)
+# #17 A single complete record on a quiet file is emitted WITHOUT needing a
+#     following record and WITHOUT the force-flush, exactly once, and the offset
+#     advances past it. (This is the assertion that fails against the $()
+#     formulation, where k=0 leaves it stuck until the fragment bound.)
+#
+#     NOT a latency assertion: the poll below allows several ticks. Exact
+#     next-tick delivery is not a contract this suite pins — saying "next tick"
+#     while polling ~8 ticks would claim more than it measures.
 # ===========================================================================
 printf 'SOLO-RECORD\n' >>"$CODEXLOG"
-# "The very next tick": TICK is 0.25s, so 2s is many ticks — but crucially this
-# must not need a FOLLOWING record or the force-flush to shake it loose.
+# What matters is that it is emitted at all without a successor or force-flush.
 if wait_for "SOLO-RECORD" 2; then
   [ "$(count_in_log "SOLO-RECORD")" -eq 1 ] \
-    && pass "#17 lone complete record emitted once, on the next tick" \
+    && pass "#17 lone complete record emitted once, unaided by a successor or force-flush" \
     || fail "#17 lone record emitted $(count_in_log "SOLO-RECORD") times, expected exactly 1"
   # Offset really advanced: a second record must follow, and the first must not
   # be re-emitted. A stalled offset would either re-emit or swallow this.
@@ -196,6 +202,12 @@ else fail "#17 a single complete newline-terminated record was never emitted (R3
 # #11/#19 Split record — including multibyte UTF-8 — is withheld until its
 #     newline arrives, then emitted exactly once, intact.
 # ===========================================================================
+if [ -z "$UTF8_LOCALE" ]; then
+  # In the C locale awk already counts bytes, so the R4 byte/char bug passes
+  # vacuously. Reporting "ok" here would be a proof the host cannot give.
+  echo "  SKIP — #19 multibyte case: no UTF-8 locale; the LC_ALL=C fix is UNPROVEN here"
+  SKIPPED=$((SKIPPED+1))
+fi
 printf 'SPLIT-héllo-→' >>"$CODEXLOG"
 sleep 1
 if [ "$(count_in_log "SPLIT-héllo")" -eq 0 ]; then pass "#11/#19 incomplete multibyte record withheld"
@@ -467,7 +479,11 @@ grep -qE '^[[:space:]]*(local[[:space:]]+)?delta=\$\(' "$CODE" && fail "static: 
 [ "$FAILED" -eq 0 ] && pass "static backstops clean"
 
 if [ "$FAILED" -eq 0 ]; then
-  echo "PASS: BUG-001 — one instance, bounded process set, byte-correct reads."
+  if [ "${SKIPPED:-0}" -gt 0 ]; then
+    echo "PASS (with ${SKIPPED} case(s) SKIPPED — see SKIP lines above; coverage is incomplete on this host)."
+  else
+    echo "PASS: BUG-001 — one instance, bounded process set, byte-correct reads."
+  fi
   exit 0
 fi
 echo "FAILED: see the FAIL lines above."

@@ -80,12 +80,21 @@ if command -v semgrep >/dev/null 2>&1; then
     . >"$_sg_out" 2>&1 || _sg_rc=$?
 
   if [ "$_sg_rc" -ge 2 ]; then
-    # Tool failure, not a clean scan. Retry once — these are usually transient —
-    # then fail CLOSED, because "the scanner could not run" must never be
-    # mistaken for "the scanner found nothing".
-    echo "  ⚠ semgrep exited $_sg_rc (tool error, not a finding) — retrying once..."
+    # Tool failure, not a clean scan. Retry once, then fail CLOSED — "the scanner
+    # could not run" must never be mistaken for "the scanner found nothing".
+    #
+    # The retry drops to --jobs 1, which is a strictly better retry than
+    # repeating the identical command: it recovers BOTH a genuinely transient
+    # failure AND the deterministic one seen here — semgrep's multi-core engine
+    # calls io_uring_queue_init per worker, which fails with "Cannot allocate
+    # memory" when RLIMIT_MEMLOCK is low (8 MB is a common Linux default), even
+    # with tens of GB of RAM free. Single-job avoids io_uring parallelism
+    # entirely. A plain repeat would just crash the same way and fail the push
+    # for an environment limit rather than a real finding.
+    echo "  ⚠ semgrep exited $_sg_rc (tool error, not a finding) — retrying single-job..."
     _sg_rc=0
     semgrep \
+      --jobs 1 \
       --config=p/owasp-top-ten \
       --severity=WARNING \
       --severity=ERROR \

@@ -50,7 +50,7 @@ MANAGED_FILES=(
   # Top-level agent protocol
   "CLAUDE.md"
   "AGENTS.md"
-  "AGENT_ROSTER.md"
+  "AGENT_ROSTER.example.md"
   "STACK_DEFAULTS.md"
   "Brewfile"
 
@@ -655,7 +655,7 @@ cmd_a2bp() {
         echo "        • docs/A2BP_PLAYBOOK.md if the calling pattern changed"
         touched_sync=1
         ;;
-      AGENTS.md|AGENT_ROSTER.md|scripts/agent-activity.sh|scripts/start-codex-signal-watch.sh|scripts/start-gemini-signal-watch.sh)
+      AGENTS.md|AGENT_ROSTER.example.md|scripts/agent-activity.sh|scripts/start-codex-signal-watch.sh|scripts/start-gemini-signal-watch.sh)
         echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
         echo "      → Class F (Agent layer) — also check:"
         echo "        • docs/way-of-working.md 'persona team — radio-over' slide"

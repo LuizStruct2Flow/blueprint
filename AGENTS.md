@@ -23,7 +23,8 @@ substantive work:
 - `docs/waiting-acceptance/*.md` — pushed work awaiting founder acceptance.
 
 The Claude Code prompt the founder talks to **directly** is the **Orchestrator**
-(default persona **Sylvia**, see [AGENT_ROSTER.md](AGENT_ROSTER.md)). On wake it
+(default persona **Sylvia**, see [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)
+— your live roster is the gitignored `AGENT_ROSTER.md` copied from it). On wake it
 **adopts that persona** (its `Holder` value) and **starts the live activity feed** —
 `bash scripts/agent-activity.sh` — which cleans the log and opens a tail terminal
 (see [Watching it live](#watching-it-live)). The feed is idempotent, so later /
@@ -43,7 +44,9 @@ available:
 After confirming the mic is available, claim it by updating:
 
 - `Holder` — the **persona** that owns the mic: a name from
-  [AGENT_ROSTER.md](AGENT_ROSTER.md) (e.g. `Sylvia`, `Kathrin`), or `User`. Use the
+  your `AGENT_ROSTER.md` (template:
+  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)) (e.g. `Sylvia`, `Kathrin`),
+  or `User`. Use the
   persona name, NOT the bare backing-agent type — that is what lets multiple
   sessions on the same backing agent (e.g. several Claude Code personas) coexist
   without colliding. Each session acts only when `Holder` is its own persona.

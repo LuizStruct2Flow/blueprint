@@ -13,8 +13,10 @@ upstream so every other project inherits it.
 ## What makes this different from "another opinionated framework"
 
 - **A whole AI team shares one mic.** A configurable roster of personas
-  ([AGENT_ROSTER.md](AGENT_ROSTER.md)) — each backed by Codex, Claude Code,
-  Gemini, or Copilot — coordinates through a single `AGENT_SIGNAL.md` file:
+  (a gitignored, per-engineer `AGENT_ROSTER.md`, copied from
+  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md) the way you'd copy
+  `.env.example`) — each backed by whichever agent you run: Codex, Claude Code,
+  Gemini, Copilot, Qwen — coordinates through a single `AGENT_SIGNAL.md` file:
   radio-over handoff, one mic at a time, no overwrites or duplicate work.
   Persona names keep same-type agents distinct (two Claude Code sessions =
   "Sylvia" vs "Christian"). The default team is 15 personas; edit the roster

@@ -32,6 +32,13 @@ npm-debug.log*
 # the public repo.
 .claude/
 
+# Per-engineer agent roster. Works like .env: AGENT_ROSTER.example.md is the
+# tracked template, AGENT_ROSTER.md is your personal copy. Each engineer runs a
+# different fleet (different agents, subscriptions, quotas), so the live roster
+# must not be shared or overwritten by a blueprint sync.
+#   cp AGENT_ROSTER.example.md AGENT_ROSTER.md
+AGENT_ROSTER.md
+
 # Test coverage
 coverage/
 

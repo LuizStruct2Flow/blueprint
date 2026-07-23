@@ -1,4 +1,28 @@
-# Agent Roster
+# Agent Roster — EXAMPLE
+
+> **This is the template, not the live roster.** It works like `.env.example`:
+> copy it once, then edit your copy freely.
+>
+> ```bash
+> cp AGENT_ROSTER.example.md AGENT_ROSTER.md   # your personal roster (gitignored)
+> ```
+>
+> **`AGENT_ROSTER.md` is gitignored and per-engineer.** Your teammates run
+> different agents with different subscriptions and quotas — one has Claude Code
+> and Codex, another adds Gemini or Qwen, a third only has what their employer
+> licenses. A committed roster would force one person's fleet onto everyone and
+> be overwritten on every blueprint sync. So the *example* is blueprint-managed
+> and the *live roster* is yours.
+>
+> **Backing agents are open-ended.** The rows below use Claude Code and Codex
+> because that is the combination the dispatchers in
+> [AGENTS.md](AGENTS.md) ship with, but the `Backing agent` column is free text
+> — put `Gemini`, `GitHub Copilot`, `Qwen`, or anything else you actually run.
+> Only two things depend on the value: the live feed prints it as the label
+> `[Persona - Backing agent]`, and any agent you want *dispatched autonomously*
+> needs a signal watcher (see [AGENTS.md](AGENTS.md) §Dispatching). An agent
+> with no watcher still works — you drive it yourself and it participates in the
+> baton normally.
 
 The team. Each member is a **persona** with a fixed **name**, a **role**, and the
 **backing agent** that powers it. The persona name is what goes in
@@ -7,11 +31,11 @@ sessions backed by the same agent type (e.g. two Claude Code sessions) stay
 distinguishable. This prevents the same-type collision where two "Claude Code"
 sessions both answer `OVER_TO_CLAUDE` and fight over the mic.
 
-**This roster is the DEFAULT for a new project — change it to fit your team.**
-Each team configures its own constellation from the agents it has access to and
-the credits / quota those agents carry. There is no fixed team. Edit the members
-below: rename personas, add or drop roles, and pick each one's backing agent
-(`Claude Code`, `Codex`, `Gemini`, or `GitHub Copilot`) to match what you have.
+**This roster is the DEFAULT starting point — change your copy to fit your
+fleet.** Each engineer configures their own constellation from the agents they
+have access to and the credits / quota those agents carry. There is no fixed
+team. Edit the members below: rename personas, add or drop roles, and set each
+one's backing agent to whatever you actually run.
 
 ## Members (default)
 

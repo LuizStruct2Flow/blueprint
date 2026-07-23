@@ -11,9 +11,14 @@ The agents on this project coordinate through [AGENT_SIGNAL.md](AGENT_SIGNAL.md)
 in `git log`). `Holder` is a **persona name** from the team roster, not a bare
 agent type.
 
-- **[AGENT_ROSTER.md](AGENT_ROSTER.md)** — the team (who's who): each persona, its
-  role, and its backing agent. This is the DEFAULT setup; each team edits it to fit
-  the agents and credits it has.
+- **`AGENT_ROSTER.md`** — the team (who's who): each persona, its role, and its
+  backing agent. **Per-engineer and gitignored, on the `.env` model**: the tracked
+  template is [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md); you copy it once
+  (`cp AGENT_ROSTER.example.md AGENT_ROSTER.md`) and edit your copy. Each engineer
+  runs a different fleet — different agents, subscriptions and quotas — so the live
+  roster is neither shared nor overwritten by a blueprint sync. The `Backing agent`
+  column is free text (Claude Code, Codex, Gemini, Copilot, Qwen, …); only
+  autonomous dispatch needs a matching signal watcher.
 - **[AGENTS.md](AGENTS.md)** — the coordination protocol: mic states, the ACTIVE-on-claim rule
   (claiming the mic means setting `State = ACTIVE` first), reactivity / Monitor
   setup, and how each backing agent (Codex, Gemini, Copilot) is dispatched/watched.
@@ -833,7 +838,7 @@ deck currently mirrors:
 6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
 7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
 8. Documentation (`docs/DOCUMENTATION.md` + CLAUDE.md §"Documentation is a main concern" + DoD §6.4)
-9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.md` team config + `scripts/agent-activity.sh` live feed)
+9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md` + `scripts/agent-activity.sh` live feed)
 10. Blueprint sync (this section + README.md §"The sync model" + `scripts/blueprint`)
 
 Tightening a rule in DoD §3? Touch the matching deck slide. Adding a

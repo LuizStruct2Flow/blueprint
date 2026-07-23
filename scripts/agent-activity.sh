@@ -3,18 +3,16 @@
 # line. The FIRST agent to wake runs this; it is idempotent (a pidfile makes
 # later agents no-op), and on that first start it:
 #   1. CLEANS old entries (truncates logs/agent-activity.log) so it can't explode,
-#   2. OPENS a Terminal window tailing the log so the founder sees it live,
-#   3. STREAMS the merged feed into the log, merging:
+#   2. STREAMS the merged feed into the log, merging:
 #        - AGENT_SIGNAL.md mic changes  → [<Holder>] <State> — <Task>  (every agent)
 #        - ~/.linkedin-watcher-agent/codex-runs.log  → [CODEX] <line>              (dispatch detail)
 #        - ~/.linkedin-watcher-agent/gemini-runs.log → [GEMINI] <line>             (dispatch detail)
 #
 # Usage:
-#   bash scripts/agent-activity.sh            # first agent: clean + open terminal + feed
+#   bash scripts/agent-activity.sh            # first agent: clean + feed
 #   tail -f logs/agent-activity.log           # follow the one file from anywhere
 #
 # Env:
-#   AGENT_FEED_NO_TERM=1   don't auto-open a Terminal (headless / CI)
 #   LINKEDIN_WATCHER_AGENT_HOME=...    override ~/.linkedin-watcher-agent
 #
 # Pull-based: only READS existing sources, so no agent changes how it writes.
@@ -28,7 +26,7 @@ pidfile="$log_dir/.agent-activity.pid"
 state_dir="${LINKEDIN_WATCHER_AGENT_HOME:-$HOME/.linkedin-watcher-agent}"; mkdir -p "$state_dir"
 
 # First-agent-wins: if a live feed is already running, no-op (don't re-clean or
-# re-open the terminal). This is what makes "only the first waking agent acts" true.
+# restart the feed). This is what makes "only the first waking agent acts" true.
 if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
   echo "[agent-activity] already running (pid $(cat "$pidfile")) — leaving it."
   exit 0
@@ -38,22 +36,24 @@ fi
 echo "$$" > "$pidfile"
 trap 'rm -f "$pidfile"' EXIT
 
-# Open a Terminal tailing the log (macOS). Skip with AGENT_FEED_NO_TERM=1 or off-mac.
-if [ "${AGENT_FEED_NO_TERM:-0}" != "1" ] && command -v osascript >/dev/null 2>&1; then
-  osascript -e "tell application \"Terminal\" to do script \"tail -F '$out'\"" >/dev/null 2>&1 \
-    && echo "[agent-activity] opened a Terminal tailing $out"
-fi
+# NOTE: auto-opening a Terminal that tails the log was removed. To watch the feed
+# live, run it yourself:  tail -f logs/agent-activity.log
 
 ts(){ date +%H:%M:%S; }
 field(){ grep "^| $1 " "$signal_file" | head -1 | sed "s/^| $1 *| //; s/ *|\$//"; }
 
 # This session's persona — it IS Sylvia, the Orchestrator (see AGENT_ROSTER.md).
 persona="${AGENT_PERSONA:-Sylvia}"; backing="${AGENT_BACKING:-Claude Code}"
+# The live roster is per-engineer and gitignored (the .env model); the example
+# is the tracked template. Prefer the personal copy, fall back to the example so
+# a fresh clone still labels personas instead of degrading to bare names.
+roster_file="$repo_root/AGENT_ROSTER.md"
+[ -f "$roster_file" ] || roster_file="$repo_root/AGENT_ROSTER.example.md"
 # Resolve a persona name to "Name - Backing agent" via the roster table; falls
 # back to the bare name (or "User") if it isn't a roster persona.
 persona_label(){
   local name="$1" b
-  b=$(grep -E "\| $name \|" "$repo_root/AGENT_ROSTER.md" 2>/dev/null | head -1 | awk -F'|' '{gsub(/^ +| +$/,"",$4); print $4}')
+  b=$(grep -E "\| $name \|" "$roster_file" 2>/dev/null | head -1 | awk -F'|' '{gsub(/^ +| +$/,"",$4); print $4}')
   [ -n "$b" ] && printf '%s - %s' "$name" "$b" || printf '%s' "$name"
 }
 

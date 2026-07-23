@@ -234,7 +234,7 @@ The two **meta-layers** below are what's new; the eight concerns underneath are 
 
 # The persona team — radio-over
 
-A configurable team of **named personas** (Sylvia · Klaus · Kathrin · …), each backed by Claude Code / Codex / Gemini / GitHub Copilot. Defined in [`AGENT_ROSTER.md`](AGENT_ROSTER.md); coordinated via [`AGENTS.md`](AGENTS.md) + `AGENT_SIGNAL.md`.
+A configurable team of **named personas** (Sylvia · Klaus · Kathrin · …), each backed by whichever agent you actually run — Claude Code, Codex, Gemini, Copilot, Qwen. Defined in a **per-engineer `AGENT_ROSTER.md`** (gitignored, copied from the tracked [`AGENT_ROSTER.example.md`](AGENT_ROSTER.example.md) on the `.env` model — your fleet is not your teammate's); coordinated via [`AGENTS.md`](AGENTS.md) + `AGENT_SIGNAL.md`.
 
 - **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
 - **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_SYLVIA` ≠ `OVER_TO_CHRISTIAN`)

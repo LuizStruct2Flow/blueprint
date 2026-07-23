@@ -118,10 +118,33 @@ saw "shim semgrep call" && pass "tool-failure path exposes the scanner's own out
 # ===========================================================================
 mk_shim gitleaks 0; mk_shim semgrep "2 0"
 rc="$(run_hook)"
-if [ "$rc" -eq 0 ] && saw "retrying once"; then pass "transient semgrep failure recovers on retry"
+if [ "$rc" -eq 0 ] && saw "retrying"; then pass "transient semgrep failure recovers on retry"
 else fail "a transient semgrep failure should retry and pass (rc=$rc)"; fi
 [ "$(calls_of semgrep)" -eq 2 ] && pass "transient recovery uses exactly one retry" \
                                 || fail "expected 2 semgrep calls, got $(calls_of semgrep)"
+
+# ===========================================================================
+# 4b. The retry uses --jobs 1 (io_uring/memlock recovery). A shim that fails
+#     UNLESS invoked single-job passes only because the retry drops parallelism
+#     — pins the claim, not just "it retried". Mirrors the real failure:
+#     semgrep's multi-core engine crashes on io_uring_queue_init under a low
+#     RLIMIT_MEMLOCK; --jobs 1 avoids it.
+# ===========================================================================
+# The shim exits 2 UNLESS it sees `--jobs 1`, so a green gate is reachable only
+# if the retry actually dropped to single-job. (The hook hides scanner stdout on
+# success by design, so we prove it via the exit code + the hook's own message,
+# not the shim's output.)
+cat >"$FIX/bin/semgrep" <<'SH'
+#!/bin/sh
+case " $* " in *" --jobs 1 "*) exit 0 ;; esac
+exit 2
+SH
+chmod +x "$FIX/bin/semgrep"
+mk_shim gitleaks 0
+rc="$(run_hook)"
+if [ "$rc" -eq 0 ] && saw "retrying single-job"; then
+  pass "semgrep retry drops to --jobs 1 and recovers the parallel-engine crash"
+else fail "retry did not recover a parallel-only failure via --jobs 1 (rc=$rc)"; fi
 
 # ===========================================================================
 # 5. gitleaks exit 1 → blocks as a SECRET.

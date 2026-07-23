@@ -22,18 +22,20 @@
 # tolerance"), and the full suite alone is ~29s. The rule is explicit: when a
 # test category outgrows the budget, move it OUT of pre-push rather than weaken
 # the ceiling. So:
-#   --fast  runs in pre-push. It covers every case that pins a defect which
-#           actually SHIPPED (RC-1/2/3/6 and review findings R3/R4/I-2/I-3),
-#           because those are the regressions most likely to return. That
-#           INCLUDES #2 (transcript scaling): unbounded per-transcript followers
-#           are one of the two core mechanisms of BUG-001 and the direct source
-#           of the thousands of resident processes. #15 only proves one
-#           supervisor at one instant and the static grep only rejects one known
-#           idiom — neither proves resident count stays independent of
-#           watched-file count. Dropping it from the blocking gate was wrong.
-#   (full)  runs in CI (.github/workflows/security.yml) on every push. It adds
-#           the slow deterministic race / fault-injection cases (#10
-#           append-during-read, #18 short sink) and foreground mode.
+#   --fast  runs in the BLOCKING pre-push gate. It covers the two shipped
+#           BUG-001 mechanisms (RC-1 instance guard, RC-2 per-transcript
+#           followers — including #2's 40→80 scaling assertion, since resident
+#           count staying independent of watched-file count IS the bug), plus
+#           RC-3 teardown, RC-6 change detection, and the cheap high-value
+#           regressions found during review (R3 command-substitution, R4
+#           byte/char, I-2 nonce, I-3 change token). Those review-found defects
+#           never shipped — they were caught before push — so "covers what
+#           shipped" would be the wrong criterion; the criterion is "shipped
+#           mechanisms plus cheap regressions worth blocking on".
+#   (full)  runs in CI (.github/workflows/security.yml) on every push. It ADDS
+#           the deterministic race / fault-injection cases (#10
+#           append-during-read, #18 short sink) and foreground mode — none of
+#           which pre-push runs. #2 is NOT in this group: it runs in pre-push.
 # Both run. A test that runs nowhere is the A-15 defect this repo already has
 # once; the split must never become an excuse for a suite nothing executes.
 #

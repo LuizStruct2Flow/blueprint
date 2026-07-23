@@ -116,10 +116,24 @@ else
   pass "roster seeded from the example, not inherited"
 fi
 
-# --- 5. Nothing untracked was committed into the new project ------------------
-if git -C "$TARGET" ls-files 2>/dev/null | grep -qx '.env'; then
-  fail "A-05: .env was COMMITTED into the derived project's history"
-else pass "no .env in the derived project's git history"; fi
+# --- 5. The real history regression (Codex R-1) ------------------------------
+# The `.env` was copied to the working TREE but was never COMMITTED even before
+# the fix — the copied .gitignore travels with it, so `git add -A` skips it in
+# the derived repo too. Asserting "no .env in history" therefore passed both
+# before and after the fix: a tautology, not regression coverage. The genuine
+# history leak is the TRACKED work item, which IS committed pre-fix (it is not
+# gitignored) and is excluded post-fix by export-ignore. Pin THAT.
+if git -C "$TARGET" ls-files 2>/dev/null | grep -q 'PLAN-BUG-999'; then
+  fail "A-05: a tracked blueprint work item is in the derived project's COMMITTED
+      history — the real leak (git archive alone would still ship it; export-ignore
+      is what excludes it)"
+else pass "tracked work items absent from the derived project's git history"; fi
+# The .env leak is confidentiality, not history: it must not reach the working
+# tree at all. (Case 1 above already pins worktree absence; this records the
+# distinction so the claim is not overstated again.)
+if [ -e "$TARGET/.env" ]; then
+  fail "A-05: .env reached the derived WORKING TREE (confidentiality leak)"
+else pass ".env absent from the derived working tree (copied, never committed pre-fix)"; fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-05 — bootstrap ships tracked template content only."

@@ -64,6 +64,17 @@ if [ -f tests/pre-push-scanners/test.sh ]; then
   }
 fi
 
+# A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
+# no logs/, and none of the blueprint's own tracked work items. ~1s.
+if [ -f tests/bootstrap-contents/test.sh ]; then
+  bash tests/bootstrap-contents/test.sh || {
+    echo "❌ tests/bootstrap-contents/test.sh failed (A-05)."
+    echo "   Bootstrap must not leak secrets, runtime state, or the blueprint's"
+    echo "   own work items into a derived project."
+    exit 1
+  }
+fi
+
 # A-14 — bootstrap must INHERIT the operator's git identity, never write one,
 # and must fail before creating anything when no identity is resolvable.
 if [ -f tests/bootstrap-identity/test.sh ]; then

@@ -24,10 +24,16 @@
 # the ceiling. So:
 #   --fast  runs in pre-push. It covers every case that pins a defect which
 #           actually SHIPPED (RC-1/2/3/6 and review findings R3/R4/I-2/I-3),
-#           because those are the regressions most likely to return.
+#           because those are the regressions most likely to return. That
+#           INCLUDES #2 (transcript scaling): unbounded per-transcript followers
+#           are one of the two core mechanisms of BUG-001 and the direct source
+#           of the thousands of resident processes. #15 only proves one
+#           supervisor at one instant and the static grep only rejects one known
+#           idiom — neither proves resident count stays independent of
+#           watched-file count. Dropping it from the blocking gate was wrong.
 #   (full)  runs in CI (.github/workflows/security.yml) on every push. It adds
-#           the slow concurrency/failure-injection cases (#10 append-during-read,
-#           #18 short sink, #2 transcript scaling, foreground mode).
+#           the slow deterministic race / fault-injection cases (#10
+#           append-during-read, #18 short sink) and foreground mode.
 # Both run. A test that runs nowhere is the A-15 defect this repo already has
 # once; the split must never become an excuse for a suite nothing executes.
 #
@@ -352,7 +358,6 @@ else fail "#7 a path with spaces broke the reader (word splitting)"; fi
 # ===========================================================================
 # #2 Process bound is independent of transcript count: 40 then 80 files.
 # ===========================================================================
-if skip "#2 transcript scaling"; then :; else
 PROJ="$HOMEDIR/.claude/projects/$(printf '%s' "$REPO" | sed 's#/#-#g')/sess/subagents"
 mkdir -p "$PROJ"
 i=0; while [ $i -lt 40 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"a%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
@@ -365,10 +370,9 @@ if [ "$n1" -eq 1 ] && [ "$n2" -eq 1 ] && [ "$t1" -eq 0 ] && [ "$t2" -eq 0 ]; the
   pass "#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)"
 else fail "#2 process count grew with transcripts (sup $n1→$n2, tails $t1→$t2) — the RC-2 leak"; fi
 stop_feed >/dev/null 2>&1
-fi
 
 # ===========================================================================
-if skip "#10 append-during-read, #18 short sink, foreground mode"; then :; else
+if skip "#10 append-during-read, #18 short sink, foreground mode (all run in CI)"; then :; else
 # #10 Append DURING the bounded read (R-1). The read window is widened by a
 #     test seam so the race is deterministic rather than timing-luck. Every
 #     record must appear exactly once: advancing short duplicates, advancing

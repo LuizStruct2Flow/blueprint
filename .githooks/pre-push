@@ -58,70 +58,74 @@ if command -v semgrep >/dev/null 2>&1; then
   # .githooks/pre-push-project. NOTE: `p/` configs are fetched from the Semgrep
   # registry (cached under ~/.semgrep), so this is NOT a purely offline step.
   #
-  # DISTINGUISH "found a finding" FROM "could not run". semgrep exits 1 for
-  # findings (with --error) and >=2 for a fatal error — and `--quiet` suppresses
-  # the reason entirely. The old `cmd || { echo "found a finding"; exit 1; }`
-  # conflated the two, so a transient registry/cache failure reported itself as
-  # a security finding. That was observed on this repo: identical back-to-back
-  # runs alternating exit 0 and exit 2 with zero output, in both bash and sh.
-  # A gate that cries wolf is a gate people learn to bypass.
-  #
-  # Output is captured and printed ONLY on failure, so the success path stays
-  # quiet without making a failure undiagnosable.
-  _sg_out="$(mktemp)"
-  _sg_rc=0
-  semgrep \
-    --config=p/owasp-top-ten \
-    --severity=WARNING \
-    --severity=ERROR \
-    --error \
-    --timeout=20 \
-    --metrics=off \
-    . >"$_sg_out" 2>&1 || _sg_rc=$?
-
-  if [ "$_sg_rc" -ge 2 ]; then
-    # Tool failure, not a clean scan. Retry once, then fail CLOSED — "the scanner
-    # could not run" must never be mistaken for "the scanner found nothing".
-    #
-    # The retry drops to --jobs 1, which is a strictly better retry than
-    # repeating the identical command: it recovers BOTH a genuinely transient
-    # failure AND the deterministic one seen here — semgrep's multi-core engine
-    # calls io_uring_queue_init per worker, which fails with "Cannot allocate
-    # memory" when RLIMIT_MEMLOCK is low (8 MB is a common Linux default), even
-    # with tens of GB of RAM free. Single-job avoids io_uring parallelism
-    # entirely. A plain repeat would just crash the same way and fail the push
-    # for an environment limit rather than a real finding.
-    echo "  ⚠ semgrep exited $_sg_rc (tool error, not a finding) — retrying single-job..."
-    _sg_rc=0
-    semgrep \
-      --jobs 1 \
-      --config=p/owasp-top-ten \
-      --severity=WARNING \
-      --severity=ERROR \
-      --error \
-      --timeout=20 \
-      --metrics=off \
-      . >"$_sg_out" 2>&1 || _sg_rc=$?
+  # CLASSIFY FROM JSON, NOT THE EXIT CODE. A finding and a crash are DIFFERENT
+  # outcomes and must never be confused — a broken scanner reported as a
+  # vulnerability teaches operators to shrug off the gate. The exit code cannot
+  # tell them apart: semgrep exits 1 for findings AND for some fatal errors
+  # (an unwritable ~/.semgrep dir exits 1 with a traceback and no JSON — Codex
+  # R-3). So:
+  #   - FINDINGS come from `.results[]` in --json output. An OSError produces no
+  #     results, so it can never be misread as a finding.
+  #   - COMPLETENESS comes from the exit code: >=2 means the scan crashed /
+  #     did not finish (e.g. the io_uring/memlock parallel crash), so "0
+  #     findings" cannot be trusted and we retry single-job, then fail closed.
+  # jq is required: without a reliable parser we would be back to guessing, which
+  # is the exact defect this fixes — so a missing jq fails closed, not open.
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required to classify semgrep output reliably, but is not installed."
+    echo "   Install jq (brew bundle, or apt/dnf install jq). Blocking rather than"
+    echo "   guessing whether a non-zero semgrep exit is a finding or a crash."
+    exit 1
   fi
 
-  if [ "$_sg_rc" -eq 1 ]; then
-    tail -40 "$_sg_out"
-    rm -f "$_sg_out"
-    echo "❌ Semgrep found a WARNING+ finding."
+  _sg_json="$(mktemp)"; _sg_err="$(mktemp)"
+
+  # $1 = extra args (word-split intentionally, e.g. "--jobs 1"); sets _sg_class
+  # (finding|incomplete|clean), _sg_findings, _sg_rc.
+  _sg_classify() {
+    _sg_rc=0
+    # shellcheck disable=SC2086
+    semgrep $1 --json \
+      --config=p/owasp-top-ten \
+      --severity=WARNING --severity=ERROR \
+      --timeout=20 --metrics=off --quiet \
+      . >"$_sg_json" 2>"$_sg_err" || _sg_rc=$?
+    if ! jq -e . "$_sg_json" >/dev/null 2>&1; then
+      _sg_class=incomplete; return           # crashed before valid JSON
+    fi
+    _sg_findings="$(jq '[.results[]] | length' "$_sg_json" 2>/dev/null || echo 0)"
+    if [ "${_sg_findings:-0}" -gt 0 ]; then _sg_class=finding
+    elif [ "$_sg_rc" -ge 2 ]; then _sg_class=incomplete   # scan did not complete
+    else _sg_class=clean; fi
+  }
+
+  _sg_classify ""
+  if [ "$_sg_class" = "incomplete" ]; then
+    # Retry single-job. --jobs 1 avoids the io_uring parallelism that crashes
+    # under a low RLIMIT_MEMLOCK (8 MB is a common Linux default) even with tens
+    # of GB free — a strictly better retry than repeating the identical command.
+    echo "  ⚠ semgrep did not complete (exit $_sg_rc) — retrying single-job..."
+    _sg_classify "--jobs 1"
+  fi
+
+  if [ "$_sg_class" = "finding" ]; then
+    jq -r '.results[] | "  \(.check_id)  \(.path):\(.start.line)"' "$_sg_json" 2>/dev/null | head -40
+    rm -f "$_sg_json" "$_sg_err"
+    echo "❌ Semgrep found ${_sg_findings} WARNING+ finding(s)."
     echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
     echo "   naming the threat-model entry in project_config_security.md that makes it safe."
     exit 1
-  elif [ "$_sg_rc" -ne 0 ]; then
-    tail -40 "$_sg_out"
-    rm -f "$_sg_out"
+  elif [ "$_sg_class" = "incomplete" ]; then
+    tail -20 "$_sg_err"
+    rm -f "$_sg_json" "$_sg_err"
     echo "❌ semgrep could not complete (exit $_sg_rc) — the SAST gate did NOT run."
     echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
-    echo "   Common causes: registry/network unavailable for the p/ pack, or an"
-    echo "   unwritable ~/.semgrep cache. Re-run, or set SEMGREP_RULES to a local"
+    echo "   Common causes: an unwritable ~/.semgrep dir, or registry/network"
+    echo "   unavailable for the p/ pack. Re-run, or set SEMGREP_RULES to a local"
     echo "   ruleset if you need to work offline."
     exit 1
   fi
-  rm -f "$_sg_out"
+  rm -f "$_sg_json" "$_sg_err"
 else
   echo "  ⚠ semgrep not installed locally — SAST skipped (CI will catch it)."
   echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"

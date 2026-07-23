@@ -14,6 +14,7 @@
 brew "gitleaks"      # secret scan, pre-push (.githooks/pre-push)
 brew "semgrep"       # SAST, pre-push + CI
 brew "osv-scanner"   # SCA / dependency CVE scan, pre-push + CI
+brew "jq"            # required to classify semgrep --json output in the pre-push gate
 
 # --- IaC gate (docs/INFRASTRUCTURE.md cross-recipe rules) ---
 # These cover all three recipes; install only what your project's recipe needs.

@@ -27,12 +27,26 @@ echo "🔒 Pre-push: security + build + lint + tests..."
 
 if command -v gitleaks >/dev/null 2>&1; then
   echo "  → Secret scan (gitleaks)..."
-  gitleaks protect --staged --redact --no-banner || {
+  # Same exit-code discipline as the semgrep step below: gitleaks exits 1 when
+  # it FINDS a leak and >=2 when it could not run. Treating both as "found a
+  # secret" is misleading in one direction and, worse, an operator who learns to
+  # shrug off spurious failures will shrug off a real one.
+  _gl_out="$(mktemp)"
+  _gl_rc=0
+  gitleaks protect --staged --redact --no-banner >"$_gl_out" 2>&1 || _gl_rc=$?
+  if [ "$_gl_rc" -eq 1 ]; then
+    tail -30 "$_gl_out"; rm -f "$_gl_out"
     echo "❌ gitleaks found a secret in staged changes."
     echo "   Unstage + rotate the credential. A leaked secret is compromised the"
     echo "   moment it lands on origin; rotating is non-negotiable."
     exit 1
-  }
+  elif [ "$_gl_rc" -ne 0 ]; then
+    tail -30 "$_gl_out"; rm -f "$_gl_out"
+    echo "❌ gitleaks could not complete (exit $_gl_rc) — the secret gate did NOT run."
+    echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
+    exit 1
+  fi
+  rm -f "$_gl_out"
 else
   echo "  ⚠ gitleaks not installed locally — secret scan skipped (CI will catch it)."
   echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
@@ -40,24 +54,65 @@ fi
 
 if command -v semgrep >/dev/null 2>&1; then
   echo "  → SAST (semgrep p/owasp-top-ten)..."
-  # Bundled rulesets (no network call). p/owasp-top-ten is the conservative
-  # baseline; projects can add more packs in .githooks/pre-push-project.
-  # Explicit --severity flags rather than --error — some packs flag INFO,
-  # which we don't want blocking pre-push.
+  # p/owasp-top-ten is the conservative baseline; projects can add packs in
+  # .githooks/pre-push-project. NOTE: `p/` configs are fetched from the Semgrep
+  # registry (cached under ~/.semgrep), so this is NOT a purely offline step.
+  #
+  # DISTINGUISH "found a finding" FROM "could not run". semgrep exits 1 for
+  # findings (with --error) and >=2 for a fatal error — and `--quiet` suppresses
+  # the reason entirely. The old `cmd || { echo "found a finding"; exit 1; }`
+  # conflated the two, so a transient registry/cache failure reported itself as
+  # a security finding. That was observed on this repo: identical back-to-back
+  # runs alternating exit 0 and exit 2 with zero output, in both bash and sh.
+  # A gate that cries wolf is a gate people learn to bypass.
+  #
+  # Output is captured and printed ONLY on failure, so the success path stays
+  # quiet without making a failure undiagnosable.
+  _sg_out="$(mktemp)"
+  _sg_rc=0
   semgrep \
     --config=p/owasp-top-ten \
     --severity=WARNING \
     --severity=ERROR \
     --error \
-    --quiet \
     --timeout=20 \
     --metrics=off \
-    . || {
+    . >"$_sg_out" 2>&1 || _sg_rc=$?
+
+  if [ "$_sg_rc" -ge 2 ]; then
+    # Tool failure, not a clean scan. Retry once — these are usually transient —
+    # then fail CLOSED, because "the scanner could not run" must never be
+    # mistaken for "the scanner found nothing".
+    echo "  ⚠ semgrep exited $_sg_rc (tool error, not a finding) — retrying once..."
+    _sg_rc=0
+    semgrep \
+      --config=p/owasp-top-ten \
+      --severity=WARNING \
+      --severity=ERROR \
+      --error \
+      --timeout=20 \
+      --metrics=off \
+      . >"$_sg_out" 2>&1 || _sg_rc=$?
+  fi
+
+  if [ "$_sg_rc" -eq 1 ]; then
+    tail -40 "$_sg_out"
+    rm -f "$_sg_out"
     echo "❌ Semgrep found a WARNING+ finding."
     echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
     echo "   naming the threat-model entry in project_config_security.md that makes it safe."
     exit 1
-  }
+  elif [ "$_sg_rc" -ne 0 ]; then
+    tail -40 "$_sg_out"
+    rm -f "$_sg_out"
+    echo "❌ semgrep could not complete (exit $_sg_rc) — the SAST gate did NOT run."
+    echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
+    echo "   Common causes: registry/network unavailable for the p/ pack, or an"
+    echo "   unwritable ~/.semgrep cache. Re-run, or set SEMGREP_RULES to a local"
+    echo "   ruleset if you need to work offline."
+    exit 1
+  fi
+  rm -f "$_sg_out"
 else
   echo "  ⚠ semgrep not installed locally — SAST skipped (CI will catch it)."
   echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"

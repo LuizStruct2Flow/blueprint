@@ -118,3 +118,24 @@ jobs:
             exit 1
           fi
           echo "osv-scanner: no MEDIUM+ vulnerabilities. PASS."
+
+  shell-tests:
+    name: shell regression suites (full)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Blueprint shell regression tests
+        # The FULL agent-activity suite, including the slow cases pre-push runs
+        # with --fast: #10 append-during-read, #18 short sink, #2 transcript
+        # scaling, and foreground mode. Pre-push has a 30s ceiling; CI does not,
+        # so the split keeps both halves actually executing rather than letting
+        # the expensive half quietly run nowhere.
+        run: |
+          set -euo pipefail
+          bash tests/marker-merge/test.sh
+          bash tests/bootstrap-identity/test.sh
+          bash tests/agent-activity-bound/test.sh

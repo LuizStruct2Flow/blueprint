@@ -142,7 +142,13 @@
       "Write(/home/**/**)",
       "Monitor",
       "Skill(update-config)",
-      "Skill(update-config:*)"
+      "Skill(update-config:*)",
+      "Bash(bash -n scripts/agent-activity.sh)",
+      "Bash(bash tests/agent-activity-bound/test.sh)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(python3 -)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ],
     "deny": [
       "Bash(sudo rm *)",

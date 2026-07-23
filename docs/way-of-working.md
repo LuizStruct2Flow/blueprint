@@ -242,7 +242,7 @@ A configurable team of **named personas** (Sylvia · Klaus · Kathrin · …), e
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
 - **Codex / Gemini dispatched by flipping the signal**, not by direct CLI call
 - **`HANDOVER.md`** lets a fresh prompt resume cold
-- **Live feed:** `scripts/agent-activity.sh` — every persona's mic moves *and* tool-by-tool work (orchestrator + subagents + Codex/Gemini) stream in one tail; self-heals across restarts
+- **Live feed:** `scripts/agent-activity.sh --daemon` — every persona's mic moves *and* tool-by-tool work (orchestrator + subagents + Codex/Gemini) stream in one tail; self-heals across restarts. **One resident process** tracking a byte offset per file — no follow-by-name tails, no inotify pressure (BUG-001). `--stop` / `--status` complete the lifecycle.
 
 > A **configurable team of AI engineers** on the same repo — without overwrites or duplicate work.
 

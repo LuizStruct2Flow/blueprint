@@ -6,9 +6,10 @@ GitHub Copilot** — coordinate in this repo. The live state is the slim baton i
 protocol** (how the radio works). `CLAUDE.md` points here rather than duplicating
 it.
 
-Watch every agent live in one place: `bash scripts/agent-activity.sh` streams a
-single tail-able `[Agent]` feed (mic changes + Codex/Gemini dispatch detail) to
-stdout and `logs/agent-activity.log`.
+Watch every agent live in one place: `bash scripts/agent-activity.sh --daemon`,
+then `tail -f logs/agent-activity.log`. One tail-able
+`[Persona - Backing agent]` feed (mic changes + each agent's actual work) written
+to `logs/agent-activity.log`. `--stop` ends it; `--status` reports whether it runs.
 
 ## On wake — minimum read
 
@@ -25,11 +26,12 @@ substantive work:
 The Claude Code prompt the founder talks to **directly** is the **Orchestrator**
 (default persona **Sylvia**, see [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)
 — your live roster is the gitignored `AGENT_ROSTER.md` copied from it). On wake it
-**adopts that persona** (its `Holder` value) and **starts the live activity feed** —
-`bash scripts/agent-activity.sh` — which cleans the log and opens a tail terminal
-(see [Watching it live](#watching-it-live)). The feed is idempotent, so later /
-spawned agents that run it simply no-op (and they adopt their own assigned persona,
-not the Orchestrator's). See `CLAUDE.md` §"On wake" for the exact first-wake steps.
+**adopts that persona** (its `Holder` value) and **ensures the live activity feed
+is running** — `bash scripts/agent-activity.sh --daemon` — which cleans the log and
+streams to `logs/agent-activity.log` (see [Watching it live](#watching-it-live));
+watch it with `tail -f`, it does not open a terminal for you. A kernel `flock` makes
+concurrent starts a no-op. **Spawned, non-primary personas must not start it** —
+they adopt their own assigned persona and participate. See `CLAUDE.md` §"On wake".
 
 ## The mic (radio-over)
 
@@ -140,7 +142,10 @@ code is the one whose clean review authorizes the push.
 
    ```bash
    cd <project-root>
-   last=$(stat -f %m AGENT_SIGNAL.md 2>/dev/null)
+   # RC-6: `stat -f %m` is macOS syntax; on GNU it means "filesystem status" and
+   # `%m` is invalid, printing a block to stdout while exiting 1. Probe once.
+   if stat -c %Y . >/dev/null 2>&1; then mt(){ stat -c %Y "$1"; }; else mt(){ stat -f %m "$1"; }; fi
+   last=$(mt AGENT_SIGNAL.md)
    while true; do
      sleep 2
      new=$(stat -f %m AGENT_SIGNAL.md 2>/dev/null)
@@ -239,15 +244,21 @@ does the work and flips the mic back per the rules above.
 
 ## Watching it live
 
-**First agent to wake starts the feed:** run `bash scripts/agent-activity.sh`. It
-is idempotent (a pidfile makes later agents no-op), so only the first waking agent
-acts. On that first start it:
+**First agent to wake ENSURES the feed is running:** run
+`bash scripts/agent-activity.sh --daemon`. It is idempotent — a kernel `flock`,
+not a pidfile — so concurrent wakes cannot produce a second feed, and it returns
+immediately. `--stop` stops it; `--status` reports whether it is up.
+
+> **BUG-001:** the old guard was a pidfile + `kill -0` check, which is TOCTOU-racy
+> and whose EXIT trap unlinked the shared lock. Concurrent wakes all won, each
+> spawning immortal `tail -F` followers. Do not reintroduce "just run the script"
+> as the wake step — spawned personas must not start it at all.
+
+On start it:
 
 1. **cleans old entries** — truncates `logs/agent-activity.log` so it can't
    explode across sessions (fresh log per session),
-2. **opens a Terminal** window running `tail -f` on the log so the founder watches
-   live (skip with `AGENT_FEED_NO_TERM=1` / off-mac),
-3. **streams** a single `[Agent]`-prefixed feed of each agent's **actual work
+2. **streams** a single `[Agent]`-prefixed feed of each agent's **actual work
    output**, so you don't switch prompts:
    - `[Claude Code]` — text + tool calls from the live session transcript
      (`~/.claude/projects/.../<session>.jsonl`, via jq; private thinking excluded),

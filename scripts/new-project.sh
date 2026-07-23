@@ -87,13 +87,31 @@ echo "📦 Bootstrapping struct2flow project '$PROJECT_NAME' at $TARGET_DIR"
 
 mkdir -p "$TARGET_DIR"
 
-# --- Copy blueprint contents (everything except .git) ---
-# Use a literal find + cp loop so we don't accidentally clone the blueprint's git history.
-(
-  cd "$BLUEPRINT_ROOT"
-  find . -maxdepth 1 -mindepth 1 ! -name '.git' -print0 \
-    | xargs -0 -I{} cp -R '{}' "$TARGET_DIR/"
-)
+# --- Copy blueprint contents: TRACKED FILES ONLY (A-05) ---
+# `git archive HEAD` ships exactly what is committed. The previous
+# `find | cp -R` copied the whole WORKING TREE, so every untracked and
+# gitignored file went into the new project and was then `git add -A`ed into its
+# first commit. That included:
+#   - a `.env` holding SONAR_TOKEN — a real secret-leak path, since .gitignore
+#     stops the commit in the SOURCE repo but nothing stops the copy;
+#   - logs/ runtime state, node_modules/, coverage/;
+#   - the blueprint's own in-flight docs/doing/ work items, which then read as
+#     the new project's active bugs.
+# Verified empirically: a bootstrap run took this repo's personal
+# AGENT_ROSTER.md, an in-progress audit, a BUG plan and logs/ into the target.
+#
+# HEAD, not the index or worktree, so a dirty blueprint checkout cannot leak
+# half-finished work into a new project either.
+if ! git -C "$BLUEPRINT_ROOT" rev-parse HEAD >/dev/null 2>&1; then
+  echo "❌ Blueprint at $BLUEPRINT_ROOT has no commits to archive." >&2
+  echo "   Bootstrap ships tracked content only, so the blueprint must be committed." >&2
+  exit 1
+fi
+git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD | tar -x -C "$TARGET_DIR"
+
+# Files the blueprint deliberately does NOT track but a project still needs.
+# AGENT_ROSTER.md is gitignored per-engineer state (A-12), so it is seeded from
+# the tracked example further down rather than copied.
 
 # --- Substitute placeholders in known files ---
 # We only substitute in files that the blueprint ships; project source code

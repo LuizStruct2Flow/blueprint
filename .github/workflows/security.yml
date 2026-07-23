@@ -141,5 +141,6 @@ jobs:
           set -euo pipefail
           bash tests/marker-merge/test.sh
           bash tests/bootstrap-identity/test.sh
+          bash tests/bootstrap-contents/test.sh
           bash tests/pre-push-scanners/test.sh
           bash tests/agent-activity-bound/test.sh

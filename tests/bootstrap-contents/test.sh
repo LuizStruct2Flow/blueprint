@@ -49,10 +49,18 @@ git -C "$ROOT" archive HEAD | tar -x -C "$BP" || { echo "FAIL: could not archive
 mkdir -p "$BP/docs/doing"
 printf '# PLAN-BUG-999 — fixture work item\n\nMust NOT reach a derived project.\n' \
   >"$BP/docs/doing/PLAN-BUG-999.md"
+# The blueprint tracks several files that are ALSO in its .gitignore — CLAUDE.md,
+# AGENTS.md, docs/DoD.md, HANDOVER.md, the project_config_*.md set (the
+# public-publishing privacy block). git ignores .gitignore for already-tracked
+# paths, so `git archive HEAD` in the real repo ships them. A plain `git add -A`
+# here would respect .gitignore and drop them, so the fixture would not mirror
+# the real repo. Force-add them so the fixture's HEAD matches what actually
+# ships.
 (
   cd "$BP"
   git init -q .
   git add -A
+  git ls-files --others --ignored --exclude-standard -z | xargs -0 -r git add -f
   git -c user.name=T -c user.email=t@t.io commit -qm "fixture blueprint"
 ) || { echo "FAIL: could not init the fixture blueprint"; exit 1; }
 

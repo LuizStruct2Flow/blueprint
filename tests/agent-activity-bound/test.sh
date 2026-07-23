@@ -15,11 +15,11 @@
 # but they are not the coverage — they cannot be.
 #
 # Run from the blueprint repo root:
-#   bash tests/agent-activity-bound/test.sh          # full suite (~29s)
-#   bash tests/agent-activity-bound/test.sh --fast   # pre-push subset (~10s)
+#   bash tests/agent-activity-bound/test.sh          # full suite  (~29s measured)
+#   bash tests/agent-activity-bound/test.sh --fast   # pre-push subset (~18s measured)
 #
 # WHY A SPLIT. The whole pre-push gate has a 30s ceiling (CLAUDE.md §"Pre-push
-# tolerance"), and the full suite alone is ~29s. The rule is explicit: when a
+# tolerance"), and the full suite alone is ~29s (--fast is ~18s). The rule is explicit: when a
 # test category outgrows the budget, move it OUT of pre-push rather than weaken
 # the ceiling. So:
 #   --fast  runs in the BLOCKING pre-push gate. It covers the two shipped
@@ -202,22 +202,29 @@ else fail "#17 a single complete newline-terminated record was never emitted (R3
 # #11/#19 Split record — including multibyte UTF-8 — is withheld until its
 #     newline arrives, then emitted exactly once, intact.
 # ===========================================================================
-if [ -z "$UTF8_LOCALE" ]; then
-  # In the C locale awk already counts bytes, so the R4 byte/char bug passes
-  # vacuously. Reporting "ok" here would be a proof the host cannot give.
+# The split-record property (#11) holds in any locale. The MULTIBYTE part (#19)
+# only exercises the LC_ALL=C fix under a UTF-8 locale — in the C locale awk
+# already counts bytes, so it would pass vacuously. So the payload and the
+# LABEL both follow the locale: without one, this proves #11 and says plainly
+# that #19 is unproven, rather than printing "ok — #11/#19" for a case it just
+# announced it could not test.
+if [ -n "$UTF8_LOCALE" ]; then
+  FRAG='SPLIT-héllo-→'; CASE='#11/#19'; KIND='multibyte '
+else
   echo "  SKIP — #19 multibyte case: no UTF-8 locale; the LC_ALL=C fix is UNPROVEN here"
   SKIPPED=$((SKIPPED+1))
+  FRAG='SPLIT-ascii-only'; CASE='#11'; KIND=''
 fi
-printf 'SPLIT-héllo-→' >>"$CODEXLOG"
+printf '%s' "$FRAG" >>"$CODEXLOG"
 sleep 1
-if [ "$(count_in_log "SPLIT-héllo")" -eq 0 ]; then pass "#11/#19 incomplete multibyte record withheld"
-else fail "#11/#19 an incomplete record was emitted before its newline (R4: byte/char mismatch, locale=${UTF8_LOCALE:-none})"; fi
+if [ "$(count_in_log "$FRAG")" -eq 0 ]; then pass "$CASE incomplete ${KIND}record withheld"
+else fail "$CASE an incomplete record was emitted before its newline (R4: byte/char mismatch, locale=${UTF8_LOCALE:-none})"; fi
 printf -- '-TAIL\n' >>"$CODEXLOG"
-if wait_for "SPLIT-héllo-→-TAIL" 8; then
-  [ "$(count_in_log "SPLIT-héllo-→-TAIL")" -eq 1 ] \
-    && pass "#11/#19 completed multibyte record emitted exactly once, intact" \
-    || fail "#11/#19 completed record emitted more than once"
-else fail "#11/#19 completed multibyte record never emitted"; fi
+if wait_for "${FRAG}-TAIL" 8; then
+  [ "$(count_in_log "${FRAG}-TAIL")" -eq 1 ] \
+    && pass "$CASE completed ${KIND}record emitted exactly once, intact" \
+    || fail "$CASE completed record emitted more than once"
+else fail "$CASE completed ${KIND}record never emitted"; fi
 
 # ===========================================================================
 # #3 Quiet-but-active file: idle for a while, then written again — still emits.

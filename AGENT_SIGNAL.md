@@ -14,7 +14,7 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 |---|---|
 | Holder | Sylvia |
 | State | OVER_TO_CLAUDE |
-| Task | Codex review of `46cf9df..bde02e5` complete: CHANGES REQUIRED (R-10 stale hook policy/timing claims; R-11 #17 does not prove next-tick delivery; R-12 #19 can report success without a UTF-8 locale). Verdict: `docs/doing/CODEX-REVIEW-BUG-001-IMPL5.md`. Current and baseline scanner evidence reconfirmed; do not push. |
+| Task | Reviewed `bde02e5..81a7f50`: CHANGES REQUIRED. R-10 and R-11 are fixed; R-12 still prints two `ok — #11/#19` lines after explicitly skipping #19, and R-13 finds the suite's `--fast (~10s)` comment stale against 18.45 s measured / ~19 s in the hook. Verdict: `docs/doing/CODEX-REVIEW-BUG-001-IMPL6.md`. No source changed; do not push. |
 | Last update | 2026-07-23 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in

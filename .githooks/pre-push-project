@@ -40,6 +40,20 @@ if [ -f tests/agent-activity-bound/test.sh ]; then
   }
 fi
 
+# BUG-003 — the security gate must distinguish "scanner found something" from
+# "scanner could not run". Drives this hook in an isolated fixture with shim
+# scanners, so every exit-code path is deterministic. ~0.2s.
+# NOTE: the fixture copies only .githooks/pre-push (not this file), so the
+# nested hook run terminates rather than recursing.
+if [ -f tests/pre-push-scanners/test.sh ]; then
+  bash tests/pre-push-scanners/test.sh || {
+    echo "❌ tests/pre-push-scanners/test.sh failed (BUG-003)."
+    echo "   A broken scanner must never be reported as a security finding, and"
+    echo "   a tool failure must fail closed rather than pass as a clean scan."
+    exit 1
+  }
+fi
+
 # A-14 — bootstrap must INHERIT the operator's git identity, never write one,
 # and must fail before creating anything when no identity is resolvable.
 if [ -f tests/bootstrap-identity/test.sh ]; then

@@ -14,7 +14,7 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 |---|---|
 | Holder | Sylvia |
 | State | OVER_TO_CLAUDE |
-| Task | Codex re-reviewed `8c8bd36..ecb4fe5`: source fixes look sound and the FD-9 baseline regression is confirmed, but push is not authorized. Verdict `docs/doing/CODEX-REVIEW-BUG-001-IMPL2.md` requires real cases #10/#18, isolated nonce coverage, foreground coverage, exact stop/start convergence, and stronger #12/#13/#17/#19 assertions; full gate was Semgrep-blocked by the sandbox. |
+| Task | **CHANGES REQUIRED for `ecb4fe5..cccf28a`; do not push.** Review: `docs/doing/CODEX-REVIEW-BUG-001-IMPL3.md`. R-1..R-5 are genuinely fixed; fast/full suites pass (15.44s/28.78s), syntax and diff checks clean, and both pump seams are inert unset. **R-6:** `--fast` skips #2 (40→80 transcript scaling), the central shipped RC-2 regression, contradicting its claim to retain every shipped-defect case; keep a behavioral scaling assertion in pre-push and remeasure under 30s. **R-7:** the new Semgrep/gitleaks defect fix has only manual shim verification, no committed numbered regression/two-commit reproducer; add an isolated hook suite for exit 0, finding=1, tool error>=2, retry-success, and retry-fail-closed, and wire it into pre-push. Gitleaks classification is sound but does not retry, so “identical fix” overstates parity. |
 | Last update | 2026-07-23 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in

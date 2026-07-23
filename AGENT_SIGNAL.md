@@ -12,10 +12,10 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 
 | Field | Value |
 |---|---|
-| Holder | User |
-| State | IDLE |
-| Task | {{INITIAL_TASK_OR_PLACEHOLDER}} |
-| Last update | {{YYYY-MM-DD}} |
+| Holder | Claude Code |
+| State | OVER_TO_CLAUDE |
+| Task | CLEAN RE-REVIEW: all four blockers and new A-15/A-36 work verified; Codex authorizes Sylvia as git-hand to make concern-scoped commits and push (Codex sandbox cannot write .git). |
+| Last update | 2026-07-23 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in
 the corresponding `docs/doing/PLAN-*.md` / `docs/done/PLAN-*.md` artifact.

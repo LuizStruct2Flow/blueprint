@@ -15,7 +15,21 @@
 # but they are not the coverage — they cannot be.
 #
 # Run from the blueprint repo root:
-#   bash tests/agent-activity-bound/test.sh
+#   bash tests/agent-activity-bound/test.sh          # full suite (~29s)
+#   bash tests/agent-activity-bound/test.sh --fast   # pre-push subset (~10s)
+#
+# WHY A SPLIT. The whole pre-push gate has a 30s ceiling (CLAUDE.md §"Pre-push
+# tolerance"), and the full suite alone is ~29s. The rule is explicit: when a
+# test category outgrows the budget, move it OUT of pre-push rather than weaken
+# the ceiling. So:
+#   --fast  runs in pre-push. It covers every case that pins a defect which
+#           actually SHIPPED (RC-1/2/3/6 and review findings R3/R4/I-2/I-3),
+#           because those are the regressions most likely to return.
+#   (full)  runs in CI (.github/workflows/security.yml) on every push. It adds
+#           the slow concurrency/failure-injection cases (#10 append-during-read,
+#           #18 short sink, #2 transcript scaling, foreground mode).
+# Both run. A test that runs nowhere is the A-15 defect this repo already has
+# once; the split must never become an excuse for a suite nothing executes.
 #
 # Exit codes: 0 = pass; non-zero = fail.
 #
@@ -24,6 +38,10 @@
 # `pkill -f agent-activity` — that would kill a founder's live feed.
 
 set -u
+
+FAST=0
+[ "${1:-}" = "--fast" ] && FAST=1
+skip(){ [ "$FAST" -eq 1 ] && { echo "  – skipped in --fast (runs in CI): $*"; return 0; }; return 1; }
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/agent-activity.sh"
@@ -334,6 +352,7 @@ else fail "#7 a path with spaces broke the reader (word splitting)"; fi
 # ===========================================================================
 # #2 Process bound is independent of transcript count: 40 then 80 files.
 # ===========================================================================
+if skip "#2 transcript scaling"; then :; else
 PROJ="$HOMEDIR/.claude/projects/$(printf '%s' "$REPO" | sed 's#/#-#g')/sess/subagents"
 mkdir -p "$PROJ"
 i=0; while [ $i -lt 40 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"a%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
@@ -346,8 +365,10 @@ if [ "$n1" -eq 1 ] && [ "$n2" -eq 1 ] && [ "$t1" -eq 0 ] && [ "$t2" -eq 0 ]; the
   pass "#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)"
 else fail "#2 process count grew with transcripts (sup $n1→$n2, tails $t1→$t2) — the RC-2 leak"; fi
 stop_feed >/dev/null 2>&1
+fi
 
 # ===========================================================================
+if skip "#10 append-during-read, #18 short sink, foreground mode"; then :; else
 # #10 Append DURING the bounded read (R-1). The read window is widened by a
 #     test seam so the race is deterministic rather than timing-luck. Every
 #     record must appear exactly once: advancing short duplicates, advancing
@@ -422,6 +443,7 @@ if grep -qF "FOREGROUND-LINE" "$LOG" 2>/dev/null; then pass "#5f foreground also
 else fail "#5f foreground did not write the log"; fi
 kill -TERM "$fgpid" 2>/dev/null; sleep 0.5; kill -9 "$fgjob" 2>/dev/null; wait "$fgjob" 2>/dev/null
 wait_sup 0
+fi
 
 # ===========================================================================
 # Static backstops — cheap guards against the exact idioms that caused the

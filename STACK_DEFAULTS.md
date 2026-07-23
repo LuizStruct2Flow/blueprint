@@ -97,28 +97,41 @@ Stats API.
 
 ## Git author identity (fresh-clone bootstrap)
 
-The founder's machine has a **work** git identity set globally
-(e.g. `*.ext@<employer>.de`). That email must NOT appear in
-personal struct2flow project history — it conflates work
-identity with personal open-source work and risks corporate
-IP-assignment ambiguity if the repo is ever published.
+**Bootstrap inherits the operator's identity from `git config`.** It does not
+write one. A blueprint that bakes a specific person into every derived repo
+makes any other operator commit silently under someone else's name, which is
+wrong for a framework meant to be forked and shared. `new-project.sh` therefore
+fails early with instructions if no identity is configured, and echoes the
+identity it is about to commit as.
 
-**Default personal identity for struct2flow projects:**
+**But read this before bootstrapping on a work machine.** If the identity
+bootstrap inherits is a work address (e.g. `*.ext@<employer>.de`), it lands in
+personal project history — conflating work and personal open-source identity,
+and risking corporate IP-assignment ambiguity if the repo is ever published.
+Inheritance makes that the *default* outcome, so the guard is yours to apply.
 
-- **Name:**  `Luiz Scheidegger`
-- **Email:** `luiz@struct2flow.com`
-
-**On fresh clone / new project bootstrap, before any commit:**
+**Bootstrap makes the initial commit immediately**, so there is no window to set
+a repo-local identity "after bootstrap but before the first commit". You have
+exactly two correct moments:
 
 ```bash
-git config user.email "luiz@struct2flow.com"
-git config user.name  "Luiz Scheidegger"
+# BEST — make the personal identity the global default, once per machine.
+# Then override repo-locally in WORK repos. The blast radius of forgetting is
+# then a work repo with a personal email, not published personal history
+# carrying an employer address.
+git config --global user.name  "Your Personal Name"
+git config --global user.email "you@personal.example"
+
+# OR — override for a single bootstrap run, without touching global config:
+GIT_AUTHOR_NAME="Your Personal Name"  GIT_AUTHOR_EMAIL="you@personal.example" \
+GIT_COMMITTER_NAME="Your Personal Name" GIT_COMMITTER_EMAIL="you@personal.example" \
+  scripts/new-project.sh my-project
 ```
 
-Use repo-local (`git config`, NOT `--global`) so work repos keep
-their own identity. The `new-project.sh` bootstrap script should
-set this automatically once; until then, an agent's first action
-on a fresh personal repo is to set + verify the identity.
+Bootstrap prints `🖋 Committing as: …` precisely so a wrong identity is visible
+at the moment it is used rather than discovered later in `git log`. If you only
+notice afterwards and the bootstrap commit is still the only one:
+`git commit --amend --reset-author --no-edit`.
 
 **If commits already exist under the wrong email**, rewrite with
 `git filter-branch --env-filter` (or `git filter-repo`) after

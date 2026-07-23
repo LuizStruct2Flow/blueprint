@@ -47,6 +47,35 @@ if [[ ! -f "$BLUEPRINT_ROOT/CLAUDE.md" || ! -f "$BLUEPRINT_ROOT/AGENT_SIGNAL.md"
   exit 1
 fi
 
+# --- Require a git author identity BEFORE creating anything ---
+# Checked here, not at commit time: a late check leaves a half-bootstrapped
+# target directory behind, and the "fix it and re-run" advice is then a lie —
+# the re-run dies on the "Target already exists" guard below. Failing before
+# any filesystem change keeps re-running the honest recovery path.
+# Identity is INHERITED, never written: baking one person into every derived
+# repo makes other operators commit silently under someone else's name (A-14).
+# `git var GIT_AUTHOR_IDENT` is the right primitive: it resolves exactly what
+# git would use at commit time, honouring GIT_AUTHOR_* env vars as well as
+# config, and failing when it would have to guess. `git config --get user.email`
+# does NOT see the env vars, and would reject the documented one-shot override
+# in STACK_DEFAULTS.md §"Git author identity". Probed in a scratch dir outside
+# any repo so the blueprint's own local config can't mask a missing global one —
+# the new project will see global/env only.
+_ident_probe="$(mktemp -d)"
+if ! git -C "$_ident_probe" var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+  rmdir "$_ident_probe" 2>/dev/null || true
+  echo "❌ No git author identity configured — nothing has been created." >&2
+  echo "   Bootstrap inherits your identity rather than assuming one. Set it:" >&2
+  echo "     git config --global user.name  \"Your Name\"" >&2
+  echo "     git config --global user.email \"you@example.com\"" >&2
+  echo "   or override for this run only:" >&2
+  echo "     GIT_AUTHOR_NAME=\"…\" GIT_AUTHOR_EMAIL=\"…\" \\" >&2
+  echo "     GIT_COMMITTER_NAME=\"…\" GIT_COMMITTER_EMAIL=\"…\" $0 $PROJECT_NAME" >&2
+  echo "   then re-run this command unchanged." >&2
+  exit 2
+fi
+rmdir "$_ident_probe" 2>/dev/null || true
+
 # --- Refuse to overwrite an existing dir ---
 if [[ -e "$TARGET_DIR" ]]; then
   echo "❌ Target already exists: $TARGET_DIR" >&2
@@ -109,6 +138,16 @@ for f in "$TARGET_DIR/AGENT_SIGNAL.md" "$TARGET_DIR/docs/doing/HANDOVER.md"; do
   fi
 done
 
+# --- Seed the per-engineer agent roster (the .env model) ---
+# AGENT_ROSTER.example.md is tracked and blueprint-managed; AGENT_ROSTER.md is
+# gitignored and personal, because each engineer runs a different fleet. Seed a
+# copy so the project works out of the box, but never overwrite an existing one
+# (a re-run must not clobber a roster someone has customised).
+if [[ -f "$TARGET_DIR/AGENT_ROSTER.example.md" && ! -f "$TARGET_DIR/AGENT_ROSTER.md" ]]; then
+  cp "$TARGET_DIR/AGENT_ROSTER.example.md" "$TARGET_DIR/AGENT_ROSTER.md"
+  echo "👥 Seeded AGENT_ROSTER.md from the example (gitignored — edit it to match your fleet)."
+fi
+
 # --- Record blueprint provenance ---
 BLUEPRINT_SHA="$(cd "$BLUEPRINT_ROOT" && git rev-parse HEAD 2>/dev/null || echo 'no-sha')"
 cat > "$TARGET_DIR/.blueprint-source" <<EOF
@@ -124,10 +163,14 @@ EOF
   cd "$TARGET_DIR"
   git init -q
   git config --local core.hooksPath .githooks
-  # Repo-local personal identity — see STACK_DEFAULTS.md §Git author identity.
-  # Override per-project for genuinely-work projects in project_config_overview.md.
-  git config --local user.email "luiz@struct2flow.com"
-  git config --local user.name  "Luiz Scheidegger"
+  # Identity was already validated before the target was created (see the
+  # pre-flight check above); nothing is written to local config here.
+  # Show it: if your global identity is a work address and this is a personal
+  # project, this is the moment to notice — see STACK_DEFAULTS.md
+  # §"Git author identity".
+  # `git var` (not `git config --get`) so a GIT_AUTHOR_* env override is shown
+  # accurately; strip the trailing "<unix-ts> <tz>" that git var appends.
+  echo "🖋  Committing as: $(git var GIT_AUTHOR_IDENT | sed 's/ [0-9][0-9]* [+-][0-9][0-9]*$//')"
   git add -A
   git commit -q -m "chore(bootstrap): initialize $PROJECT_NAME from struct2flow blueprint ($BLUEPRINT_SHA)"
 )

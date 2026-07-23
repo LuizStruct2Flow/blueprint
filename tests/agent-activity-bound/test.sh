@@ -47,6 +47,12 @@ pass(){ echo "  ok — $*"; }
 
 [ -f "$SCRIPT" ] || fail "missing $SCRIPT"
 
+# Static checks must inspect CODE, not prose: this script's header explains the
+# very anti-patterns it forbids, so grepping the raw file would match its own
+# comments. Strip full-line and trailing comments first.
+CODE="$WORK/code.sh"
+sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$SCRIPT" >"$CODE"
+
 # A throwaway repo the feed can watch, so we never touch the real one.
 REPO="$WORK/repo"
 mkdir -p "$REPO/logs" "$REPO/scripts"
@@ -97,12 +103,12 @@ mkdir -p "$WORK/home"
 #    On the parent commit the script takes no arguments, so --status is
 #    swallowed and the feed starts in the foreground and never returns.
 # ---------------------------------------------------------------------------
-if ! grep -q -- '--status' "$SCRIPT"; then
+if ! grep -q -- '--status' "$CODE"; then
   fail "no --status mode: the script has no start/stop/status contract (F-2').
       A feed that cannot be asked whether it is running, or told to stop,
       can only be cleaned up with pkill — which is how orphans accumulate."
 fi
-if ! grep -q -- '--stop' "$SCRIPT"; then
+if ! grep -q -- '--stop' "$CODE"; then
   fail "no --stop mode (F-2'): teardown depends on signalling a pid by hand"
 fi
 pass "start/stop/status CLI contract present"
@@ -113,7 +119,7 @@ pass "start/stop/status CLI contract present"
 #    deleted, so the tail never exits. One per transcript per instance is the
 #    leak. The fix reads byte deltas instead.
 # ---------------------------------------------------------------------------
-if grep -qE 'tail[[:space:]]+(-n0[[:space:]]+)?-F' "$SCRIPT"; then
+if grep -qE 'tail[[:space:]]+(-n0[[:space:]]+)?-F' "$CODE"; then
   fail "script still uses 'tail -F' (RC-2).
       Every match is a process that never exits and consumes an inotify
       instance; past fs.inotify.max_user_instances they degrade to 1s
@@ -124,7 +130,7 @@ pass "no immortal 'tail -F' followers"
 # ---------------------------------------------------------------------------
 # 3. Single-instance guard is kernel-enforced, not a pidfile race (RC-1).
 # ---------------------------------------------------------------------------
-if ! grep -q 'flock' "$SCRIPT"; then
+if ! grep -q 'flock' "$CODE"; then
   fail "no flock (RC-1): the pidfile + kill -0 guard is TOCTOU-racy and its
       EXIT trap unlinks shared state, so the gate reopens on every death"
 fi
@@ -136,7 +142,7 @@ pass "flock-based single-instance guard"
 #    to stdout AND exits 1, so $(a || b) captures both. The "mtime" then holds
 #    live free-block counters that change constantly.
 # ---------------------------------------------------------------------------
-if grep -qE '\$\((stat -f %m[^)]*\|\| *stat -c %Y|stat -c %Y[^)]*\|\| *stat -f %m)' "$SCRIPT"; then
+if grep -qE '\$\((stat -f %m[^)]*\|\| *stat -c %Y|stat -c %Y[^)]*\|\| *stat -f %m)' "$CODE"; then
   fail "broken stat fallback still present (RC-6).
       On GNU the failing branch still writes to stdout, so the captured value
       is a filesystem blob, not an mtime — the change detector fires forever."
@@ -149,7 +155,7 @@ pass "no broken stat -f/-c capture"
 #    quantity is BYTES; a two-byte 'é' reported as 1 advances one byte past the
 #    real newline, emitting part of an incomplete record.
 # ---------------------------------------------------------------------------
-if grep -q "awk 'END{print length" "$SCRIPT" && ! grep -q "LC_ALL=C awk 'END{print length" "$SCRIPT"; then
+if grep -q "awk 'END{print length" "$CODE" && ! grep -q "LC_ALL=C awk 'END{print length" "$CODE"; then
   fail "fragment length computed without LC_ALL=C (R4): character count used
       as a byte offset corrupts any record containing non-ASCII"
 fi
@@ -160,7 +166,7 @@ pass "fragment length is byte-based"
 #    $() strips ALL trailing newlines, so a snapshot ending in a complete
 #    record loses the delimiter the newline-boundary rule depends on.
 # ---------------------------------------------------------------------------
-if grep -qE '^[[:space:]]*(local[[:space:]]+)?delta=\$\(' "$SCRIPT"; then
+if grep -qE '^[[:space:]]*(local[[:space:]]+)?delta=\$\(' "$CODE"; then
   fail "delta captured via \$() (R3): trailing newlines are stripped, so a
       single appended complete line yields k=0 — nothing emitted, offset never
       advances, and the feed stalls until the fragment force-flush"

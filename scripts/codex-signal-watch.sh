@@ -53,9 +53,16 @@ read_field() {
   ' "$SIGNAL_FILE"
 }
 
-file_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
-}
+# BUG-001 / RC-6: `stat -f %m f || stat -c %Y f` is NOT a portable fallback. On
+# GNU coreutils `-f` means "filesystem status", so `%m` is invalid — it prints a
+# multi-line block to STDOUT and exits 1, and `$(a || b)` captures BOTH outputs.
+# The result is a blob holding live free-block counters, not an mtime, so every
+# comparison against it reports "changed". Probe once, call only the right form.
+if stat -c %Y . >/dev/null 2>&1; then
+  file_mtime() { stat -c %Y "$1" 2>/dev/null; }
+else
+  file_mtime() { stat -f %m "$1" 2>/dev/null; }
+fi
 
 ROOT="$(repo_root)"
 SIGNAL_FILE="$ROOT/AGENT_SIGNAL.md"

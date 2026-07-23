@@ -22,6 +22,18 @@ if [ -f tests/marker-merge/test.sh ]; then
   }
 fi
 
+# BUG-001 — the activity feed must hold exactly one instance with a bounded
+# process set, and must read file deltas byte-correctly. Guards the fork-bomb
+# regression plus the two silent-data-loss defects found in review rounds 3/4.
+if [ -f tests/agent-activity-bound/test.sh ]; then
+  bash tests/agent-activity-bound/test.sh || {
+    echo "❌ tests/agent-activity-bound/test.sh failed (BUG-001)."
+    echo "   The feed must stay one flock-guarded process with no 'tail -F'"
+    echo "   followers, and its delta reads must stay byte-exact."
+    exit 1
+  }
+fi
+
 # A-14 — bootstrap must INHERIT the operator's git identity, never write one,
 # and must fail before creating anything when no identity is resolvable.
 if [ -f tests/bootstrap-identity/test.sh ]; then

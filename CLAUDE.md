@@ -24,7 +24,8 @@ agent type.
   setup, and how each backing agent (Codex, Gemini, Copilot) is dispatched/watched.
   Read it before any coordinated work.
 
-Watch the whole team live in one terminal: `bash scripts/agent-activity.sh` streams
+Watch the whole team live in one terminal: `bash scripts/agent-activity.sh --daemon`
+then `tail -f logs/agent-activity.log` streams
 a single `[Persona - Backing Agent]` feed. `bash scripts/team-kickoff.sh` runs a
 round-robin kick-off to confirm the roster after editing it.
 
@@ -39,9 +40,16 @@ anything else:
    the Orchestrator). Your `Holder` on `AGENT_SIGNAL.md` is that name; handoffs to
    you are `OVER_TO_<NAME>`. Run the feed with `AGENT_PERSONA="<name>"` so it labels
    your output `[<name> - Claude Code]`.
-2. **Start the live team feed.** Run `bash scripts/agent-activity.sh` (idempotent —
-   the first waker only). It cleans the activity log, **opens a Terminal tailing
-   it**, and streams the one `[Persona - Backing Agent]` feed of every agent's work.
+2. **Ensure the live team feed is running.** Run
+   `bash scripts/agent-activity.sh --daemon`. This is *"ensure running"*, not
+   *"run"*: it is idempotent (a `flock` makes a second call a no-op) and returns
+   immediately. It cleans the activity log and streams the one
+   `[Persona - Backing Agent]` feed of every agent's work. **Watch it with
+   `tail -f logs/agent-activity.log`** — the feed does not open a terminal for
+   you. Stop it with `--stop`; check with `--status`.
+
+   > Spawned, non-primary personas must **not** start it. Every-wake spawning is
+   > what turned a broken idempotency guard into BUG-001 (load 175 for 2.7 days).
 3. **Then orchestrate** the roster — dispatch the Codex/Gemini personas, spawn / hand
    off to the other Claude personas, integrate their work.
 

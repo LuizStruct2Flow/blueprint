@@ -12,10 +12,22 @@ if [ ! -f "$signal_file" ]; then
   echo "AGENT_SIGNAL.md not found at $signal_file" >&2
   exit 1
 fi
-last=$(stat -f %m "$signal_file" 2>/dev/null || stat -c %Y "$signal_file" 2>/dev/null)
+# BUG-001 / RC-6: `stat -f %m f || stat -c %Y f` is NOT a portable fallback. On
+# GNU coreutils `-f` means "filesystem status", so `%m` is invalid — it prints a
+# multi-line block to STDOUT and exits 1, and `$(a || b)` captures BOTH. The
+# "mtime" then contained live free-block counters that change on every write, so
+# this watcher re-announced [signal-change] every 2s into an unrotated log.
+# Probe once, then call only the correct form.
+if stat -c %Y . >/dev/null 2>&1; then
+  file_mtime(){ stat -c %Y "$1" 2>/dev/null; }
+else
+  file_mtime(){ stat -f %m "$1" 2>/dev/null; }
+fi
+
+last=$(file_mtime "$signal_file")
 while true; do
   sleep 2
-  new=$(stat -f %m "$signal_file" 2>/dev/null || stat -c %Y "$signal_file" 2>/dev/null)
+  new=$(file_mtime "$signal_file")
   if [ -n "$new" ] && [ "$new" != "$last" ]; then
     last=$new
     holder=$(grep '^| Holder ' "$signal_file" | head -1 | sed 's/^| Holder *| //; s/ *|$//') || holder=""

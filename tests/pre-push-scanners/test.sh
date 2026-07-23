@@ -86,6 +86,8 @@ case "$mode" in
   clean)   printf '{"version":"1","results":[],"errors":[]}\n'; exit 0 ;;
   finding) printf '{"version":"1","results":[{"check_id":"demo.rule","path":"x.py","start":{"line":7}}],"errors":[]}\n'; exit 1 ;;
   crash2)  echo "SEMGREP-CRASH-DIAG (simulated io_uring)" >&2; printf '{"version":"1","results":[],"errors":[{"level":"error"}]}\n'; exit 2 ;;
+  err1json) echo "SEMGREP-CRASH-DIAG (error, exit 1, valid JSON)" >&2; printf '{"version":"1","results":[],"errors":[{"level":"error"}]}\n'; exit 1 ;;
+  badschema) printf '{"version":"1","results":"not-an-array"}\n'; exit 0 ;;
   oserror) echo "Traceback (most recent call last):" >&2; echo "PermissionError: settings.yml" >&2; exit 1 ;;
 esac
 SH
@@ -182,6 +184,29 @@ rc="$(run_hook)"
 if [ "$rc" -eq 0 ] && saw "retrying single-job"; then
   pass "semgrep retry drops to --jobs 1 and recovers the parallel-engine crash"
 else fail "retry did not recover a parallel-only failure via --jobs 1 (rc=$rc)"; fi
+
+# ===========================================================================
+# R2-1a. Valid JSON + zero results + NON-ZERO exit is NOT a proven clean scan.
+#        exit 1 is not semgrep's clean exit, so "0 results" cannot be trusted —
+#        classify as incomplete/tool-failure, never clean. (Codex R2-1.)
+# ===========================================================================
+mk_shim gitleaks 0; mk_sg err1json err1json
+rc="$(run_hook)"
+if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "WARNING+ finding"; then
+  pass "R2-1: valid JSON + 0 results + exit 1 → tool failure, not clean"
+else fail "R2-1: exit 1 with 0 results was waved through as clean (rc=$rc)"; fi
+
+# ===========================================================================
+# R2-1b. Valid JSON whose `.results` is not an array (wrong schema) must be
+#        rejected as incomplete, not silently treated as zero findings — the
+#        `|| echo 0` fail-open. Exit 0 here proves it is caught by schema
+#        validation, independent of the exit code.
+# ===========================================================================
+mk_shim gitleaks 0; mk_sg badschema badschema
+rc="$(run_hook)"
+if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "WARNING+ finding"; then
+  pass "R2-1: valid JSON with non-array results → tool failure (no fail-open)"
+else fail "R2-1: malformed results schema was treated as zero findings (rc=$rc)"; fi
 
 # ===========================================================================
 # 5. gitleaks exit 1 → blocks as a SECRET.

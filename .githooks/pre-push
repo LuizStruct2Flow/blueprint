@@ -82,6 +82,17 @@ if command -v semgrep >/dev/null 2>&1; then
 
   # $1 = extra args (word-split intentionally, e.g. "--jobs 1"); sets _sg_class
   # (finding|incomplete|clean), _sg_findings, _sg_rc.
+  #
+  # A "clean" verdict is the strongest claim this gate makes, so it demands the
+  # most evidence: semgrep exited 0 AND emitted a well-formed `.results` ARRAY
+  # AND that array is empty. Anything weaker is incomplete, never clean:
+  #   - invalid JSON (crash before output — the OSError class);
+  #   - `.results` missing or not an array (wrong/partial schema) — NOT coerced
+  #     to zero findings, which would fail open;
+  #   - a NON-ZERO exit with zero results — exit 1 is not semgrep's clean exit,
+  #     so "0 results" there is not a proven-complete scan (Codex R2-1).
+  # Only the exit code proves completeness; only the results array proves
+  # findings. Neither is inferred from the other.
   _sg_classify() {
     _sg_rc=0
     # shellcheck disable=SC2086
@@ -90,13 +101,19 @@ if command -v semgrep >/dev/null 2>&1; then
       --severity=WARNING --severity=ERROR \
       --timeout=20 --metrics=off --quiet \
       . >"$_sg_json" 2>"$_sg_err" || _sg_rc=$?
-    if ! jq -e . "$_sg_json" >/dev/null 2>&1; then
-      _sg_class=incomplete; return           # crashed before valid JSON
+    # Require a well-formed results ARRAY. `jq -e` is false/non-zero when the
+    # JSON is invalid, or `.results` is missing / not an array — all incomplete.
+    if ! jq -e '(.results | type) == "array"' "$_sg_json" >/dev/null 2>&1; then
+      _sg_class=incomplete; return
     fi
-    _sg_findings="$(jq '[.results[]] | length' "$_sg_json" 2>/dev/null || echo 0)"
-    if [ "${_sg_findings:-0}" -gt 0 ]; then _sg_class=finding
-    elif [ "$_sg_rc" -ge 2 ]; then _sg_class=incomplete   # scan did not complete
-    else _sg_class=clean; fi
+    _sg_findings="$(jq '.results | length' "$_sg_json")"
+    if [ "${_sg_findings:-0}" -gt 0 ]; then
+      _sg_class=finding                       # real results, regardless of exit
+    elif [ "$_sg_rc" -eq 0 ]; then
+      _sg_class=clean                          # zero results AND a clean exit
+    else
+      _sg_class=incomplete                     # zero results but a non-zero exit
+    fi
   }
 
   _sg_classify ""

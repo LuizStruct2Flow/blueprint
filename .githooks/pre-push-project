@@ -1,0 +1,34 @@
+#!/bin/sh
+# Project-specific pre-push guards for the BLUEPRINT repo itself.
+#
+# Sourced by .githooks/pre-push (see its "Project-specific guards" section).
+# The generic hook runs build/lint/test per workspace, but this repo has no
+# backend/ or frontend/ — so without this file its own regression tests run
+# NOWHERE and a regression to the sync CLI or the bootstrap script pushes green.
+# That gap was audit finding A-15.
+#
+# Keep every check here fast: the whole pre-push gate has a 30 s ceiling
+# (CLAUDE.md §"Pre-push tolerance"). Current total for this file: well under 1 s.
+
+echo "  → Blueprint shell regression tests..."
+
+# BP-7 — `blueprint pull` must do a marker-aware merge, preserving the
+# project's outside-marker content byte-for-byte.
+if [ -f tests/marker-merge/test.sh ]; then
+  bash tests/marker-merge/test.sh || {
+    echo "❌ tests/marker-merge/test.sh failed — marker-aware merge is broken."
+    echo "   A pull would clobber project-owned content outside the markers."
+    exit 1
+  }
+fi
+
+# A-14 — bootstrap must INHERIT the operator's git identity, never write one,
+# and must fail before creating anything when no identity is resolvable.
+if [ -f tests/bootstrap-identity/test.sh ]; then
+  bash tests/bootstrap-identity/test.sh || {
+    echo "❌ tests/bootstrap-identity/test.sh failed."
+    echo "   Bootstrap must inherit the git author identity (never hardcode one)"
+    echo "   and must not leave a half-bootstrapped directory behind."
+    exit 1
+  }
+fi

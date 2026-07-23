@@ -69,6 +69,30 @@ EOF
 }
 calls_of(){ cat "$CALLS.$1" 2>/dev/null || echo 0; }
 
+# JSON-emitting semgrep shim — the hook now classifies from semgrep's --json
+# output, not its exit code. $@ = modes played in call order (last repeats):
+#   clean   → {results:[],errors:[]}, exit 0
+#   finding → {results:[{check_id:demo.rule,...}]}, exit 1   (block: results present)
+#   crash2  → valid JSON but exit 2 + stderr diag             (incomplete: retry)
+#   oserror → traceback on stderr, NO json, exit 1           (incomplete: crashed)
+mk_sg(){
+  {
+    printf '#!/bin/sh\n'
+    printf 'n=$(cat "%s.semgrep" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" >"%s.semgrep"\n' "$CALLS" "$CALLS"
+    printf 'set -- %s\n' "$*"
+    printf 'eval "mode=\\${$n:-\\${%s}}"\n' "$#"
+    cat <<'SH'
+case "$mode" in
+  clean)   printf '{"version":"1","results":[],"errors":[]}\n'; exit 0 ;;
+  finding) printf '{"version":"1","results":[{"check_id":"demo.rule","path":"x.py","start":{"line":7}}],"errors":[]}\n'; exit 1 ;;
+  crash2)  echo "SEMGREP-CRASH-DIAG (simulated io_uring)" >&2; printf '{"version":"1","results":[],"errors":[{"level":"error"}]}\n'; exit 2 ;;
+  oserror) echo "Traceback (most recent call last):" >&2; echo "PermissionError: settings.yml" >&2; exit 1 ;;
+esac
+SH
+  } >"$FIX/bin/semgrep"
+  chmod +x "$FIX/bin/semgrep"; rm -f "$CALLS.semgrep"
+}
+
 # Run the hook in the fixture with shims first on PATH.
 run_hook(){ ( cd "$FIX" && PATH="$FIX/bin:$PATH" sh .githooks/pre-push ) >"$WORK/out" 2>&1; echo $?; }
 saw(){ grep -qF -- "$1" "$WORK/out"; }
@@ -76,42 +100,39 @@ saw(){ grep -qF -- "$1" "$WORK/out"; }
 # ===========================================================================
 # 1. Both scanners clean → the gate passes.
 # ===========================================================================
-mk_shim gitleaks 0; mk_shim semgrep 0
+mk_shim gitleaks 0; mk_sg clean
 rc="$(run_hook)"
 [ "$rc" -eq 0 ] && pass "clean scanners → gate passes" \
                 || { fail "clean scanners should pass, got exit $rc"; tail -5 "$WORK/out"; }
 
 # ===========================================================================
-# 2. semgrep exit 1 → blocks, labelled a FINDING, and shows it.
+# 2. JSON results present → blocks as a FINDING and shows the rule.
 # ===========================================================================
-mk_shim gitleaks 0; mk_shim semgrep 1
+mk_shim gitleaks 0; mk_sg finding
 rc="$(run_hook)"
-if [ "$rc" -ne 0 ] && saw "found a WARNING+ finding" && ! saw "could not complete"; then
-  saw "SIMULATED-FINDING" && pass "semgrep exit 1 → blocks as a finding, output shown" \
-                          || fail "semgrep exit 1 blocked but did not show the finding (--quiet regression)"
-else fail "semgrep exit 1 must block AND be labelled a finding (rc=$rc)"; fi
-[ "$(calls_of semgrep)" -eq 1 ] && pass "semgrep exit 1 is not retried" \
+if [ "$rc" -ne 0 ] && saw "WARNING+ finding" && ! saw "could not complete"; then
+  saw "demo.rule" && pass "semgrep JSON finding → blocks, rule shown" \
+                  || fail "finding blocked but the rule id was not shown"
+else fail "a JSON result must block AND be labelled a finding (rc=$rc)"; fi
+[ "$(calls_of semgrep)" -eq 1 ] && pass "a finding is not retried" \
                                 || fail "a real finding was retried $(calls_of semgrep) times"
 
 # ===========================================================================
-# 3. semgrep exit 2 twice → blocks as a TOOL FAILURE, never as a finding,
-#    and retries exactly once. THIS IS THE REGRESSION: the old hook printed
-#    "found a WARNING+ finding" here.
+# 3. Scan crashes (exit 2) both times → blocks as a TOOL FAILURE, never a
+#    finding, retries exactly once, and surfaces the crash diagnostic.
 # ===========================================================================
-mk_shim gitleaks 0; mk_shim semgrep "2 2"
+mk_shim gitleaks 0; mk_sg crash2 crash2
 rc="$(run_hook)"
-if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "found a WARNING+ finding"; then
-  pass "semgrep exit 2 → blocks as a tool failure, NOT as a finding"
+if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "WARNING+ finding"; then
+  pass "semgrep crash (exit 2) → blocks as a tool failure, NOT as a finding"
 else
   fail "semgrep tool error must not be reported as a security finding (rc=$rc)"
   grep -E "❌|⚠" "$WORK/out" | head -3
 fi
-[ "$(calls_of semgrep)" -eq 2 ] && pass "semgrep tool error retried exactly once" \
+[ "$(calls_of semgrep)" -eq 2 ] && pass "semgrep crash retried exactly once" \
                                 || fail "expected exactly 2 semgrep calls (1 + 1 retry), got $(calls_of semgrep)"
-# The captured scanner output must be surfaced, otherwise the failure is
-# undiagnosable — which is what --quiet was doing before.
-saw "shim semgrep call" && pass "tool-failure path exposes the scanner's own output" \
-                        || { fail "tool-failure path hid the diagnostic output"; tail -6 "$WORK/out"; }
+saw "SEMGREP-CRASH-DIAG" && pass "tool-failure path exposes the scanner's own diagnostic" \
+                         || { fail "tool-failure path hid the diagnostic output"; tail -6 "$WORK/out"; }
 
 # ===========================================================================
 # R-3. semgrep exit 1 with NO valid JSON on stdout — an OSError BEFORE the scan
@@ -120,23 +141,16 @@ saw "shim semgrep call" && pass "tool-failure path exposes the scanner's own out
 #      finding", so it reported a crash as a vulnerability. Findings must come
 #      from semgrep's JSON `results`, which an OSError never produces.
 # ===========================================================================
-cat >"$FIX/bin/semgrep" <<'SH'
-#!/bin/sh
-echo "Traceback (most recent call last):" >&2
-echo "PermissionError: [Errno 13] Permission denied: '/ro/.semgrep/settings.yml'" >&2
-exit 1
-SH
-chmod +x "$FIX/bin/semgrep"
-mk_shim gitleaks 0
+mk_shim gitleaks 0; mk_sg oserror oserror
 rc="$(run_hook)"
-if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "found a WARNING+ finding"; then
+if [ "$rc" -ne 0 ] && saw "did NOT run" && ! saw "WARNING+ finding"; then
   pass "R-3: semgrep exit 1 with no JSON → tool failure, not a finding"
 else fail "R-3: semgrep OSError (exit 1, no JSON) misclassified as a finding (rc=$rc)"; fi
 
 # ===========================================================================
 # 4. semgrep exit 2 then 0 → retries once and passes (transient recovery).
 # ===========================================================================
-mk_shim gitleaks 0; mk_shim semgrep "2 0"
+mk_shim gitleaks 0; mk_sg crash2 clean
 rc="$(run_hook)"
 if [ "$rc" -eq 0 ] && saw "retrying"; then pass "transient semgrep failure recovers on retry"
 else fail "a transient semgrep failure should retry and pass (rc=$rc)"; fi
@@ -156,8 +170,11 @@ else fail "a transient semgrep failure should retry and pass (rc=$rc)"; fi
 # not the shim's output.)
 cat >"$FIX/bin/semgrep" <<'SH'
 #!/bin/sh
-case " $* " in *" --jobs 1 "*) exit 0 ;; esac
-exit 2
+case " $* " in
+  *" --jobs 1 "*) printf '{"version":"1","results":[],"errors":[]}\n'; exit 0 ;;
+esac
+echo "SEMGREP-CRASH-DIAG (simulated io_uring)" >&2
+printf '{"version":"1","results":[],"errors":[{"level":"error"}]}\n'; exit 2
 SH
 chmod +x "$FIX/bin/semgrep"
 mk_shim gitleaks 0

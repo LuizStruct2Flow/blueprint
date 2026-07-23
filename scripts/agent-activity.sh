@@ -129,7 +129,13 @@ read_state(){
   s_pid=$(sed -n 's/^pid=//p'   "$state_file" | head -1)
   s_nonce=$(sed -n 's/^nonce=//p' "$state_file" | head -1)
   s_token=$(sed -n 's/^token=//p' "$state_file" | head -1)
-  [ -n "${s_pid:-}" ] && [ -n "${s_token:-}" ]
+  # ALL THREE required — rev 5 F-2': any missing field fails closed. The nonce
+  # is not decoration: `start_token` on Linux is starttime in clock ticks since
+  # BOOT, so after a reboot a fresh process can legitimately carry the same
+  # pid AND the same token as the dead supervisor. The random nonce is what
+  # makes a state file written before a reboot distinguishable from one written
+  # after it.
+  [ -n "${s_pid:-}" ] && [ -n "${s_nonce:-}" ] && [ -n "${s_token:-}" ]
 }
 
 # Fail-closed: signal ONLY a process whose recorded identity still matches.
@@ -269,10 +275,15 @@ pump(){
     fi
   fi
 
+  # Advance ONLY after the bytes were materialized AND emitted. The rule is
+  # "emit complete bytes, then advance": if the sink fails, those bytes must be
+  # re-read next tick, not silently consumed. (`set -e` is not in force here, so
+  # this has to be explicit.)
   if [ "$k" -gt 0 ]; then
-    head -c "$k" "$tmp" >"$tmp.p" && emit_delta "$f" "$tmp.p" "$kind" "$who"
+    if head -c "$k" "$tmp" >"$tmp.p" 2>/dev/null && emit_delta "$f" "$tmp.p" "$kind" "$who"; then
+      OFFSET["$f"]=$(( off + k ))
+    fi
     rm -f "$tmp.p"
-    OFFSET["$f"]=$(( off + k ))
   else
     OFFSET["$f"]=$off
   fi
@@ -291,6 +302,18 @@ seed_offset(){
   fi
 }
 
+# Change token for AGENT_SIGNAL.md — CONTENT, not size+inode and not a bare
+# timestamp.
+#   - size+inode is a *stream* identity (right for offset resets), not a
+#     *change* token: an in-place edit preserving byte length and inode is
+#     invisible, and rewriting a Task field to the same width is exactly the
+#     kind of edit agents make. A real mic change would never reach the feed.
+#   - mtime alone can alias when two edits land inside one timestamp tick.
+# cksum is POSIX, costs one read of a small file per tick, and fires exactly
+# when the bytes change. RC-6 was "call the correct stat form", not "stop
+# detecting changes" — this satisfies both.
+signal_token(){ cksum < "$signal_file" 2>/dev/null; }
+
 signal_line(){
   local holder state task
   holder=$(field Holder); state=$(field State); task=$(field Task)
@@ -305,6 +328,22 @@ supervise(){
     return 0
   fi
 
+  # CLOSE FD 9 IN EVERY CHILD — one choke point, not per-command.
+  #
+  # `exec 9>lock` is NOT close-on-exec, so every child inherits the locked
+  # descriptor. The lock is only released when the LAST holder exits, so a
+  # SIGKILLed supervisor whose `sleep $TICK` child is still alive keeps the lock
+  # held — and the next `--daemon` sees "already running" and refuses to start.
+  # That is Codex round-1 blocker #1 resurfacing: I argued it was structurally
+  # impossible because there are no LONG-lived children, but short-lived ones
+  # inherit it just the same, and the tick sleep is a child on every iteration.
+  # Wrapping the whole body in `{ ... } 9>&-` closes FD 9 for everything spawned
+  # inside while this shell keeps the lock, so no per-command `9>&-` can be
+  # forgotten. Regression: tests/agent-activity-bound/test.sh #4.
+  supervise_body 9>&-
+}
+
+supervise_body(){
   local nonce; nonce="$$-$(od -An -tu4 -N4 /dev/urandom 2>/dev/null | tr -d ' ' || echo 0)"
   write_state "$$" "$nonce" "$(start_token "$$")"
 
@@ -321,7 +360,7 @@ supervise(){
   proj="$HOME/.claude/projects/$(printf '%s' "$repo_root" | sed 's#/#-#g')"
 
   signal_line   # current baton, once
-  sig_last="$(f_size "$signal_file")-$(f_inode "$signal_file")"
+  sig_last="$(signal_token)"
 
   seed_offset "$state_dir/codex-runs.log"
   seed_offset "$state_dir/gemini-runs.log"
@@ -329,8 +368,10 @@ supervise(){
   while [ "$stop" -eq 0 ]; do
     # Signal file: size+inode identity, so an unchanged file emits nothing.
     if [ -f "$signal_file" ]; then
-      sig_now="$(f_size "$signal_file")-$(f_inode "$signal_file")"
-      if [ "$sig_now" != "$sig_last" ]; then sig_last="$sig_now"; signal_line; fi
+      sig_now="$(signal_token)"
+      if [ -n "$sig_now" ] && [ "$sig_now" != "$sig_last" ]; then
+        sig_last="$sig_now"; signal_line
+      fi
     fi
 
     pump "$state_dir/codex-runs.log"  raw   "CODEX"

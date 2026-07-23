@@ -1,7 +1,7 @@
 # Codex / Slava four-eyes review — BUG-001 implementation
 
-**Date:** 2026-07-23  
-**Reviewed commits:** `d0b3f2b` (reproducer), `8c8bd36` (fix)  
+**Date:** 2026-07-23
+**Reviewed commits:** `d0b3f2b` (reproducer), `8c8bd36` (fix)
 **Verdict:** **CHANGES REQUIRED — do not push.**
 
 The core offset-supervisor architecture matches rev 5, and the four

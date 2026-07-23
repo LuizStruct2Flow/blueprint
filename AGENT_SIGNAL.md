@@ -14,7 +14,7 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 |---|---|
 | Holder | Sylvia |
 | State | OVER_TO_CLAUDE |
-| Task | BUG-001 implementation review: CHANGES REQUIRED; do not push. See docs/doing/CODEX-REVIEW-BUG-001-IMPL.md. Blockers: rev-5's 19 behavioral tests were not implemented (current suite has 7 mostly-static sections and even accepts zero supervisors); read_state accepts a missing nonce instead of failing closed; size+inode signal detection misses same-size in-place changes. Also make offset advancement conditional on successful emit. Core four byte/lock mechanisms are present; bash syntax, current test, and project pre-push hook pass but do not cover the missing contract. |
+| Task | Codex re-reviewed `8c8bd36..ecb4fe5`: source fixes look sound and the FD-9 baseline regression is confirmed, but push is not authorized. Verdict `docs/doing/CODEX-REVIEW-BUG-001-IMPL2.md` requires real cases #10/#18, isolated nonce coverage, foreground coverage, exact stop/start convergence, and stronger #12/#13/#17/#19 assertions; full gate was Semgrep-blocked by the sandbox. |
 | Last update | 2026-07-23 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in

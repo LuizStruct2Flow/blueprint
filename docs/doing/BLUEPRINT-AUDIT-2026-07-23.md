@@ -12,9 +12,10 @@ verified the claim myself rather than relaying it.
 
 **Fix status (authoritative) — updated by the 2026-07-24 `lcm` pass.**
 
-**DELIVERED, pushed to `main` (`1c2f1b9`), awaiting founder acceptance** — rows
-live on in this register for traceability, but the work and its decision records
-are in `docs/waiting-acceptance/`:
+**DELIVERED + QA-ACCEPTED (Jesko, QA-2, round 2, 2026-07-24)** — all seven
+accepted with executed evidence; record in
+`docs/waiting-acceptance/ACCEPTANCE-JESKO-ROUND2-2026-07-24.md`. Rows live on
+here for traceability:
 **A-01** (host paths out of committed settings), **A-05** (bootstrap ships
 tracked template content only), **A-12** (roster on the `.env` model), **A-14**
 (git identity inherited), **A-15** (shell tests wired into a gate), **A-27**
@@ -22,6 +23,11 @@ tracked template content only), **A-12** (roster on the `.env` model), **A-14**
 **BUG-001**, **BUG-002** and **BUG-003** — see `docs/waiting-acceptance/BUGS.md`.
 **A-02** is closed (scanners installed). **A-03 is now empirically confirmed**
 rather than reasoned, and remains OPEN.
+
+> **Jesko's explicit caveat, recorded so it is not lost:** accepting these seven
+> is **not** acceptance of **A-22**. The gate that protects them is armed on this
+> machine only; a fresh clone is still ungated. A-22 is a separate delivery
+> promise and stays open below.
 
 **STILL OPEN — everything else in the register below.** The highest-value ones,
 in the founder-agreed "guard the pipe" order:

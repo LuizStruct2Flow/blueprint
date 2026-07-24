@@ -13,8 +13,8 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 | Field | Value |
 |---|---|
 | Holder | Sylvia |
-| State | OVER_TO_USER |
-| Task | **Acceptance complete (Jesko, QA-2) — 2 accepted, 1 rejected.** **BUG-001** and **BUG-003 ACCEPTED** → `docs/done/BUGS.md`. **BUG-002 REJECTED and reopened** → `docs/doing/BUGS.md`. Jesko's reason is correct and I had missed it: the fix aligns the **Codex** dispatcher but a derived project's **Gemini** watcher still writes literal `$HOME/.{{PROJECT_NAME}}/gemini-runs.log`. Verified by bootstrapping `testqa` — codex → `$HOME/.testqa/`, gemini → `$HOME/.{{PROJECT_NAME}}/`. So the promise "the feed reads its own project's dispatcher state" holds for Codex and fails for Gemini. **Root cause is A-09**: `scripts/start-gemini-signal-watch.sh` is absent from `new-project.sh` TARGETS (0 occurrences), as is `sonar-project.properties`. Jesko's call: accept BUG-002 together with A-09. Also fixed a stale "11 assertions" → 15 in the BUG-003 row that Jesko flagged. Evidence: `docs/waiting-acceptance/ACCEPTANCE-JESKO-2026-07-24.md`. **Next:** A-22 (pre-push hook not armed in a fresh clone), then A-09+BUG-002 together, then A-07, A-03, A-08. |
+| State | OVER_TO_CLAUDE |
+| Task | Jesko QA-2 accepted A-01, A-05, A-12, A-14, A-15, A-27 and A-36 with executed evidence; A-22 remains separately open. |
 | Last update | 2026-07-24 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in

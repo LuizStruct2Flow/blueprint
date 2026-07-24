@@ -29,14 +29,22 @@ rather than reasoned, and remains OPEN.
 > machine only; a fresh clone is still ungated. A-22 is a separate delivery
 > promise and stays open below.
 
+> **A-22 UPDATE (2026-07-24) — fix implemented, NOT yet accepted.** Jesko's
+> caveat above is now addressed in code: `arm_gate` (`scripts/lib/gate.sh`) is
+> called from the two paths that already run at wake (the activity feed and
+> `blueprint drift`), so a fresh clone arms itself instead of relying on a
+> `postinstall` that never existed. Pinned by `tests/gate-arming/` (11 cases),
+> wired into the pre-push gate and CI. **Residual gap, stated rather than
+> hidden:** this covers the agent wake paths. A human who clones and pushes
+> without ever starting the feed or running drift is still ungated — git has no
+> clone hook. A-22 therefore moves to `waiting-acceptance/` on push, **not** to
+> `done/`; only the founder closes it.
+
 **STILL OPEN — everything else in the register below.** The highest-value ones,
 in the founder-agreed "guard the pipe" order:
 
-- **A-22** — the pre-push hook is not armed in a fresh clone (`core.hooksPath`
-  unset; the claimed `postinstall` auto-wire does not exist because there is no
-  root `package.json`). Discovered when the first push of 12 commits went out
-  **ungated**. Wired locally now. *This gates the value of every other finding:
-  an unenforced gate finds nothing.*
+- **A-07** — see below. (**A-22 has moved out of this list — see the note
+  directly under Jesko's caveat.**)
 - **A-07** — `blueprint a2bp` copies a project's file into the blueprint with a
   bare `cp`: no reverse-substitution, no contamination scan. The vector that
   created BUG-002.
@@ -77,7 +85,7 @@ every derived project · **S3** = correctness/doc drift · **S4** = hygiene.
 | **A-19** | S3 | docs ↔ docs | **No single executable wake order**: `AGENTS.md` says signal→AGENTS→CLAUDE; `DoD.md §10` + `HANDOVER.md` say HANDOVER first; `CLAUDE.md` says persona+feed "before anything else". | Codex |
 | **A-20** | S3 | docs ↔ code | **Handoff identity contradicts the dispatchers**: protocol requires `Holder` = roster persona, but both launchers instruct agents to return `Holder=Claude Code` — the exact same-type collision the roster exists to prevent. | Codex |
 | **A-21** | S3 | `.githooks/pre-push` vs `DoD.md §4` | Documented gate order omits the real stages (security runs first, IaC after tests). And the hook is **not** universally blocking as advertised — see A-02. | Codex |
-| **A-22** | S3 | `CLAUDE.md`/`AGENTS.md` | Claim `postinstall` auto-wires `core.hooksPath`. The template has **no root `package.json`**; `new-project.sh` says it runs npm init but doesn't. A later clone has no auto-wire path. | Codex |
+| **A-22** | S3 | `CLAUDE.md`/`.githooks/pre-push` | **FIXED 2026-07-24 (awaiting acceptance)** — see the A-22 update note above. Claimed `postinstall` auto-wires `core.hooksPath` (the claim was in `CLAUDE.md` and the hook header — **not** in `AGENTS.md`). The template has **no root `package.json`**; `new-project.sh` says it runs npm init but doesn't. A later clone has no auto-wire path. | Codex |
 | **A-23** | S3 | `scripts/blueprint:341-351` | Under `set -euo pipefail`, a missing line in `.blueprint-source` aborts the whole script **with no output** — the mandatory wake-time `blueprint drift` exits 1 silently. An unattended agent may read that as "no drift". | Fable |
 | **A-24** | S4 | `scripts/team-kickoff.sh:18-24` | Default persona intros own **another product's** surface ("the editor", "the v2 pipeline", "share/login surfaces") rather than the roster's generic roles. | Fable |
 | **A-25** | S4 | `scripts/build-deck.sh:32` | `npx -y @marp-team/marp-cli@latest` — unpinned remote code executed on every deck rebuild, in an agent-automated step, bypassing the pin-and-scan doctrine the blueprint enforces elsewhere. | Fable |

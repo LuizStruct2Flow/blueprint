@@ -4,8 +4,8 @@
 # A-22: `core.hooksPath` is repo-LOCAL config. `scripts/new-project.sh` sets it
 # at bootstrap, so a bootstrapped project is gated — but a CLONE never runs
 # bootstrap, so `.githooks/pre-push` sits there correct, tested, and completely
-# inert. CLAUDE.md and AGENTS.md claimed a `postinstall` auto-wires it; there is
-# no root package.json, so nothing ever did.
+# inert. CLAUDE.md and the hook header itself claimed a `postinstall` auto-wires
+# it; there is no root package.json, so nothing ever did.
 #
 # That is not hypothetical: in this repo core.hooksPath was UNSET and a push of
 # 12 commits went out COMPLETELY UNGATED while the gate was being run by hand

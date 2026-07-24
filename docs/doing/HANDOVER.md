@@ -6,7 +6,8 @@
 >
 > **Last updated: 2026-07-24.** BUG-001/002/003 + 7 audit findings are fixed,
 > reviewed under four-eyes and pushed; awaiting founder acceptance. The audit
-> register still has open findings, led by A-22 and A-07.
+> register still has open findings, now led by A-07 and A-03 — **A-22 is fixed
+> and awaiting acceptance**, not open.
 
 ## 0. STATUS
 
@@ -24,14 +25,21 @@
 
 ## 1. RESUME — live state + immediate action
 
-- **Immediate next action: A-22 — the pre-push hook is not armed in a fresh
-  clone.** `core.hooksPath` was UNSET in this checkout, so the gate never ran —
-  including on the push of the first 12 commits, which went out **ungated**.
-  Wired locally now (`git config --local core.hooksPath .githooks`), but any
-  other clone has the same gap. CLAUDE.md and AGENTS.md claim a `postinstall`
-  auto-wires it; there is no root `package.json`, so nothing does. Either ship
-  one or correct the docs. **This gates the value of every other finding — an
-  unenforced gate finds nothing.**
+- **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
+  `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
+  the gate never ran — including on the push of the first 12 commits, which
+  went out **ungated**. The docs blamed a `postinstall` auto-wire that never
+  existed (there is no root `package.json`); that claim lived in `CLAUDE.md`
+  and the hook header, **not** in `AGENTS.md`. Fixed by `arm_gate`
+  (`scripts/lib/gate.sh`) called from the two paths that already run at wake —
+  the activity feed and `blueprint drift` — so arming is code on an existing
+  path, not an instruction someone must remember. 11 cases in
+  `tests/gate-arming/`, wired into pre-push and CI. **Residual gap:** a human
+  who clones and pushes without starting the feed or running drift is still
+  ungated; git has no clone hook.
+- **Immediate next action: A-07** — `blueprint a2bp` copies a project's file
+  into the blueprint with no contamination scan (the P-11 lead in the
+  cross-stream plan).
 - **Then, in the founder-agreed "guard the pipe" order:**
   - **A-07** — `blueprint a2bp` copies a project's file into the blueprint with a
     bare `cp`: no reverse-substitution of the project name, no contamination

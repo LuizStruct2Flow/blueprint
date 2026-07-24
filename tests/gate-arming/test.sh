@@ -145,8 +145,16 @@ else fail "#7 blueprint CLI left the clone UNGATED — core.hooksPath='$(hookspa
 # ===========================================================================
 D="$WORK/notarepo"; mkdir -p "$D"
 ( cd "$D" && . "$ROOT/scripts/lib/gate.sh" && arm_gate ) >"$WORK/o8" 2>&1
-if [ $? -eq 0 ]; then pass "#8 arm_gate returns 0 outside a git work tree (degrades, never throws)"
-else fail "#8 arm_gate returned non-zero outside a git repo — it would break every caller"; fi
+rc8=$?
+# Both legs, independently. rc=0 alone is not the contract: a silent success is
+# exactly the "could not arm" / "never ran" ambiguity A-22 is about.
+if [ "$rc8" -ne 0 ]; then
+  fail "#8 arm_gate returned $rc8 outside a git repo — it would break every caller"
+elif grep -qi 'not a git work tree\|nothing to arm' "$WORK/o8"; then
+  pass "#8 outside a git work tree: rc=0 AND says so (degrades visibly, never throws)"
+else
+  fail "#8 arm_gate was silent outside a git repo — 'reports the gate state ALWAYS' must hold on failure paths too"
+fi
 
 # The `git config --local` write itself failing. Removing write permission on
 # .git blocks the config.lock create, which is the real-world read-only-checkout

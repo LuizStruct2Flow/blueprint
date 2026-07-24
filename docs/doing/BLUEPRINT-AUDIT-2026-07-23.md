@@ -48,8 +48,6 @@ rather than reasoned, and remains OPEN.
 **STILL OPEN — everything else in the register below.** The highest-value ones,
 in the founder-agreed "guard the pipe" order:
 
-- **A-07** — see below. (**A-22 has moved out of this list — see the note
-  directly under Jesko's caveat.**)
 - **A-07** — `blueprint a2bp` copies a project's file into the blueprint with a
   bare `cp`: no reverse-substitution, no contamination scan. The vector that
   created BUG-002.

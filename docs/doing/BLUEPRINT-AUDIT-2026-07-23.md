@@ -37,8 +37,13 @@ rather than reasoned, and remains OPEN.
 > wired into the pre-push gate and CI. **Residual gap, stated rather than
 > hidden:** this covers the agent wake paths. A human who clones and pushes
 > without ever starting the feed or running drift is still ungated — git has no
-> clone hook. A-22 therefore moves to `waiting-acceptance/` on push, **not** to
-> `done/`; only the founder closes it.
+> clone hook. That gap is **not closable client-side at all**, and is better
+> stated as a layer assignment than a hole: a pre-push hook is advisory by
+> construction (repo-local, absent on a clone, `--no-verify` defeats it), so
+> local tooling is fast feedback and the enforcing layer is server-side. See
+> **A-37** — on this repo that enforcing layer does not currently exist.
+> A-22 therefore moves to `waiting-acceptance/` on push, **not** to `done/`;
+> only the founder closes it.
 
 **STILL OPEN — everything else in the register below.** The highest-value ones,
 in the founder-agreed "guard the pipe" order:
@@ -277,6 +282,52 @@ pointing directly at commits, so no annotated-tag dereference was needed) and
 pinned to full 40-character SHAs with the version retained as a trailing
 comment. Re-verified: `semgrep … --error` now exits 0, `gitleaks detect` over
 all 62 commits reports no leaks.
+
+## 4c. A-37 (NEW) — `main` is unprotected: the only NON-advisory gate does not exist
+
+Raised by the redcare stream's reframe of my A-22 residual gap (agent-exchange,
+2026-07-24T13:10Z), and **verified here, not assumed**:
+
+```
+$ gh api repos/LuizStruct2Flow/blueprint/branches/main/protection
+{"message":"Branch not protected", ...}   # HTTP 404
+```
+
+**The reframe that makes this a finding.** A pre-push hook is *advisory by
+construction*: it is repo-local config (A-22), absent on a fresh clone, and
+`--no-verify` defeats it in one flag. So local tooling can never be the
+enforcement layer — it is fast feedback for people who have tooling. The
+enforcement layer is server-side required status checks. On this repo that
+layer is **absent**: `.github/workflows/security.yml` does run on every push
+(verified via `gh run list` — it is NOT redcare's BUG-018 shape, where a
+workflow had never once started for months), but it runs **after** the commits
+are already on `main`, and nothing blocks or reverts them when it fails.
+
+Net: A-22 hardened the advisory layer, which was worth doing and is where the
+fast feedback lives. It did not create an enforcing one. **Stating the residual
+gap as a layer assignment rather than a hole** — local = feedback, CI = gate —
+is only honest if the CI layer actually gates. Here it does not.
+
+**Not fixed unilaterally — this is a founder decision, and it has a real
+tension in it.** CLAUDE.md mandates **trunk-based development, no branches,
+direct pushes to `main`**. GitHub's required-status-checks enforce at *merge*
+time; turning them on for direct pushes to `main` blocks the trunk-based flow
+outright, because a check cannot have passed on a sha that has not been pushed
+yet. So the honest options are a genuine trade, not an oversight to correct:
+
+1. **Accept it** — record that this repo's enforcement is social + advisory,
+   and that a failing CI run on `main` is a fix-forward signal rather than a
+   gate. Cheapest; keeps trunk-based intact; means a bad commit does land.
+2. **Protected `main` + short-lived PRs** — real enforcement, but it
+   contradicts the trunk-based rule and changes how the whole team works.
+3. **Post-hoc enforcement** — leave pushes open, add an alert (and optionally
+   an auto-revert) when the `security` workflow fails on `main`. Keeps
+   trunk-based; converts "silently red" into "loudly red". Nothing blocks the
+   bad commit landing, but nothing hides it either.
+
+Option 3 is the one I would argue for, because it is the only one that keeps
+the founder-mandated workflow while removing the silence — and silence is what
+every finding in this register has actually been about. **Founder's call.**
 
 ## 5. Next up
 

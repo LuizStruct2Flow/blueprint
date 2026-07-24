@@ -36,7 +36,10 @@
   path, not an instruction someone must remember. 11 cases in
   `tests/gate-arming/`, wired into pre-push and CI. **Residual gap:** a human
   who clones and pushes without starting the feed or running drift is still
-  ungated; git has no clone hook.
+  ungated; git has no clone hook. Not closable client-side — a pre-push hook is
+  advisory by construction, so this is a layer assignment (local = feedback,
+  CI = gate), which raised **A-37: `main` is unprotected, so the enforcing
+  layer does not exist here.** A-37 needs a founder decision.
 - **Immediate next action: A-07** — `blueprint a2bp` copies a project's file
   into the blueprint with no contamination scan (the P-11 lead in the
   cross-stream plan).

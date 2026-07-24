@@ -281,7 +281,7 @@ pinned to full 40-character SHAs with the version retained as a trailing
 comment. Re-verified: `semgrep … --error` now exits 0, `gitleaks detect` over
 all 62 commits reports no leaks.
 
-## 4c. A-37 (NEW) — a red `security` run on `main` alerts nobody
+## 4c. A-37 (NEW) — no configured team alert route for a failing `security` run
 
 **Corrected scope (founder, 2026-07-24).** This finding was first written as
 "`main` is unprotected, so the enforcing layer is missing." That framing was

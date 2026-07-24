@@ -54,6 +54,18 @@ mk_clone(){
   ( cd "$d" && git init -q . ) >/dev/null 2>&1
   # Guarantee the clone-shaped precondition: core.hooksPath never set.
   ( cd "$d" && git config --unset core.hooksPath 2>/dev/null || true )
+
+  # POSITIVE CONTROL. Three cases below assert core.hooksPath is EMPTY, and
+  # `git config --get` prints nothing both for "unset in a working repo" and
+  # for "there is no usable repo here at all". Without this, a fixture that
+  # silently failed to initialise would make every one of those cases pass
+  # while testing nothing. So prove config writes actually FUNCTION here,
+  # using a throwaway key rather than core.hooksPath (which would arm it).
+  ( cd "$d" && git config --local s2f.fixtureprobe ok ) 2>/dev/null
+  if [ "$(git -C "$d" config --get s2f.fixtureprobe 2>/dev/null)" != "ok" ]; then
+    fail "fixture $d is not a working git repo — every 'hooksPath is empty' assertion below would pass vacuously"
+  fi
+  ( cd "$d" && git config --local --unset s2f.fixtureprobe ) 2>/dev/null
 }
 
 hookspath(){ git -C "$1" config --get core.hooksPath 2>/dev/null; }

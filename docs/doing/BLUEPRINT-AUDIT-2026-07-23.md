@@ -281,51 +281,58 @@ pinned to full 40-character SHAs with the version retained as a trailing
 comment. Re-verified: `semgrep … --error` now exits 0, `gitleaks detect` over
 all 62 commits reports no leaks.
 
-## 4c. A-37 (NEW) — `main` is unprotected: the only NON-advisory gate does not exist
+## 4c. A-37 (NEW) — a red `security` run on `main` alerts nobody
 
-Raised by the redcare stream's reframe of my A-22 residual gap (agent-exchange,
-2026-07-24T13:10Z), and **verified here, not assumed**:
+**Corrected scope (founder, 2026-07-24).** This finding was first written as
+"`main` is unprotected, so the enforcing layer is missing." That framing was
+wrong, and the reason is worth recording because it is a cross-stream hazard.
 
-```
-$ gh api repos/LuizStruct2Flow/blueprint/branches/main/protection
-{"message":"Branch not protected", ...}   # HTTP 404
-```
+The redcare stream reframed my A-22 residual gap as a layer assignment — local
+hook = advisory feedback, CI required-checks = the real gate — and I adopted it
+and audited against it. **But that reframe is specific to their collaboration
+model: redcare works through PRs, so required status checks gate the merge.**
+This repo is **trunk-based by design** (CLAUDE.md: no branches, direct push to
+`main`). Trunk-based has **no merge point to gate**, so "turn on required
+checks" is not a fix withheld for cost reasons — the mechanism structurally
+does not apply here. An unprotected `main` is a *consequence of the chosen
+model*, not a defect in it.
 
-**The reframe that makes this a finding.** A pre-push hook is *advisory by
-construction*: it is repo-local config (A-22), absent on a fresh clone, and
-`--no-verify` defeats it in one flag. So local tooling can never be the
-enforcement layer — it is fast feedback for people who have tooling. The
-enforcement layer is server-side required status checks. On this repo that
-layer is **absent**: `.github/workflows/security.yml` does run on every push
-(verified via `gh run list` — it is NOT redcare's BUG-018 shape, where a
-workflow had never once started for months), but it runs **after** the commits
-are already on `main`, and nothing blocks or reverts them when it fails.
+So the correct question for a trunk-based repo is not "why is nothing
+blocking?" — nothing can block — but **"if a push lands broken, who finds
+out?"** Verified:
 
-Net: A-22 hardened the advisory layer, which was worth doing and is where the
-fast feedback lives. It did not create an enforcing one. **Stating the residual
-gap as a layer assignment rather than a hole** — local = feedback, CI = gate —
-is only honest if the CI layer actually gates. Here it does not.
+- `.github/workflows/security.yml` runs on every push and nightly (`gh run
+  list` — not redcare's BUG-018 shape, where a workflow had never once
+  started).
+- It has **no failure notification of any kind**: no `if: failure()` step, no
+  Slack webhook, no alert destination. Grep confirms zero.
 
-**Not fixed unilaterally — this is a founder decision, and it has a real
-tension in it.** CLAUDE.md mandates **trunk-based development, no branches,
-direct pushes to `main`**. GitHub's required-status-checks enforce at *merge*
-time; turning them on for direct pushes to `main` blocks the trunk-based flow
-outright, because a check cannot have passed on a sha that has not been pushed
-yet. So the honest options are a genuine trade, not an oversight to correct:
+**That is the actual finding.** In a model where detection is the only
+available layer, detection with no alerting is the whole layer failing quietly.
+A red security run on `main` currently reaches nobody but whatever default
+email GitHub sends the pusher. This also violates the project's own
+non-negotiable observability capability #3 (CLAUDE.md §"Observability is a main
+concern": *every shipped capability is alertable when it starts failing*) —
+the security gate is a shipped capability and it is not alertable.
 
-1. **Accept it** — record that this repo's enforcement is social + advisory,
-   and that a failing CI run on `main` is a fix-forward signal rather than a
-   gate. Cheapest; keeps trunk-based intact; means a bad commit does land.
-2. **Protected `main` + short-lived PRs** — real enforcement, but it
-   contradicts the trunk-based rule and changes how the whole team works.
-3. **Post-hoc enforcement** — leave pushes open, add an alert (and optionally
-   an auto-revert) when the `security` workflow fails on `main`. Keeps
-   trunk-based; converts "silently red" into "loudly red". Nothing blocks the
-   bad commit landing, but nothing hides it either.
+**Fix direction** (not applied — see below): an `if: failure()` step routing to
+the same Slack lane as the other observability alerts, on the transition edge
+rather than every run. Optionally an auto-revert of the offending commit on
+`main`, which trunk-based makes cheap because there is no branch to reconcile.
 
-Option 3 is the one I would argue for, because it is the only one that keeps
-the founder-mandated workflow while removing the silence — and silence is what
-every finding in this register has actually been about. **Founder's call.**
+**Why this is not a hole in trunk-based.** Trunk-based trades pre-merge
+blocking for fast feedback plus fix-forward. That trade is coherent *provided
+the feedback actually arrives* — which is precisely the leg that is missing.
+Adding the alert makes the model whole; it does not make it PR-based.
+
+**Blueprint-level consequence, worth the founder's attention.** CLAUDE.md
+mandates trunk-based generically, but derived projects do not all follow it —
+redcare collaborates via PRs. That means **patterns arriving from the redcare
+stream may silently assume a PR flow**, and this one did. I adopted their
+reframe and audited my repo against a mechanism that cannot exist here, and
+would have filed a wrong finding had the founder not caught it. Cross-stream
+patterns need their collaboration-model assumption stated before adoption —
+the same discipline already applied to flagging divergent defaults.
 
 ## 5. Next up
 

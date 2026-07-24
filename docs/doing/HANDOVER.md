@@ -37,9 +37,12 @@
   `tests/gate-arming/`, wired into pre-push and CI. **Residual gap:** a human
   who clones and pushes without starting the feed or running drift is still
   ungated; git has no clone hook. Not closable client-side — a pre-push hook is
-  advisory by construction, so this is a layer assignment (local = feedback,
-  CI = gate), which raised **A-37: `main` is unprotected, so the enforcing
-  layer does not exist here.** A-37 needs a founder decision.
+  advisory by construction. Note the model difference: redcare's "CI = the
+  gate" reframe assumes **PR-based** collaboration (required checks gate the
+  merge); this repo is **trunk-based**, which has no merge point to gate, so
+  that mechanism does not apply here. The real residue is **A-37: a red
+  `security` run on `main` alerts nobody** — detection is the only available
+  layer in trunk-based, and it has no failure notification at all.
 - **Immediate next action: A-07** — `blueprint a2bp` copies a project's file
   into the blueprint with no contamination scan (the P-11 lead in the
   cross-stream plan).

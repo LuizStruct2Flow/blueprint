@@ -43,8 +43,9 @@
   block direct pushes to a protected branch, so enforcement is available here —
   what conflicts is the no-branches rule, since a SHA must exist on some ref for
   checks to run before it reaches `main`. That is a founder trade, not an
-  impossibility. **A-37** is the part that holds either way: a red `security`
-  run on `main` currently alerts nobody — no `if: failure()`, no webhook.
+  impossibility. **A-37** is the part that holds either way: `security.yml` has
+  no configured shared/team failure route — no `if: failure()`, no webhook, no
+  declared destination (GitHub's per-user run notifications aside).
 - **Immediate next action: A-07** — `blueprint a2bp` copies a project's file
   into the blueprint with no contamination scan (the P-11 lead in the
   cross-stream plan).

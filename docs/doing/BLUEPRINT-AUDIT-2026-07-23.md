@@ -37,11 +37,11 @@ rather than reasoned, and remains OPEN.
 > wired into the pre-push gate and CI. **Residual gap, stated rather than
 > hidden:** this covers the agent wake paths. A human who clones and pushes
 > without ever starting the feed or running drift is still ungated — git has no
-> clone hook. That gap is **not closable client-side at all**, and is better
-> stated as a layer assignment than a hole: a pre-push hook is advisory by
-> construction (repo-local, absent on a clone, `--no-verify` defeats it), so
-> local tooling is fast feedback and the enforcing layer is server-side. See
-> **A-37** — on this repo that enforcing layer does not currently exist.
+> clone hook. The gap is not closable **by another local hook** — a pre-push
+> hook is advisory by construction (repo-local, absent on a clone, `--no-verify`
+> defeats it), so local tooling is fast feedback and enforcement is server-side.
+> Server-side enforcement **is available** here at the policy/workflow cost set
+> out in **A-37** §4c; it is simply not configured today.
 > A-22 therefore moves to `waiting-acceptance/` on push, **not** to `done/`;
 > only the founder closes it.
 
@@ -329,15 +329,27 @@ reach someone. Verified:
 - `.github/workflows/security.yml` runs on every push and nightly (`gh run
   list` — not redcare's BUG-018 shape, where a workflow had never once
   started).
-- It has **no failure notification of any kind**: no `if: failure()` step, no
-  Slack webhook, no alert destination. Grep confirms zero.
+- It has **no configured failure routing**: no `if: failure()` step, no Slack
+  webhook, no declared alert destination. Grep confirms zero. (GitHub's own
+  per-user run notifications are unaffected by this — they are not a
+  team-visible route and are not what capability #3 asks for.)
 
-**That is the actual finding.** Under option 3 detection is the *only* layer,
-so silent detection is the whole layer failing quietly; under options 1 and 2
-it is still the layer that catches everything the pre-merge check cannot see
-(nightly CVEs landing after ship, for one).
-A red security run on `main` currently reaches nobody but whatever default
-email GitHub sends the pusher. This also violates the project's own
+**That is the actual finding, stated precisely:** there is **no configured
+shared/team alert and no transition-edge failure route**. Not "nobody finds
+out" — GitHub does send individual notifications for runs a user triggers, and
+routes scheduled-workflow failures to the workflow's designated user, though
+delivery depends on that person's notification settings. What does not exist is
+any *team-visible, configured* destination, which is what the observability
+capability actually requires.
+
+Severity differs by option. Under options 1 and 2 a failing required check
+already blocks the push or merge, giving synchronous feedback on the change
+being attempted — the alert is still needed for failures *outside* that path,
+above all the nightly CVE scan, which by definition fires when nobody is
+pushing. Under option 3 the alert is the only automated detection after a bad
+commit has landed, so its absence is most severe there.
+
+This violates the project's own
 non-negotiable observability capability #3 (CLAUDE.md §"Observability is a main
 concern": *every shipped capability is alertable when it starts failing*) —
 the security gate is a shipped capability and it is not alertable.
@@ -358,8 +370,9 @@ That is an argument for option 3 being viable, **not** an argument that options
 mandates trunk-based generically, but derived projects do not all follow it —
 redcare collaborates via PRs. That means **patterns arriving from the redcare
 stream may silently assume a PR flow**, and this one did. I adopted their
-reframe and audited my repo against a mechanism that cannot exist here, and
-would have filed a wrong finding had the founder not caught it. Cross-stream
+reframe and audited my repo against a mechanism shaped for their PR flow, then
+compounded it by concluding the mechanism was unavailable rather than merely
+costly here (corrected above, R6). Both errors needed someone else to catch. Cross-stream
 patterns need their collaboration-model assumption stated before adoption —
 the same discipline already applied to flagging divergent defaults.
 

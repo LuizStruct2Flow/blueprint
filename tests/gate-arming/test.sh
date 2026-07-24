@@ -6,8 +6,8 @@
 # The defect: `core.hooksPath` is repo-local config. `scripts/new-project.sh`
 # sets it at bootstrap, so a BOOTSTRAPPED project is gated — but a CLONE never
 # runs bootstrap, so `.githooks/pre-push` is present, correct, tested, and
-# completely inert. CLAUDE.md and AGENTS.md claim a `postinstall` auto-wires it;
-# there is no root package.json, so nothing does.
+# completely inert. CLAUDE.md and the hook header itself claim a `postinstall`
+# auto-wires it; there is no root package.json, so nothing does.
 #
 # This is not hypothetical: in this repo core.hooksPath was UNSET and the first
 # push of 12 commits went out COMPLETELY UNGATED, while the gate was being run
@@ -67,6 +67,15 @@ C="$WORK/c1"; mk_clone "$C"
 if [ "$(hookspath "$C")" = ".githooks" ]; then
   fail "#1 --status armed the gate; arming must not be a side effect of asking whether the feed runs"
 else pass "#1 --status does NOT arm (asking a question must not change config)"; fi
+
+# --stop needs its OWN unset fixture. Running it after --daemon cannot tell
+# "stop preserved unset" from "stop armed it", because the daemon already armed
+# that clone — the assertion would pass either way.
+C="$WORK/c1b"; mk_clone "$C"
+( cd "$C" && HOME="$WORK/h1b" bash scripts/agent-activity.sh --stop ) >"$WORK/o1b" 2>&1
+if [ -z "$(hookspath "$C")" ]; then
+  pass "#1b --stop does NOT arm (tested on a fixture nothing armed first)"
+else fail "#1b --stop armed the gate; stopping the feed must not change git config"; fi
 
 C="$WORK/c2"; mk_clone "$C"
 ( cd "$C" && HOME="$WORK/h2" bash scripts/agent-activity.sh --daemon ) >"$WORK/o2" 2>&1
@@ -128,15 +137,36 @@ if [ "$(hookspath "$C")" = ".githooks" ]; then
 else fail "#7 blueprint CLI left the clone UNGATED — core.hooksPath='$(hookspath "$C")'"; fi
 
 # ===========================================================================
-# 6. Robustness: must never break its caller.
+# 6. Robustness: arm_gate must never break its caller.
+#
+# These drive arm_gate ITSELF through its failure paths. Going through
+# `--status` would prove nothing: by design (#1) --status never calls arm_gate,
+# so it exercises no degradation path in the helper at all.
 # ===========================================================================
-D="$WORK/notarepo"; mkdir -p "$D/scripts" "$D/.githooks" "$D/logs"
-cp "$ROOT/scripts/agent-activity.sh" "$D/scripts/"
-cp "$ROOT/.githooks/pre-push" "$D/.githooks/" 2>/dev/null
-printf '# S\n\n| Field | Value |\n|---|---|\n| Holder | S |\n| State | ACTIVE |\n| Task | t |\n' >"$D/AGENT_SIGNAL.md"
-if ( cd "$D" && HOME="$WORK/h7" timeout 20 bash scripts/agent-activity.sh --status ) >/dev/null 2>&1; [ $? -le 1 ]; then
-  pass "#8 outside a git repo the feed still runs (arming degrades, does not throw)"
-else fail "#8 the feed broke outside a git work tree"; fi
+D="$WORK/notarepo"; mkdir -p "$D"
+( cd "$D" && . "$ROOT/scripts/lib/gate.sh" && arm_gate ) >"$WORK/o8" 2>&1
+if [ $? -eq 0 ]; then pass "#8 arm_gate returns 0 outside a git work tree (degrades, never throws)"
+else fail "#8 arm_gate returned non-zero outside a git repo — it would break every caller"; fi
+
+# The `git config --local` write itself failing. Removing write permission on
+# .git blocks the config.lock create, which is the real-world read-only-checkout
+# shape. Skipped as root, who ignores the mode bits.
+C="$WORK/c9"; mk_clone "$C"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "  ~ #9 skipped (running as root — mode bits do not block the write)"
+else
+  chmod a-w "$C/.git"
+  ( cd "$C" && . scripts/lib/gate.sh && arm_gate "$C" ) >"$WORK/o9" 2>&1
+  rc9=$?
+  chmod u+w "$C/.git"
+  if [ "$rc9" -ne 0 ]; then
+    fail "#9 arm_gate returned $rc9 when the config write failed — must never fail its caller"
+  elif grep -qi 'could not set\|NOT active' "$WORK/o9"; then
+    pass "#9 an unwritable config degrades to a warning, caller unharmed"
+  else
+    fail "#9 the config write failed but nothing said so — a silent non-arm reads as armed"
+  fi
+fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-22 — the gate arms itself on paths that already run."

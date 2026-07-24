@@ -27,8 +27,16 @@
 # when core.hooksPath is UNSET. Never fails the caller.
 arm_gate() {
   _ag_root="${1:-}"
-  [ -n "$_ag_root" ] || _ag_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
-  [ -n "$_ag_root" ] || return 0            # not a git work tree — nothing to arm
+  [ -n "$_ag_root" ] || _ag_root="$(git rev-parse --show-toplevel 2>/dev/null)" || _ag_root=""
+  # One guard, and it SPEAKS. "Reports the gate state ALWAYS" (above) has to hold
+  # on the failure paths too, or a call that could not arm is indistinguishable
+  # from a call that never happened — which is the A-22 injury itself. This also
+  # covers rev-parse exiting 0 with empty output: unlikely, but it must not reach
+  # the path concatenation below.
+  if [ -z "$_ag_root" ]; then
+    echo "  ⚠ gate: not a git work tree — nothing to arm"
+    return 0
+  fi
 
   # Never point core.hooksPath at a directory that cannot gate.
   if [ ! -x "$_ag_root/.githooks/pre-push" ]; then

@@ -66,8 +66,9 @@ if command -v semgrep >/dev/null 2>&1; then
   # R-3). So:
   #   - FINDINGS come from `.results[]` in --json output. An OSError produces no
   #     results, so it can never be misread as a finding.
-  #   - COMPLETENESS comes from the exit code: >=2 means the scan crashed /
-  #     did not finish (e.g. the io_uring/memlock parallel crash), so "0
+  #   - COMPLETENESS comes from the exit code, and ONLY exit 0 proves it. Any
+  #     non-zero exit with zero results means the scan is not proven complete
+  #     (exit >=2 is the io_uring/memlock crash; exit 1 is ambiguous), so "0
   #     findings" cannot be trusted and we retry single-job, then fail closed.
   # jq is required: without a reliable parser we would be back to guessing, which
   # is the exact defect this fixes — so a missing jq fails closed, not open.

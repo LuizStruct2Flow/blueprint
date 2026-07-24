@@ -10,15 +10,35 @@ defects · bootstrap+sync) + Codex/Slava (cross-provider four-eyes, per
 **deduplicated** across reviewers; the `Confirmed` column records whether I
 verified the claim myself rather than relaying it.
 
-**Fix status (authoritative — §3b has the detail):** **A-12** and **A-14** are
-implemented (founder-decided). **A-01** is implemented but **re-opened by Codex
-round 2** — the committed settings file had picked up further host/session paths
-during the scanner install; those are now removed and it needs re-verification
-before it counts as closed. **A-36** (new, below) was found and fixed as a
-direct consequence of installing the scanners. Everything else in this register
-is **untouched**. BUG-001 remains **blocked** — Codex withheld consensus in
-round 1, correctly (§3); the plan has been revised to rev 2 and is awaiting
-round-2 judgement.
+**Fix status (authoritative) — updated by the 2026-07-24 `lcm` pass.**
+
+**DELIVERED, pushed to `main` (`1c2f1b9`), awaiting founder acceptance** — rows
+live on in this register for traceability, but the work and its decision records
+are in `docs/waiting-acceptance/`:
+**A-01** (host paths out of committed settings), **A-05** (bootstrap ships
+tracked template content only), **A-12** (roster on the `.env` model), **A-14**
+(git identity inherited), **A-15** (shell tests wired into a gate), **A-27**
+(all five `project_config_*.md` ignored), **A-36** (Actions pinned to SHAs), plus
+**BUG-001**, **BUG-002** and **BUG-003** — see `docs/waiting-acceptance/BUGS.md`.
+**A-02** is closed (scanners installed). **A-03 is now empirically confirmed**
+rather than reasoned, and remains OPEN.
+
+**STILL OPEN — everything else in the register below.** The highest-value ones,
+in the founder-agreed "guard the pipe" order:
+
+- **A-22** — the pre-push hook is not armed in a fresh clone (`core.hooksPath`
+  unset; the claimed `postinstall` auto-wire does not exist because there is no
+  root `package.json`). Discovered when the first push of 12 commits went out
+  **ungated**. Wired locally now. *This gates the value of every other finding:
+  an unenforced gate finds nothing.*
+- **A-07** — `blueprint a2bp` copies a project's file into the blueprint with a
+  bare `cp`: no reverse-substitution, no contamination scan. The vector that
+  created BUG-002.
+- **A-03** — `gitleaks protect --staged` scans the index, empty at pre-push time.
+- **A-08** — `LWA_FEED_*` in `scripts/log-activity.sh`: BUG-002's contamination
+  in env-var-namespace form.
+- **A-09** — dispatchers still write a literal `~/.{{PROJECT_NAME}}/`, shared
+  across projects (redcare's Codex output interleaves with this repo's).
 
 ---
 

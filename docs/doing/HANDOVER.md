@@ -39,10 +39,12 @@
   ungated; git has no clone hook. Not closable client-side — a pre-push hook is
   advisory by construction. Note the model difference: redcare's "CI = the
   gate" reframe assumes **PR-based** collaboration (required checks gate the
-  merge); this repo is **trunk-based**, which has no merge point to gate, so
-  that mechanism does not apply here. The real residue is **A-37: a red
-  `security` run on `main` alerts nobody** — detection is the only available
-  layer in trunk-based, and it has no failure notification at all.
+  merge); this repo is **trunk-based**. Note (Slava, R6): required checks DO
+  block direct pushes to a protected branch, so enforcement is available here —
+  what conflicts is the no-branches rule, since a SHA must exist on some ref for
+  checks to run before it reaches `main`. That is a founder trade, not an
+  impossibility. **A-37** is the part that holds either way: a red `security`
+  run on `main` currently alerts nobody — no `if: failure()`, no webhook.
 - **Immediate next action: A-07** — `blueprint a2bp` copies a project's file
   into the blueprint with no contamination scan (the P-11 lead in the
   cross-stream plan).

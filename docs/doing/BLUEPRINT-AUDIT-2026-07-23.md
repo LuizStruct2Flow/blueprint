@@ -289,17 +289,42 @@ wrong, and the reason is worth recording because it is a cross-stream hazard.
 
 The redcare stream reframed my A-22 residual gap as a layer assignment — local
 hook = advisory feedback, CI required-checks = the real gate — and I adopted it
-and audited against it. **But that reframe is specific to their collaboration
-model: redcare works through PRs, so required status checks gate the merge.**
-This repo is **trunk-based by design** (CLAUDE.md: no branches, direct push to
-`main`). Trunk-based has **no merge point to gate**, so "turn on required
-checks" is not a fix withheld for cost reasons — the mechanism structurally
-does not apply here. An unprotected `main` is a *consequence of the chosen
-model*, not a defect in it.
+and audited against it. **That reframe fits their collaboration model: redcare
+works through PRs, so required status checks gate the merge.** This repo is
+**trunk-based by design** (CLAUDE.md: no branches, direct push to `main`).
 
-So the correct question for a trunk-based repo is not "why is nothing
-blocking?" — nothing can block — but **"if a push lands broken, who finds
-out?"** Verified:
+**Second correction (Slava, four-eyes R6) — and this one corrects me, not the
+first framing.** I wrote that required checks "enforce at merge time" and then,
+rescoping, that the mechanism "structurally does not apply" to trunk-based.
+**Both are false, and the second is just the first in new words.** GitHub
+documents required checks as blocking **pushes** to a protected branch, not
+only merges; and it documents a direct-push path — a commit whose exact SHA is
+up to date and has already passed the required checks can be pushed straight to
+the protected branch. So enforcement *is* technically available here.
+
+What actually conflicts is narrower and is a **policy** conflict, not a
+structural one: to get checks to run on a SHA before it reaches `main`, that
+SHA must first exist on some other ref, and this repo's rule is **no branches**.
+So the enforcing options are:
+
+1. **Short-lived PRs** — real enforcement; contradicts the no-branches rule and
+   changes how the whole team works.
+2. **Stage the exact SHA on a temporary ref, wait for required checks, then push
+   that already-green SHA directly to a protected `main`** — real enforcement,
+   keeps `main` linear and direct-pushed, but still requires a ref to stage on,
+   so it bends the same rule more cheaply. Also needs the workflow to trigger on
+   that staging ref; today it only listens to `main` pushes and `pull_request`,
+   which is why no check can currently run for an unpushed local SHA.
+3. **Accept advisory-only enforcement and fix the detection layer** — below.
+
+An unprotected `main` is therefore a *live trade the founder owns*, not an
+impossibility. I twice reached for "this cannot be done here" when the true
+answer was "this costs something here", which is a materially different claim to
+put in front of a decision-maker.
+
+**Independently of that trade, the detection layer is broken and should be
+fixed either way.** Even with option 1 or 2 adopted, a red run still has to
+reach someone. Verified:
 
 - `.github/workflows/security.yml` runs on every push and nightly (`gh run
   list` — not redcare's BUG-018 shape, where a workflow had never once
@@ -307,8 +332,10 @@ out?"** Verified:
 - It has **no failure notification of any kind**: no `if: failure()` step, no
   Slack webhook, no alert destination. Grep confirms zero.
 
-**That is the actual finding.** In a model where detection is the only
-available layer, detection with no alerting is the whole layer failing quietly.
+**That is the actual finding.** Under option 3 detection is the *only* layer,
+so silent detection is the whole layer failing quietly; under options 1 and 2
+it is still the layer that catches everything the pre-merge check cannot see
+(nightly CVEs landing after ship, for one).
 A red security run on `main` currently reaches nobody but whatever default
 email GitHub sends the pusher. This also violates the project's own
 non-negotiable observability capability #3 (CLAUDE.md §"Observability is a main
@@ -320,10 +347,12 @@ the same Slack lane as the other observability alerts, on the transition edge
 rather than every run. Optionally an auto-revert of the offending commit on
 `main`, which trunk-based makes cheap because there is no branch to reconcile.
 
-**Why this is not a hole in trunk-based.** Trunk-based trades pre-merge
-blocking for fast feedback plus fix-forward. That trade is coherent *provided
-the feedback actually arrives* — which is precisely the leg that is missing.
-Adding the alert makes the model whole; it does not make it PR-based.
+**Why option 3 is defensible rather than a cop-out.** Trunk-based trades
+pre-merge blocking for fast feedback plus fix-forward. That trade is coherent
+*provided the feedback actually arrives* — which is precisely the leg that is
+missing. Adding the alert makes the model whole; it does not make it PR-based.
+That is an argument for option 3 being viable, **not** an argument that options
+1 and 2 are unavailable — which is the error corrected above.
 
 **Blueprint-level consequence, worth the founder's attention.** CLAUDE.md
 mandates trunk-based generically, but derived projects do not all follow it —

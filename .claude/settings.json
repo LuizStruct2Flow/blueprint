@@ -194,7 +194,8 @@
       "Bash(git push *:*)"
     ],
     "additionalDirectories": [
-      "/private/tmp"
+      "/private/tmp",
+      "../../agent-exchange"
     ]
   },
   "hooks": {

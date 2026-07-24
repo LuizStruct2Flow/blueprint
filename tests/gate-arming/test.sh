@@ -37,15 +37,24 @@ pass(){ echo "  ok — $*"; }
 # exactly what `git clone` gives you.
 mk_clone(){
   local d="$1"
-  mkdir -p "$d"
-  git -C "$ROOT" archive HEAD | tar -x -C "$d"
-  ( cd "$d" && git init -q . \
-      && git add -A >/dev/null 2>&1 \
-      && git ls-files --others --ignored --exclude-standard -z 2>/dev/null | xargs -0 -r git add -f \
-      && git -c user.name=T -c user.email=t@t.io commit -qm clone ) >/dev/null 2>&1
-  # Guarantee the clone-shaped precondition regardless of what bootstrap did.
+  mkdir -p "$d/.githooks" "$d/scripts/lib" "$d/logs"
+  # Copy the SHIPPED artefacts straight out of HEAD — so this still tests what
+  # is committed, not the working tree — but skip the full archive+commit dance.
+  # core.hooksPath is settable on an empty repo, so no commit is needed, and
+  # building six full fixtures cost ~9s of a 30s gate budget.
+  git -C "$ROOT" show HEAD:.githooks/pre-push        >"$d/.githooks/pre-push"
+  git -C "$ROOT" show HEAD:scripts/agent-activity.sh >"$d/scripts/agent-activity.sh"
+  git -C "$ROOT" show HEAD:scripts/blueprint         >"$d/scripts/blueprint"
+  git -C "$ROOT" show HEAD:scripts/lib/gate.sh       >"$d/scripts/lib/gate.sh" 2>/dev/null || true
+  git -C "$ROOT" show HEAD:AGENT_ROSTER.example.md   >"$d/AGENT_ROSTER.example.md" 2>/dev/null || true
+  chmod +x "$d/.githooks/pre-push" "$d/scripts/agent-activity.sh" "$d/scripts/blueprint" 2>/dev/null
+  printf '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | S |\n| State | ACTIVE |\n| Task | fixture |\n' \
+    >"$d/AGENT_SIGNAL.md"
+  ( cd "$d" && git init -q . ) >/dev/null 2>&1
+  # Guarantee the clone-shaped precondition: core.hooksPath never set.
   ( cd "$d" && git config --unset core.hooksPath 2>/dev/null || true )
 }
+
 hookspath(){ git -C "$1" config --get core.hooksPath 2>/dev/null; }
 
 # ===========================================================================
@@ -74,10 +83,13 @@ else fail "#2 A-22: a clone stayed UNGATED after the feed ran — core.hooksPath
 grep -qi 'gate' "$WORK/o2" && pass "#3 arming is reported in the feed output" \
                            || { fail "#3 gate arming was silent — the founder asked for it to be explicit"; tail -3 "$WORK/o2"; }
 
+# #2 above already proves the FEED calls arm_gate. The boundary cases below
+# exercise arm_gate directly instead of paying a full daemon start/stop cycle
+# each (~1.5s apiece, and the whole gate has a 30s ceiling). Composition:
+# "the feed calls arm_gate" + "arm_gate behaves" covers the integration.
 C="$WORK/c3"; mk_clone "$C"
 ( cd "$C" && git config core.hooksPath .githooks )
-( cd "$C" && HOME="$WORK/h3" bash scripts/agent-activity.sh --daemon ) >"$WORK/o3" 2>&1
-( cd "$C" && HOME="$WORK/h3" bash scripts/agent-activity.sh --stop ) >/dev/null 2>&1
+( cd "$C" && . scripts/lib/gate.sh && arm_gate "$C" ) >"$WORK/o3" 2>&1
 if grep -qi 'gate' "$WORK/o3"; then pass "#4 already-armed state is confirmed explicitly, not silently assumed"
 else fail "#4 an already-armed gate reported nothing — 'explicit' must mean every run, not only on change"; fi
 
@@ -88,8 +100,7 @@ else fail "#4 an already-armed gate reported nothing — 'explicit' must mean ev
 # ===========================================================================
 C="$WORK/c4"; mk_clone "$C"
 ( cd "$C" && mkdir -p .other-hooks && git config core.hooksPath .other-hooks )
-( cd "$C" && HOME="$WORK/h4" bash scripts/agent-activity.sh --daemon ) >"$WORK/o4" 2>&1
-( cd "$C" && HOME="$WORK/h4" bash scripts/agent-activity.sh --stop ) >/dev/null 2>&1
+( cd "$C" && . scripts/lib/gate.sh && arm_gate "$C" ) >"$WORK/o4" 2>&1
 if [ "$(hookspath "$C")" = ".other-hooks" ]; then
   grep -qi 'warn\|not armed\|foreign\|leaving' "$WORK/o4" \
     && pass "#5 foreign hooksPath preserved AND warned about" \
@@ -101,8 +112,7 @@ else fail "#5 CLOBBERED a deliberate foreign core.hooksPath ('$(hookspath "$C")'
 # ===========================================================================
 C="$WORK/c5"; mk_clone "$C"
 ( cd "$C" && rm -f .githooks/pre-push )
-( cd "$C" && HOME="$WORK/h5" bash scripts/agent-activity.sh --daemon ) >"$WORK/o5" 2>&1
-( cd "$C" && HOME="$WORK/h5" bash scripts/agent-activity.sh --stop ) >/dev/null 2>&1
+( cd "$C" && . scripts/lib/gate.sh && arm_gate "$C" ) >"$WORK/o5" 2>&1
 [ -z "$(hookspath "$C")" ] && pass "#6 does not arm when .githooks/pre-push is missing" \
                            || fail "#6 armed a hooks dir with no pre-push — a dangling, non-gating hooksPath"
 

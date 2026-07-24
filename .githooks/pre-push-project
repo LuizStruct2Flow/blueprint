@@ -64,6 +64,18 @@ if [ -f tests/pre-push-scanners/test.sh ]; then
   }
 fi
 
+# A-22 — the gate must arm itself on paths that already run, so a fresh clone
+# is not silently ungated. Also pins the boundaries: --status/--stop must not
+# arm, and a deliberate foreign core.hooksPath must never be clobbered. ~4s.
+if [ -f tests/gate-arming/test.sh ]; then
+  bash tests/gate-arming/test.sh || {
+    echo "❌ tests/gate-arming/test.sh failed (A-22)."
+    echo "   A tracked hook is not an active hook — if arming regresses, clones"
+    echo "   go back to pushing completely ungated."
+    exit 1
+  }
+fi
+
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
 if [ -f tests/bootstrap-contents/test.sh ]; then

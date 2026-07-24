@@ -139,6 +139,7 @@ jobs:
         # quietly run nowhere.
         run: |
           set -euo pipefail
+          bash tests/gate-arming/test.sh
           bash tests/marker-merge/test.sh
           bash tests/bootstrap-identity/test.sh
           bash tests/bootstrap-contents/test.sh

@@ -425,11 +425,20 @@ supervise_body(){
   return 0
 }
 
+# A-22: arm the pre-push gate from a path that already runs on every wake.
+# Only for the modes an agent actually invokes to START the feed — arming as a
+# side effect of `--status` ("is it running?") or `--stop` would be a surprising
+# config change in answer to a question.
+# shellcheck source=scripts/lib/gate.sh
+[ -r "$repo_root/scripts/lib/gate.sh" ] && . "$repo_root/scripts/lib/gate.sh"
+
 case "${1:-}" in
   --stop)      cmd_stop ;;
   --status)    cmd_status ;;
-  --daemon)    cmd_daemon ;;
+  --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
+               cmd_daemon ;;
   --supervise) FOREGROUND=0 supervise ;;          # internal: daemon child
-  "")          FOREGROUND=1 supervise ;;          # foreground
+  "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
+               FOREGROUND=1 supervise ;;          # foreground
   *)           echo "usage: $0 [--daemon|--stop|--status]" >&2; exit 2 ;;
 esac

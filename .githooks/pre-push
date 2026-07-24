@@ -8,9 +8,16 @@
 #   - IaC validate (cdk synth / terraform / helm — see docs/INFRASTRUCTURE.md)
 #   - Project-specific guards (see .githooks/pre-push-project)
 #
-# This file is tracked in the repo at .githooks/pre-push. New clones pick it
-# up automatically via the `postinstall` script in your project's package.json,
-# which runs `git config --local core.hooksPath .githooks`.
+# This file is tracked at .githooks/pre-push, but being tracked is NOT the same
+# as being active: git only runs it when `core.hooksPath` points here, and that
+# is repo-LOCAL config a fresh clone does not have. This header used to claim a
+# `postinstall` wires it up; there is no root package.json, so nothing did, and
+# a 12-commit push went out ungated while this gate was run by hand and reported
+# green (A-22).
+#
+# `arm_gate` (scripts/lib/gate.sh) now sets it from paths that already run on
+# every wake — the activity feed and `blueprint drift`. Verify with
+# `git config --get core.hooksPath`; empty means this file is decoration.
 #
 # This is the BLUEPRINT version: generic checks only. Project-specific guards
 # (placeholder injection, asset invariants, release-notes guard, etc.) live

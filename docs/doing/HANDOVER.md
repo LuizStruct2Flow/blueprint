@@ -36,7 +36,7 @@
   path, not an instruction someone must remember. 11 cases in
   `tests/gate-arming/`, wired into pre-push and CI. **Residual gap:** a human
   who clones and pushes without starting the feed or running drift is still
-  ungated; git has no clone hook. Not closable client-side — a pre-push hook is
+  ungated; git has no clone hook. Not closable by another LOCAL hook — a pre-push hook is
   advisory by construction. Note the model difference: redcare's "CI = the
   gate" reframe assumes **PR-based** collaboration (required checks gate the
   merge); this repo is **trunk-based**. Note (Slava, R6): required checks DO

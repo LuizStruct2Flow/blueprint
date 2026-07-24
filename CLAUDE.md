@@ -63,9 +63,21 @@ A shared pre-push hook at `.githooks/pre-push` enforces the generic gate
 (build, lint, tests) and blocks the push if anything fails. Project-specific
 guards (placeholder checks, asset invariants, release-notes guards, etc.)
 live in `.githooks/pre-push-project` and are sourced by the main hook if
-present. The hook is tracked in the repo and should auto-wire on
-`npm install` (or your project's bootstrap) via a `postinstall` that sets
-`git config --local core.hooksPath .githooks`.
+present.
+
+**The hook only runs if `core.hooksPath` points at `.githooks` — and that is
+repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
+sets it at bootstrap, but a clone never runs bootstrap. This file previously
+claimed a `postinstall` auto-wires it; there is no root `package.json`, so
+nothing ever did — and a push of 12 commits went out completely ungated while
+the gate was being run by hand and reported green (A-22).
+
+It is now armed automatically by `arm_gate` (`scripts/lib/gate.sh`), called from
+two paths that already run on every wake: `scripts/agent-activity.sh` (the feed)
+and `blueprint drift`. Both **report the gate state on every run** rather than
+arming silently, and neither will overwrite a `core.hooksPath` you set
+deliberately (husky, a shared hooks dir) — it warns and leaves it. Check any
+time with `git config --get core.hooksPath`.
 
 **Lint warnings count is ratcheted** — don't loosen `--max-warnings` without
 explicit justification. After pushing, watch your CI pipeline; if red, fix

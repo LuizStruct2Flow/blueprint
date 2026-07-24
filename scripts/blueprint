@@ -71,6 +71,10 @@ MANAGED_FILES=(
   "scripts/start-copilot-signal-watch.sh"
   "scripts/start-all-watchers.sh"
   "scripts/agent-activity.sh"
+  # Shared helper sourced by agent-activity.sh and this CLI. MUST ship: without
+  # it arm_gate is absent in a derived project and the gate silently never arms
+  # there — exactly the A-22 defect, just relocated downstream.
+  "scripts/lib/gate.sh"
   "scripts/codex-feed-filter.sh"
   "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
@@ -367,6 +371,15 @@ cmd_files() {
 
 # --- Subcommand: drift ---
 cmd_drift() {
+  # A-22: arm the pre-push gate here, BEFORE read_blueprint_source (which dies
+  # when .blueprint-source is missing). `blueprint drift` is the wake-mandated
+  # check (CLAUDE.md §"Wake-time drift check"), and spawned personas are told
+  # NOT to start the feed — so in a derived project this is the only path that
+  # covers them. Same arm_gate as the feed: one mechanism, two callers.
+  _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
+  # shellcheck source=scripts/lib/gate.sh
+  [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
   read_blueprint_source
 
   echo "${C_BOLD}Blueprint drift check${C_RESET}"

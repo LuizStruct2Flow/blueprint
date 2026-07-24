@@ -28,6 +28,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
 FAILED=0
+START="$SECONDS"
 trap 'rm -rf "$WORK"' EXIT
 
 fail(){ echo "FAIL: $*"; FAILED=1; }
@@ -176,8 +177,12 @@ else
   fi
 fi
 
+elapsed=$(( SECONDS - START ))
 if [ "$FAILED" -eq 0 ]; then
-  echo "PASS: A-22 — the gate arms itself on paths that already run."
+  # Self-reported so nobody has to wrap this call to learn the cost. The whole
+  # pre-push gate has a 30 s ceiling (CLAUDE.md §"Pre-push tolerance") and this
+  # suite is a named line item in that budget.
+  echo "PASS: A-22 — the gate arms itself on paths that already run. (${elapsed}s, 11 cases)"
   exit 0
 fi
 echo "FAILED: see the FAIL lines above."

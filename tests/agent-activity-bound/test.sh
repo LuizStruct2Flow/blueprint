@@ -93,10 +93,16 @@ SKIPPED=0
 REPO="$WORK/repo"; HOMEDIR="$WORK/home"; STATE="$WORK/state"
 mkdir -p "$REPO/scripts/lib" "$REPO/logs" "$HOMEDIR" "$STATE"
 cp "$SCRIPT" "$REPO/scripts/agent-activity.sh"
-# The feed sources scripts/lib/state-dir.sh (A-09) — a real runtime dependency,
-# so the fixture must ship it or the feed aborts on the missing source and every
-# assertion below fails for the wrong reason.
-cp "$ROOT/scripts/lib/state-dir.sh" "$REPO/scripts/lib/state-dir.sh"
+# The feed sources helpers out of scripts/lib/ (A-09: state-dir.sh today; more as
+# it grows). Copy the WHOLE lib dir, not a named file, so the next lib dependency
+# the feed sources cannot silently break this fixture — the exact fragility that
+# already bit once when state-dir.sh was added. (R12a, ported from redcare's
+# feed-projection/-teardown fix — provenance: redcare.) Assert the copy stays
+# directory-shaped, so an empty/failed copy fails LOUDLY here rather than
+# reproducing the missing-source abort it exists to prevent.
+cp -R "$ROOT/scripts/lib/." "$REPO/scripts/lib/" 2>/dev/null
+lib_libs=$(find "$REPO/scripts/lib" -maxdepth 1 -name '*.sh' -type f 2>/dev/null | wc -l | tr -d ' ')
+[ "${lib_libs:-0}" -ge 1 ] || { echo "FAIL: fixture scripts/lib/ has no *.sh — the feed will abort on its missing source dependency"; exit 1; }
 cp "$ROOT/AGENT_ROSTER.example.md" "$REPO/" 2>/dev/null
 SIG="$REPO/AGENT_SIGNAL.md"
 LOG="$REPO/logs/agent-activity.log"

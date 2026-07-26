@@ -78,6 +78,19 @@ if [ -f tests/gate-arming/test.sh ]; then
   }
 fi
 
+# A-09 — the feed and the dispatchers must derive ONE per-project state dir. An
+# unrun regression is the A-15 defect this repo already carried once: deleting
+# the shared helper or restoring a literal state path could otherwise push green
+# while cross-project log contamination silently returns. ~0.1s.
+if [ -f tests/state-dir/test.sh ]; then
+  bash tests/state-dir/test.sh || {
+    echo "❌ tests/state-dir/test.sh failed (A-09)."
+    echo "   Feed and dispatchers must share one derivation (scripts/lib/state-dir.sh)"
+    echo "   or another project's Codex output bleeds into this feed."
+    exit 1
+  }
+fi
+
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
 if [ -f tests/bootstrap-contents/test.sh ]; then

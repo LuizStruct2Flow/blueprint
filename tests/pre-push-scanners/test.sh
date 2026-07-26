@@ -95,9 +95,62 @@ SH
   chmod +x "$FIX/bin/semgrep"; rm -f "$CALLS.semgrep"
 }
 
+# EVERY executable the hook can discover must be under fixture control, not just
+# the ones a case happens to assert on. The hook probes gitleaks, semgrep AND
+# osv-scanner; only the first two were shimmed, so every case silently ran the
+# real osv-scanner off the ambient PATH (Slava, R11 — refuting a claim I had made
+# from inspection rather than experiment). No case asserts on SCA, so it is a
+# neutral always-exit-0 shim; its only job is to stop an ambient binary deciding
+# these results.
+#
+# It is written DIRECTLY, not via mk_shim: osv-scanner is the one shim created
+# once and invoked across many cases without a per-case counter reset, so it is
+# the only one that reaches call >=2 — and mk_shim's counter-based "repeat the
+# last code" branch resolves wrong there (its $# is captured at heredoc-write
+# time, not shim runtime). A trivial exit-0 shim sidesteps that entirely.
+mk_osv_neutral(){ printf '#!/bin/sh\nexit 0\n' >"$FIX/bin/osv-scanner"; chmod +x "$FIX/bin/osv-scanner"; }
+mk_osv_neutral
+
 # Run the hook in the fixture with shims first on PATH.
 run_hook(){ ( cd "$FIX" && PATH="$FIX/bin:$PATH" sh .githooks/pre-push ) >"$WORK/out" 2>&1; echo $?; }
 saw(){ grep -qF -- "$1" "$WORK/out"; }
+
+# ===========================================================================
+# 0. POSITIVE CONTROL for the fixture's own isolation (Slava, R11).
+#
+#    Adding the osv-scanner shim only helps if `$FIX/bin` actually wins PATH
+#    resolution over an ambient same-named binary. That is the load-bearing
+#    assumption behind EVERY case below — if a future PATH reordering let an
+#    ambient scanner resolve first, the whole suite would silently regress to
+#    testing the host's real scanners (exactly the R11 defect, and redcare's
+#    "fake isolation" — a stub deleted while $PATH kept the real tool reachable).
+#
+#    So prove it, adversarially: plant a HOSTILE osv-scanner LATER on PATH that,
+#    if ever reached, records a sentinel and exits 1 (which would fail the gate).
+#    A clean run must stay green AND leave the sentinel untouched — the shim
+#    resolved first and the hostile binary was never called. This assertion is
+#    non-vacuous: with the osv-scanner shim removed, the hostile binary resolves,
+#    the sentinel appears, and the gate goes red (verified against the unfixed
+#    fixture before committing, per the mutation-check discipline).
+# ===========================================================================
+mkdir -p "$WORK/hostile"
+HOSTILE_SENTINEL="$WORK/osv-hostile-was-called"
+cat >"$WORK/hostile/osv-scanner" <<EOF
+#!/bin/sh
+: >"$HOSTILE_SENTINEL"
+echo "HOSTILE-OSV-REACHED" >&2
+exit 1
+EOF
+chmod +x "$WORK/hostile/osv-scanner"
+rm -f "$HOSTILE_SENTINEL"
+mk_shim gitleaks 0; mk_sg clean; mk_osv_neutral
+# Shim dir first, hostile SECOND, real ambient PATH last: the shim must win.
+rc_h="$( ( cd "$FIX" && PATH="$FIX/bin:$WORK/hostile:$PATH" sh .githooks/pre-push ) >"$WORK/out" 2>&1; echo $? )"
+if [ "$rc_h" -eq 0 ] && [ ! -e "$HOSTILE_SENTINEL" ]; then
+  pass "#0 fixture isolation holds: the osv-scanner shim wins PATH over a hostile ambient binary"
+else
+  fail "#0 a hostile ambient osv-scanner was reachable (sentinel=$( [ -e "$HOSTILE_SENTINEL" ] && echo HIT || echo miss ), rc=$rc_h) — fixture no longer isolates the SCA probe"
+fi
 
 # ===========================================================================
 # 1. Both scanners clean → the gate passes.

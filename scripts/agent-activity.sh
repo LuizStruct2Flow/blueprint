@@ -50,8 +50,11 @@ state_file="$log_dir/.agent-activity.state"
 
 # Generic, project-neutral state dir. Derived from the repo name so a derived
 # project reads the dispatcher logs IT writes — never another project's
-# (BUG-002: this used to hardcode ~/.linkedin-watcher-agent).
-state_dir="${AGENT_STATE_HOME:-$HOME/.$(basename "$repo_root")}"; mkdir -p "$state_dir"
+# (BUG-002: this used to hardcode ~/.linkedin-watcher-agent). The derivation is
+# shared with the dispatchers via scripts/lib/state-dir.sh so both sides compute
+# the identical directory — one mechanism, never two (A-09).
+. "$repo_root/scripts/lib/state-dir.sh"
+state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
 
 persona="${AGENT_PERSONA:-Sylvia}"; backing="${AGENT_BACKING:-Claude Code}"
 

@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # The command receives AGENT_SIGNAL_HOLDER, AGENT_SIGNAL_STATE, and
 # AGENT_SIGNAL_TASK in its environment. Every trigger is also appended to
-# ~/.{{PROJECT_NAME}}/signal.log by default.
+# the project's state dir (~/.<repo-name>/signal.log; see scripts/lib/state-dir.sh).
 
 usage() {
   cat <<'USAGE'
@@ -22,7 +22,7 @@ Options:
   --file PATH       Signal file to watch (default: ./AGENT_SIGNAL.md)
   --state STATE     State that triggers the command (default: OVER_TO_CODEX)
   --poll SECONDS    Poll interval in seconds (default: 2)
-  --log PATH        Trigger log path (default: ~/.{{PROJECT_NAME}}/signal.log)
+  --log PATH        Trigger log path (default: ~/.<repo-name>/signal.log)
   --once            Exit after the first trigger
   -h, --help        Show this help
 
@@ -68,7 +68,9 @@ ROOT="$(repo_root)"
 SIGNAL_FILE="$ROOT/AGENT_SIGNAL.md"
 TARGET_STATE="OVER_TO_CODEX"
 POLL_SECONDS=2
-LOG_FILE="${HOME}/.{{PROJECT_NAME}}/signal.log"
+# Same state-dir derivation as the feed and the launchers (A-09) — one mechanism.
+. "$ROOT/scripts/lib/state-dir.sh"
+LOG_FILE="$(agent_state_dir "$ROOT")/signal.log"
 ONCE=0
 COMMAND=()
 

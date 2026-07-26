@@ -75,6 +75,10 @@ MANAGED_FILES=(
   # it arm_gate is absent in a derived project and the gate silently never arms
   # there — exactly the A-22 defect, just relocated downstream.
   "scripts/lib/gate.sh"
+  # State-dir derivation shared by the feed and the dispatchers. MUST ship: a
+  # derived project without it falls back to divergent paths and re-opens the
+  # A-09 cross-project log contamination.
+  "scripts/lib/state-dir.sh"
   "scripts/codex-feed-filter.sh"
   "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
@@ -668,7 +672,7 @@ cmd_a2bp() {
         echo "        • docs/A2BP_PLAYBOOK.md if the calling pattern changed"
         touched_sync=1
         ;;
-      AGENTS.md|AGENT_ROSTER.example.md|scripts/agent-activity.sh|scripts/start-codex-signal-watch.sh|scripts/start-gemini-signal-watch.sh)
+      AGENTS.md|AGENT_ROSTER.example.md|scripts/agent-activity.sh|scripts/start-codex-signal-watch.sh|scripts/start-gemini-signal-watch.sh|scripts/codex-signal-watch.sh|scripts/lib/state-dir.sh)
         echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
         echo "      → Class F (Agent layer) — also check:"
         echo "        • docs/way-of-working.md 'persona team — radio-over' slide"

@@ -8,9 +8,9 @@ set -euo pipefail
 # engine) and, every time the mic flips to `OVER_TO_GEMINI`, invokes the
 # real Gemini CLI in non-interactive (-p) YOLO mode with the current `Task`
 # field as the prompt. Gemini's file edits + signal flip land directly in
-# the repo; its final message is captured to
-# `~/.{{PROJECT_NAME}}/gemini-last-message.md` and the run log to
-# `~/.{{PROJECT_NAME}}/gemini-runs.log`.
+# the repo; its final message + run log are captured to the project's state dir
+# (see scripts/lib/state-dir.sh — `~/.<repo-name>/gemini-last-message.md` and
+# `~/.<repo-name>/gemini-runs.log` by default).
 #
 # Usage:
 #   scripts/start-gemini-signal-watch.sh
@@ -50,9 +50,13 @@ EOF
   exit 1
 fi
 
-mkdir -p "$HOME/.{{PROJECT_NAME}}"
-RUN_LOG="$HOME/.{{PROJECT_NAME}}/gemini-runs.log"
-OUTPUT_LAST="$HOME/.{{PROJECT_NAME}}/gemini-last-message.md"
+# State dir derived the SAME way the activity feed derives it (A-09) — so the
+# feed reads exactly the run log THIS project writes, never another project's.
+. "$ROOT/scripts/lib/state-dir.sh"
+STATE_DIR="$(agent_state_dir "$ROOT")"
+mkdir -p "$STATE_DIR"
+RUN_LOG="$STATE_DIR/gemini-runs.log"
+OUTPUT_LAST="$STATE_DIR/gemini-last-message.md"
 
 export GEMINI_BIN
 export RUN_LOG
@@ -76,4 +80,4 @@ end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] gemini finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
 '
 
-exec "${ROOT}/scripts/codex-signal-watch.sh" --state OVER_TO_GEMINI --log "$HOME/.{{PROJECT_NAME}}/signal.log" "$@"
+exec "${ROOT}/scripts/codex-signal-watch.sh" --state OVER_TO_GEMINI --log "$STATE_DIR/signal.log" "$@"

@@ -8,7 +8,8 @@ set -euo pipefail
 # non-interactive `exec` mode with the current `Task` field as the
 # prompt. Codex's response (file edits, signal flip) lands directly in
 # the repo via `--sandbox workspace-write`; the human-readable summary
-# is appended to `~/.{{PROJECT_NAME}}/codex-runs.log` for review.
+# is appended to the project's state dir (see scripts/lib/state-dir.sh —
+# `~/.<repo-name>/codex-runs.log` by default) for review.
 #
 # Usage:
 #   scripts/start-codex-signal-watch.sh
@@ -48,9 +49,13 @@ EOF
   exit 1
 fi
 
-mkdir -p "$HOME/.{{PROJECT_NAME}}"
-RUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"
-OUTPUT_LAST="$HOME/.{{PROJECT_NAME}}/codex-last-message.md"
+# State dir derived the SAME way the activity feed derives it (A-09) — so the
+# feed reads exactly the run log THIS project writes, never another project's.
+. "$ROOT/scripts/lib/state-dir.sh"
+STATE_DIR="$(agent_state_dir "$ROOT")"
+mkdir -p "$STATE_DIR"
+RUN_LOG="$STATE_DIR/codex-runs.log"
+OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 
 # The wake command runs every time `State = OVER_TO_CODEX` fires.
 # `AGENT_SIGNAL_TASK` is the current `Task` field, exported by

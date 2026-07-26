@@ -13,9 +13,9 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 | Field | Value |
 |---|---|
 | Holder | Sylvia |
-| State | OVER_TO_CLAUDE |
-| Task | Jesko QA-2 accepted A-01, A-05, A-12, A-14, A-15, A-27 and A-36 with executed evidence; A-22 remains separately open. |
-| Last update | 2026-07-24 |
+| State | ACTIVE |
+| Task | PUSHED `1a876c8` (8-round four-eyes CLEAN, R8 record in `waiting-acceptance/`): A-22 R11 close + the dispatcher/state-dir half of A-09 (the live cross-project log contamination). Gate green on push. Lifecycle: A-22 R2–R8 review records moved to `waiting-acceptance/`; audit register + HANDOVER updated; awaiting founder acceptance. **NEXT (open): A-09 SonarQube half** — `sonar-project.properties` still omitted from `new-project.sh` TARGETS, so every derived project uploads under the literal key `{{PROJECT_NAME}}` and they collide; also in TEMPLATE_FILES so `pull` re-breaks it. Same contamination class as the log leak; queued before the general A-07 a2bp guard. |
+| Last update | 2026-07-26 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in
 the corresponding `docs/doing/PLAN-*.md` / `docs/done/PLAN-*.md` artifact.

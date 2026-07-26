@@ -135,6 +135,23 @@ if [ -e "$TARGET/.env" ]; then
   fail "A-05: .env reached the derived WORKING TREE (confidentiality leak)"
 else pass ".env absent from the derived working tree (copied, never committed pre-fix)"; fi
 
+# --- 6. Bootstrap must substitute the placeholder in EVERY file that carries it
+# (A-09 / Codex R12(d)). The Gemini launcher was omitted from new-project.sh
+# TARGETS while both Codex scripts were listed, so a derived Gemini launcher kept
+# a literal {{PROJECT_NAME}} in its prompt. No test caught it because none
+# asserted substitution. Pin it for all three dispatchers. Non-vacuous: the
+# blueprint sources DO contain the token, so an omitted file fails here.
+for f in scripts/start-codex-signal-watch.sh scripts/start-gemini-signal-watch.sh \
+         scripts/codex-signal-watch.sh; do
+  if [ ! -e "$TARGET/$f" ]; then
+    fail "R12(d): $f did not ship into the derived project"
+  elif grep -q '{{PROJECT_NAME}}' "$TARGET/$f"; then
+    fail "R12(d): $f still holds a literal {{PROJECT_NAME}} after bootstrap — omitted from new-project.sh TARGETS"
+  else
+    pass "$f: placeholder substituted at bootstrap"
+  fi
+done
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-05 — bootstrap ships tracked template content only."
   exit 0

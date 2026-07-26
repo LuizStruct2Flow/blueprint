@@ -91,8 +91,12 @@ SKIPPED=0
 
 # --- fixture ----------------------------------------------------------------
 REPO="$WORK/repo"; HOMEDIR="$WORK/home"; STATE="$WORK/state"
-mkdir -p "$REPO/scripts" "$REPO/logs" "$HOMEDIR" "$STATE"
+mkdir -p "$REPO/scripts/lib" "$REPO/logs" "$HOMEDIR" "$STATE"
 cp "$SCRIPT" "$REPO/scripts/agent-activity.sh"
+# The feed sources scripts/lib/state-dir.sh (A-09) — a real runtime dependency,
+# so the fixture must ship it or the feed aborts on the missing source and every
+# assertion below fails for the wrong reason.
+cp "$ROOT/scripts/lib/state-dir.sh" "$REPO/scripts/lib/state-dir.sh"
 cp "$ROOT/AGENT_ROSTER.example.md" "$REPO/" 2>/dev/null
 SIG="$REPO/AGENT_SIGNAL.md"
 LOG="$REPO/logs/agent-activity.log"

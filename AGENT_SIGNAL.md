@@ -14,7 +14,7 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 |---|---|
 | Holder | Sylvia |
 | State | ACTIVE |
-| Task | PUSHED `1a876c8` (8-round four-eyes CLEAN, R8 record in `waiting-acceptance/`): A-22 R11 close + the dispatcher/state-dir half of A-09 (the live cross-project log contamination). Gate green on push. Lifecycle: A-22 R2–R8 review records moved to `waiting-acceptance/`; audit register + HANDOVER updated; awaiting founder acceptance. **NEXT (open): A-09 SonarQube half** — `sonar-project.properties` still omitted from `new-project.sh` TARGETS, so every derived project uploads under the literal key `{{PROJECT_NAME}}` and they collide; also in TEMPLATE_FILES so `pull` re-breaks it. Same contamination class as the log leak; queued before the general A-07 a2bp guard. |
+| Task | PUSHED `e293429` (four-eyes CLEAN, record in `waiting-acceptance/CODEX-REVIEW-A09-SONAR.md`): A-09 SonarQube half — `sonar-project.properties` added to bootstrap TARGETS so each derived project gets a unique Sonar key. **A-09 is now FULLY CLOSED** (both halves), awaiting founder acceptance. redcare confirmed P-09 live on their side and landed the same fix (PR #26); they added the insight that the defect also silently blinds the observing feed (their own `[CODEX]` lines never showed). **NEXT: A-07** — `blueprint a2bp` bare-`cp` with no name reverse-substitution or contamination scan; the root-cause vector for BUG-002 + A-09. |e verdict (source commits need no changes), push `main` through the gate, then update HANDOVER/lifecycle and continue with A-07. |
 | Last update | 2026-07-26 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in

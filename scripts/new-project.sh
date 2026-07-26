@@ -132,6 +132,7 @@ TARGETS=(
   "scripts/codex-signal-watch.sh"
   "scripts/start-codex-signal-watch.sh"
   "scripts/start-gemini-signal-watch.sh"
+  "sonar-project.properties"
   ".githooks/pre-push"
   "config/README.md"
   "project_config_overview.md"

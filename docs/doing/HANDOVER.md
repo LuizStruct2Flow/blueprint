@@ -4,27 +4,45 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-24.** BUG-001/002/003 + 7 audit findings are fixed,
+> **Last updated: 2026-07-26.** BUG-001/002/003 + audit findings are fixed,
 > reviewed under four-eyes and pushed; awaiting founder acceptance. The audit
-> register still has open findings, now led by A-07 and A-03 — **A-22 is fixed
-> and awaiting acceptance**, not open.
+> register still has open findings, now led by **A-09 (SonarQube half)**, A-07
+> and A-03 — **A-22 is fully fixed (R11 closed) and awaiting acceptance**, not open.
 
 ## 0. STATUS
 
 - **Blueprint self-audit + BUG-001: PUSHED, awaiting acceptance.** `origin/main`
-  is at `1c2f1b9`. Delivered: **BUG-001** (fork-bomb process leak in the activity
+  is at `1a876c8`. Delivered: **BUG-001** (fork-bomb process leak in the activity
   feed — a host was pegged at load 175 for 2.7 days by ~17,400 leaked processes),
   **BUG-002** (linkedin-watcher contamination in a generic file), **BUG-003**
   (the security gate could not tell a scanner *failure* from a scanner
-  *finding*), plus audit findings **A-01, A-05, A-12, A-14, A-15, A-27, A-36**.
+  *finding*), plus audit findings **A-01, A-05, A-12, A-14, A-15, A-22, A-27,
+  A-36**, and the **dispatcher/state-dir half of A-09** (the live cross-project
+  log contamination — a redcare Codex verdict was bleeding into this feed;
+  fixed via the shared `scripts/lib/state-dir.sh`). **A-09's SonarQube-key half
+  is still OPEN** (see §1).
 - **Artefacts awaiting acceptance:** `docs/waiting-acceptance/` — `BUGS.md`,
-  `PLAN-BUG-001.md`, and 16 Codex review records. Do **not** promote to `done/`
-  without an explicit founder acceptance signal.
+  `PLAN-BUG-001.md`, and the Codex review records (BUG-001, A-05/A-27, and the
+  A-22 R2–R8 set just moved here). Do **not** promote to `done/` without an
+  explicit founder acceptance signal.
 - **Register of everything found:** `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`
   (35 findings, ranked). It stays in `doing/` until the open ones are closed.
 
 ## 1. RESUME — live state + immediate action
 
+- **JUST PUSHED (`1a876c8`, 8-round four-eyes CLEAN, Codex delegated the push):**
+  A-22 R11 close + the dispatcher/state-dir half of A-09. Codex couldn't push
+  (sandbox SSH-config block) so Sylvia pushed the authorized SHA.
+- **Immediate next action — A-09 SonarQube half (still OPEN).** The half just
+  shipped fixed the dispatcher log-dir collision (shared `scripts/lib/state-dir.sh`)
+  and put the Gemini launcher in TARGETS. STILL BROKEN:
+  `sonar-project.properties` is omitted from `new-project.sh` TARGETS, so every
+  derived project uploads to SonarQube under the **literal key
+  `{{PROJECT_NAME}}`** — they all collide and trample each other's issues +
+  coverage. It is also in `TEMPLATE_FILES`, so `blueprint pull` would re-break a
+  hand-fixed key. Fix = sonar in TARGETS **and** out of the pull-managed reset
+  path, with regression (extend `tests/bootstrap-contents`). Same contamination
+  class as the log leak, so it belongs before the general A-07 work.
 - **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which
@@ -33,8 +51,9 @@
   and the hook header, **not** in `AGENTS.md`. Fixed by `arm_gate`
   (`scripts/lib/gate.sh`) called from the two paths that already run at wake —
   the activity feed and `blueprint drift` — so arming is code on an existing
-  path, not an instruction someone must remember. 11 cases in
-  `tests/gate-arming/`, wired into pre-push and CI. **Residual gap:** a human
+  path, not an instruction someone must remember. `tests/gate-arming/` (plus
+  R11's `osv-scanner` isolation control in `tests/pre-push-scanners`), wired
+  into pre-push and CI. **Residual gap:** a human
   who clones and pushes without starting the feed or running drift is still
   ungated; git has no clone hook. Not closable by another LOCAL hook — a pre-push hook is
   advisory by construction. Note the model difference: redcare's "CI = the
@@ -46,10 +65,8 @@
   impossibility. **A-37** is the part that holds either way: `security.yml` has
   no configured shared/team failure route — no `if: failure()`, no webhook, no
   declared destination (GitHub's per-user run notifications aside).
-- **Immediate next action: A-07** — `blueprint a2bp` copies a project's file
-  into the blueprint with no contamination scan (the P-11 lead in the
-  cross-stream plan).
-- **Then, in the founder-agreed "guard the pipe" order:**
+- **Then, in the founder-agreed "guard the pipe" order (A-09 sonar half first,
+  then):**
   - **A-07** — `blueprint a2bp` copies a project's file into the blueprint with a
     bare `cp`: no reverse-substitution of the project name, no contamination
     scan. This is the vector that created BUG-002; fixing it stops the next one.
@@ -59,18 +76,22 @@
     `gitleaks detect --log-opts="$remote_sha..$local_sha"`.
   - **A-08** — `LWA_FEED_*` env vars in `scripts/log-activity.sh`: BUG-002's
     contamination in env-var-namespace form, still present.
-  - **A-09** — dispatchers write a literal, unsubstituted `~/.{{PROJECT_NAME}}/`.
+  - **A-09 (dispatcher/state-dir half)** — DONE, pushed `1a876c8`. Remaining
+    sonar-key half is the immediate next action above.
 
 ## 2. Project-specific config
 
 - **Activity feed:** `bash scripts/agent-activity.sh --daemon`; watch with
   `tail -f logs/agent-activity.log`; `--stop` / `--status`. One resident process
   tracking a byte offset per file — no `tail -F`, no inotify pressure.
-- **Feed ↔ dispatcher state-dir mismatch (A-09, OPEN):** the feed derives
-  `~/.<repo-name>`, the dispatchers still write literal `~/.{{PROJECT_NAME}}/`.
-  To see `[CODEX]` lines here, start the feed with
-  `AGENT_STATE_HOME="$HOME/.{{PROJECT_NAME}}"`. That literal directory is
-  **shared with other projects** — redcare's dispatches interleave in the log.
+- **Feed ↔ dispatcher state dir (A-09 dispatcher half, FIXED `1a876c8`):** the
+  feed and all three dispatchers now derive the SAME `~/.<repo-name>` through
+  `scripts/lib/state-dir.sh`, so `[CODEX]`/`[GEMINI]` lines land here without any
+  `AGENT_STATE_HOME` override. **Do NOT** relaunch the feed with
+  `AGENT_STATE_HOME="$HOME/.{{PROJECT_NAME}}"` — that was the old workaround and
+  it re-points the feed at the shared literal dir where other projects interleave.
+  If a feed is already running with that override, restart it with
+  `env -u AGENT_STATE_HOME bash scripts/agent-activity.sh --daemon`.
 - **Scanners:** gitleaks / semgrep / osv-scanner / trivy in `~/.local/bin` (no
   brew on this Ubuntu host). **`jq` is REQUIRED** by the SAST step and fails
   closed without it.

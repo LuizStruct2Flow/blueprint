@@ -152,6 +152,23 @@ for f in scripts/start-codex-signal-watch.sh scripts/start-gemini-signal-watch.s
   fi
 done
 
+# --- 7. The SonarQube key must be substituted too (A-09 sonar half).
+# sonar-project.properties carries sonar.projectKey={{PROJECT_NAME}}. If bootstrap
+# leaves it literal, EVERY derived project uploads under the one key
+# "{{PROJECT_NAME}}" and they collide on a single SonarQube project, trampling
+# each other's issues and coverage — the same cross-project contamination class
+# as the shared log dir, on the Sonar key instead. It is a TEMPLATE_FILE
+# (bootstrapped, project-owned, not pull-synced), so bootstrap substitution is
+# the ONLY place this can be made right. Non-vacuous: the source carries the
+# token, so an omission from TARGETS fails here.
+if [ ! -e "$TARGET/sonar-project.properties" ]; then
+  fail "A-09(sonar): sonar-project.properties did not ship into the derived project"
+elif grep -q '{{PROJECT_NAME}}' "$TARGET/sonar-project.properties"; then
+  fail "A-09(sonar): derived sonar-project.properties still holds a literal {{PROJECT_NAME}} — omitted from new-project.sh TARGETS, so every project collides on one Sonar key"
+else
+  pass "sonar-project.properties: SonarQube projectKey substituted at bootstrap"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-05 — bootstrap ships tracked template content only."
   exit 0

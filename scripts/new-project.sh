@@ -131,6 +131,7 @@ TARGETS=(
   "docs/doing/HANDOVER.md"
   "scripts/codex-signal-watch.sh"
   "scripts/start-codex-signal-watch.sh"
+  "scripts/start-gemini-signal-watch.sh"
   ".githooks/pre-push"
   "config/README.md"
   "project_config_overview.md"

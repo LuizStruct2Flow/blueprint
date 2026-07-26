@@ -20,7 +20,8 @@
   A-36**, and the **dispatcher/state-dir half of A-09** (the live cross-project
   log contamination — a redcare Codex verdict was bleeding into this feed;
   fixed via the shared `scripts/lib/state-dir.sh`). **A-09's SonarQube-key half
-  is still OPEN** (see §1).
+  is fixed and in four-eyes** (sonar-project.properties added to bootstrap
+  TARGETS); A-09 fully closed once that pushes.
 - **Artefacts awaiting acceptance:** `docs/waiting-acceptance/` — `BUGS.md`,
   `PLAN-BUG-001.md`, and the Codex review records (BUG-001, A-05/A-27, and the
   A-22 R2–R8 set just moved here). Do **not** promote to `done/` without an
@@ -30,19 +31,22 @@
 
 ## 1. RESUME — live state + immediate action
 
-- **JUST PUSHED (`1a876c8`, 8-round four-eyes CLEAN, Codex delegated the push):**
+- **PUSHED (`1a876c8`, 8-round four-eyes CLEAN, Codex delegated the push):**
   A-22 R11 close + the dispatcher/state-dir half of A-09. Codex couldn't push
   (sandbox SSH-config block) so Sylvia pushed the authorized SHA.
-- **Immediate next action — A-09 SonarQube half (still OPEN).** The half just
-  shipped fixed the dispatcher log-dir collision (shared `scripts/lib/state-dir.sh`)
-  and put the Gemini launcher in TARGETS. STILL BROKEN:
-  `sonar-project.properties` is omitted from `new-project.sh` TARGETS, so every
-  derived project uploads to SonarQube under the **literal key
-  `{{PROJECT_NAME}}`** — they all collide and trample each other's issues +
-  coverage. It is also in `TEMPLATE_FILES`, so `blueprint pull` would re-break a
-  hand-fixed key. Fix = sonar in TARGETS **and** out of the pull-managed reset
-  path, with regression (extend `tests/bootstrap-contents`). Same contamination
-  class as the log leak, so it belongs before the general A-07 work.
+- **A-09 is now FULLY FIXED (sonar half committed, in four-eyes).** The sonar
+  half: `sonar-project.properties` was the last shipping file carrying a live
+  substitutable `{{PROJECT_NAME}}` (its `sonar.projectKey`) while omitted from
+  `new-project.sh` TARGETS, so every derived project uploaded under the one
+  literal key and collided. Fixed by adding it to TARGETS; regression in
+  `tests/bootstrap-contents`. It is a TEMPLATE_FILE (not pull-synced), so
+  bootstrap substitution is the whole fix — **pull neither heals nor re-breaks
+  it** (correcting an earlier note that claimed pull would re-break a hand-fixed
+  key). Awaiting Codex four-eyes, then push.
+- **Immediate next action — A-07** (once the sonar half pushes): `blueprint a2bp`
+  copies a project file into the blueprint with a bare `cp` — no name
+  reverse-substitution, no contamination scan. It is the vector that created
+  BUG-002 and A-09; guarding it stops the next literal-placeholder leak at source.
 - **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which
@@ -65,8 +69,7 @@
   impossibility. **A-37** is the part that holds either way: `security.yml` has
   no configured shared/team failure route — no `if: failure()`, no webhook, no
   declared destination (GitHub's per-user run notifications aside).
-- **Then, in the founder-agreed "guard the pipe" order (A-09 sonar half first,
-  then):**
+- **Then, in the founder-agreed "guard the pipe" order:**
   - **A-07** — `blueprint a2bp` copies a project's file into the blueprint with a
     bare `cp`: no reverse-substitution of the project name, no contamination
     scan. This is the vector that created BUG-002; fixing it stops the next one.
@@ -76,8 +79,8 @@
     `gitleaks detect --log-opts="$remote_sha..$local_sha"`.
   - **A-08** — `LWA_FEED_*` env vars in `scripts/log-activity.sh`: BUG-002's
     contamination in env-var-namespace form, still present.
-  - **A-09 (dispatcher/state-dir half)** — DONE, pushed `1a876c8`. Remaining
-    sonar-key half is the immediate next action above.
+  - **A-09** — DONE. Dispatcher/state-dir half pushed `1a876c8`; sonar-key half
+    fixed and in four-eyes (both halves now closed).
 
 ## 2. Project-specific config
 

@@ -285,8 +285,14 @@ all eight concerns below, plus the agent infra, live in one git repo.
 - **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
   improvement lands in a project, it travels back to the blueprint
   so *every other project* inherits it next time they pull.
+- **Guarded push** — the same multiplier that spreads a good rule spreads a
+  leaked one. So `a2bp` reverse-substitutes the project's name back to
+  `{{PROJECT_NAME}}` and **blocks** on host paths, foreign state dirs, and
+  any project name that survived. Suppressions are per-line and must carry a
+  justification.
 
 > A rule tightened once in any project benefits every project. The blueprint is the multiplier.
+> Which is exactly why the upstream door is the one that has to be guarded.
 
 ---
 

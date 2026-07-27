@@ -202,6 +202,13 @@ fi
 #    as code; the CLI already exempts them on the pull side via
 #    _should_substitute. The a2bp side must honour the SAME exemption, or
 #    back-propagating the CLI corrupts the CLI.
+#
+#    Driven with --force on purpose. The only observable proof that reverse-
+#    substitution was skipped is the project name surviving verbatim — and the
+#    scan (correctly) blocks on exactly that. --force isolates the exemption
+#    from the scan so this case tests one behaviour, not two. Compare with #1,
+#    where the same input on a NON-exempt file comes out as {{PROJECT_NAME}}:
+#    that differential is the whole assertion.
 # ===========================================================================
 setup
 mkdir -p "$PROJ/scripts" "$FAKE_BP/scripts"
@@ -211,15 +218,15 @@ cat >"$PROJ/scripts/new-project.sh" <<'EOF'
 # Bootstrap. Mentions acme-flow only as example text in a comment.
 sed -e "s/{{PROJECT_NAME}}/${proj}/g" "$f"
 EOF
-rc=$(run_a2bp scripts/new-project.sh)
-if [ "$rc" -ne 0 ]; then
-  fail "#6 a2bp exited $rc on scripts/new-project.sh — see $WORK/out"
-elif grep -q '^SENTINEL' "$FAKE_BP/scripts/new-project.sh"; then
-  fail "#6 scripts/new-project.sh was not copied"
-elif grep -q 'acme-flow' "$FAKE_BP/scripts/new-project.sh"; then
-  pass "#6 substitution-implementing files are exempt from reverse-substitution (matches _should_substitute on the pull side)"
-else
+rc=$(run_a2bp --force scripts/new-project.sh)
+if grep -q '^SENTINEL' "$FAKE_BP/scripts/new-project.sh"; then
+  fail "#6 scripts/new-project.sh was not copied even under --force (exit $rc)"
+elif ! grep -q 'acme-flow' "$FAKE_BP/scripts/new-project.sh"; then
   fail "#6 scripts/new-project.sh WAS reverse-substituted — the pull-side _should_substitute exemption is not mirrored on the a2bp side; back-propagating the CLI would corrupt it"
+elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/scripts/new-project.sh"; then
+  fail "#6 the file's own {{PROJECT_NAME}} code token was mangled"
+else
+  pass "#6 substitution-implementing files are exempt from reverse-substitution (matches _should_substitute on the pull side)"
 fi
 
 echo

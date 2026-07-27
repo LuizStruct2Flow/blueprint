@@ -210,16 +210,17 @@ new file *should* be managed, add it to the `MANAGED_FILES` array in
 
 **The contamination guard.** `a2bp` is the only write path from a project
 into the generic blueprint, so it does not copy bytes verbatim. It restores
-`{{PROJECT_NAME}}` on any line that is byte-identical to what `pull`
-produced, then scans for host home paths, literal per-project state dirs, and
-any project name that survived. Findings **block the copy** and exit non-zero.
+`{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
+copy proves unchanged, then scans for host home paths, literal per-project
+state dirs, and any project name that survived. Findings **block the copy**
+and exit non-zero.
 
-The restore is deliberately provenance-based rather than a global
-search-and-replace: `pull` substitutes an unambiguous token, but reversing
-would rewrite a bare word that also appears in prose — for a project named
-`blueprint`, every occurrence of the word. Lines you edited are therefore left
-alone, and if one still carries the project name the guard blocks so you can
-write the placeholder explicitly. Mark a known-benign line with an inline
+The restore is deliberately alignment-based rather than a search-and-replace:
+`pull` substitutes an unambiguous token, but reversing would rewrite a bare
+word that also appears in prose — for a project named `blueprint`, every
+occurrence. Lines you edited are therefore left alone, and if one still
+carries the project name the guard blocks so you can write the placeholder
+explicitly. Mark a known-benign line with an inline
 `a2bp-allow: <why>` comment, or waive the whole file with `--force` — which
 prints every finding it waved through. This guard exists because both BUG-002
 and A-09 entered the blueprint through an unguarded `a2bp`.

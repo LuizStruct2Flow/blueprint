@@ -783,14 +783,16 @@ naming every file that has to be touched in the same commit and a
 strong reminder pointing at the playbook below.
 
 **It is guarded (A-07).** Before anything lands, `a2bp` restores
-`{{PROJECT_NAME}}` on every line that is byte-identical to what `pull`
-produced, then scans for host home paths, literal per-project state dirs, and
-any project name that survived. Findings block the copy and exit non-zero.
+`{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
+copy proves unchanged, then scans for host home paths, literal per-project
+state dirs, and any project name that survived. Findings block the copy and
+exit non-zero.
 
-The restore is **provenance-based, not a global search-and-replace** — there
-is no general textual inverse of the substitution. `pull` replaces an
-unambiguous token; reversing would replace a bare word that also occurs in
-prose (for a project named `blueprint`, every occurrence of the word). So
+The restore is **alignment-based, not a search-and-replace** — there is no
+general textual inverse of the substitution, and no content-based shortcut
+either. `pull` replaces an unambiguous token; reversing would replace a bare
+word that also occurs in prose (for a project named `blueprint`, every
+occurrence). Matching on line content fails the same way one level up. So
 lines you edited are left alone, and if one still carries the project name the
 guard blocks and you write the placeholder explicitly. Mark a known-benign
 line with an inline `a2bp-allow: <why it is safe>` comment (the justification

@@ -21,13 +21,16 @@
 #
 # Two primitives, deliberately separate:
 #
-#   contamination_reverse_substitute  — DETERMINISTIC. The exact inverse of
-#       scripts/blueprint's substitute_placeholders. Always safe to apply, so
-#       it applies silently.
-#   contamination_scan                — HEURISTIC. Catches what no mechanical
-#       inverse can know about (host paths, foreign state dirs, operator
-#       emails). Because it is heuristic it must be overridable, and every
-#       override must be visible — see "BLOCKING vs NOTICE" below.
+#   contamination_stage  — ALIGNMENT-BASED. Restores placeholders only where a
+#       positional diff against the blueprint's own copy proves the line came
+#       from one. It is NOT an inverse of substitute_placeholders — no such
+#       inverse exists, and two review rounds were spent learning that (see
+#       the function's own header). Anything it cannot attribute is left
+#       untouched for the scan to judge.
+#   contamination_scan   — HEURISTIC. Catches what no mechanical transform can
+#       know about (host paths, foreign state dirs, operator emails). Because
+#       it is heuristic it must be overridable, and every override must be
+#       visible — see "BLOCKING vs NOTICE" below.
 #
 # Sourced by scripts/blueprint. Kept as a shared lib rather than inlined so
 # the gate and new-project.sh can reuse the same patterns — the same reason
@@ -86,91 +89,122 @@ _contamination_is_placeholder_email() {
   return 1
 }
 
-# --- contamination_reverse_substitute PROJ_FILE BP_FILE PROJECT_NAME ------
-# Prints PROJ_FILE's content with placeholders restored, on a PROVENANCE
-# basis: a line is reverted only when it is byte-identical to what
-# substitute_placeholders would have produced from a placeholder-bearing line
-# in the blueprint's own copy.
+# --- contamination_stage PROJ BP NAME STAGED_OUT ALIGN_OUT ----------------
+# Writes to STAGED_OUT the bytes that should land in the blueprint, and to
+# ALIGN_OUT the staged line numbers whose provenance is PROVEN (one per line).
 #
-# WHY NOT A GLOBAL sed (Codex four-eyes F1, and it is a fair hit). The first
-# cut of this function ran `s/${proj_name}/{{PROJECT_NAME}}/g` and the commit
-# message called it "the exact inverse of substitute_placeholders". It is not,
-# and the asymmetry is the whole point:
+# WHY ALIGNMENT AND NOT A LOOKUP — two review rounds are compressed here, so
+# the next person does not re-derive them:
 #
-#   forward   replaces `{{PROJECT_NAME}}` — an unambiguous token that never
-#             occurs in prose. Lossless by construction.
-#   backward  would replace a bare word that absolutely does occur in prose.
-#             For a project directory legitimately named `blueprint`, "The
-#             blueprint documentation explains blueprint sync." silently
-#             became "The {{PROJECT_NAME}} documentation explains
-#             {{PROJECT_NAME}} sync." — and the guard then copied the
-#             corrupted file with no finding at all.
+#   R1: a global `s/${proj_name}/{{PROJECT_NAME}}/g` was called "the exact
+#       inverse of substitute_placeholders". There is no such inverse. Forward
+#       replaces an unambiguous token that never occurs in prose; backward
+#       would replace a bare word that does. For a project directory
+#       legitimately named `blueprint`, "The blueprint documentation explains
+#       blueprint sync." silently became "The {{PROJECT_NAME}} documentation
+#       explains {{PROJECT_NAME}} sync.", and the guard copied the corrupted
+#       file through with no finding at all.
 #
-# Substitution destroys the provenance needed to tell "this text came from a
-# placeholder" from "this text always said that". The blueprint's own copy is
-# where that provenance still exists, so that is what we consult. Names like
-# `app`, `flow`, `docs` or `agent` make the blast radius of the naive version
-# large, and an unescaped name containing regex metacharacters made it unsafe
-# on top. Nothing here builds a regex from the project name.
+#   R2: the fix keyed a map on line CONTENT — substituted_form → blueprint
+#       line. That still discards occurrence identity. If the blueprint holds
+#       both `{{PROJECT_NAME}}` and a literal `acme-flow` line, the first one
+#       owns the key and EVERY matching project line gets rewritten, including
+#       a legitimate literal that never came from a placeholder. Same
+#       information loss as R1, at line granularity instead of substring.
 #
-# Lines the operator actually CHANGED are left alone. If such a line contains
-# the project name, contamination_scan blocks it and the operator writes
-# `{{PROJECT_NAME}}` explicitly. That is deliberate: fail closed and make the
-# human resolve the ambiguity, rather than guess and corrupt silently.
+# So provenance is established POSITIONALLY. We forward-substitute the
+# blueprint's copy — reproducing exactly what `pull` handed the project — and
+# diff it against the project file. Only a line the diff reports as UNCHANGED
+# is attributed to its aligned upstream line, and only then is that upstream
+# line's original text (placeholder intact) emitted. Everything the operator
+# actually touched passes through byte-for-byte and is left for the scan to
+# judge. An occurrence that cannot be attributed uniquely is never guessed at.
 #
-# No blueprint copy (a brand-new managed file) → no provenance → verbatim
-# passthrough, and the scan blocks on any project name. Also fail-closed.
+# The same alignment drives the scan's exemption, which is why it is returned
+# rather than kept private: "already upstream" has to mean "this occurrence
+# was already upstream at this position", not "these bytes appear upstream
+# somewhere". A relocated or duplicated risky line is a NEW occurrence and
+# must face every check (R2-F2).
 #
-# The caller is responsible for the _should_substitute exemption (files that
-# IMPLEMENT the substitution carry the tokens as code — reverse-substituting
+# No blueprint copy (a brand-new managed file) → nothing to align against →
+# verbatim passthrough with an empty alignment, so the scan judges every line.
+# Fail closed.
+#
+# Nothing here compiles the project name as a regex: the forward substitution
+# is bash parameter expansion and the comparison is done by `diff`.
+#
+# The caller owns the _should_substitute exemption (files that IMPLEMENT the
+# substitution carry the tokens as code — restoring placeholders in
 # scripts/blueprint would corrupt scripts/blueprint).
-contamination_reverse_substitute() {
-  local pf="$1" bpf="$2" proj_name="$3"
+contamination_stage() {
+  local pf="$1" bpf="$2" proj_name="$3" staged_out="$4" align_out="$5"
   local proj_upper
   proj_upper=$(printf '%s' "$proj_name" | tr 'a-z-' 'A-Z_')
 
+  : > "$align_out"
+
   if [ ! -f "$bpf" ]; then
-    cat "$pf"
+    cat "$pf" > "$staged_out"
     return 0
   fi
 
-  # substituted-form → the original placeholder-bearing blueprint line.
-  # Pure bash string replacement, never sed: the project name is DATA here,
-  # and must never be compiled as a pattern.
-  declare -A _rev
-  local bl sub
-  while IFS= read -r bl || [ -n "$bl" ]; do
-    case "$bl" in
-      *'{{PROJECT_NAME}}'*|*'{{PROJECT_NAME_UPPER}}'*) ;;
-      *) continue ;;
-    esac
+  # Does the project file end with a newline? The staged copy must match it
+  # byte-for-byte; a line-oriented rewrite would otherwise append one the
+  # operator never wrote.
+  local final_nl=1
+  if [ -s "$pf" ] && [ "$(tail -c1 "$pf" | wc -l)" -eq 0 ]; then
+    final_nl=0
+  fi
+
+  local -a bp_lines proj_lines
+  mapfile -t bp_lines < "$bpf"
+  mapfile -t proj_lines < "$pf"
+
+  # What `pull` would have produced from the blueprint's copy.
+  local bp_sub bl sub
+  bp_sub=$(mktemp)
+  for bl in ${bp_lines[@]+"${bp_lines[@]}"}; do
     sub=${bl//\{\{PROJECT_NAME_UPPER\}\}/$proj_upper}
     sub=${sub//\{\{PROJECT_NAME\}\}/$proj_name}
-    [ -n "${_rev[$sub]+x}" ] || _rev[$sub]=$bl
-  done < "$bpf"
+    printf '%s\n' "$sub"
+  done > "$bp_sub"
 
-  # Stream the project file, preserving a missing final newline exactly.
-  local pl out had_nl
-  while :; do
-    if IFS= read -r pl; then
-      had_nl=1
-    elif [ -n "$pl" ]; then
-      had_nl=0
+  # Positional alignment. The three --*-line-format options emit one record
+  # per line in file order: '=' common, '-' only upstream, '+' only in the
+  # project. Walking that stream with two counters yields, for every project
+  # line, the upstream line it corresponds to (or none).
+  declare -A _align
+  local rec tag bp_i=0 pj_i=0
+  while IFS= read -r rec; do
+    tag=${rec:0:1}
+    case "$tag" in
+      '=') bp_i=$((bp_i+1)); pj_i=$((pj_i+1)); _align[$pj_i]=$bp_i ;;
+      '-') bp_i=$((bp_i+1)) ;;
+      '+') pj_i=$((pj_i+1)) ;;
+    esac
+  done < <(diff --unchanged-line-format='=%L' \
+                --old-line-format='-%L' \
+                --new-line-format='+%L' \
+                "$bp_sub" "$pf" 2>/dev/null || true)
+  rm -f "$bp_sub"
+
+  # Emit the staged copy plus the proven-provenance line list.
+  local i n out
+  n=${#proj_lines[@]}
+  : > "$staged_out"
+  for (( i=1; i<=n; i++ )); do
+    if [ -n "${_align[$i]+x}" ]; then
+      out=${bp_lines[$(( ${_align[$i]} - 1 ))]}
+      printf '%s\n' "$i" >> "$align_out"
     else
-      break
+      out=${proj_lines[$(( i - 1 ))]}
     fi
-    out=$pl
-    # Guard the empty key: bash associative arrays reject an empty subscript
-    # outright ("bad array subscript"), and a blank line is never a candidate
-    # for reversal anyway.
-    if [ -n "$pl" ] && [ -n "${_rev[$pl]+x}" ]; then out=${_rev[$pl]}; fi
-    if [ "$had_nl" -eq 1 ]; then
-      printf '%s\n' "$out"
+    if [ "$i" -eq "$n" ] && [ "$final_nl" -eq 0 ]; then
+      printf '%s' "$out" >> "$staged_out"
     else
-      printf '%s' "$out"
-      break
+      printf '%s\n' "$out" >> "$staged_out"
     fi
-  done < "$pf"
+  done
 }
 
 # --- contamination_scan FILE PROJECT_NAME ---------------------------------
@@ -210,10 +244,10 @@ contamination_reverse_substitute() {
 #                  production while the unit tests — which called this helper
 #                  directly with a real .md path — stayed green (Codex F2).
 #                  Defaults to CONTENT_FILE.
-#   BASELINE_FILE  the blueprint's current copy, if any. See below.
+#   ALIGN_FILE     contamination_stage's proven-provenance line list. See below.
 contamination_scan() {
   local f="$1" proj_name="$2"
-  local logical="${3:-$1}" baseline="${4:-}"
+  local logical="${3:-$1}" align_file="${4:-}"
   local blocked=0
   local name_rx suppressed
   # `acme-flow` also appears as AcmeFlow / acme_flow / ACMEflow. Match any
@@ -230,28 +264,31 @@ contamination_scan() {
                  | cut -d: -f1 | tr '\n' '|')"
   _skip() { case "$suppressed" in *"|$1|"*) return 0 ;; esac; return 1; }
 
-  # --- Baseline exemption ---
-  # A line already present verbatim in the blueprint's own copy is not
-  # something this back-propagation is INTRODUCING. The guard polices what you
-  # are adding; content already upstream is out of its remit (and if it is
-  # genuinely contaminated, blocking a2bp would not fix it — that is a
-  # separate cleanup).
+  # --- Unchanged-line exemption (OCCURRENCE-aware) ---
+  # A line that the positional diff attributed to an upstream line is not
+  # something this back-propagation is INTRODUCING — it is already in the
+  # blueprint, at that position. The guard polices what you add; existing
+  # upstream content is out of its remit (and if it is genuinely contaminated,
+  # blocking a2bp would not fix it — that is a separate cleanup).
   #
-  # This is also what makes a one-word project name survivable. For a project
-  # named `blueprint`, generic prose containing the word "blueprint" is
-  # unchanged from upstream, so it is exempt rather than flagged as a residual
-  # project name. Without this the F1 corruption would simply have come back
-  # as a false BLOCK on the same lines.
-  declare -A _base
-  if [ -n "$baseline" ] && [ -f "$baseline" ]; then
-    local bl
-    while IFS= read -r bl || [ -n "$bl" ]; do
-      [ -n "$bl" ] && _base[$bl]=1
-    done < "$baseline"
+  # This is also what makes a one-word project name survivable: for a project
+  # named `blueprint`, untouched prose containing the word is attributed
+  # upstream rather than flagged as a residual project name. Without it, R1's
+  # corruption would simply have returned as a false BLOCK on the same lines.
+  #
+  # It is keyed on LINE NUMBER, not content, and that distinction is the whole
+  # of R2-F2. A content set would exempt every occurrence of a risky line just
+  # because those bytes appear upstream once — so a project could duplicate or
+  # relocate such a line and the new occurrence would bypass every check, even
+  # though relocation can turn quoted prose into an operative path.
+  declare -A _aligned
+  if [ -n "$align_file" ] && [ -f "$align_file" ]; then
+    local al
+    while IFS= read -r al; do
+      [ -n "$al" ] && _aligned[$al]=1
+    done < "$align_file"
   fi
-  # Empty subscripts are rejected by bash associative arrays, and a blank line
-  # is never a finding, so treat it as not-known rather than indexing with it.
-  _known() { [ -n "$1" ] && [ -n "${_base[$1]+x}" ]; }
+  _known() { [ -n "${_aligned[$1]+x}" ]; }
 
   # Markdown documents the CONVENTION; shell scripts execute a PATH. That
   # distinction decides whether `~/.{{PROJECT_NAME}}` is correct or is the
@@ -266,7 +303,7 @@ contamination_scan() {
   mapfile -t _lines < "$f" 2>/dev/null || _lines=()
   _exempt() {
     _skip "$1" && return 0
-    _known "${_lines[$(( $1 - 1 ))]-}" && return 0
+    _known "$1" && return 0
     return 1
   }
 

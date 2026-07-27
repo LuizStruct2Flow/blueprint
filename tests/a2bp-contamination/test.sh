@@ -428,6 +428,84 @@ else
   pass "#15 a file with no final newline round-trips byte-exactly (F3)"
 fi
 
+# ===========================================================================
+# 16. R2-F1 (Codex round 2) — OCCURRENCE collision must not corrupt a literal.
+#     The round-1 fix keyed a map on line CONTENT: substituted-form → upstream
+#     line. When the blueprint holds BOTH a `{{PROJECT_NAME}}` line and a
+#     literal `acme-flow` line that render to the same bytes, the placeholder
+#     line owned the key and EVERY matching project line was rewritten —
+#     including the legitimate literal that never came from a placeholder.
+#     Positional alignment is what fixes it; this pins that the second
+#     occurrence keeps its literal text.
+# ===========================================================================
+setup
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+{{PROJECT_NAME}}
+acme-flow
+EOF
+cat >"$PROJ/$CARRIER" <<'EOF'
+acme-flow
+acme-flow
+EOF
+rc=$(run_a2bp "$CARRIER")
+got=$(cat "$FAKE_BP/$CARRIER")
+want=$(printf '{{PROJECT_NAME}}\nacme-flow\n')
+if [ "$got" = "$(printf '{{PROJECT_NAME}}\n{{PROJECT_NAME}}')" ]; then
+  fail "#16 CORRUPTION: the literal second occurrence was rewritten to {{PROJECT_NAME}} — provenance is keyed on content, not position (Codex R2-F1)"
+elif [ "$got" != "$want" ]; then
+  fail "#16 unexpected staged result (exit $rc):$(printf '\n%s' "$got")"
+else
+  pass "#16 colliding forward forms keep their occurrence identity (R2-F1)"
+fi
+
+# ===========================================================================
+# 17. R2-F2 — a RELOCATED/duplicated risky line is a NEW occurrence and must
+#     face every check. A content-keyed exemption would wave it through just
+#     because those bytes appear upstream once — and relocation can turn
+#     quoted prose into an operative path.
+# ===========================================================================
+setup
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+# Mocks
+Historical note: the old tool wrote to /home/someuser/state.
+EOF
+cat >"$PROJ/$CARRIER" <<'EOF'
+# Mocks
+Historical note: the old tool wrote to /home/someuser/state.
+Historical note: the old tool wrote to /home/someuser/state.
+EOF
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -eq 0 ]; then
+  fail "#17 a duplicated host-path line was copied — the exemption is a content set, so a NEW occurrence inherited the old one's pass (Codex R2-F2)"
+elif [ "$(grep -c 'someuser' "$FAKE_BP/$CARRIER")" -ne 1 ]; then
+  fail "#17 blueprint copy was modified despite the block"
+else
+  pass "#17 a relocated/duplicated risky line is judged as newly introduced (R2-F2)"
+fi
+
+# ===========================================================================
+# 18. R2-F2, other half — the untouched upstream occurrence must STILL be
+#     exempt. The fix must not become "block everything that was always there".
+# ===========================================================================
+setup
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+# Mocks
+Historical note: the old tool wrote to /home/someuser/state.
+EOF
+cat >"$PROJ/$CARRIER" <<'EOF'
+# Mocks
+Historical note: the old tool wrote to /home/someuser/state.
+A newly added, perfectly generic line.
+EOF
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -ne 0 ]; then
+  fail "#18 an untouched pre-existing upstream line was blocked (exit $rc) — the guard must police what the copy INTRODUCES; see $WORK/out"
+elif ! grep -q 'newly added' "$FAKE_BP/$CARRIER"; then
+  fail "#18 the new generic line was not copied"
+else
+  pass "#18 an unchanged upstream occurrence stays exempt (R2-F2)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: a2bp reverse-substitutes and refuses to launder project specifics."

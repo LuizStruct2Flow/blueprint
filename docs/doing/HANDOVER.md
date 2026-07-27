@@ -4,49 +4,54 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-26.** BUG-001/002/003 + audit findings are fixed,
-> reviewed under four-eyes and pushed; awaiting founder acceptance. The audit
-> register still has open findings, now led by **A-09 (SonarQube half)**, A-07
-> and A-03 — **A-22 is fully fixed (R11 closed) and awaiting acceptance**, not open.
+> **Last updated: 2026-07-26 (evening handover; VSCode/session restart pending).**
+> BUG-001/002/003 + audit findings fixed, four-eyes-reviewed, PUSHED; awaiting
+> founder acceptance. **A-09 is FULLY CLOSED (both halves) and pushed.** Open
+> audit findings now led by **A-07** then A-03. Two loose ends carried into the
+> next session: one unpushed commit (R12a) and a half-finished timestamp switch
+> on the agent-exchange board — see §1 and §3.
 
 ## 0. STATUS
 
 - **Blueprint self-audit + BUG-001: PUSHED, awaiting acceptance.** `origin/main`
-  is at `1a876c8`. Delivered: **BUG-001** (fork-bomb process leak in the activity
+  is at `32adcf3`. Delivered: **BUG-001** (fork-bomb process leak in the activity
   feed — a host was pegged at load 175 for 2.7 days by ~17,400 leaked processes),
   **BUG-002** (linkedin-watcher contamination in a generic file), **BUG-003**
   (the security gate could not tell a scanner *failure* from a scanner
-  *finding*), plus audit findings **A-01, A-05, A-12, A-14, A-15, A-22, A-27,
-  A-36**, and the **dispatcher/state-dir half of A-09** (the live cross-project
-  log contamination — a redcare Codex verdict was bleeding into this feed;
-  fixed via the shared `scripts/lib/state-dir.sh`). **A-09's SonarQube-key half
-  is fixed and in four-eyes** (sonar-project.properties added to bootstrap
-  TARGETS); A-09 fully closed once that pushes.
+  *finding*), plus audit findings **A-01, A-05, A-09 (BOTH halves), A-12, A-14,
+  A-15, A-22, A-27, A-36**. A-09 was the live cross-project log contamination (a
+  redcare Codex verdict bled into this feed) — dispatcher/state-dir half fixed via
+  the shared `scripts/lib/state-dir.sh`, SonarQube-key half fixed by adding
+  `sonar-project.properties` to bootstrap TARGETS. All pushed, four-eyes CLEAN.
+- **One commit PUSHED-PENDING:** `205f6f7` `test(R12a)` — bound-test copies the
+  whole `scripts/lib/` instead of a named file (ported from redcare). Committed,
+  **NOT pushed, NOT four-eyes reviewed.** Test-only. Either hand to Codex + push,
+  or fold into the next review batch.
 - **Artefacts awaiting acceptance:** `docs/waiting-acceptance/` — `BUGS.md`,
-  `PLAN-BUG-001.md`, and the Codex review records (BUG-001, A-05/A-27, and the
-  A-22 R2–R8 set just moved here). Do **not** promote to `done/` without an
-  explicit founder acceptance signal.
+  `PLAN-BUG-001.md`, and the Codex review records (BUG-001, A-05/A-27, the
+  A-22 R2–R8 set, and `CODEX-REVIEW-A09-SONAR.md`). Do **not** promote to `done/`
+  without an explicit founder acceptance signal.
 - **Register of everything found:** `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`
   (35 findings, ranked). It stays in `doing/` until the open ones are closed.
 
 ## 1. RESUME — live state + immediate action
 
-- **PUSHED (`1a876c8`, 8-round four-eyes CLEAN, Codex delegated the push):**
-  A-22 R11 close + the dispatcher/state-dir half of A-09. Codex couldn't push
-  (sandbox SSH-config block) so Sylvia pushed the authorized SHA.
-- **A-09 is now FULLY FIXED (sonar half committed, in four-eyes).** The sonar
-  half: `sonar-project.properties` was the last shipping file carrying a live
-  substitutable `{{PROJECT_NAME}}` (its `sonar.projectKey`) while omitted from
-  `new-project.sh` TARGETS, so every derived project uploaded under the one
-  literal key and collided. Fixed by adding it to TARGETS; regression in
-  `tests/bootstrap-contents`. It is a TEMPLATE_FILE (not pull-synced), so
-  bootstrap substitution is the whole fix — **pull neither heals nor re-breaks
-  it** (correcting an earlier note that claimed pull would re-break a hand-fixed
-  key). Awaiting Codex four-eyes, then push.
-- **Immediate next action — A-07** (once the sonar half pushes): `blueprint a2bp`
-  copies a project file into the blueprint with a bare `cp` — no name
-  reverse-substitution, no contamination scan. It is the vector that created
-  BUG-002 and A-09; guarding it stops the next literal-placeholder leak at source.
+- **A-09 FULLY CLOSED, pushed `32adcf3`** (dispatcher/state-dir half at `1a876c8`,
+  sonar half + review record after). 8+ four-eyes rounds, Codex CLEAN; Codex
+  delegated each push (sandbox SSH/index.lock block) so Sylvia pushed the
+  authorized SHAs.
+- **IMMEDIATE NEXT ACTION — A-07.** `blueprint a2bp` copies a project file into
+  the blueprint with a bare `cp` — no name reverse-substitution, no contamination
+  scan. It is the vector that created BUG-002 and A-09; guarding it stops the next
+  literal-placeholder leak at source. This is the P-11 lead in the cross-stream
+  plan and the head of the "guard the pipe" order.
+- **LOOSE END 1 — push/review `205f6f7` (R12a).** Committed, unpushed, unreviewed
+  (test-only). Fold into the A-07 review batch or hand to Codex standalone.
+- **LOOSE END 2 — agent-exchange timestamp switch is HALF DONE (see §3).** The
+  board was being converted UTC→Berlin local (`+02:00`). 15/16 headers converted,
+  **uncommitted**; 1 header + the README format line remain; blocked by a
+  permissions issue. Finish or revert — founder to decide the permission approach
+  first.
 - **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which
@@ -113,9 +118,50 @@
   (`scripts/start-codex-signal-watch.sh`). It resolves `CODEX_BIN` **once at
   startup** — if the codex binary is moved or re-linked, restart it or every
   dispatch fails with `codex: not found` (this happened once already).
-- The feed does not survive a reboot; re-arm it.
+- The feed does not survive a reboot; re-arm it with
+  `env -u AGENT_STATE_HOME bash scripts/agent-activity.sh --daemon` (the
+  `-u` strips any stale override so it reads its own `~/.blueprint`, per A-09).
 - Other sessions may run their own dispatchers (redcare has two). Only ever kill
   watchers scoped to *this* repo's path.
+
+### 3a. agent-exchange timestamp switch — HALF DONE, uncommitted
+
+- **Repo:** `../../agent-exchange` (local, no git remote — both streams share the
+  working tree). Board file: `EXCHANGE.md`.
+- **What's underway:** founder asked to switch the board from **UTC (`Z`)** to
+  **Berlin local (`+02:00`, CEST)**. Berlin in July is **UTC+2** (CEST), not +1.
+- **State:** 15 of 16 `### ` header timestamps converted to `+02:00`
+  (**uncommitted** working-tree changes). **Remaining:** (1) the last header
+  `### 2026-07-24T08:45Z — Sylvia@redcare` → `10:45+02:00`; (2) the `README.md`
+  header-format spec still says `<UTC>` — change it to the local convention.
+  Then commit. The last committed exchange message is `e14b897` (my A-09 reply).
+- **How to convert:** `date -u` on this box IS correct UTC; add 2h for the header.
+  Do it via the **Edit tool** (founder rejected a `perl -i` one-liner — wanted
+  transparent per-line edits, not an interpreter).
+- **Decision owed:** finish the switch, or revert all 15 back to `Z` for
+  consistency. Founder's call.
+
+### 3b. PERMISSIONS BLOCKER (this is why 3a stalled)
+
+- **Symptom:** every edit to `../../agent-exchange/EXCHANGE.md` prompts, even
+  after running `/permissions`.
+- **Root cause (evidenced, not inferred):** the permission matcher does **not**
+  resolve relative `../` for paths OUTSIDE the project tree. The committed
+  `.claude/settings.json` has `Edit(../../agent-exchange/**)` (relative) — it
+  never matches, so edits fall through to a prompt. Only the **absolute
+  double-slash** form works for out-of-tree paths (cf. `Read(//Users/**/**)`).
+- **Founder constraint:** wants **relative paths ONLY**, no absolute paths in the
+  config. That is in direct conflict with prompt-free out-of-tree edits here.
+  **Undecided** — two options on the table:
+  - **(A)** put `//home/luiz/dev/agent-exchange/**` in the **gitignored**
+    `.claude/settings.local.json` (absolute, but per-machine, never shared).
+  - **(B)** stay relative-only and accept a prompt on every exchange edit.
+- **⚠ Regression I introduced:** to honour "relative only" I changed
+  `.claude/settings.local.json`'s `Read(//home/luiz/.vscode/**)` →
+  `Read(../../../.vscode/**)`. By the same root cause that relative form likely
+  **breaks the vscode read permission**. If VSCode file reads start prompting,
+  revert that one line back to `Read(//home/luiz/.vscode/**)`.
+  (`settings.local.json` is gitignored — safe to edit freely.)
 
 ## 4. Parked plans / follow-ups (not active)
 

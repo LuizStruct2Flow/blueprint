@@ -14,7 +14,7 @@ Shared "radio over" baton for the agent team. `Holder` is a **persona name** fro
 |---|---|
 | Holder | Sylvia |
 | State | ACTIVE |
-| Task | PUSHED `e293429` (four-eyes CLEAN, record in `waiting-acceptance/CODEX-REVIEW-A09-SONAR.md`): A-09 SonarQube half — `sonar-project.properties` added to bootstrap TARGETS so each derived project gets a unique Sonar key. **A-09 is now FULLY CLOSED** (both halves), awaiting founder acceptance. redcare confirmed P-09 live on their side and landed the same fix (PR #26); they added the insight that the defect also silently blinds the observing feed (their own `[CODEX]` lines never showed). **NEXT: A-07** — `blueprint a2bp` bare-`cp` with no name reverse-substitution or contamination scan; the root-cause vector for BUG-002 + A-09. |e verdict (source commits need no changes), push `main` through the gate, then update HANDOVER/lifecycle and continue with A-07. |
+| Task | HANDOVER for a VSCode/session restart — **read `docs/doing/HANDOVER.md` §1 + §3 first.** `origin/main` at `32adcf3`. **A-09 FULLY CLOSED** (both halves) + A-22 R11, pushed, four-eyes CLEAN, awaiting founder acceptance. **NEXT: A-07** (a2bp contamination guard). **Loose ends:** (1) `205f6f7` R12a bound-test hardening — committed, UNPUSHED, unreviewed; (2) agent-exchange timestamp UTC→Berlin-local switch is 15/16 headers done but UNCOMMITTED (1 header + README remain), blocked by a permissions issue; (3) a settings.local.json vscode read rule was made relative and likely broke — see HANDOVER §3b. |
 | Last update | 2026-07-26 |
 
 History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in

@@ -637,7 +637,18 @@ cmd_a2bp() {
       # against a forward-substituted copy of $bp and restores placeholders
       # only on lines the diff proves unchanged. See contamination.sh for why
       # neither a global textual inverse nor a content-keyed lookup is sound.
-      contamination_stage "$f" "$bp" "$proj_name" "$staged" "$align"
+      if ! contamination_stage "$f" "$bp" "$proj_name" "$staged" "$align"; then
+        # Staging could not establish provenance at all (e.g. `diff` lacks the
+        # GNU --*-line-format extensions, or failed outright). Refuse rather
+        # than fall through with an empty alignment — with --force that would
+        # copy wholly unrestored project bytes upstream (A-07 R3-F3).
+        rm -f "$staged" "$align"
+        echo "  ${C_RED}reject${C_RESET}  $f  (staging failed — cannot establish provenance)"
+        echo "    ${C_DIM}'diff' must support --unchanged-line-format/--old-line-format/${C_RESET}"
+        echo "    ${C_DIM}--new-line-format (GNU diffutils). Install GNU diffutils and re-run.${C_RESET}"
+        blocked=$((blocked+1))
+        continue
+      fi
     else
       cp "$f" "$staged"
       : > "$align"

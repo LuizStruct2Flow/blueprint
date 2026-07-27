@@ -506,6 +506,84 @@ else
   pass "#18 an unchanged upstream occurrence stays exempt (R2-F2)"
 fi
 
+# ===========================================================================
+# 19. R3-F1 (Codex round 3) — an LCS match is not edit history.
+#     Insert a literal `acme-flow` where the old placeholder line was, AND
+#     edit the original placeholder line. `diff` aligns the INSERTED literal
+#     with the upstream placeholder, so the round-2 code rewrote it to
+#     {{PROJECT_NAME}} and exempted it from scanning — both from a tie-break,
+#     not from evidence. The guard must refuse the ambiguity instead.
+# ===========================================================================
+setup
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+HEAD
+{{PROJECT_NAME}}
+TAIL
+EOF
+cat >"$PROJ/$CARRIER" <<'EOF'
+HEAD
+acme-flow
+edited-placeholder
+TAIL
+EOF
+rc=$(run_a2bp "$CARRIER")
+# The blueprint FIXTURE already contains {{PROJECT_NAME}}, so a bare grep for
+# it matches the untouched file too. "edited-placeholder" is the tell that the
+# staged copy actually landed.
+if grep -q 'edited-placeholder' "$FAKE_BP/$CARRIER"; then
+  if [ "$(sed -n '2p' "$FAKE_BP/$CARRIER")" = '{{PROJECT_NAME}}' ]; then
+    fail "#19 CORRUPTION: the newly inserted literal was rewritten to {{PROJECT_NAME}} on an LCS tie-break (Codex R3-F1)"
+  else
+    fail "#19 the ambiguous insert was copied — an unprovable alignment must not also grant scan exemption (Codex R3-F1)"
+  fi
+elif [ "$rc" -eq 0 ]; then
+  fail "#19 nothing was copied yet a2bp exited 0"
+else
+  pass "#19 ambiguous alignment next to an edit is refused, not guessed (R3-F1)"
+fi
+
+# ===========================================================================
+# 20. R3-F2 — a file whose FINAL line is incomplete must still align.
+#     `%L` preserves the missing newline, so the last record was unterminated
+#     and `while read` never saw it: the counters desynchronised and the line
+#     was silently left unaligned. Case #15 only proved byte preservation of
+#     an unchanged line; this proves restoration on an incomplete final line.
+# ===========================================================================
+setup
+printf '{{PROJECT_NAME}}' > "$FAKE_BP/$CARRIER"
+printf 'acme-flow' > "$PROJ/$CARRIER"
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -ne 0 ]; then
+  fail "#20 an incomplete final line blocked (exit $rc) — the record protocol is inheriting the input's line endings (Codex R3-F2); see $WORK/out"
+elif [ "$(cat "$FAKE_BP/$CARRIER")" != '{{PROJECT_NAME}}' ]; then
+  fail "#20 the placeholder was not restored on an incomplete final line: '$(cat "$FAKE_BP/$CARRIER")'"
+elif [ "$(tail -c1 "$FAKE_BP/$CARRIER" | wc -l)" -ne 0 ]; then
+  fail "#20 a trailing newline was added that the operator never wrote"
+else
+  pass "#20 an incomplete final line aligns, restores, and stays incomplete (R3-F2)"
+fi
+
+# ===========================================================================
+# 21. R3-F3 — if `diff` cannot do the alignment, FAIL CLOSED.
+#     The GNU --*-line-format switches are extensions. Swallowing an error
+#     into an empty alignment reads as "nothing is attributable" and, under
+#     --force, copies wholly unrestored project bytes upstream.
+# ===========================================================================
+setup
+printf '# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project.\n' > "$FAKE_BP/$CARRIER"
+printf '# Mocks\nGeneric guidance for the acme-flow project.\n' > "$PROJ/$CARRIER"
+SHIMDIR="$WORK/shim"; mkdir -p "$SHIMDIR"
+printf '#!/bin/sh\nexit 2\n' > "$SHIMDIR/diff"; chmod +x "$SHIMDIR/diff"
+( cd "$PROJ" && PATH="$SHIMDIR:$PATH" "$BLUEPRINT_BIN" a2bp --force "$CARRIER" ) >"$WORK/out" 2>&1
+rc=$?
+if grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
+  fail "#21 a broken 'diff' let UNRESTORED project bytes reach the blueprint under --force (Codex R3-F3)"
+elif [ "$rc" -eq 0 ]; then
+  fail "#21 staging failure exited 0 — a tool that could not run must never read as a clean pass (BUG-003's rule)"
+else
+  pass "#21 a diff capability/runtime failure fails closed, even under --force (R3-F3)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: a2bp reverse-substitutes and refuses to launder project specifics."

@@ -32,6 +32,42 @@ session" — that habit is the failure mode.
 
 ---
 
+## Step A0 — The contamination guard (runs for you)
+
+`a2bp` no longer copies bytes verbatim. Before anything lands in the
+blueprint working tree it does two things (A-07 — `scripts/lib/contamination.sh`):
+
+1. **Reverse-substitution.** Your project's name goes back to
+   `{{PROJECT_NAME}}` / `{{PROJECT_NAME_UPPER}}` — the exact inverse of what
+   `blueprint pull` did on the way down. Silent, deterministic, always applied
+   except to the files that *implement* the substitution (`scripts/blueprint`,
+   `scripts/new-project.sh`), which carry the tokens as code.
+2. **Contamination scan.** Host home paths, literal per-project state dirs,
+   and any project name that survived step 1 **block the copy** and exit
+   non-zero. A personal email is reported as a `NOTICE` and does not block.
+
+This exists because `a2bp` is how **BUG-002** (`~/.linkedin-watcher-agent`
+hardcoded into the generic feed) and **A-09** (every checkout colliding on one
+shared state dir) got into the blueprint in the first place. The playbook used
+to open at Step A and assume the bytes were fine.
+
+**If a file is rejected**, fix the named lines. If a hit is genuinely
+benign — a comment that quotes a historical bad path *as the incident
+record* — mark that line:
+
+```sh
+# (BUG-002: this used to hardcode ~/.old-project)  a2bp-allow: incident record, not a live path
+```
+
+The justification text after `a2bp-allow:` is required; a bare marker does
+not suppress. Prefer the marker over `--force`: `--force` waives the **whole
+file**, including findings you never read, and says so in its output.
+
+Your project's own copy is never modified — `a2bp` stages a transformed copy
+and reads the original.
+
+---
+
 ## Step A — Classify the change
 
 Before doing the ripples, classify the change. Pick the row(s) that match

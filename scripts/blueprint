@@ -79,6 +79,11 @@ MANAGED_FILES=(
   # derived project without it falls back to divergent paths and re-opens the
   # A-09 cross-project log contamination.
   "scripts/lib/state-dir.sh"
+  # Reverse-substitution + contamination scan for the project→blueprint
+  # direction (A-07). MUST ship: cmd_a2bp refuses to run without it, so a
+  # derived project missing this file cannot back-propagate at all — which is
+  # the intended fail-closed behaviour, but only useful if the file travels.
+  "scripts/lib/contamination.sh"
   "scripts/codex-feed-filter.sh"
   "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
@@ -558,18 +563,45 @@ cmd_pull() {
 # --- Subcommand: a2bp ---
 cmd_a2bp() {
   read_blueprint_source
-  if [ "$#" -eq 0 ]; then
-    die "usage: blueprint a2bp FILE [FILE...]"
+
+  # A-07: the contamination guard is REQUIRED, not best-effort. If the helper
+  # is missing we must refuse rather than silently degrade to the old bare
+  # `cp` — that is BUG-003's lesson applied here (a guard that cannot run is
+  # not a guard that passed).
+  local _bp_contam
+  _bp_contam="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/contamination.sh"
+  if [ ! -r "$_bp_contam" ]; then
+    die "scripts/lib/contamination.sh is missing — refusing to back-propagate unguarded (A-07)"
+  fi
+  # shellcheck source=scripts/lib/contamination.sh
+  . "$_bp_contam"
+
+  local force=0
+  local files=()
+  for arg in "$@"; do
+    case "$arg" in
+      --force) force=1 ;;
+      *)       files+=("$arg") ;;
+    esac
+  done
+
+  if [ "${#files[@]}" -eq 0 ]; then
+    die "usage: blueprint a2bp [--force] FILE [FILE...]"
   fi
 
+  local proj_name
+  proj_name=$(basename "$(pwd)")
+
   echo "${C_BOLD}Apply-to-blueprint${C_RESET}"
-  echo "  project:    $(pwd)"
+  echo "  project:    $(pwd)  ${C_DIM}(name: $proj_name)${C_RESET}"
   echo "  blueprint:  $BLUEPRINT_ROOT"
+  [ "$force" -eq 1 ] && echo "  ${C_YELLOW}--force: contamination findings will NOT block${C_RESET}"
   echo
 
   local copied=0
+  local blocked=0
   local copied_files=()
-  for f in "$@"; do
+  for f in "${files[@]}"; do
     # Validate that this file is blueprint-managed
     local is_managed=0
     for m in "${MANAGED_FILES[@]}"; do
@@ -591,17 +623,72 @@ cmd_a2bp() {
       echo "  ${C_DIM}same${C_RESET}    $f  (project version already matches blueprint)"
       continue
     fi
+
+    # A-07 step 1 — reverse-substitute into a STAGING copy. The project's own
+    # file is never mutated: a2bp is a read of the project, not a rewrite of
+    # it. Files that implement the substitution carry the tokens as code, so
+    # they use the same _should_substitute exemption as the pull side —
+    # otherwise back-propagating the CLI would corrupt the CLI.
+    local staged
+    staged=$(mktemp)
+    if _should_substitute "$f"; then
+      contamination_reverse_substitute "$f" "$proj_name" > "$staged"
+    else
+      cp "$f" "$staged"
+    fi
+
+    # A-07 step 2 — scan the staged content, i.e. exactly the bytes that would
+    # land in the blueprint. Scanning the pre-substitution original would
+    # report the project name on every line and be useless.
+    local findings
+    findings=$(contamination_scan "$staged" "$proj_name") || true
+    local has_block=0
+    if printf '%s' "$findings" | grep -q '|BLOCK|'; then has_block=1; fi
+
+    if [ -n "$findings" ]; then
+      printf '%s\n' "$findings" | while IFS='|' read -r ln kind reason text; do
+        local colour="$C_YELLOW"
+        [ "$kind" = "BLOCK" ] && colour="$C_RED"
+        echo "    ${colour}${kind}${C_RESET}  $f:$ln — $reason"
+        echo "      ${C_DIM}${text}${C_RESET}"
+      done
+    fi
+
+    if [ "$has_block" -eq 1 ] && [ "$force" -eq 0 ]; then
+      rm -f "$staged"
+      echo "  ${C_RED}reject${C_RESET}  $f  (contamination — not copied)"
+      echo "    ${C_DIM}Fix the lines above, or mark a known-benign one with an inline${C_RESET}"
+      echo "    ${C_DIM}'a2bp-allow: <why it is safe>' comment. Re-run with --force only when${C_RESET}"
+      echo "    ${C_DIM}you have read every finding — it waives the whole file.${C_RESET}"
+      blocked=$((blocked+1))
+      continue
+    fi
+
     mkdir -p "$(dirname "$bp")"
-    cp "$f" "$bp"
-    echo "  ${C_GREEN}copied${C_RESET}  $f → blueprint"
+    cp "$staged" "$bp"
+    rm -f "$staged"
+    if [ "$has_block" -eq 1 ]; then
+      echo "  ${C_YELLOW}forced${C_RESET}  $f → blueprint  ${C_YELLOW}(contamination waived by --force)${C_RESET}"
+    else
+      echo "  ${C_GREEN}copied${C_RESET}  $f → blueprint"
+    fi
     copied=$((copied+1))
     copied_files+=("$f")
   done
 
   echo
   if [ $copied -eq 0 ]; then
+    if [ "$blocked" -gt 0 ]; then
+      # Exit non-zero: a refused back-propagation must never read as success
+      # to a caller or to an agent parsing the exit code.
+      echo "${C_RED}✗ Nothing copied — $blocked file(s) blocked by the contamination guard.${C_RESET}"
+      return 1
+    fi
     echo "${C_DIM}Nothing copied.${C_RESET}"
     return 0
+  fi
+  if [ "$blocked" -gt 0 ]; then
+    echo "${C_RED}✗ $blocked file(s) blocked by the contamination guard (see above).${C_RESET}"
   fi
 
   echo "${C_GREEN}✓ Copied $copied file(s) into the blueprint working tree.${C_RESET}"
@@ -730,6 +817,11 @@ cmd_a2bp() {
 
   echo
   echo "${C_DIM}Full playbook: $BLUEPRINT_ROOT/docs/A2BP_PLAYBOOK.md${C_RESET}"
+
+  # A-07: a partial run — some files copied, others refused — must still exit
+  # non-zero. An agent that only reads the exit code has to see the refusal.
+  [ "$blocked" -gt 0 ] && return 1
+  return 0
 }
 
 # --- Subcommand: help ---

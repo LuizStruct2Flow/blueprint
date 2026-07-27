@@ -50,7 +50,8 @@ state_file="$log_dir/.agent-activity.state"
 
 # Generic, project-neutral state dir. Derived from the repo name so a derived
 # project reads the dispatcher logs IT writes — never another project's
-# (BUG-002: this used to hardcode ~/.linkedin-watcher-agent). The derivation is
+# (BUG-002: this used to hardcode ~/.linkedin-watcher-agent).  a2bp-allow: that
+# path is the incident record, quoted in a comment, not a live path. The derivation is
 # shared with the dispatchers via scripts/lib/state-dir.sh so both sides compute
 # the identical directory — one mechanism, never two (A-09).
 . "$repo_root/scripts/lib/state-dir.sh"

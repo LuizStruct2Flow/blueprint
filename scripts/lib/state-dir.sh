@@ -7,12 +7,14 @@
 # not a collision, both sides must compute the SAME directory from the SAME rule.
 #
 # They did not. The feed derived `~/.<repo-basename>` at runtime; the dispatchers
-# hardcoded the literal `~/.{{PROJECT_NAME}}/` — a bootstrap placeholder that was
-# never substituted (this repo is the template AND a working copy, so it stayed
-# literal). Result: EVERY blueprint-derived checkout's dispatcher wrote into the
-# one shared `~/.{{PROJECT_NAME}}/` directory, and any feed pointed there saw
-# every other project's Codex output interleaved. A redcare acceptance verdict
-# surfaced live in this project's feed — that is the whole defect in one line.
+# hardcoded a literal, never-substituted bootstrap placeholder as their state dir
+# (this repo is the template AND a working copy, so it stayed literal). The path
+# they baked in was `~/.{{PROJECT_NAME}}/`.  a2bp-allow: the defective path is
+# quoted here deliberately as the incident record; it is prose, not a code path.
+# Result: EVERY blueprint-derived checkout's dispatcher wrote into that one
+# shared directory, and any feed pointed there saw every other project's Codex
+# output interleaved. A redcare acceptance verdict surfaced live in this
+# project's feed — that is the whole defect in one line.
 #
 # The fix is one mechanism, sourced by every caller — never two implementations
 # that agree only when a substitution happens to line up (cf. scripts/lib/gate.sh).

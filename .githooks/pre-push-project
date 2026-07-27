@@ -91,6 +91,20 @@ if [ -f tests/state-dir/test.sh ]; then
   }
 fi
 
+# A-07 — `blueprint a2bp` is the ONLY write path from a project into the generic
+# blueprint, and it is how BUG-002 and A-09 both got in. It must reverse-
+# substitute the project name and refuse to copy contaminated content. Unrun,
+# this regression would let the next literal-placeholder leak through the same
+# door that has already been used twice. ~0.2s.
+if [ -f tests/a2bp-contamination/test.sh ]; then
+  bash tests/a2bp-contamination/test.sh || {
+    echo "❌ tests/a2bp-contamination/test.sh failed (A-07)."
+    echo "   a2bp must restore {{PROJECT_NAME}} and block host paths / foreign"
+    echo "   state dirs, or one project's specifics fan out to every other."
+    exit 1
+  }
+fi
+
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
 if [ -f tests/bootstrap-contents/test.sh ]; then

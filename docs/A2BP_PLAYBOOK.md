@@ -37,25 +37,30 @@ session" — that habit is the failure mode.
 `a2bp` no longer copies bytes verbatim. Before anything lands in the
 blueprint working tree it does two things (A-07 — `scripts/lib/contamination.sh`):
 
-1. **Reverse-substitution, on a provenance basis.** A line goes back to
-   `{{PROJECT_NAME}}` / `{{PROJECT_NAME_UPPER}}` **only when it is
-   byte-identical to what `pull` produced** from a placeholder-bearing line in
-   the blueprint's own copy. Lines you actually edited are left alone.
+1. **Placeholder restoration, by positional alignment.** `a2bp`
+   forward-substitutes the blueprint's own copy — reproducing exactly what
+   `pull` handed you — and diffs it against your file. A line goes back to
+   `{{PROJECT_NAME}}` / `{{PROJECT_NAME_UPPER}}` **only where the diff proves
+   it unchanged**. Lines you actually edited pass through untouched.
 
-   There is no such thing as a general textual inverse of the substitution:
-   `pull` replaces an unambiguous token, but reversing would replace a bare
-   word that also occurs in ordinary prose. For a project directory
-   legitimately named `blueprint`, a global reverse turns "the blueprint
-   documentation" into "the {{PROJECT_NAME}} documentation". Consulting the
-   blueprint's copy is what recovers the provenance that substitution destroyed.
+   There is no general textual inverse of the substitution, and no
+   content-based shortcut either. `pull` replaces an unambiguous token, but
+   reversing would replace a bare word that also occurs in prose — for a
+   project directory legitimately named `blueprint`, every occurrence of the
+   word. Matching on line *content* fails the same way one level up: if the
+   blueprint holds both a `{{PROJECT_NAME}}` line and a literal line that
+   render alike, content matching rewrites both. Only position carries the
+   provenance that substitution destroyed.
 
    Files that *implement* the substitution (`scripts/blueprint`,
    `scripts/new-project.sh`) are exempt — they carry the tokens as code.
 2. **Contamination scan.** Host home paths, literal per-project state dirs,
    and any project name that survived step 1 **block the copy** and exit
    non-zero. A personal email is reported as a `NOTICE` and does not block.
-   Lines already present verbatim in the blueprint's copy are exempt — the
-   guard polices what this copy *introduces*, not what is already upstream.
+   Lines the alignment proves were *already upstream at that position* are
+   exempt — the guard polices what this copy introduces. Duplicating or
+   relocating an existing risky line creates a new occurrence, and that
+   occurrence faces every check.
 
 This exists because `a2bp` is how **BUG-002** (`~/.linkedin-watcher-agent`
 hardcoded into the generic feed) and **A-09** (every checkout colliding on one

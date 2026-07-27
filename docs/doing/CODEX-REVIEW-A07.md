@@ -88,3 +88,91 @@ be executable before this guard is trusted as the only write-path defence.
 but the batch cannot be authorized while A-07 has blockers. `2787332` is a
 handover checkpoint only.
 
+## Round 2 — re-review of `d3e21a2`
+
+**Date:** 2026-07-27
+**Commits reviewed:** `205f6f7`, `2787332`, `63fac8e`, `5d3ff5e`, `d3e21a2`
+**Verdict:** **CHANGES REQUESTED — do not push**
+
+### R2-F1 — BLOCKER: line-content lookup is not provenance when forward forms collide
+
+The global textual inverse is gone, but `_rev[substituted_line]=blueprint_line`
+still discards occurrence identity. Two distinct upstream lines can produce the
+same project bytes. In that case the first placeholder-bearing line owns the map
+key and every matching project line is rewritten, including a legitimate
+literal line that never came from a placeholder.
+
+Minimal reproduction against the current helper:
+
+```text
+blueprint: {{PROJECT_NAME}}
+blueprint: acme-flow
+project:   acme-flow
+project:   acme-flow
+result:    {{PROJECT_NAME}}
+result:    {{PROJECT_NAME}}
+```
+
+The second line is corrupted. This is the same information-loss problem as R1,
+at line granularity instead of substring granularity. It can occur naturally in
+prose/examples, especially for a common project name. The current case #7 has no
+placeholder-bearing line, so it does not exercise the collision.
+
+`--force` cannot recover the literal occurrence: reversal happens before the
+scan and is unconditional, so force copies the corrupted staging bytes. Force
+should waive findings, not make an ambiguous transform irreversible.
+
+Provenance must retain occurrence/alignment information (for example, align the
+project with the fully substituted blueprint copy and only reverse an unchanged
+occurrence whose corresponding upstream occurrence bears a placeholder). If an
+occurrence cannot be attributed uniquely, leave its bytes alone and make the
+residual-name finding/explicit operator resolution handle it.
+
+### R2-F2 — HIGH: the baseline exemption is an unbounded content set
+
+`_base[line]=1` exempts every occurrence of a line if the same bytes occur
+anywhere once in the upstream file. It does not prove that this occurrence was
+already present. A project can duplicate or relocate a risky upstream line and
+the new occurrence bypasses every check, including host-home paths and residual
+project names. Location can also change semantics: bytes that were quoted prose
+or inert data upstream can become executable or operative after relocation.
+
+An attacker who already controls the blueprint needs no bypass, but that does
+not make the rule sound: an ordinary project edit can introduce a new occurrence
+of an existing risky line, and the guard explicitly promises to police what the
+back-propagation introduces. Exemption should be occurrence-aware (alignment or
+at least a consumed multiset), and should not blanket-exempt a relocated line
+from all finding classes.
+
+### R2-F3 — non-blocking checks
+
+- Threading the logical managed path fixes the dead production branch from R1.
+  The `.md` rule remains correctly narrow for its stated purpose:
+  `~/.{{PROJECT_NAME}}` documents the runtime convention in Markdown, while the
+  identical literal in a script remains blocked. Real-CLI cases #10 and #11 pin
+  both sides.
+- The changed `contamination_scan` signature has one production caller and its
+  optional defaults preserve direct helper use. `pull`, `drift`, and bootstrap
+  do not call it. No signature regression found in those paths.
+- The requested partial multi-file, multi-digit suppression, bare-marker, and
+  no-final-newline cases are now executable and pass. I agree that managed
+  filenames containing spaces are unreachable under the current exact
+  `MANAGED_FILES` validation.
+- The file header at `scripts/lib/contamination.sh:24-26` still calls reversal
+  “the exact inverse” and “always safe”, contradicting the corrected design and
+  this reproduction. Update it with the eventual fix.
+
+### Round 2 checks run
+
+- `bash tests/a2bp-contamination/test.sh` — PASS (16 assertions)
+- `bash -n scripts/blueprint scripts/lib/contamination.sh tests/a2bp-contamination/test.sh` — PASS
+- `git diff --check` — PASS
+- targeted placeholder/literal same-line collision — reproduces corruption:
+  two `acme-flow` project lines become two `{{PROJECT_NAME}}` lines
+- call-site review for `contamination_scan`,
+  `contamination_reverse_substitute`, `_should_substitute`, pull, drift, and
+  bootstrap — no signature break found
+
+`205f6f7` remains reasonable by inspection and
+`bash tests/agent-activity-bound/test.sh` passes in this review, but this batch
+is not clean while R2-F1/R2-F2 remain.

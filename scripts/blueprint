@@ -629,26 +629,29 @@ cmd_a2bp() {
     # it. Files that implement the substitution carry the tokens as code, so
     # they use the same _should_substitute exemption as the pull side —
     # otherwise back-propagating the CLI would corrupt the CLI.
-    local staged
+    local staged align
     staged=$(mktemp)
+    align=$(mktemp)
     if _should_substitute "$f"; then
-      # Provenance comes from the blueprint's own copy ($bp): only lines that
-      # match what pull produced are reverted. See contamination.sh for why a
-      # global textual inverse is unsound.
-      contamination_reverse_substitute "$f" "$bp" "$proj_name" > "$staged"
+      # Provenance is positional: contamination_stage diffs the project file
+      # against a forward-substituted copy of $bp and restores placeholders
+      # only on lines the diff proves unchanged. See contamination.sh for why
+      # neither a global textual inverse nor a content-keyed lookup is sound.
+      contamination_stage "$f" "$bp" "$proj_name" "$staged" "$align"
     else
       cp "$f" "$staged"
+      : > "$align"
     fi
 
     # A-07 step 2 — scan the staged content, i.e. exactly the bytes that would
-    # land in the blueprint. Scanning the pre-substitution original would
-    # report the project name on every line and be useless.
+    # land in the blueprint. Scanning the project's original would report the
+    # project name on every line and be useless.
     #
-    # $f is passed as the LOGICAL path: $staged is an extensionless mktemp
-    # name, and the scan's prose-vs-script rule keys off the extension. $bp is
-    # the baseline — lines already upstream are not what this copy introduces.
+    # $f is the LOGICAL path: $staged is an extensionless mktemp name, and the
+    # prose-vs-script rule keys off the extension. $align exempts only those
+    # occurrences positionally proven to be already upstream.
     local findings
-    findings=$(contamination_scan "$staged" "$proj_name" "$f" "$bp") || true
+    findings=$(contamination_scan "$staged" "$proj_name" "$f" "$align") || true
     local has_block=0
     if printf '%s' "$findings" | grep -q '|BLOCK|'; then has_block=1; fi
 
@@ -662,7 +665,7 @@ cmd_a2bp() {
     fi
 
     if [ "$has_block" -eq 1 ] && [ "$force" -eq 0 ]; then
-      rm -f "$staged"
+      rm -f "$staged" "$align"
       echo "  ${C_RED}reject${C_RESET}  $f  (contamination — not copied)"
       echo "    ${C_DIM}Fix the lines above, or mark a known-benign one with an inline${C_RESET}"
       echo "    ${C_DIM}'a2bp-allow: <why it is safe>' comment. Re-run with --force only when${C_RESET}"
@@ -673,7 +676,7 @@ cmd_a2bp() {
 
     mkdir -p "$(dirname "$bp")"
     cp "$staged" "$bp"
-    rm -f "$staged"
+    rm -f "$staged" "$align"
     if [ "$has_block" -eq 1 ]; then
       echo "  ${C_YELLOW}forced${C_RESET}  $f → blueprint  ${C_YELLOW}(contamination waived by --force)${C_RESET}"
     else

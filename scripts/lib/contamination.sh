@@ -160,19 +160,60 @@ contamination_stage() {
   mapfile -t bp_lines < "$bpf"
   mapfile -t proj_lines < "$pf"
 
-  # What `pull` would have produced from the blueprint's copy.
-  local bp_sub bl sub
+  # What `pull` would have produced from the blueprint's copy. The blueprint's
+  # own final-newline state has to be reproduced too: `diff` treats a complete
+  # and an incomplete last line as different, so unconditionally terminating
+  # bp_sub would leave the last line of an incomplete file permanently
+  # unalignable — and therefore never restored (R3-F2's second half).
+  local bp_final_nl=1
+  if [ -s "$bpf" ] && [ "$(tail -c1 "$bpf" | wc -l)" -eq 0 ]; then
+    bp_final_nl=0
+  fi
+  local bp_sub bl sub bi bn
   bp_sub=$(mktemp)
-  for bl in ${bp_lines[@]+"${bp_lines[@]}"}; do
+  bn=${#bp_lines[@]}
+  : > "$bp_sub"
+  for (( bi=1; bi<=bn; bi++ )); do
+    bl=${bp_lines[$(( bi - 1 ))]}
     sub=${bl//\{\{PROJECT_NAME_UPPER\}\}/$proj_upper}
     sub=${sub//\{\{PROJECT_NAME\}\}/$proj_name}
-    printf '%s\n' "$sub"
-  done > "$bp_sub"
+    if [ "$bi" -eq "$bn" ] && [ "$bp_final_nl" -eq 0 ]; then
+      printf '%s' "$sub" >> "$bp_sub"
+    else
+      printf '%s\n' "$sub" >> "$bp_sub"
+    fi
+  done
 
   # Positional alignment. The three --*-line-format options emit one record
   # per line in file order: '=' common, '-' only upstream, '+' only in the
   # project. Walking that stream with two counters yields, for every project
   # line, the upstream line it corresponds to (or none).
+  #
+  # `%l` + an explicit `%c'\012'`, never `%L` (R3-F2). `%L` preserves whether
+  # the input line had a trailing newline, so a file whose final line is
+  # incomplete emits an UNTERMINATED final record — `while read` never sees
+  # it, the counters silently desynchronise, and the last line is left
+  # unaligned. The record protocol must not inherit the input's line endings.
+  local diff_out diff_rc
+  diff_out=$(mktemp)
+  diff --unchanged-line-format="=%l%c'\012'" \
+       --old-line-format="-%l%c'\012'" \
+       --new-line-format="+%l%c'\012'" \
+       "$bp_sub" "$pf" > "$diff_out" 2>/dev/null
+  diff_rc=$?
+  rm -f "$bp_sub"
+
+  # diff exits 0 (identical) or 1 (differences). Anything else is trouble —
+  # an unsupported option, an I/O error, a missing binary. Previously that was
+  # swallowed into an empty alignment, which reads as "nothing is attributable"
+  # and, under --force, would copy wholly unrestored project bytes upstream
+  # (R3-F3). The --*-line-format switches are GNU extensions; fail closed
+  # rather than pretend the capability is there.
+  if [ "$diff_rc" -gt 1 ]; then
+    rm -f "$diff_out"
+    return 2
+  fi
+
   declare -A _align
   local rec tag bp_i=0 pj_i=0
   while IFS= read -r rec; do
@@ -182,19 +223,68 @@ contamination_stage() {
       '-') bp_i=$((bp_i+1)) ;;
       '+') pj_i=$((pj_i+1)) ;;
     esac
-  done < <(diff --unchanged-line-format='=%L' \
-                --old-line-format='-%L' \
-                --new-line-format='+%L' \
-                "$bp_sub" "$pf" 2>/dev/null || true)
-  rm -f "$bp_sub"
+  done < "$diff_out"
+  rm -f "$diff_out"
+
+  # --- Ambiguity guard: only restore inside CLEAN CONTEXT (R3-F1) ---
+  # `diff` computes a sequence alignment from bytes; it has no edit history.
+  # Where equal lines are inserted or deleted next to an edit, its choice of
+  # which occurrence matches which is a tie-break, not evidence. Codex's
+  # reproduction: insert a literal `acme-flow` and edit the line that used to
+  # hold the placeholder, and the alignment attributes the INSERTED literal to
+  # the upstream placeholder — silently rewriting it to {{PROJECT_NAME}} and
+  # exempting it from the scan.
+  #
+  # The tie-break only has consequences for lines we would actually REWRITE —
+  # those whose upstream original holds a placeholder. Where the upstream line
+  # has no placeholder, an aligned line is byte-identical to it, so which
+  # occurrence `diff` picked changes nothing: no rewrite happens and the line
+  # is genuinely already upstream.
+  #
+  # So the extra proof is demanded exactly where it matters: a placeholder
+  # line is restored only if it AND both neighbours are aligned contiguously —
+  # nothing moved around it. A placeholder line adjacent to an edit is left
+  # alone AND denied exemption, so the scan blocks on the residual project
+  # name and the operator writes {{PROJECT_NAME}} explicitly.
+  #
+  # Scoping it this way matters: demanding clean context for every line would
+  # strip exemption from untouched upstream content merely because someone
+  # added a line next to it, and the guard would start blocking lines it did
+  # not introduce.
+  #
+  # This is the third attempt at provenance and the first that does not guess:
+  # R1 matched substrings, R2 matched line content, R3 trusted the LCS
+  # wholesale. The rule now is that ambiguity is refused, not resolved.
+  local n_proj=${#proj_lines[@]}
+  declare -A _proven
+  local k up
+  for k in "${!_align[@]}"; do
+    up=${bp_lines[$(( ${_align[$k]} - 1 ))]}
+    case "$up" in
+      *'{{PROJECT_NAME}}'*|*'{{PROJECT_NAME_UPPER}}'*)
+        # Neighbour must be aligned AND contiguous — an aligned neighbour
+        # pointing elsewhere upstream means lines moved, which is the
+        # ambiguous case.
+        if [ "$k" -gt 1 ]; then
+          [ -n "${_align[$((k-1))]+x}" ] || continue
+          [ "$(( ${_align[$k]} - ${_align[$((k-1))]} ))" -eq 1 ] || continue
+        fi
+        if [ "$k" -lt "$n_proj" ]; then
+          [ -n "${_align[$((k+1))]+x}" ] || continue
+          [ "$(( ${_align[$((k+1))]} - ${_align[$k]} ))" -eq 1 ] || continue
+        fi
+        ;;
+    esac
+    _proven[$k]=${_align[$k]}
+  done
 
   # Emit the staged copy plus the proven-provenance line list.
   local i n out
-  n=${#proj_lines[@]}
+  n=$n_proj
   : > "$staged_out"
   for (( i=1; i<=n; i++ )); do
-    if [ -n "${_align[$i]+x}" ]; then
-      out=${bp_lines[$(( ${_align[$i]} - 1 ))]}
+    if [ -n "${_proven[$i]+x}" ]; then
+      out=${bp_lines[$(( ${_proven[$i]} - 1 ))]}
       printf '%s\n' "$i" >> "$align_out"
     else
       out=${proj_lines[$(( i - 1 ))]}

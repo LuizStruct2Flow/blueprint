@@ -176,3 +176,132 @@ from all finding classes.
 `205f6f7` remains reasonable by inspection and
 `bash tests/agent-activity-bound/test.sh` passes in this review, but this batch
 is not clean while R2-F1/R2-F2 remain.
+
+## Round 3 — re-review of `4ac7b01`
+
+**Date:** 2026-07-27
+**Commits reviewed:** `205f6f7`, `2787332`, `63fac8e`, `5d3ff5e`, `d3e21a2`, `4ac7b01`
+**Verdict:** **CHANGES REQUESTED — do not push**
+
+### R3-F1 — BLOCKER: an LCS match still does not prove occurrence provenance
+
+The implementation now retains the occurrence chosen by `diff`, but the claim
+that an unchanged diff record “proves” that the project occurrence came from
+that upstream occurrence is false when equal lines can be inserted, deleted, or
+moved. `diff` computes a sequence alignment from bytes; it has no edit history.
+
+Concrete reproduction against `contamination_stage`:
+
+```text
+blueprint: HEAD
+blueprint: {{PROJECT_NAME}}
+blueprint: TAIL
+
+project:   HEAD
+project:   acme-flow             # newly inserted literal
+project:   edited-placeholder    # the former placeholder line was edited
+project:   TAIL
+```
+
+The forward-substituted upstream has `acme-flow` at line 2, so `diff` aligns
+the newly inserted literal with it. The staged result is:
+
+```text
+HEAD
+{{PROJECT_NAME}}                 # newly inserted literal was corrupted
+edited-placeholder
+TAIL
+```
+
+The alignment file marks project lines 1, 2, and 4 as upstream. Thus the same
+false attribution both rewrites the inserted line and exempts it from scanning.
+`--force` does not help: it copies the already-corrupted stage.
+
+This is the same information-theoretic limit as R1/R2: neither content nor a
+content-derived LCS can recover edit provenance. Position is evidence only
+while surrounding edits leave the match unambiguous. The implementation must
+fail closed on ambiguous equal-line alignment, or use a representation that
+actually carries stable provenance. Add this exact insert-plus-edit
+reproducer.
+
+### R3-F2 — BLOCKER: `%L` makes the final incomplete record unparsable here
+
+GNU diff documents `%L` as preserving whether a line has its trailing newline.
+For a final line without a newline, the emitted tagged record is itself
+unterminated. The loop:
+
+```bash
+while IFS= read -r rec; do
+```
+
+does not execute for that final unterminated record. Reproduction with both
+files containing one incomplete line:
+
+```text
+blueprint: {{PROJECT_NAME}}   (no final newline)
+project:   acme-flow          (no final newline)
+staged:    acme-flow          (no final newline)
+alignment: empty
+```
+
+So case #15 proves only byte preservation of an unrelated unchanged line; it
+does not prove placeholder restoration or exemption on an incomplete line.
+In the real CLI, the residual project-name scan then blocks the ordinary
+round-trip. Add incomplete-line cases for placeholder restoration and
+alignment/exemption. A record protocol must delimit records independently of
+the input line ending (or explicitly handle the final failed `read`).
+
+There is a second consequence: if an incomplete record is followed in the
+formatted stream by another record from the other side, the tags/contents can
+concatenate and corrupt both counter updates. Do not use input newlines as the
+alignment protocol delimiter while also asking `%L` to preserve their absence.
+
+### R3-F3 — HIGH: `diff` capability/runtime failure is silently treated as “no alignment”
+
+The three `--*-line-format` switches are GNU extensions, not POSIX. The GNU
+implementation supports them (including old GNU diffutils releases), so a
+macOS installation that really is GNU diffutils 2.8.1 has the required
+feature. That does not make the current call portable or fail closed:
+
+```bash
+done < <(diff ... 2>/dev/null || true)
+```
+
+suppresses an unsupported-option error, an I/O error, or any other execution
+failure and turns it into an empty alignment. That can produce false blocks;
+with `--force`, or content not caught by the heuristics, it can copy
+unrestored project-specific bytes. Probe the required capability or capture
+and validate the exit status separately from normal `diff` status 1. Do not
+describe a GNU-only primitive as portable without pinning the runtime contract.
+
+### R3 boundary/path checks
+
+- Empty project file, entirely new file, and blueprint longer than project:
+  counter/array handling is sound by inspection.
+- CRLF: `mapfile -t` retains `\r`, `%L` retains CRLF, and a targeted
+  three-line placeholder/tag reproduction restored byte-correctly.
+- Lines whose content begins `=`, `-`, or `+` are safe from tag confusion:
+  the format prepends its own tag, and the parser consumes only that byte.
+- The two counters are otherwise correctly 1-based for complete records.
+- `_should_substitute` remains symmetric at the `pull`/`a2bp` call sites.
+  `pull`, `drift`, and bootstrap have no new signature break; the helper is in
+  `MANAGED_FILES`, and bootstrap archives tracked `HEAD`.
+- `--force` only waives scan findings, as documented, but it cannot repair
+  either staging defect above and therefore can make their corruption land.
+
+### Round 3 checks run
+
+- `bash tests/a2bp-contamination/test.sh` — PASS (19 current assertions)
+- `bash tests/agent-activity-bound/test.sh` — PASS
+- `bash -n scripts/blueprint scripts/lib/contamination.sh tests/a2bp-contamination/test.sh` — PASS
+- `git diff --check` — PASS
+- targeted insert-equal-to-old-line plus edit-original reproduction —
+  **corrupts the inserted literal into `{{PROJECT_NAME}}`**
+- targeted one-line placeholder with no final newline — **not restored;
+  alignment file empty**
+- targeted CRLF plus leading `=`, `-`, `+` lines — restores correctly with
+  alignment `1,2,3`
+
+The R2 collision and duplicated-line fixtures are valuable and pass, but they
+exercise only the alignment choices GNU `diff` happens to make for those
+layouts. They do not establish provenance for the adversarial layouts above.

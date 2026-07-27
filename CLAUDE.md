@@ -782,15 +782,21 @@ blueprint a2bp docs/DoD.md
 naming every file that has to be touched in the same commit and a
 strong reminder pointing at the playbook below.
 
-**It is guarded (A-07).** Before anything lands, `a2bp` reverse-substitutes
-the project's name back to `{{PROJECT_NAME}}` — the exact inverse of what
-`pull` did on the way down — and scans for host home paths, literal
-per-project state dirs, and any project name that survived. Findings block
-the copy and exit non-zero. Mark a known-benign line with an inline
-`a2bp-allow: <why it is safe>` comment (the justification is required);
-`--force` waives the whole file and prints everything it waved through.
-This guard exists because `a2bp` is how **BUG-002** and **A-09** got into
-the blueprint — an unguarded upstream door means one project's specifics
+**It is guarded (A-07).** Before anything lands, `a2bp` restores
+`{{PROJECT_NAME}}` on every line that is byte-identical to what `pull`
+produced, then scans for host home paths, literal per-project state dirs, and
+any project name that survived. Findings block the copy and exit non-zero.
+
+The restore is **provenance-based, not a global search-and-replace** — there
+is no general textual inverse of the substitution. `pull` replaces an
+unambiguous token; reversing would replace a bare word that also occurs in
+prose (for a project named `blueprint`, every occurrence of the word). So
+lines you edited are left alone, and if one still carries the project name the
+guard blocks and you write the placeholder explicitly. Mark a known-benign
+line with an inline `a2bp-allow: <why it is safe>` comment (the justification
+is required); `--force` waives the whole file and prints everything it waved
+through. This guard exists because `a2bp` is how **BUG-002** and **A-09** got
+into the blueprint — an unguarded upstream door means one project's specifics
 fan out to every other project on their next pull.
 
 > **Do NOT open a new prompt in the blueprint repo to "do the docs".**

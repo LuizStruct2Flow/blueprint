@@ -632,7 +632,10 @@ cmd_a2bp() {
     local staged
     staged=$(mktemp)
     if _should_substitute "$f"; then
-      contamination_reverse_substitute "$f" "$proj_name" > "$staged"
+      # Provenance comes from the blueprint's own copy ($bp): only lines that
+      # match what pull produced are reverted. See contamination.sh for why a
+      # global textual inverse is unsound.
+      contamination_reverse_substitute "$f" "$bp" "$proj_name" > "$staged"
     else
       cp "$f" "$staged"
     fi
@@ -640,8 +643,12 @@ cmd_a2bp() {
     # A-07 step 2 — scan the staged content, i.e. exactly the bytes that would
     # land in the blueprint. Scanning the pre-substitution original would
     # report the project name on every line and be useless.
+    #
+    # $f is passed as the LOGICAL path: $staged is an extensionless mktemp
+    # name, and the scan's prose-vs-script rule keys off the extension. $bp is
+    # the baseline — lines already upstream are not what this copy introduces.
     local findings
-    findings=$(contamination_scan "$staged" "$proj_name") || true
+    findings=$(contamination_scan "$staged" "$proj_name" "$f" "$bp") || true
     local has_block=0
     if printf '%s' "$findings" | grep -q '|BLOCK|'; then has_block=1; fi
 

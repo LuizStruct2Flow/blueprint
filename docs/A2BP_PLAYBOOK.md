@@ -37,23 +37,36 @@ session" — that habit is the failure mode.
 `a2bp` no longer copies bytes verbatim. Before anything lands in the
 blueprint working tree it does two things (A-07 — `scripts/lib/contamination.sh`):
 
-1. **Reverse-substitution.** Your project's name goes back to
-   `{{PROJECT_NAME}}` / `{{PROJECT_NAME_UPPER}}` — the exact inverse of what
-   `blueprint pull` did on the way down. Silent, deterministic, always applied
-   except to the files that *implement* the substitution (`scripts/blueprint`,
-   `scripts/new-project.sh`), which carry the tokens as code.
+1. **Reverse-substitution, on a provenance basis.** A line goes back to
+   `{{PROJECT_NAME}}` / `{{PROJECT_NAME_UPPER}}` **only when it is
+   byte-identical to what `pull` produced** from a placeholder-bearing line in
+   the blueprint's own copy. Lines you actually edited are left alone.
+
+   There is no such thing as a general textual inverse of the substitution:
+   `pull` replaces an unambiguous token, but reversing would replace a bare
+   word that also occurs in ordinary prose. For a project directory
+   legitimately named `blueprint`, a global reverse turns "the blueprint
+   documentation" into "the {{PROJECT_NAME}} documentation". Consulting the
+   blueprint's copy is what recovers the provenance that substitution destroyed.
+
+   Files that *implement* the substitution (`scripts/blueprint`,
+   `scripts/new-project.sh`) are exempt — they carry the tokens as code.
 2. **Contamination scan.** Host home paths, literal per-project state dirs,
    and any project name that survived step 1 **block the copy** and exit
    non-zero. A personal email is reported as a `NOTICE` and does not block.
+   Lines already present verbatim in the blueprint's copy are exempt — the
+   guard polices what this copy *introduces*, not what is already upstream.
 
 This exists because `a2bp` is how **BUG-002** (`~/.linkedin-watcher-agent`
 hardcoded into the generic feed) and **A-09** (every checkout colliding on one
 shared state dir) got into the blueprint in the first place. The playbook used
 to open at Step A and assume the bytes were fine.
 
-**If a file is rejected**, fix the named lines. If a hit is genuinely
-benign — a comment that quotes a historical bad path *as the incident
-record* — mark that line:
+**If a file is rejected**, fix the named lines. Most often that means writing
+`{{PROJECT_NAME}}` yourself on a line you edited — the guard refuses to guess
+which occurrences were meant to be generic. If a hit is genuinely benign — a
+comment that quotes a historical bad path *as the incident record* — mark that
+line:
 
 ```sh
 # (BUG-002: this used to hardcode ~/.old-project)  a2bp-allow: incident record, not a live path

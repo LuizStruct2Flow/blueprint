@@ -81,6 +81,15 @@ bp_untouched() { grep -q '^SENTINEL' "$FAKE_BP/$CARRIER"; }
 #    fans out to every other project on their next pull (BUG-002's mechanism).
 # ===========================================================================
 setup
+# Provenance lives in the blueprint's own copy: these are the placeholder
+# lines that `pull` substituted into the project in the first place. Without
+# them there is nothing to reverse TO, and the guard correctly fails closed
+# instead of guessing — that is case #8.
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+# Mocks
+Generic guidance for the {{PROJECT_NAME}} project.
+Environment override: {{PROJECT_NAME_UPPER}}_HOME
+EOF
 cat >"$PROJ/$CARRIER" <<'EOF'
 # Mocks
 Generic guidance for the acme-flow project.
@@ -227,6 +236,196 @@ elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/scripts/new-project.sh"; then
   fail "#6 the file's own {{PROJECT_NAME}} code token was mangled"
 else
   pass "#6 substitution-implementing files are exempt from reverse-substitution (matches _should_substitute on the pull side)"
+fi
+
+# ===========================================================================
+# 7. F1 (Codex four-eyes) — a one-word project name must not corrupt prose.
+#    The first implementation ran a global `sed s/${proj_name}/{{PROJECT_NAME}}/g`
+#    and called it "the exact inverse". For a project legitimately named
+#    `blueprint`, every occurrence of the word "blueprint" in generic prose was
+#    silently rewritten — and copied through with no finding at all.
+#    Provenance-based reversal + the baseline exemption is the fix; this case
+#    pins both halves.
+# ===========================================================================
+WORD_PROJ="$WORK/blueprint"
+mkdir -p "$WORD_PROJ/docs/mocks" "$FAKE_BP/docs/mocks"
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+# Mocks
+The blueprint documentation explains blueprint sync.
+EOF
+cat >"$WORD_PROJ/$CARRIER" <<'EOF'
+# Mocks
+The blueprint documentation explains blueprint sync.
+A new generic line about mockups.
+EOF
+cat >"$WORD_PROJ/.blueprint-source" <<EOF
+blueprint_source = $FAKE_BP
+bootstrap_sha    = test-fixture
+bootstrap_date   = test-fixture
+EOF
+( cd "$WORD_PROJ" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  fail "#7 a2bp rejected a one-word-named project's generic prose (exit $rc) — F1 came back as a false BLOCK; see $WORK/out"
+elif grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
+  fail "#7 CORRUPTION: the word 'blueprint' in generic prose was rewritten to {{PROJECT_NAME}} — this is Codex F1, the global-sed inverse"
+elif ! grep -q 'The blueprint documentation explains blueprint sync.' "$FAKE_BP/$CARRIER"; then
+  fail "#7 the unchanged prose line did not survive intact: $(cat "$FAKE_BP/$CARRIER")"
+elif ! grep -q 'A new generic line' "$FAKE_BP/$CARRIER"; then
+  fail "#7 the newly added generic line was not copied"
+else
+  pass "#7 a one-word project name does not corrupt prose, and does not false-block it either (F1)"
+fi
+
+# ===========================================================================
+# 8. F1 — an EDITED line carrying the project name must block, not be guessed.
+#    Provenance only exists for lines that match the blueprint's copy. For
+#    anything the operator changed, the tool must refuse rather than assume.
+# ===========================================================================
+setup
+printf '# Mocks\nState lives under the {{PROJECT_NAME}} home.\n' > "$FAKE_BP/$CARRIER"
+printf '# Mocks\nState lives under the acme-flow home, newly reworded.\n' > "$PROJ/$CARRIER"
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -eq 0 ]; then
+  fail "#8 an edited line still carrying the literal project name was copied — the tool guessed instead of failing closed"
+elif grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
+  fail "#8 blueprint copy was modified despite the block — the project name reached the blueprint"
+elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
+  fail "#8 the blueprint's original placeholder line was lost"
+else
+  pass "#8 an edited line carrying the project name blocks for explicit operator resolution (F1)"
+fi
+
+# ===========================================================================
+# 9. F1 — a project name containing regex metacharacters must be safe.
+#    The old code interpolated the name straight into a sed pattern, so a
+#    legal directory name like `acme.flow` matched `acmeXflow` too.
+# ===========================================================================
+RX_PROJ="$WORK/acme.flow"
+mkdir -p "$RX_PROJ/docs/mocks"
+printf '# Mocks\nGeneric line mentioning acmeXflow which is unrelated.\n' > "$FAKE_BP/$CARRIER"
+printf '# Mocks\nGeneric line mentioning acmeXflow which is unrelated.\n' > "$RX_PROJ/$CARRIER"
+cat >"$RX_PROJ/.blueprint-source" <<EOF
+blueprint_source = $FAKE_BP
+bootstrap_sha    = test-fixture
+bootstrap_date   = test-fixture
+EOF
+( cd "$RX_PROJ" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
+rc=$?
+if grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
+  fail "#9 'acmeXflow' was treated as a match for project 'acme.flow' — the name is being compiled as a regex"
+elif [ "$rc" -ne 0 ] && grep -q 'acmeXflow' "$WORK/out"; then
+  fail "#9 unrelated text 'acmeXflow' was reported as the project name — unescaped regex metacharacter"
+else
+  pass "#9 a project name with regex metacharacters is treated as data, not a pattern (F1)"
+fi
+
+# ===========================================================================
+# 10. F2 — the Markdown/prose exception must work through the REAL a2bp path.
+#     It keyed off the extension of the scanned file, but a2bp scans an
+#     extensionless mktemp staging copy — so `is_prose` was always false in
+#     production while the unit tests, calling the helper directly with a real
+#     .md path, stayed green. That gap is exactly why this case drives the CLI.
+# ===========================================================================
+setup
+cat >"$PROJ/$CARRIER" <<'EOF'
+# Mocks
+Dispatcher output lands in `~/.{{PROJECT_NAME}}/codex-runs.log` by convention.
+EOF
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -ne 0 ]; then
+  fail "#10 legitimate Markdown documenting ~/.{{PROJECT_NAME}} was BLOCKED — the prose exception is dead in the real a2bp path (Codex F2); see $WORK/out"
+elif bp_untouched; then
+  fail "#10 the Markdown file was not copied"
+else
+  pass "#10 the prose exception survives the staged-temp-file path (F2)"
+fi
+
+# ===========================================================================
+# 11. F2 — the same string in a SCRIPT must still block. The prose exception
+#     must be an extension rule, not a blanket hole.
+# ===========================================================================
+setup
+mkdir -p "$PROJ/scripts" "$FAKE_BP/scripts"
+printf 'SENTINEL\n' > "$FAKE_BP/scripts/log-activity.sh"
+printf '#!/bin/sh\nstate_dir="$HOME/.{{PROJECT_NAME}}"\n' > "$PROJ/scripts/log-activity.sh"
+rc=$(run_a2bp scripts/log-activity.sh)
+if [ "$rc" -eq 0 ]; then
+  fail "#11 a SCRIPT hardcoding \$HOME/.{{PROJECT_NAME}} was copied — that is the A-09 defect, and the prose exception has become a blanket hole"
+else
+  pass "#11 the prose exception is extension-scoped; a script hardcoding the literal path still blocks (F2)"
+fi
+
+# ===========================================================================
+# 12. F3 — multi-file partial failure: the clean file copies, the dirty one is
+#     refused, and the overall exit code still reports the refusal.
+# ===========================================================================
+setup
+mkdir -p "$PROJ/docs/config" "$FAKE_BP/docs/config"
+printf 'SENTINEL2\n' > "$FAKE_BP/docs/config/README.md"
+printf '# Mocks\nPerfectly generic guidance.\n' > "$PROJ/$CARRIER"
+printf '# Config\nSee /home/someuser/notes for details.\n' > "$PROJ/docs/config/README.md"
+rc=$(run_a2bp "$CARRIER" docs/config/README.md)
+if bp_untouched; then
+  fail "#12 the CLEAN file was not copied — one bad file aborted the whole run"
+elif ! grep -q '^SENTINEL2' "$FAKE_BP/docs/config/README.md"; then
+  fail "#12 the CONTAMINATED file was copied"
+elif [ "$rc" -eq 0 ]; then
+  fail "#12 partial run exited 0 — an agent reading only the exit code would never see the refusal"
+else
+  pass "#12 partial multi-file run: clean copies, dirty refused, exit code reports it (F3)"
+fi
+
+# ===========================================================================
+# 13. F3 — suppression must be per-line for multi-digit line numbers. A naive
+#     substring test would let line 1's marker suppress line 11.
+# ===========================================================================
+setup
+{
+  echo "# Mocks"
+  echo "Line 2 mentions /home/someuser/one — a2bp-allow: deliberate fixture line"
+  for i in 3 4 5 6 7 8 9 10; do echo "filler line $i"; done
+  echo "Line 11 mentions /home/someuser/two with no marker at all"
+} > "$PROJ/$CARRIER"
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -eq 0 ]; then
+  fail "#13 line 11 was suppressed by line 2's marker — the suppression set is matching substrings, not whole line numbers"
+elif ! grep -q 'someuser/two' "$WORK/out"; then
+  fail "#13 the unsuppressed line 11 finding was not reported"
+elif grep -q 'someuser/one' "$WORK/out"; then
+  fail "#13 the a2bp-allow marker on line 2 did not suppress its finding"
+else
+  pass "#13 suppression is exact per line number, including multi-digit (F3)"
+fi
+
+# ===========================================================================
+# 14. F3 — a bare a2bp-allow with no justification must NOT suppress.
+#     CLAUDE.md §Security requires suppressions to carry a reason; an
+#     unenforced requirement is a comment, not a rule.
+# ===========================================================================
+setup
+printf '# Mocks\nSee /home/someuser/x  a2bp-allow:\n' > "$PROJ/$CARRIER"
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -eq 0 ]; then
+  fail "#14 a bare 'a2bp-allow:' with no justification suppressed the finding — the justification requirement is not enforced"
+else
+  pass "#14 a suppression without a justification does not suppress (F3)"
+fi
+
+# ===========================================================================
+# 15. F3 — a file with no final newline must round-trip byte-exactly.
+#     The reversal streams line by line; a naive `printf '%s\n'` per line
+#     would silently append a newline the operator never wrote.
+# ===========================================================================
+setup
+printf '# Mocks\nNo trailing newline here.' > "$PROJ/$CARRIER"
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -ne 0 ]; then
+  fail "#15 a2bp exited $rc on a file with no final newline"
+elif ! diff -q "$PROJ/$CARRIER" "$FAKE_BP/$CARRIER" >/dev/null 2>&1; then
+  fail "#15 file with no final newline was not copied byte-exactly: $(diff "$PROJ/$CARRIER" "$FAKE_BP/$CARRIER" | head -5)"
+else
+  pass "#15 a file with no final newline round-trips byte-exactly (F3)"
 fi
 
 echo

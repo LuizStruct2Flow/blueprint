@@ -4,6 +4,23 @@ Bugs currently being worked. Pushed bugs move to
 `docs/waiting-acceptance/BUGS.md`; founder-accepted bugs move to
 `docs/done/BUGS.md`. See [README.md](README.md) for the lifecycle.
 
-| # | Bug | Severity | Status | Plan |
+**Keep rows to one line.** Link out for the detail. A row that grows into a
+paragraph belongs in a `PLAN-*.md` or a work-item folder — a table cell
+holding half a page is unreadable, which is how this file stopped being
+useful once already.
+
+| # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
-| BUG-002 | **Blueprint contamination** — `scripts/agent-activity.sh` hardcodes a *project-specific* state dir in a blueprint-managed generic file: `LINKEDIN_WATCHER_AGENT_HOME` / `~/.linkedin-watcher-agent` (lines 8, 9, 16, 26). Every derived project silently reads/writes another project's state dir for its Codex + Gemini run logs, so the feed shows the wrong project's dispatch output. Violates CLAUDE.md §"What blueprint sync covers" ("if you catch yourself adding a project-specific path to a blueprint-managed file, move it"). Distinct from the *legitimate* prose references to linkedin-watcher as a worked example (`docs/OBSERVABILITY.md:148`, `STACK_DEFAULTS.md:84`, `docs/way-of-working.md:259/269/591`) — those stay. Fix: rename to a generic `AGENT_STATE_HOME` / `~/.struct2flow/<project>` with a back-compat fallback; `new-project.sh` substitutes the project name. | **HIGH** | **REOPENED 2026-07-24 — acceptance REJECTED by Jesko (QA-2).** The fix is correct for the Codex dispatcher, but a derived project's **Gemini** watcher still writes literal `$HOME/.{{PROJECT_NAME}}/gemini-runs.log` — verified by bootstrapping `testqa`: codex → `$HOME/.testqa/`, gemini → `$HOME/.{{PROJECT_NAME}}/`. The promised "feed reads its own project's dispatcher state" therefore holds for Codex and fails for Gemini, so the isolation is incomplete. Root cause is **A-09** — `scripts/start-gemini-signal-watch.sh` is absent from `new-project.sh` TARGETS (0 occurrences), as is `sonar-project.properties`. **Accept BUG-002 together with A-09.** | — |
+
+_No active bugs._ BUG-002 moved to `waiting-acceptance/` on 2026-07-27: its
+blocker (A-09) is fixed and pushed, so it is no longer being implemented.
+
+## Active non-bug work
+
+Audit findings live in
+[BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md), not here.
+What is genuinely in flight right now:
+
+| Item | State |
+|---|---|
+| **A-07** — `blueprint a2bp` contamination guard | Implemented, committed, **UNPUSHED** (5 commits). Four-eyes R1/R2/R3 all returned CHANGES-REQUESTED; all addressed. R4 pending. Trail: [CODEX-REVIEW-A07.md](CODEX-REVIEW-A07.md). |

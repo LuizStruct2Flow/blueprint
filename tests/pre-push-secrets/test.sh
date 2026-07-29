@@ -29,10 +29,12 @@ set -u
 # that the gate had already blown at 30.8s. They run in full in CI.
 #
 # #11 stays local despite being a "budget" case by topic, because the split is
-# by COST and #11 costs nothing — it runs the hook on a curated PATH and fails
-# immediately at the dependency probe. Grouping it with the slow cases was
-# inconsistent with the rule stated right here, and removed the only local
-# guard on a newly mandatory dependency (Codex R5-F2).
+# by COST and #11's marginal cost is negligible and bounded — it has no
+# deliberate sleep and exits at the dependency probe before scanning (the whole
+# --fast suite runs in ~1s including it). Not literally zero: a slow box still
+# pays process startup, fixture setup and one partial hook invocation. Grouping
+# it with the slow cases was inconsistent with the rule stated right here, and
+# removed the only local guard on a newly mandatory dependency (Codex R5-F2).
 FAST=0
 [ "${1:-}" = "--fast" ] && FAST=1
 

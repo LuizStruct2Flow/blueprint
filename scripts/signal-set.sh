@@ -67,15 +67,24 @@ fi
 #                      indentation inside snippets, aligned columns, and quoted
 #                      arguments whose repeated spaces are deliberate.
 #   INTERIOR tabs    → preserved as tabs. Markdown renders them in a cell.
-#   BOUNDARY space   → TRIMMED, both ends. This is a real edit and is not
-#                      "preserving everything horizontal", which is what the
-#                      comment used to claim while doing this anyway. It is
-#                      deliberate: `--task-file` almost always ends in a
+#   BOUNDARY         → TRIMMED, both ends: every byte `sed` matches as POSIX
+#                      `[[:space:]]` in the current locale. That is space and
+#                      tab, and also vertical tab and form feed — stating only
+#                      "spaces and tabs" was narrower than the code, which is
+#                      the same overclaim this comment has now made twice.
+#                      Deliberate: `--task-file` almost always ends in a
 #                      newline, which becomes a trailing space, and leading
-#                      indentation of the whole cell carries no meaning in a
-#                      one-line table cell. If you need boundary whitespace to
-#                      survive, it belongs in the body of the instruction, not
-#                      at its edges.
+#                      indentation of a one-line cell carries no meaning. If
+#                      you need boundary whitespace to survive, put it in the
+#                      body of the instruction, not at its edges.
+#
+#   NOT SUPPORTED    → Unicode whitespace (U+00A0 NBSP and friends) is NOT
+#                      recognised, so it survives at the boundary. Logged as
+#                      unsupported rather than engineered: this is a shell
+#                      table publisher, and exhaustive Unicode normalisation
+#                      would be a lot of machinery for a case that has never
+#                      occurred. Say so rather than let the next reader assume
+#                      the trim is total.
 TASK="$(printf '%s' "$TASK" | tr '\n\r' '  ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 
 # A literal `|` would end the table cell early and truncate the instruction.

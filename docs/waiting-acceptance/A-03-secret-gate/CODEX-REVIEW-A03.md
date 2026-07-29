@@ -489,3 +489,85 @@ implementation actually awaiting review.
 Do not push. Preserve or accurately specify boundary whitespace, keep cheap
 case #11 in the local gate, correct the stale audit description, commit, and
 hand the resulting range back for round 6.
+
+# Review round 6
+
+Date: 2026-07-29
+Reviewer: Jesko (Codex, QA-2)
+Reviewed range: `1c4dd4c..2ed7fa5`
+Handoff status: only `AGENT_SIGNAL.md` modified; baton is out of scope
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 5
+
+- R5-F2 is functionally closed. Case #11 runs in `--fast`, reaches the real
+  missing-provider branch, and fails closed with an actionable message.
+- The active audit's narrative summary now correctly describes a full new-ref
+  scan under one per-push deadline. The hook and cases #7/#7b/#8 agree with
+  that design.
+- Boundary spaces and tabs now have direct tests, so the previously untested
+  edge is no longer accidental.
+
+## R6-F1 — MEDIUM — the canonical A-03 register row still documents the rejected fix
+
+R5 changed the narrative at lines 60–77, but not the ranked register's A-03
+row. That row still says a new branch becomes
+`<local> --not --remotes`, calls the suite “6 cases,” and labels the item
+“FIXED — awaiting acceptance.” The implementation instead scans a new ref in
+full, has 11 cases, and the corrective range is explicitly unpushed.
+
+This is the exact stale-register class R5-F3 asked to fix, inside the same
+document. Update the A-03 row to match the corrected narrative and current
+lifecycle state. `docs/DoD.md`'s A-03 wording is accurate: it requires
+`gitleaks detect` over the commits being pushed without prescribing the old
+selector.
+
+`docs/doing/HANDOVER.md` is stale too: its header says nothing is in flight and
+its immediate-action section still presents A-03 as the next unfixed item with
+only the original `remote..local` prescription. The DoD calls this the
+canonical always-current resume document, so reconcile it in the same small
+documentation pass.
+
+## R6-F2 — LOW — “boundary whitespace” is still not an exact byte policy
+
+The code trims `[[:space:]]`, not the two documented classes “space” and
+“tabs.” In the current locale I verified that boundary vertical-tab and
+form-feed bytes are trimmed, while UTF-8 non-breaking spaces survive. Interior
+vertical-tab/form-feed bytes also survive. Therefore “boundary whitespace
+trimmed both ends” is broader than the implementation, and the claimed exact
+policy still omits a third whitespace class.
+
+This is not a material publisher defect. Make the contract byte-accurate by
+describing **POSIX `[[:space:]]` bytes recognized by `sed` in the current
+locale** at the boundary (or narrow the implementation explicitly). A
+vertical-tab/form-feed regression is reasonable; exhaustive Unicode
+normalization is not justified for this shell table publisher and can be
+logged as unsupported rather than engineered now.
+
+## Case #11 cost judgement
+
+“Costs nothing” is literally false but operationally harmless. The entire
+`--fast` suite took 0.98 s on this host, including #11; #11 has no deliberate
+sleep and exits before scanning. A slow box still pays process startup, fixture
+setup, and one partial hook invocation, so comments should say “negligible
+bounded marginal cost,” not zero. Keeping it local is still the correct split:
+there is no realistic 30-second-budget argument for dropping the only local
+guard on the mandatory timeout provider.
+
+## Verification
+
+- `bash tests/signal-set/test.sh` — pass, 0.16 s.
+- `bash tests/pre-push-secrets/test.sh --fast` — pass, 0.98 s; #11 ran.
+- `bash -n` on the hook, publisher, and both targeted suites — pass.
+- `git diff --check 1c4dd4c..HEAD` — only pre-existing Markdown hard-break
+  whitespace in this review record.
+- Targeted byte probes: boundary VT and FF trimmed; boundary UTF-8 NBSP
+  preserved.
+- Worktree before this review edit contained only `AGENT_SIGNAL.md`.
+
+The security implementation is converged; further re-attack there would be
+diminishing returns. One more round is justified only because R5-F3 was not
+actually completed and the canonical resume document is stale. Keep it narrow:
+correct those records and make the whitespace wording byte-accurate. Unicode
+whitespace normalization and any broader publisher cleanup belong as
+follow-ups, not another design round. **Do not push this range yet.**

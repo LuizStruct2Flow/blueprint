@@ -715,3 +715,27 @@ now lives in the lifecycle state its own records claim.
 
 **Verdict: CHANGES MADE.** Per four-eyes, the writer must hand the corrected
 records back to the other provider for a clean review before push.
+
+## Round 10 — R9 edits and commit-message review
+
+**Reviewed commit:** `9035a6f`
+
+### R10-F1 — MEDIUM — the commit message repeats the absolute-claim pattern
+
+The R9 file changes match the requested corrections: both sides of the
+round-trip are described as forward-substituted, the scan no longer claims
+there are no operator exemptions, and the unpushed A-03 record now lives in
+`docs/doing/` with no stale lifecycle link.
+
+The commit message's conclusion nevertheless says the recurring defect “has
+not been the code”. That is broader than the evidence and contradicted by real
+code defects fixed in this same range, including the multi-remote under-scan,
+the per-ref rather than per-push timeout budget, the unbounded no-timeout path,
+and publisher input defects. The supportable narrower claim is that a recurring
+*additional* defect was documentation describing the code more absolutely than
+the implementation warranted.
+
+Amend the commit message only; the R9 documentation patch needs no change.
+
+**Verdict: CHANGES REQUESTED.** Do not push until the commit message is narrowed
+and the amended commit receives a clean cross-provider review.

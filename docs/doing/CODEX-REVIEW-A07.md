@@ -305,3 +305,105 @@ describe a GNU-only primitive as portable without pinning the runtime contract.
 The R2 collision and duplicated-line fixtures are valuable and pass, but they
 exercise only the alignment choices GNU `diff` happens to make for those
 layouts. They do not establish provenance for the adversarial layouts above.
+
+## Round 4 — re-review of `fd57648`
+
+**Date:** 2026-07-27
+**Commits reviewed:** `205f6f7`, `2787332`, `63fac8e`, `5d3ff5e`, `d3e21a2`,
+`4ac7b01`, `fd57648`
+**Verdict:** **CHANGES REQUESTED — do not push**
+
+### R4-F1 — BLOCKER: contiguous neighbours still do not establish provenance
+
+The new rule refuses the exact case #19 layout, but “the line and both
+neighbours align contiguously” only proves that `diff` found an unchanged
+three-line block. It does not prove which occurrence or edit history produced
+that block. The ambiguity survives by moving the edit outside the block:
+
+```text
+blueprint: HEAD
+blueprint: {{PROJECT_NAME}}
+blueprint: TAIL
+
+project:   HEAD
+project:   acme-flow             # newly inserted literal
+project:   TAIL
+project:   edited-placeholder    # former placeholder moved/edited here
+```
+
+`diff` aligns project lines 1–3 contiguously with upstream lines 1–3. The guard
+therefore rewrites the inserted literal to `{{PROJECT_NAME}}`, marks all three
+lines proven, and copies the corrupt attribution successfully. Moving the
+edited line before `HEAD`, or duplicating/moving a larger unchanged context
+block, is the same defect. Case #19 passes only because its edited line happens
+to interrupt one of the two immediate-neighbour checks.
+
+This also disproves the comment that this version “does not guess”. Any finite
+clean-context window can be relocated or duplicated as a unit; content-derived
+alignment cannot recover edit history. A safe design must either use durable
+provenance outside the edited bytes, or leave literal project-name bytes alone
+and require explicit placeholders when attribution is not independently
+knowable. Add the reproduction above before another clean verdict.
+
+### R4-F2 — BLOCKER: non-placeholder alignment can still launder relocation
+
+Scoping clean-context checks only to placeholder-bearing upstream lines is not
+sound because `_proven` is also the complete exemption list for every scan.
+An aligned non-placeholder line is byte-identical to *some* upstream line, but
+that does not make this occurrence already upstream at this position.
+
+Concrete reproduction:
+
+```text
+blueprint: SAFE
+blueprint: Historical /home/someuser/state
+blueprint: END
+
+project:   Historical /home/someuser/state
+project:   SAFE
+project:   END
+```
+
+GNU `diff` aligns the relocated host-path line with upstream line 2 and the
+guard writes project line 1 to the alignment file. `contamination_scan` then
+returns 0: the absolute host path bypasses the BLOCK because line 1 is called
+known. The same bytes may be inert in one location and operative in another;
+R2-F2 explicitly required relocated risky lines to be judged as new. Case #17
+tests duplication, but does not pin this pure relocation alignment choice.
+
+Do not use all LCS matches as a scan exemption. Exemption needs occurrence and
+position evidence independent of the ambiguous alignment, or at minimum risky
+classes must be scanned when their aligned occurrence changed position/context.
+Add the reproduction above.
+
+### R4-F3 — newline protocol and boundary checks are clean
+
+- `%l` plus explicit `%c'\012'` gives every diff record its own LF delimiter.
+  A literal LF cannot occur inside one input line. Content containing the two
+  bytes backslash + `n` has no special meaning to `%l` and does not collide
+  with the delimiter.
+- A CR-only input is treated as one LF-delimited diff record whose content
+  contains CR bytes. A targeted two-CR record restored the placeholder and
+  preserved both CR bytes exactly. This is acceptable for the stated
+  line-oriented protocol; CRLF behavior was already clean in Round 3.
+- Both files empty produce empty staging and alignment outputs. Empty blueprint
+  versus non-empty project and empty project versus non-empty blueprint follow
+  the ordinary add/delete records; no counter or final-newline defect found.
+- Capturing `diff` status separately and accepting only 0/1 fixes R3-F3. The
+  real CLI rejects a staging failure before scan/copy, including under force.
+
+### Round 4 checks run
+
+- `bash tests/a2bp-contamination/test.sh` — PASS (21 printed cases / 22 assertions)
+- `bash -n scripts/blueprint scripts/lib/contamination.sh tests/a2bp-contamination/test.sh` — PASS
+- `git diff --check` — PASS before this review-note edit
+- targeted clean-three-line-block plus moved/edited-placeholder reproduction —
+  **inserted literal is rewritten and copied**
+- targeted pure relocation of an upstream host-path line — **scan returns 0;
+  relocated line is exempted**
+- targeted CR-only placeholder restoration — byte-exact PASS
+- targeted both-empty staging/alignment — PASS
+
+The record-protocol and runtime-failure fixes in `fd57648` are good. The batch
+is still unsafe because the alignment is being asked to prove occurrence
+history that it cannot contain, both for rewriting and for scan exemption.

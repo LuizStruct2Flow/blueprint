@@ -57,12 +57,15 @@ blueprint working tree it does two things (A-07 — `scripts/lib/contamination.s
 2. **Contamination scan.** Host home paths, literal per-project state dirs,
    and any project name that survived step 1 **block the copy** and exit
    non-zero. A personal email is reported as a `NOTICE` and does not block.
-   Lines the alignment proves were *already upstream at that position* are
-   exempt — the guard polices what this copy introduces. Duplicating or
-   relocating an existing risky line creates a new occurrence, and that
-   occurrence faces every check.
+   **Every staged line is scanned — there is no exemption**, not even for
+   lines that were already upstream. An exemption list is the one place a
+   wrong alignment could wave real contamination through, so it does not
+   exist. The cost is that an upstream line which would itself trip a check
+   blocks even when you did not touch it; use `a2bp-allow` on it. In practice
+   this is rare — the host-path pattern scores zero hits across the whole
+   managed tree.
 
-This exists because `a2bp` is how **BUG-002** (`~/.linkedin-watcher-agent`
+This exists because `a2bp` is how **BUG-002** (a project's own state dir
 hardcoded into the generic feed) and **A-09** (every checkout colliding on one
 shared state dir) got into the blueprint in the first place. The playbook used
 to open at Step A and assume the bytes were fine.

@@ -211,9 +211,13 @@ new file *should* be managed, add it to the `MANAGED_FILES` array in
 **The contamination guard.** `a2bp` is the only write path from a project
 into the generic blueprint, so it does not copy bytes verbatim. It restores
 `{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
-copy proves unchanged, then scans for host home paths, literal per-project
-state dirs, and any project name that survived. Findings **block the copy**
-and exit non-zero.
+copy proves unchanged, then scans **every** staged line for host home paths,
+literal per-project state dirs, and any project name that survived. Findings
+**block the copy** and exit non-zero.
+
+The promise is narrow on purpose: on the default path a recognized finding
+cannot land, and every override is loud and auditable. It does not claim
+contamination is impossible — the scan is heuristic and `--force` exists.
 
 The restore is deliberately alignment-based rather than a search-and-replace:
 `pull` substitutes an unambiguous token, but reversing would rewrite a bare

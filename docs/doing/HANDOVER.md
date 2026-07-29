@@ -89,11 +89,14 @@
   or drift is still ungated).
 - ~~LOOSE END — agent-exchange timestamp switch~~ **DONE.** All 16 headers on
   Berlin local, README format spec updated, committed in `../../agent-exchange`.
-- **KNOWN GAP, pre-existing:** `docs/way-of-working.pdf` is ~6 weeks stale
-  (`.md` 2026-07-23, `.pdf` 2026-06-15). `scripts/build-deck.sh` exits 1 here —
-  marp-cli needs chrome/edge/firefox and none is installed on this host. The
-  script reports the failure correctly; it just cannot run. Rebuild it on a
-  machine with a browser, or install one.
+- **`docs/way-of-working.pdf` — DEFERRED by founder decision (2026-07-29), not
+  a gap to chase.** The PDF is ~6 weeks behind the `.md` (`.md` 2026-07-23,
+  `.pdf` 2026-06-15) and `scripts/build-deck.sh` cannot run here — marp-cli
+  needs chrome/edge/firefox and none is installed. **The founder will generate
+  it from their Mac once the bug work is finished**, deliberately, so it is
+  rebuilt once against a settled deck rather than repeatedly against a moving
+  one. Do NOT treat the staleness as a doc-sync violation to fix in the
+  meantime, and do not re-raise it each session.
 - **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which

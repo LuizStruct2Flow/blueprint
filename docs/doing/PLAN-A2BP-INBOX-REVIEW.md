@@ -1,8 +1,8 @@
 # Codex design review — `PLAN-A2BP-INBOX`
 
-**Verdict:** CHANGES-REQUESTED  
-**Reviewer:** Jesko (QA-2, Codex)  
-**Date:** 2026-07-29  
+**Verdict:** CHANGES-REQUESTED
+**Reviewer:** Jesko (QA-2, Codex)
+**Date:** 2026-07-29
 **Scope:** design only; no implementation reviewed or authorized
 
 ## Conclusion
@@ -215,3 +215,149 @@ Revise the plan to:
 
 With those changes, I expect the core “propose, do not write” direction to be
 sound.
+
+---
+
+## Round 2 — review of DRAFT v2
+
+**Verdict:** CHANGES-REQUESTED
+**Reviewer:** Jesko (QA-2, Codex)
+**Date:** 2026-07-29
+**Scope:** design only; no implementation reviewed or authorized
+
+F2 and F4 are materially corrected. Exact target-byte identity is the right
+staleness token, and same-session decision/apply/ripples with
+`APPLIED_PENDING_RIPPLES` is the right primary flow. Omitting `--apply-now` is
+also the sound default. Consensus is still withheld because F1/F3/F5 remain
+open and the cleanup inventory exposes two additional contradictions.
+
+### R2-F1 — HIGH: the digest + lock scheme still overclaims editor safety
+
+The scheme is sufficient against two **cooperating** `inbox apply` processes:
+both take the same lock, the second re-checks the target after the first, and
+same-filesystem rename prevents a partial target. It is not sufficient against
+the editor race named in §2.1. An editor and today's other managed-file writers
+do not take the inbox lock. They can write after apply's digest check but before
+its rename, and apply then atomically overwrites their bytes. Atomicity removes
+partial writes; it does not provide compare-and-swap.
+
+Revise F3's threat model explicitly. Either:
+
+- make this a **blueprint managed-target lock** and require every tool-owned
+  writer (`pull`, `inbox apply`, and any other scripted replacement) to honor
+  it, while stating that arbitrary editors remain outside the guarantee; or
+- provide a real compare-and-swap mechanism that detects a non-cooperating
+  change at commit/replacement time.
+
+Do not claim the design serializes an ordinary editor unless it actually can.
+The race test must include an uncooperative writer, not only two applies.
+
+The earlier F1 is unchanged and interacts with replacement: normalised lexical
+membership is not a filesystem boundary. The plan still needs canonical
+blueprint/inbox roots, rejection of absolute and `..` targets, no-follow
+handling for proposal components, and a rule for symlinked target parents.
+Creating the replacement temp beside a target whose parent escapes through a
+symlink makes “same filesystem” true in the wrong tree.
+
+### R2-F2 — HIGH: removing propose-side `--force` contradicts “findings travel”
+
+Removing the derived project's authority to waive findings is correct.
+Refusing to create any proposal on a BLOCK finding is not. Under the current
+v2 text, the blueprint-side founder never receives the content or finding and
+`inbox apply --force` has nothing to apply. “Findings travel with the proposal”
+and test 2 (“no proposal is created”) cannot both hold.
+
+Create an immutable proposal in a non-applicable `BLOCKED_FINDINGS` state,
+including the complete findings. Only the blueprint-side decision can reject
+it or explicitly waive and apply it. The derived side may not promote that
+state. This preserves the new authority boundary without turning a heuristic
+false positive into an inability even to ask for review.
+
+This also means §3b must not delete all blocked accounting. It should delete
+the old **managed-file partial-write** accounting, but multi-file `FILE...`
+still needs specified proposal semantics: all-or-nothing publication, or clean
+and blocked proposals plus a non-success aggregate status. At present the CLI
+accepts multiple files and v2 never chooses.
+
+### R2-F3 — MEDIUM: the cleanup inventory undercounts surfaces
+
+The five named docs are not the complete live documentation surface.
+`docs/DOCUMENTATION.md` §“Back-propagation” also says the file has already
+landed, calls the checklist post-`a2bp`, and says `a2bp` emits hints “per file
+copied.” It is managed and must be in §3/§3b.
+
+Also inventory the behavior-bearing descriptions, even where the file remains:
+
+- `scripts/blueprint` header/help, stale-drift message, comments, usage and
+  `a2bp|push` alias;
+- `scripts/lib/contamination.sh` contract/comments that say findings block a
+  copy and that `--force` copies them;
+- `.githooks/pre-push-project` A-07 gate text (“ONLY write path”, “refuse to
+  copy”) and the CI/gate suite wiring/name if the suite is renamed or split;
+- README's command-tree/playbook labels in addition to its main Push section.
+
+The `push` alias deserves an explicit product decision. Keeping `push` for a
+command that only proposes is misleading; removing it requires docs/help/tests
+and may be a compatibility break. It is currently absent from §3b.
+
+One claimed removal is load-bearing: the `blocked`/partial-run accounting does
+not simply become dead while `a2bp FILE...` remains multi-file and contaminated
+input can be refused or quarantined. Define the transaction first, then remove
+only the branches made unreachable by that definition.
+
+### R2-F4 — MEDIUM: the test estimate undercounts and uses a stale denominator
+
+The suite currently emits **38**, not 41, passing assertions. I executed it and
+counted the emitted `ok` records. Of those, **27 are driven through the real
+`a2bp` CLI**: emitted assertions 1–25 (through case `#22`) plus the two `#24`
+pull→a2bp assertions. All 27 need at least harness/oracle migration because
+success may no longer be observed by reading the managed target, blocked
+findings become proposal states, project-side `--force` disappears, and the
+decision-pending exit is intentionally non-zero.
+
+The remaining 11 are direct `placeholders.sh` primitive assertions (`#23`,
+`#25`–`#28`) and can remain substantively unchanged, though suite comments and
+grouping may move. Therefore the plan should say **27 of 38 current
+assertions**, not “~25 of 41.” The new inbox/concurrency/lifecycle tests are
+additional to that migration.
+
+### R2-F5 — F1/F3/F5 requirements remain
+
+- **F1:** unchanged; v2 adds no exclusive atomic publication or symlink/path
+  boundary. Use a private temp directory under the canonical inbox, publish
+  with a no-clobber operation, fsync as appropriate to the durability claim,
+  and clean partials.
+- **F3:** unchanged; define the local-writer threat model and validate the
+  content digest against the bytes actually guarded and applied. Also define
+  whether `diff` and metadata are authoritative, recomputed, or merely display.
+  Apply must not trust mutable `PROPOSAL.md` fields to locate a target.
+- **F5:** unchanged; v2 still says reject “removes” a proposal while requiring
+  durable rejection provenance, and §7 says proposals are deleted on
+  apply/reject while §2.4 retains applied work through ripples. Define the
+  state machine and terminal archive/removal policy. Writing a line to
+  `docs/config/findings.md` is not a substitute for retaining the decision
+  record and also mutates an unrelated managed file.
+
+The apply guard also needs a precise input contract: re-run it against the
+stored content and current target, verify that the resulting staged bytes equal
+the proposal content digest, then replace exactly those verified bytes. A guard
+that transforms to different bytes at apply time is a rebase and requires a new
+decision.
+
+## Round-2 consensus conditions
+
+1. Complete F1's atomic/no-clobber publication and canonical path/symlink rules.
+2. Narrow the lock guarantee to cooperating writers or provide real CAS;
+   specify all tool-owned writers that share the lock.
+3. Replace “contamination means no proposal” with an inspectable,
+   non-applicable blocked proposal and blueprint-side waiver/rejection.
+4. Define multi-file transaction/status semantics before deleting partial-run
+   accounting.
+5. Add the missed docs/code/help/gate surfaces and decide the misleading
+   `push` alias.
+6. Correct the migration count to 27/38 and retain the 11 primitive tests.
+7. Close F3/F5 with an authoritative proposal schema, exact guard/apply bytes,
+   and a durable lifecycle/state machine.
+
+F2's target-byte token and F4's synchronous flow are accepted. The overall
+verdict remains **CHANGES-REQUESTED**.

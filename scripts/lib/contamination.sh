@@ -10,27 +10,46 @@
 # OTHER project then pulls. That is not a theoretical hazard; it is the
 # mechanism behind two of this repo's worst defects:
 #
-#   BUG-002  `~/.linkedin-watcher-agent` hardcoded into the generic activity
-#            feed, so the [CODEX]/[GEMINI] lines silently never appeared in
-#            any derived project.
-#   A-09     dispatchers writing a literal `~/.{{PROJECT_NAME}}/`, shared by
-#            every checkout — a redcare Codex verdict surfaced live in this
-#            repo's feed. Eight four-eyes rounds to close.
+#   BUG-002  the generic activity feed hardcoded one project's own state dir,
+#            `~/.linkedin-watcher-agent`,  a2bp-allow: incident record, not a live path
+#            so the [CODEX]/[GEMINI] lines silently never appeared in any
+#            derived project.
+#   A-09     dispatchers wrote a literal, never-substituted
+#            `~/.{{PROJECT_NAME}}/`,  a2bp-allow: incident record, not a live path
+#            shared by every checkout — a redcare Codex verdict surfaced live
+#            in this repo's feed. Eight four-eyes rounds to close.
 #
 # Both arrived through a2bp. Guarding the pipe stops the next one at source.
 #
 # Two primitives, deliberately separate:
 #
-#   contamination_stage  — ALIGNMENT-BASED. Restores placeholders only where a
-#       positional diff against the blueprint's own copy proves the line came
-#       from one. It is NOT an inverse of substitute_placeholders — no such
-#       inverse exists, and two review rounds were spent learning that (see
-#       the function's own header). Anything it cannot attribute is left
-#       untouched for the scan to judge.
-#   contamination_scan   — HEURISTIC. Catches what no mechanical transform can
-#       know about (host paths, foreign state dirs, operator emails). Because
-#       it is heuristic it must be overridable, and every override must be
-#       visible — see "BLOCKING vs NOTICE" below.
+#   contamination_stage  — restores placeholders where a positional diff makes
+#       them attributable, then VERIFIES the result by round-tripping. It is
+#       not an inverse of substitute_placeholders and does not claim to be:
+#       four review rounds established that neither an inverse nor any
+#       content-derived alignment can recover edit history. What makes it safe
+#       is the round-trip check, not the attribution. See its header.
+#   contamination_scan   — HEURISTIC, and the ONLY thing standing between the
+#       project and the blueprint. It scans every staged line; there is no
+#       alignment-derived exemption, because an exemption is the one place a
+#       misattribution could actually leak (R4-F2). Being heuristic it must be
+#       overridable, and every override must be visible — see "BLOCKING vs
+#       NOTICE" below.
+#
+# THE CONTRACT, stated so it can be checked rather than argued:
+#
+#   1. a2bp never introduces project-specific bytes into the blueprint. The
+#      scan enforces this on every line, unconditionally.
+#   2. Staging never changes the file's meaning: forward-substituting the
+#      staged result reproduces the project's file byte-for-byte, and that is
+#      asserted rather than assumed. A misattributed line therefore cannot
+#      corrupt anything observable — the worst it can do is write
+#      {{PROJECT_NAME}} where a literal project name stood, which is the
+#      correct generic content for a blueprint file anyway.
+#
+# Those two together are what the guard actually needs to promise, and neither
+# depends on knowing which occurrence came from which placeholder — the
+# question that cannot be answered from content.
 #
 # Sourced by scripts/blueprint. Kept as a shared lib rather than inlined so
 # the gate and new-project.sh can reuse the same patterns — the same reason
@@ -63,7 +82,7 @@ _contamination_suppressed() {
 # written literally into a generic file.
 #
 # Note `{{PROJECT_NAME}}` is deliberately NOT allowlisted. After reverse-
-# substitution a project's own `~/.acme-flow` becomes `~/.{{PROJECT_NAME}}` —
+# substitution a project's own `~/.acme-flow` becomes `~/.{{PROJECT_NAME}}` —  a2bp-allow: worked example in a comment
 # which is A-09 exactly, the literal shared dir every checkout collided on.
 # The placeholder makes it look intentional; it is still the defect.
 _CONTAMINATION_KNOWN_DOTDIRS="aws bash_history bashrc cache claude codex config
@@ -89,12 +108,14 @@ _contamination_is_placeholder_email() {
   return 1
 }
 
-# --- contamination_stage PROJ BP NAME STAGED_OUT ALIGN_OUT ----------------
-# Writes to STAGED_OUT the bytes that should land in the blueprint, and to
-# ALIGN_OUT the staged line numbers whose provenance is PROVEN (one per line).
+# --- contamination_stage PROJ BP NAME STAGED_OUT --------------------------
+# Writes to STAGED_OUT the bytes that should land in the blueprint.
+# Returns non-zero if staging cannot be done safely.
 #
-# WHY ALIGNMENT AND NOT A LOOKUP — two review rounds are compressed here, so
-# the next person does not re-derive them:
+# FOUR review rounds are compressed here, so the next person does not re-derive
+# them. Each attempt tried harder to infer which text came from a placeholder,
+# and each was defeated by the same fact: substitution destroys exactly that
+# information, and no amount of content matching recovers it.
 #
 #   R1: a global `s/${proj_name}/{{PROJECT_NAME}}/g` was called "the exact
 #       inverse of substitute_placeholders". There is no such inverse. Forward
@@ -112,23 +133,30 @@ _contamination_is_placeholder_email() {
 #       a legitimate literal that never came from a placeholder. Same
 #       information loss as R1, at line granularity instead of substring.
 #
-# So provenance is established POSITIONALLY. We forward-substitute the
-# blueprint's copy — reproducing exactly what `pull` handed the project — and
-# diff it against the project file. Only a line the diff reports as UNCHANGED
-# is attributed to its aligned upstream line, and only then is that upstream
-# line's original text (placeholder intact) emitted. Everything the operator
-# actually touched passes through byte-for-byte and is left for the scan to
-# judge. An occurrence that cannot be attributed uniquely is never guessed at.
+#   R3: trusting `diff`'s alignment. An LCS match is a byte alignment, not an
+#       edit history: insert a literal equal to a substituted placeholder and
+#       edit the original, and the insert is attributed to the placeholder.
 #
-# The same alignment drives the scan's exemption, which is why it is returned
-# rather than kept private: "already upstream" has to mean "this occurrence
-# was already upstream at this position", not "these bytes appear upstream
-# somewhere". A relocated or duplicated risky line is a NEW occurrence and
-# must face every check (R2-F2).
+#   R4: requiring clean contiguous neighbours. Any finite context window can
+#       be relocated or duplicated as a unit, so the same misattribution
+#       survives by moving the edit outside the window.
+#
+# So this stopped trying to win that argument. Alignment is still used — it
+# gets the common case right and keeps the upstream diff minimal — but NOTHING
+# SAFETY-CRITICAL RESTS ON IT:
+#
+#   * The scan no longer takes an exemption list. Every staged line is
+#     checked, so a misattribution cannot wave contamination through. That was
+#     the only path by which a wrong alignment could actually leak (R4-F2).
+#   * Staging is round-trip VERIFIED: forward-substituting the staged output
+#     must reproduce the project file byte-for-byte, or staging fails closed.
+#     That holds regardless of how diff aligned anything, and it bounds the
+#     blast radius of a misattribution to "a placeholder where a literal
+#     project name stood" — the correct generic content for a blueprint file,
+#     and never a leak.
 #
 # No blueprint copy (a brand-new managed file) → nothing to align against →
-# verbatim passthrough with an empty alignment, so the scan judges every line.
-# Fail closed.
+# verbatim passthrough, and the scan judges every line. Fail closed.
 #
 # Nothing here compiles the project name as a regex: the forward substitution
 # is bash parameter expansion and the comparison is done by `diff`.
@@ -137,11 +165,9 @@ _contamination_is_placeholder_email() {
 # substitution carry the tokens as code — restoring placeholders in
 # scripts/blueprint would corrupt scripts/blueprint).
 contamination_stage() {
-  local pf="$1" bpf="$2" proj_name="$3" staged_out="$4" align_out="$5"
+  local pf="$1" bpf="$2" proj_name="$3" staged_out="$4"
   local proj_upper
   proj_upper=$(printf '%s' "$proj_name" | tr 'a-z-' 'A-Z_')
-
-  : > "$align_out"
 
   if [ ! -f "$bpf" ]; then
     cat "$pf" > "$staged_out"
@@ -196,11 +222,14 @@ contamination_stage() {
   # unaligned. The record protocol must not inherit the input's line endings.
   local diff_out diff_rc
   diff_out=$(mktemp)
+  # `|| diff_rc=$?` rather than a bare call: diff exits 1 whenever the files
+  # differ, which is the NORMAL case here, and callers run under `set -e`. A
+  # bare invocation kills the script before the status can even be inspected.
+  diff_rc=0
   diff --unchanged-line-format="=%l%c'\012'" \
        --old-line-format="-%l%c'\012'" \
        --new-line-format="+%l%c'\012'" \
-       "$bp_sub" "$pf" > "$diff_out" 2>/dev/null
-  diff_rc=$?
+       "$bp_sub" "$pf" > "$diff_out" 2>/dev/null || diff_rc=$?
   rm -f "$bp_sub"
 
   # diff exits 0 (identical) or 1 (differences). Anything else is trouble —
@@ -235,57 +264,15 @@ contamination_stage() {
   # the upstream placeholder — silently rewriting it to {{PROJECT_NAME}} and
   # exempting it from the scan.
   #
-  # The tie-break only has consequences for lines we would actually REWRITE —
-  # those whose upstream original holds a placeholder. Where the upstream line
-  # has no placeholder, an aligned line is byte-identical to it, so which
-  # occurrence `diff` picked changes nothing: no rewrite happens and the line
-  # is genuinely already upstream.
-  #
-  # So the extra proof is demanded exactly where it matters: a placeholder
-  # line is restored only if it AND both neighbours are aligned contiguously —
-  # nothing moved around it. A placeholder line adjacent to an edit is left
-  # alone AND denied exemption, so the scan blocks on the residual project
-  # name and the operator writes {{PROJECT_NAME}} explicitly.
-  #
-  # Scoping it this way matters: demanding clean context for every line would
-  # strip exemption from untouched upstream content merely because someone
-  # added a line next to it, and the guard would start blocking lines it did
-  # not introduce.
-  #
-  # This is the third attempt at provenance and the first that does not guess:
-  # R1 matched substrings, R2 matched line content, R3 trusted the LCS
-  # wholesale. The rule now is that ambiguity is refused, not resolved.
   local n_proj=${#proj_lines[@]}
-  declare -A _proven
-  local k up
-  for k in "${!_align[@]}"; do
-    up=${bp_lines[$(( ${_align[$k]} - 1 ))]}
-    case "$up" in
-      *'{{PROJECT_NAME}}'*|*'{{PROJECT_NAME_UPPER}}'*)
-        # Neighbour must be aligned AND contiguous — an aligned neighbour
-        # pointing elsewhere upstream means lines moved, which is the
-        # ambiguous case.
-        if [ "$k" -gt 1 ]; then
-          [ -n "${_align[$((k-1))]+x}" ] || continue
-          [ "$(( ${_align[$k]} - ${_align[$((k-1))]} ))" -eq 1 ] || continue
-        fi
-        if [ "$k" -lt "$n_proj" ]; then
-          [ -n "${_align[$((k+1))]+x}" ] || continue
-          [ "$(( ${_align[$((k+1))]} - ${_align[$k]} ))" -eq 1 ] || continue
-        fi
-        ;;
-    esac
-    _proven[$k]=${_align[$k]}
-  done
 
   # Emit the staged copy plus the proven-provenance line list.
   local i n out
   n=$n_proj
   : > "$staged_out"
   for (( i=1; i<=n; i++ )); do
-    if [ -n "${_proven[$i]+x}" ]; then
-      out=${bp_lines[$(( ${_proven[$i]} - 1 ))]}
-      printf '%s\n' "$i" >> "$align_out"
+    if [ -n "${_align[$i]+x}" ]; then
+      out=${bp_lines[$(( ${_align[$i]} - 1 ))]}
     else
       out=${proj_lines[$(( i - 1 ))]}
     fi
@@ -293,6 +280,54 @@ contamination_stage() {
       printf '%s' "$out" >> "$staged_out"
     else
       printf '%s\n' "$out" >> "$staged_out"
+    fi
+  done
+
+  # --- Round-trip verification: the safety property, asserted ---
+  # Staging must preserve the file's MEANING UNDER SUBSTITUTION. Forward-
+  # substitute both the staged output and the project's own file; they must be
+  # byte-identical. That is what makes a misattributed alignment harmless: the
+  # restore is proven unable to drop, reorder or invent content, so the most it
+  # can do is write a placeholder where the project had the literal name.
+  #
+  # Both sides are substituted, not just the staged one. A project file may
+  # legitimately already contain `{{PROJECT_NAME}}` — it is precisely what the
+  # operator is told to write when the scan blocks an edited line — and
+  # comparing staged-substituted against the RAW project file would then fail
+  # on a correct, unmodified round-trip.
+  #
+  # This is a real check, not a comment: if diff aligns something in a way that
+  # would change the file, staging fails and cmd_a2bp refuses the copy.
+  local verify_staged verify_proj
+  verify_staged=$(mktemp)
+  verify_proj=$(mktemp)
+  _contamination_subst_file "$staged_out" "$proj_name" "$proj_upper" "$final_nl" > "$verify_staged"
+  _contamination_subst_file "$pf"         "$proj_name" "$proj_upper" "$final_nl" > "$verify_proj"
+
+  if ! cmp -s "$verify_staged" "$verify_proj"; then
+    rm -f "$verify_staged" "$verify_proj"
+    return 3
+  fi
+  rm -f "$verify_staged" "$verify_proj"
+}
+
+# _contamination_subst_file FILE NAME UPPER FINAL_NL
+# Forward-substitutes FILE to stdout, preserving a missing final newline.
+# Used only by the round-trip check above.
+_contamination_subst_file() {
+  local src="$1" nm="$2" up="$3" fnl="$4"
+  local -a ls
+  mapfile -t ls < "$src"
+  local i n l
+  n=${#ls[@]}
+  for (( i=1; i<=n; i++ )); do
+    l=${ls[$(( i - 1 ))]}
+    l=${l//\{\{PROJECT_NAME_UPPER\}\}/$up}
+    l=${l//\{\{PROJECT_NAME\}\}/$nm}
+    if [ "$i" -eq "$n" ] && [ "$fnl" -eq 0 ]; then
+      printf '%s' "$l"
+    else
+      printf '%s\n' "$l"
     fi
   done
 }
@@ -354,34 +389,8 @@ contamination_scan() {
                  | cut -d: -f1 | tr '\n' '|')"
   _skip() { case "$suppressed" in *"|$1|"*) return 0 ;; esac; return 1; }
 
-  # --- Unchanged-line exemption (OCCURRENCE-aware) ---
-  # A line that the positional diff attributed to an upstream line is not
-  # something this back-propagation is INTRODUCING — it is already in the
-  # blueprint, at that position. The guard polices what you add; existing
-  # upstream content is out of its remit (and if it is genuinely contaminated,
-  # blocking a2bp would not fix it — that is a separate cleanup).
-  #
-  # This is also what makes a one-word project name survivable: for a project
-  # named `blueprint`, untouched prose containing the word is attributed
-  # upstream rather than flagged as a residual project name. Without it, R1's
-  # corruption would simply have returned as a false BLOCK on the same lines.
-  #
-  # It is keyed on LINE NUMBER, not content, and that distinction is the whole
-  # of R2-F2. A content set would exempt every occurrence of a risky line just
-  # because those bytes appear upstream once — so a project could duplicate or
-  # relocate such a line and the new occurrence would bypass every check, even
-  # though relocation can turn quoted prose into an operative path.
-  declare -A _aligned
-  if [ -n "$align_file" ] && [ -f "$align_file" ]; then
-    local al
-    while IFS= read -r al; do
-      [ -n "$al" ] && _aligned[$al]=1
-    done < "$align_file"
-  fi
-  _known() { [ -n "${_aligned[$1]+x}" ]; }
-
   # Markdown documents the CONVENTION; shell scripts execute a PATH. That
-  # distinction decides whether `~/.{{PROJECT_NAME}}` is correct or is the
+  # distinction decides whether `~/.{{PROJECT_NAME}}` is correct or is the  a2bp-allow: worked example in a comment
   # A-09 defect — see the dot-dir pass below.
   local is_prose=0
   case "$logical" in *.md) is_prose=1 ;; esac
@@ -391,17 +400,12 @@ contamination_scan() {
   # the `grep -o` passes below only yield the matched token, not its line.
   local -a _lines
   mapfile -t _lines < "$f" 2>/dev/null || _lines=()
-  _exempt() {
-    _skip "$1" && return 0
-    _known "$1" && return 0
-    return 1
-  }
 
   # --- BLOCK: absolute host home path ---
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
     ln=${hit%%:*}; text=${hit#*:}
-    _exempt "$ln" && continue
+    _skip "$ln" && continue
     printf '%s|BLOCK|host home path (belongs in a gitignored local config)|%s\n' "$ln" "$text"
     blocked=1
   done < <(grep -nE '/(Users|home)/[A-Za-z0-9_.-]+/' "$f" 2>/dev/null || true)
@@ -410,11 +414,11 @@ contamination_scan() {
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
     ln=${hit%%:*}; text=${hit#*:}
-    _exempt "$ln" && continue
+    _skip "$ln" && continue
     name=${text#*/.}
     name=${name%%/*}
     _contamination_is_known_dotdir "$name" && continue
-    # `~/.{{PROJECT_NAME}}` is the placeholder, i.e. already genericised. In
+    # `~/.{{PROJECT_NAME}}` is the placeholder, i.e. already genericised. In  a2bp-allow: worked example in a comment
     # prose that is the correct way to document a per-project dir, and
     # AGENTS.md/OBSERVABILITY.md legitimately do so — agent_state_dir derives
     # `~/.<repo-basename>`, which in a derived project IS the project name.
@@ -436,7 +440,7 @@ contamination_scan() {
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
     ln=${hit%%:*}; text=${hit#*:}
-    _exempt "$ln" && continue
+    _skip "$ln" && continue
     printf '%s|BLOCK|project name survived reverse-substitution — write {{PROJECT_NAME}} explicitly if it belongs|%s\n' "$ln" "$text"
     blocked=1
   done < <(grep -nEi "(^|[^A-Za-z0-9])${name_rx}([^A-Za-z0-9]|$)" "$f" 2>/dev/null || true)
@@ -445,7 +449,7 @@ contamination_scan() {
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
     ln=${hit%%:*}; text=${hit#*:}
-    _exempt "$ln" && continue
+    _skip "$ln" && continue
     _contamination_is_placeholder_email "$text" && continue
     printf '%s|NOTICE|operator/personal email %s — generic files should not name an individual|%s\n' \
       "$ln" "$text" "$text"

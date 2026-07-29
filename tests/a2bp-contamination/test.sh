@@ -498,12 +498,46 @@ Historical note: the old tool wrote to /home/someuser/state.
 A newly added, perfectly generic line.
 EOF
 rc=$(run_a2bp "$CARRIER")
-if [ "$rc" -ne 0 ]; then
-  fail "#18 an untouched pre-existing upstream line was blocked (exit $rc) — the guard must police what the copy INTRODUCES; see $WORK/out"
-elif ! grep -q 'newly added' "$FAKE_BP/$CARRIER"; then
-  fail "#18 the new generic line was not copied"
+# CONTRACT CHANGE at R4. There is no longer an alignment-derived exemption:
+# every staged line is scanned. Codex R4-F2 showed that an exemption list is
+# the one place a misattributed alignment can actually leak — a relocated
+# risky line inherits the pass of the line it aligned to. So the exemption is
+# gone, and the cost is exactly this case: an upstream line that would itself
+# trip a check now blocks even when untouched.
+#
+# That is the safe direction (a false BLOCK, never a false PASS) and it is
+# overridable per line. It also barely arises in practice: the host-path
+# pattern scores zero hits across all 48 managed files, and the two real
+# in-tree cases carry a2bp-allow markers.
+if [ "$rc" -eq 0 ]; then
+  fail "#18 an upstream host-path line passed unchecked — the alignment is still granting scan exemptions, which is the R4-F2 leak path"
+elif ! grep -q 'a2bp-allow' "$WORK/out" && ! grep -q 'someuser' "$WORK/out"; then
+  fail "#18 blocked, but the output does not name the offending line or the way out"
 else
-  pass "#18 an unchanged upstream occurrence stays exempt (R2-F2)"
+  pass "#18 with no exemption list, even an untouched upstream risky line is scanned (R4-F2)"
+fi
+
+# ===========================================================================
+# 18b. The other half: an untouched upstream line that is CLEAN must still
+#      copy. Removing the exemption must not turn into "block everything".
+# ===========================================================================
+setup
+cat >"$FAKE_BP/$CARRIER" <<'EOF'
+# Mocks
+Perfectly ordinary upstream guidance.
+EOF
+cat >"$PROJ/$CARRIER" <<'EOF'
+# Mocks
+Perfectly ordinary upstream guidance.
+A newly added, perfectly generic line.
+EOF
+rc=$(run_a2bp "$CARRIER")
+if [ "$rc" -ne 0 ]; then
+  fail "#18b a clean edit to a clean file was blocked (exit $rc) — see $WORK/out"
+elif ! grep -q 'newly added' "$FAKE_BP/$CARRIER"; then
+  fail "#18b the new generic line was not copied"
+else
+  pass "#18b ordinary edits to clean files still back-propagate"
 fi
 
 # ===========================================================================
@@ -527,19 +561,29 @@ edited-placeholder
 TAIL
 EOF
 rc=$(run_a2bp "$CARRIER")
-# The blueprint FIXTURE already contains {{PROJECT_NAME}}, so a bare grep for
-# it matches the untouched file too. "edited-placeholder" is the tell that the
-# staged copy actually landed.
-if grep -q 'edited-placeholder' "$FAKE_BP/$CARRIER"; then
-  if [ "$(sed -n '2p' "$FAKE_BP/$CARRIER")" = '{{PROJECT_NAME}}' ]; then
-    fail "#19 CORRUPTION: the newly inserted literal was rewritten to {{PROJECT_NAME}} on an LCS tie-break (Codex R3-F1)"
-  else
-    fail "#19 the ambiguous insert was copied — an unprovable alignment must not also grant scan exemption (Codex R3-F1)"
-  fi
-elif [ "$rc" -eq 0 ]; then
-  fail "#19 nothing was copied yet a2bp exited 0"
+# CONTRACT, stated plainly. Codex proved across R1–R4 that no content-derived
+# matching recovers edit history, so the alignment WILL sometimes misattribute
+# and this fixture is one of those layouts. What is guaranteed is not "the
+# attribution is right" but:
+#
+#   1. no project-specific bytes reach the blueprint, and
+#   2. staging preserves meaning under substitution (asserted by the
+#      round-trip check).
+#
+# Under those, a misattribution here writes {{PROJECT_NAME}} where the operator
+# typed a literal `acme-flow`. That is the correct generic content for a
+# blueprint file — a literal project name there would BE the contamination —
+# so the failure mode is benign by construction rather than by argument.
+#
+# What must never happen is the literal reaching upstream.
+if grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
+  fail "#19 the literal project name reached the blueprint — this is the leak the whole guard exists to stop (Codex R3-F1)"
+elif grep -q 'edited-placeholder' "$FAKE_BP/$CARRIER"; then
+  pass "#19 ambiguous layout copies generic content only; the literal never lands (R3-F1)"
+elif [ "$rc" -ne 0 ]; then
+  pass "#19 ambiguous layout was refused outright (also acceptable — fails safe)"
 else
-  pass "#19 ambiguous alignment next to an edit is refused, not guessed (R3-F1)"
+  fail "#19 nothing was copied yet a2bp exited 0"
 fi
 
 # ===========================================================================

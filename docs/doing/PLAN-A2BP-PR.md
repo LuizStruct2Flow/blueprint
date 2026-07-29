@@ -1,7 +1,19 @@
 # PLAN — `a2bp` files a feature request
 
-**Status:** DRAFT v15 — reframe, behavioural boundary and `CLAUDE.md` rule
-accepted; rebuild-and-compare accepted. No code written.
+**Status:** DRAFT v16 — reviewer judges the remaining work **convergent**. No
+code written.
+
+**v16.** v15's tree build omitted `read-tree`, so an unseeded index plus three
+`cacheinfo` entries would have produced a tree of exactly three files — **the
+first request ever filed would have proposed deleting the entire blueprint**
+except what it changed. Fifteen drafts and ten reviews did not catch it, because
+"build the new tree from the base tree" reads as though it describes itself.
+Also: `git init --bare` inherits object format, `GIT_*`, system/global config
+and locale, all now scrubbed with a hostile-config test; parent components must
+each be a `040000` tree; the ref uses the **full digest** and the project is
+validated **as a ref name**, which is a different rule set from a path
+component; and the key is length-framed throughout, since v15's newline-
+delimited header could be defeated by a component containing a newline.
 
 **v15.** v14 fixed the commit metadata and left the **tree** ambient: checkout,
 write and `git add` run through `.gitattributes`, clean filters, `core.autocrlf`,
@@ -223,13 +235,23 @@ No `push` alias.
 
   **The key, exactly.** Concatenate, in order, with `\n` between records:
 
+  **Every component length-framed, including the header** (R10-F4). v2 used
+  newline-delimited header records while the components themselves — a remote
+  URL, a branch name, a project identity — can contain newlines, so the framing
+  was defeated by exactly the inputs it was meant to disambiguate. There are no
+  delimiters at all now:
+
   ```
-  v2                                     # key schema version
-  <destination remote URL, verbatim>
-  <target branch name>
-  <base commit SHA, 40 hex, lowercase>
-  <project length in bytes> <canonical project identity>
+  <len> "v3"                             # key schema version
+  <len> <destination remote URL, verbatim>
+  <len> <target branch name>
+  <len> <base commit SHA, 40 hex, lowercase>
+  <len> <canonical project identity>
   ```
+
+  …then one length-framed record per sorted target path, as below. `<len>` is a
+  decimal byte count followed by a single space. Schema bumped to `v3` because
+  the framing changed.
 
   **The project belongs in the key** (R9-F3). v1 left it out while putting it in
   the branch ref *and* the commit message — so two projects filing identical
@@ -246,9 +268,24 @@ No `push` alias.
 
   Length-prefixing both path and content is what stops `ab`+`c` colliding with
   `a`+`bc`. The digest is **SHA-256** over that byte string, rendered
-  **lowercase hex**; the branch id uses its **first 12 characters**. Schema
-  version leads the key so a future change is a different id rather than a
-  silent collision.
+  **lowercase hex**. Schema version leads the key so a future change is a
+  different id rather than a silent collision.
+
+  **The ref uses the FULL 64-hex digest, not a 12-char prefix** (R10-F4). A
+  truncated id is a birthday problem against a namespace that persists — cheap
+  to avoid, and the branch name is machine-read far more often than typed.
+
+  **The project name is validated as a ref component, separately from being
+  validated as a path component.** The two rule sets differ: git refs reject
+  `..`, `~`, `^`, `:`, `?`, `*`, `[`, backslash, control characters, leading or
+  trailing `/`, trailing `.`, and the sequence `@{`. A directory name that is
+  perfectly legal on disk can be an invalid ref, and v15 assumed one implied the
+  other. If the name fails ref validation the request is **refused with the
+  reason**, not silently mangled into something valid — a slug that quietly
+  differs from the project's real name breaks the provenance the ref exists to
+  carry.
+
+  Final ref: `refs/heads/a2bp/<validated-project>/<digest64>`.
 
 - **The commit must be DETERMINISTIC, or exact-tip adoption never matches.**
   v12 specified a content key and forgot that **git hashes the commit, not the
@@ -269,7 +306,7 @@ No `push` alias.
   | author date | **the base commit's committer date**, verbatim, including its timezone offset — available without a clock, and it ties the request to the base it was built from |
   | committer date | identical to author date |
   | message | exactly `a2bp: <n> file(s) from <project>\n\n` followed by one sorted target path per line, LF-terminated, no trailing blank line |
-  | branch ref | `refs/heads/a2bp/<project>-<id12>` where `<id12>` is the key digest's first 12 hex characters |
+  | branch ref | `refs/heads/a2bp/<validated-project>/<digest64>` — full digest, project validated as a ref component |
 
   Set via `GIT_AUTHOR_*` / `GIT_COMMITTER_*` in the environment of the commit
   call, never from the operator's `git config`.
@@ -325,7 +362,7 @@ No `push` alias.
   | A **symlink** (mode `120000`) at the target path | Refuse. Overwriting it with a regular file silently changes what every consumer resolves. |
   | A **gitlink / submodule** (`160000`) | Refuse. |
   | A **regular file** with an unrepresentable mode | Refuse, naming the mode. |
-  | Nothing at the path, but a **parent component is a blob or symlink** | Refuse — the entry cannot be created without restructuring the base. |
+  | Nothing at the path, but a **parent component is not a `040000` tree** | Refuse. Every existing parent must be verified as a tree — a blob, symlink or **gitlink** in the path, or a malformed mode/type pair, all mean the entry cannot be created without restructuring the base. v15 said "a blob or symlink", which is narrower than the check needs to be (R10-F3). |
   | Nothing at the path, parents clean | Creation; already called out in the PR body. |
 
   Every refusal names the path and what was found, because "refused" without the
@@ -352,16 +389,41 @@ No `push` alias.
      so a failure cannot leave residue in a tracked tree.
   2. `git init --bare` there; add the remote from `blueprint_remote`. A bare
      repo has no working tree to be filtered through and no hooks to run.
+
+     **Bare is not isolated on its own** (R10-F1). The init still inherits:
+
+     | Ambient input | Scrub |
+     |---|---|
+     | Object format | `--object-format=sha1` **explicitly** — a SHA-256 repo produces different hashes for identical content, and the default follows `init.defaultObjectFormat` |
+     | `GIT_*` environment | Unset all `GIT_*` except the author/committer vars this build sets deliberately |
+     | System + global config | `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL=/dev/null` |
+     | Locale | `LC_ALL=C` — date and message rendering must not follow the operator's locale |
+     | Date interpretation | Pass the base date in **raw** format (`<epoch> <±hhmm>`), which git parses unambiguously, rather than a formatted string |
+
+     Also pin a **minimum git version** and refuse below it, since plumbing
+     flags and defaults have moved. A **hostile-config test** proves the scrub:
+     run the build with `core.autocrlf=true`, a clean filter registered, a
+     `commit.gpgsign=true` global, a non-C locale and `init.defaultObjectFormat
+     =sha256` set, and require a byte-identical commit SHA to a clean run.
   3. `git fetch --depth 1 <remote> <branch>`; capture the resolved SHA as **the**
      base for the key.
   4. Read the base tree with `git ls-tree` — never a checkout.
   5. Write each staged blob with `git hash-object -w --no-filters --stdin`.
      `--no-filters` is the point: it bypasses `.gitattributes` and clean
      filters entirely.
-  6. Build the new tree from the base tree with the target entries replaced or
-     added, via `git update-index --cacheinfo <mode>,<blob>,<path>` against a
-     temporary index, then `git write-tree`. Entry order is git's, so it is
-     stable.
+  6. **`git read-tree <base>` into the temporary index FIRST**, then
+     `git update-index --cacheinfo <mode>,<blob>,<path>` for each target, then
+     `git write-tree`.
+
+     > **v15 omitted the `read-tree`, and it is the worst defect in fifteen
+     > drafts.** An empty index plus three `cacheinfo` entries yields a tree of
+     > exactly three files — so the first request ever filed would have proposed
+     > **deleting the entire blueprint** except the files it changed. It
+     > survived ten reviews because "build the new tree from the base tree with
+     > the target entries replaced" reads as though it describes itself. It does
+     > not; `cacheinfo` populates an index, and an unseeded index is empty.
+     > Assertion 7b would have caught it — which is the argument for asserting
+     > the final diff rather than trusting the construction.
   7. `git commit-tree <tree> -p <base>` with the fixed identity, date and
      message, run with `core.hooksPath=/dev/null`, `commit.gpgsign=false`,
      `core.autocrlf=false`, `i18n.commitEncoding=UTF-8` set on the command.

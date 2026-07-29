@@ -139,3 +139,102 @@ Because F1 is already pushed and F2 affects the unpushed guard, the combined
 verdict is **CHANGES-REQUESTED. Do not push `41a85e1` / `5b2d1fa` as the clean
 reviewed continuation until the other provider fixes these findings and hands
 the resulting commit(s) back for cross-provider review.**
+
+---
+
+# Review round 2
+
+Date: 2026-07-29  
+Reviewer: Slava (Codex)  
+Reviewed commits: `41a85e1`, `5b2d1fa`, `d6ae7f1`  
+Handoff status: only `AGENT_SIGNAL.md` modified; baton is out of scope  
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 1
+
+- The missed README contract change is present in named commit `41a85e1`.
+- The byte-identical-Task guard and its false “one poll interval” claim are
+  gone. The new regression does prove two legitimate identical rounds fire.
+- The lifecycle documents now say explicitly that `1c4dd4c` was pushed before
+  the review that found its multi-remote hole.
+
+## R2-F1 — HIGH — destination tracking refs are not a trustworthy exclusion set
+
+`--remotes=<destination>` is a namespace selector for
+`refs/remotes/<destination>/*`; it does not ask the destination which commits
+it actually has and it does not interpret an unusual fetch refspec.
+
+The safe failure directions are only partial:
+
+- absent refs, stale-behind refs, and fetches stored outside
+  `refs/remotes/<destination>/*` cause an over-scan;
+- a stale-ahead, manually created, or refspec-repurposed ref inside that
+  namespace causes an **under-scan**, because its reachable commits are
+  subtracted even though the destination need not contain them.
+
+Checking that `remote.<name>.url` exists proves only that the name is configured;
+it does not make the local tracking namespace authoritative. The pre-push input
+provides the old SHA for each updated destination ref, but provides no complete,
+server-authenticated “all other refs” set for a new branch. Therefore the
+security-safe selector for a new destination ref is the same conservative
+fallback already used for a bare URL: scan all history reachable from the local
+SHA. It may over-scan, but it cannot omit outgoing commits on the strength of
+local cache state. Add a regression with a phantom
+`refs/remotes/origin/*` ref and prove it is not subtracted.
+
+## R2-F2 — HIGH — the settle window reduces the race but does not close it
+
+The code and docs acknowledge the decisive counterexample: if the writer pauses
+longer than `AGENT_SIGNAL_SETTLE` after flipping State first, the watcher
+dispatches the stale Task. Six seconds is not a publication boundary and there
+is no measured upper bound on a human/tool doing two edits. The default is
+therefore not defensible as a correctness guard; increasing it only trades more
+latency for a smaller race.
+
+There is a second mismatch between claim and implementation. The watcher does
+not wait for “the signal to stop changing”; it waits for the parsed
+`Holder|State|Task` key to remain equal. Changes to `Last update`, formatting,
+or any other file content do not restart the window. `last_mtime` is updated
+but never participates in dispatch. A non-target transition clears
+`pending_key` when sampled, which is safe, but a brief transition entirely
+between polls is invisible and leaves the old candidate age intact.
+
+Clearing `pending_key` on an observed non-target state does not itself open a
+gap; it correctly separates rounds. The gap is inference from sampled,
+non-atomic state. Fix the publication boundary rather than tuning the delay:
+for example, add a round/generation written with the handoff and dispatch each
+generation once, or make the supported handoff path atomically replace the
+complete signal and trigger on that publication. Tests must include a pause
+longer than the configured settle value after State-first publication. Until
+then the suite demonstrates the happy timing case, not the promised invariant.
+
+## R2-F3 — MEDIUM — DoD F.1 excludes untracked omissions and permits ambiguity
+
+The commit-as-review-object rule is correct and would have prevented the README
+false closure. Two phrases should be tightened:
+
+- `git status --short` reports untracked files too, but the blocking sentence
+  says only “tracked modification”. A newly created, required in-scope test or
+  document can be omitted just as a tracked README was. Make **any in-scope
+  status entry** block.
+- “committed or explicitly named as out of scope” can be read as allowing an
+  overlapping modification to be declared away. Require it to be included in
+  the named review commit set, or narrow the claimed scope so the entry truly
+  does not overlap.
+
+This need not block legitimate stacked work: unrelated entries remain allowed
+when explicitly listed, and the writer can define a precise review scope. The
+rule should prevent overlap, not require a globally clean tree.
+
+## Verification
+
+- Reviewed `git show` / `1c4dd4c..d6ae7f1` for the three named commits, not
+  uncommitted source.
+- `bash tests/pre-push-secrets/test.sh` — pass, 8 cases.
+- `bash tests/signal-dispatch/test.sh` — pass, 4 cases.
+- Shell syntax checks and `git diff --check 1c4dd4c..d6ae7f1` — pass.
+- Worktree before this review edit: only `AGENT_SIGNAL.md` modified.
+
+The current tests pass, but they do not exercise the two undercutting cases
+above. Do not push. The last writer must fix R2-F1/R2-F2/R2-F3, commit, and hand
+the resulting commit set back to the other provider for a clean review.

@@ -57,25 +57,31 @@ _PUSH_REMOTE="${1:-}"
 #   deletion       local_sha is all-zero: nothing is published, so nothing to
 #                  scan — and a range built from it would be nonsense.
 #
-# The new-branch case originally used a bare `--not --remotes`, which subtracts
-# commits on EVERY configured remote. A commit already on a private mirror was
-# therefore skipped when first pushed to a public remote — precisely the
-# disclosure the scan exists to catch, and reproduced by Codex against a
-# fixture with the commit only on `refs/remotes/private/main`. Scoped to
-# `--remotes=<destination>`, and when the destination is a bare URL rather than
-# a named remote there are no tracking refs to trust, so nothing is subtracted
-# and the whole reachable history is scanned. Over-scanning is slow; under-
-# scanning ships secrets.
+# A NEW ref is scanned in FULL — everything reachable from the local sha, with
+# nothing subtracted. Two rejected attempts are worth recording, because the
+# obvious optimisations are both unsafe:
+#
+#   `--not --remotes`             subtracts EVERY configured remote, so a
+#                                 commit sitting on a private mirror was
+#                                 skipped on its first push to a public one.
+#   `--not --remotes=<dest>`      still only a namespace selector over
+#                                 refs/remotes/<dest>/*. It never asks the
+#                                 destination what it actually has, and it does
+#                                 not interpret an unusual fetch refspec. A
+#                                 stale-ahead, phantom, or repurposed local ref
+#                                 in that namespace subtracts commits the
+#                                 destination need not contain — an UNDER-scan.
+#
+# git gives the hook no server-authenticated view of what a new destination ref
+# already holds, so there is nothing trustworthy to subtract. Over-scanning
+# costs time; under-scanning ships secrets. For an updated ref the old sha
+# comes from git itself on stdin, so `remote..local` is authoritative there.
 push_log_opts() {
   echo "$_PUSH_REFS" | while read -r _lref _lsha _rref _rsha; do
     [ -n "${_lsha:-}" ] || continue
     [ "$_lsha" = "$_ZERO" ] && continue
     if [ "${_rsha:-$_ZERO}" = "$_ZERO" ]; then
-      if [ -n "$_PUSH_REMOTE" ] && git config --get "remote.$_PUSH_REMOTE.url" >/dev/null 2>&1; then
-        echo "$_lsha --not --remotes=$_PUSH_REMOTE"
-      else
-        echo "$_lsha"
-      fi
+      echo "$_lsha"
     else
       echo "$_rsha..$_lsha"
     fi

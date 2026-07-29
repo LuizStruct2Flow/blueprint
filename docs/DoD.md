@@ -534,9 +534,16 @@ Walk every box. If any is unchecked, finish it; do **not** flip
       (`git log --oneline <base>..HEAD`), and the reviewer reviews that
       diff — `git show` / `<base>..<sha>` — not whatever happens to be
       in the tree.
-- [ ] `git status --short` is captured in the handoff. **Any tracked
-      modification inside the claimed scope blocks the flip** until it is
-      committed or explicitly named as out of scope.
+- [ ] `git status --short` is captured in the handoff. **Any entry inside the
+      claimed scope blocks the flip** — including `??` untracked ones. A new
+      test or doc that was never `git add`ed is omitted exactly as silently as
+      a modified file, and the reviewer cannot miss what was never mentioned.
+- [ ] An in-scope entry is resolved by **including it in the named review
+      commits**, or by **narrowing the claimed scope so it genuinely does not
+      overlap**. It may not be declared away: "out of scope" is a statement
+      about what the claim covers, not a waiver for work the claim depends on.
+      Unrelated entries stay allowed, listed explicitly — the rule prevents
+      overlap, it does not demand a globally clean tree.
 - [ ] The doc-sync list in the claim is checked **against that diff**,
       file by file.
 

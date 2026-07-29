@@ -160,6 +160,69 @@ else
   pass "#4 the watcher still dispatches after settling (no permanent stall)"
 fi
 
+# ===========================================================================
+# 5. R2-F2 (Codex) — the honest limit of a timeout, and the fix for it.
+#
+#    First half: a State-first write with a pause LONGER than the settle value
+#    still publishes a torn state, and the watcher dispatches the stale Task.
+#    No timeout is a publication boundary; this case exists so that limit is
+#    demonstrated rather than described.
+# ===========================================================================
+write_signal ACTIVE "old-task"
+(
+  sleep 2
+  write_signal OVER_TO_CODEX "old-task"      # round 1
+  sleep 6
+  write_signal ACTIVE "old-task"
+  sleep 2
+  write_signal OVER_TO_CODEX "old-task"      # State first…
+  sleep 8                                    # …a pause LONGER than settle (3)
+  write_signal OVER_TO_CODEX "new-task"
+  sleep 5
+) &
+run_watch 26
+wait 2>/dev/null
+
+if grep -qx 'new-task' "$HITS" 2>/dev/null && [ "$(grep -cx 'old-task' "$HITS")" -eq 1 ]; then
+  fail "#5 the settle window closed a race it cannot close — if this passes, the timeout is doing more than it should be able to"
+else
+  pass "#5 a pause longer than settle DOES publish a torn state — the timeout is a mitigation, not a boundary (Codex R2-F2, documented limit)"
+fi
+
+# ===========================================================================
+# 6. R2-F2, the actual fix — scripts/signal-set.sh publishes the whole baton in
+#    ONE atomic move, so there is no torn state to sample at any pause length.
+# ===========================================================================
+SETTER="$ROOT/scripts/signal-set.sh"
+if [ ! -x "$SETTER" ]; then
+  fail "#6 scripts/signal-set.sh is missing — the atomic publication path does not exist"
+else
+  write_signal ACTIVE "old-task"
+  (
+    sleep 2
+    bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-one" >/dev/null
+    sleep 6
+    bash "$SETTER" --file "$SIG" --holder Sylvia --state ACTIVE --task "round-one" >/dev/null
+    sleep 2
+    # One indivisible publication: State and Task change together. There is no
+    # window in which the new State sits beside the old Task, at ANY pause.
+    bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-two" >/dev/null
+    sleep 6
+  ) &
+  run_watch 20
+  wait 2>/dev/null
+
+  if grep -qx 'old-task' "$HITS" 2>/dev/null; then
+    fail "#6 a stale Task was dispatched despite atomic publication: $(tr '\n' '|' <"$HITS")"
+  elif ! grep -qx 'round-two' "$HITS" 2>/dev/null; then
+    fail "#6 the second round never dispatched: $(tr '\n' '|' <"$HITS")"
+  elif [ "$(hits)" -ne 2 ]; then
+    fail "#6 expected exactly 2 dispatches, got $(hits): $(tr '\n' '|' <"$HITS")"
+  else
+    pass "#6 atomic publication never exposes a torn state, at any pause length (Codex R2-F2)"
+  fi
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: the dispatcher will not fire on a Task nobody has updated."

@@ -220,11 +220,33 @@ mk_gitleaks 1
 rc=$(run_hook "refs/heads/main $HEADSHA refs/heads/main $ZERO
 ")
 if [ "$rc" -eq 0 ]; then
-  fail "#7 a commit already on a PRIVATE remote was skipped when first pushed to origin — '--not --remotes' subtracted every remote, not the destination (Codex F1)"
-elif grep -qE '\-\-not --remotes( |$)' "$ARGV"; then
-  fail "#7 the scan subtracted ALL remotes; it must scope to the destination. argv: $(tr '\n' '|' <"$ARGV")"
+  fail "#7 a commit already on a PRIVATE remote was skipped when first pushed to origin (Codex F1)"
+elif grep -qE '\-\-not' "$ARGV"; then
+  fail "#7 a new ref subtracted SOMETHING; nothing local is trustworthy enough to subtract. argv: $(tr '\n' '|' <"$ARGV")"
 else
-  pass "#7 a new branch subtracts only the DESTINATION remote's refs (Codex F1)"
+  pass "#7 a new ref is scanned in full — no remote's refs are subtracted (Codex F1)"
+fi
+
+# ===========================================================================
+# 7b. R2-F1 — a PHANTOM tracking ref must not shrink the scan.
+#     `--remotes=<destination>` was the second attempt and is still only a
+#     namespace selector: it never asks the destination what it has, so a
+#     stale-ahead, hand-created or refspec-repurposed ref under
+#     refs/remotes/<destination>/ subtracts commits the destination need not
+#     contain. That is an UNDER-scan, the one direction that ships secrets.
+# ===========================================================================
+(
+  cd "$FIX"
+  # A phantom origin ref claiming the very commit we are about to publish.
+  git update-ref refs/remotes/origin/phantom "$HEADSHA"
+) 2>/dev/null
+mk_gitleaks 1
+rc=$(run_hook "refs/heads/main $HEADSHA refs/heads/main $ZERO
+")
+if [ "$rc" -eq 0 ]; then
+  fail "#7b a phantom refs/remotes/origin/* ref caused the outgoing commit to be subtracted — the local tracking namespace was trusted as authoritative (Codex R2-F1)"
+else
+  pass "#7b a phantom destination tracking ref does not shrink the scan (Codex R2-F1)"
 fi
 
 # ===========================================================================
@@ -241,10 +263,10 @@ printf '%s' "refs/heads/main $HEADSHA refs/heads/main $ZERO
 rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#8 pushing to a bare URL skipped the scan entirely"
-elif grep -q '\-\-remotes=' "$ARGV"; then
-  fail "#8 a bare-URL destination was treated as a named remote. argv: $(tr '\n' '|' <"$ARGV")"
+elif grep -q '\-\-remotes' "$ARGV"; then
+  fail "#8 a bare-URL destination consulted tracking refs. argv: $(tr '\n' '|' <"$ARGV")"
 else
-  pass "#8 a bare-URL destination scans all reachable history rather than trusting tracking refs (Codex F1)"
+  pass "#8 a bare-URL destination scans all reachable history (Codex F1)"
 fi
 
 echo

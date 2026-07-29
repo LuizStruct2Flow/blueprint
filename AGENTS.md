@@ -209,12 +209,20 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
    is already finished. **The dispatcher must already be running before you
    flip** — otherwise the trigger fires into the void (the #1 mistake).
 
-   Ordering is now tolerated rather than merely demanded: the watcher waits for
-   the signal to **stop changing** (`AGENT_SIGNAL_SETTLE`, default 6s) before
-   dispatching, so a two-edit write fires once, on its final content, whichever
-   order you wrote the fields in. Write `Task` first anyway — the settle window
-   is a safety net, and a long enough pause between the two edits still
-   dispatches the stale text.
+   **The supported way to hand off is `scripts/signal-set.sh`**, which composes
+   the whole baton and moves it into place in one atomic write:
+
+   ```sh
+   scripts/signal-set.sh --holder Jesko --state OVER_TO_CODEX --task-file prompt.md
+   ```
+
+   There is then no window in which the new `State` sits beside the previous
+   round's `Task`, at any pause length. Hand-editing the two rows still works
+   and the watcher additionally waits for the signal to stop changing
+   (`AGENT_SIGNAL_SETTLE`, default 6s) — but that is a **mitigation, not a
+   boundary**: pause longer than the settle value between the two edits and the
+   stale Task is dispatched anyway. `tests/signal-dispatch/` case #5
+   demonstrates that limit deliberately rather than describing it.
 
    This exists because the rule was written down here and in HANDOVER and then
    violated twice in one session by its own author — a rule you must remember

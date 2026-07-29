@@ -104,6 +104,11 @@ MANAGED_FILES=(
   # near-copies of this logic drifted apart and disagreed on legal project
   # names containing `&` or `\` (A-07 R5-F1).
   "scripts/lib/placeholders.sh"
+  # Atomic baton publication. MUST ship: hand-editing Task and State as two
+  # writes lets a poller sample the new State beside the previous round's Task
+  # and dispatch against finished work. A settle window shrinks that race; only
+  # one indivisible write removes it.
+  "scripts/signal-set.sh"
   # Reverse-substitution + contamination scan for the project→blueprint
   # direction (A-07). MUST ship: cmd_a2bp refuses to run without it, so a
   # derived project missing this file cannot back-propagate at all — which is

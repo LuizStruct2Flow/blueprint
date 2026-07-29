@@ -155,6 +155,8 @@
       "Write(/**/*.yaml)",
       "Write(/**/*.txt)",
       "Edit(/AGENT_SIGNAL.md)",
+      "Edit(/scripts/blueprint)",
+      "Write(/scripts/blueprint)",
       "Bash(bash tests/*)",
       "Bash(bash .githooks/pre-push*)",
       "Bash(sh .githooks/pre-push*)",

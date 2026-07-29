@@ -103,3 +103,10 @@ scripts/new-project.sh
 
 # Agent activity feed logs (scripts/agent-activity.sh)
 logs/
+
+# Agent scratch space — throwaway probes, debug harnesses, commit-message
+# drafts. Kept INSIDE the repo so the work is visible next to the code that
+# prompted it, rather than hidden in a system temp dir. Never committed.
+# Bootstrap ships `git archive HEAD` (A-05), so nothing here can leak into a
+# derived project.
+.scratch/

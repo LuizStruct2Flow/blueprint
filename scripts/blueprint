@@ -28,6 +28,18 @@
 
 set -euo pipefail
 
+# THE forward substitution for {{PROJECT_NAME}}, shared by pull, drift's
+# comparison and a2bp's round-trip verifier. Sourced at top level so all three
+# provably use one semantics (A-07 R5-F1) — three near-copies had drifted apart
+# and disagreed on names containing `&` or `\`.
+_bp_placeholders="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/placeholders.sh"
+if [ ! -r "$_bp_placeholders" ]; then
+  echo "error: scripts/lib/placeholders.sh is missing — cannot substitute safely" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/placeholders.sh
+. "$_bp_placeholders"
+
 # --- Canonical list of blueprint-managed files ---
 # This is the SINGLE SOURCE OF TRUTH for "which files does the blueprint
 # own". The README.md and CLAUDE.md link here; do not duplicate the list
@@ -79,6 +91,11 @@ MANAGED_FILES=(
   # derived project without it falls back to divergent paths and re-opens the
   # A-09 cross-project log contamination.
   "scripts/lib/state-dir.sh"
+  # THE forward {{PROJECT_NAME}} substitution, shared by pull, drift and a2bp's
+  # verifier. MUST ship: this CLI refuses to start without it, because three
+  # near-copies of this logic drifted apart and disagreed on legal project
+  # names containing `&` or `\` (A-07 R5-F1).
+  "scripts/lib/placeholders.sh"
   # Reverse-substitution + contamination scan for the project→blueprint
   # direction (A-07). MUST ship: cmd_a2bp refuses to run without it, so a
   # derived project missing this file cannot back-propagate at all — which is
@@ -265,14 +282,11 @@ substituted_blueprint_copy() {
   fi
   local proj_name
   proj_name=$(basename "$(pwd)")
-  local proj_upper
-  proj_upper=$(echo "$proj_name" | tr 'a-z-' 'A-Z_')
   local tmp
   tmp=$(mktemp)
-  sed \
-    -e "s/{{PROJECT_NAME_UPPER}}/${proj_upper}/g" \
-    -e "s/{{PROJECT_NAME}}/${proj_name}/g" \
-    "$bp" > "$tmp"
+  # Same primitive as pull and as a2bp's verifier (A-07 R5-F1) — drift must
+  # compare against exactly what pull would produce, not an approximation.
+  bp_substitute_stream "$bp" "$proj_name" > "$tmp"
   echo "$tmp"
 }
 
@@ -284,15 +298,11 @@ substitute_placeholders() {
   if ! _should_substitute "$f"; then return 0; fi
   local proj_name
   proj_name=$(basename "$(pwd)")
-  local proj_upper
-  proj_upper=$(echo "$proj_name" | tr 'a-z-' 'A-Z_')
   if grep -q '{{PROJECT_NAME' "$f" 2>/dev/null; then
-    local tmp
-    tmp=$(mktemp)
-    sed \
-      -e "s/{{PROJECT_NAME_UPPER}}/${proj_upper}/g" \
-      -e "s/{{PROJECT_NAME}}/${proj_name}/g" \
-      "$f" > "$tmp" && mv "$tmp" "$f"
+    # A-07 R5-F1: one shared literal primitive, never an interpolated sed.
+    # The project name is data; a name containing `&` or `\` was previously
+    # mangled here (and differently again in a2bp's verifier).
+    bp_substitute_in_place "$f" "$proj_name"
   fi
 }
 

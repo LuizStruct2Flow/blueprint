@@ -182,3 +182,170 @@ cross-provider consensus, the implementation authorised should be exactly:
 It does not authorise fork mode, general branch-based development, automatic
 merge, an offline proposal store, arbitrary remote hosting support, unrelated
 sync changes, or weakening the existing contamination scan.
+
+---
+
+## Round 2 — review of DRAFT v7
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v7 (`4574eb1`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — no implementation authorised**
+
+v7 concedes the three central findings from round 1 and moves the design in the
+right direction. Base-owned enforcement is the correct boundary, an isolated
+checkout rooted at the fetched blueprint base fixes the unrelated-history
+error, and the PR-specific obligation section is necessary. The remaining
+issues are bounded, but two are still properties that implementation must not
+invent.
+
+### R2-F1 — HIGH: base-only suppression must bind the whole approved line, not the marker token
+
+The proposed rule closes new-file suppression and a marker added to a newly
+contaminated line, but “an `a2bp-allow` marker introduced or modified by the PR
+does not suppress” still admits this variant:
+
+1. base contains `safe historical text  # a2bp-allow: known incident`;
+2. the PR changes only the text before the unchanged marker, introducing a
+   recognized contaminant;
+3. a token-level comparison says the marker was neither introduced nor
+   modified and suppresses the changed line.
+
+Make the receiver-owned oracle:
+
+> A finding is suppressed only when the **entire candidate line bytes** equal a
+> line at the corresponding base path that already carried a syntactically
+> valid, justified `a2bp-allow` marker.
+
+Exact same-path line identity is sufficient; matching the base line by line
+number is the simplest conservative rule. A moved unchanged line may false-block
+and be re-reviewed upstream, which is safer than fuzzy matching. An unchanged
+marker on an adjacent line has no effect because suppression remains exact-line.
+A wholly added file has no base line and therefore has no suppressions. Deletion
+of a base file has no candidate bytes to scan.
+
+The authoritative workflow must also obtain every executable component from
+the trusted base SHA, not merely the top-level workflow. Checking out the PR
+merge result and then sourcing `scripts/lib/contamination.sh` from that checkout
+reopens the same bypass. Use a separate trusted-tool checkout (workflow, guard,
+placeholder helper and transitive scripts pinned to the event's base SHA) and
+pass the base tree plus candidate merge tree as data. Add regressions for:
+unchanged marker plus changed prefix/suffix, adjacent marker, moved marker,
+added file containing a marker, modified justification, and a PR that weakens
+the guard/helper/workflow.
+
+One more input remains unresolved: the residual-project-name check requires the
+source project name. Git commit author, branch and tree do not establish that
+name, and v7 correctly says the PR body is display-only. Either derive the name
+from receiver-owned configuration keyed by an authenticated repository identity,
+or classify that check as advisory when no trusted mapping exists. Do not feed
+an untrusted branch-name/body value into the authoritative claim as provenance.
+
+With those qualifications, the defensible property is:
+
+> On the protected merge path, an actor outside the enumerated privileged
+> control plane cannot merge a recognized BLOCK finding unless the complete
+> finding line was already approved in the base.
+
+“Only the founder can bypass” is true only if the founder is literally the sole
+ruleset bypass actor, administrator/owner, privileged app controller and actor
+able to change the protected base. State those premises rather than treating
+“founder” as a GitHub permission primitive.
+
+### R2-F2 — HIGH: §4b states that choices are required but does not make them
+
+A PR template plus a check that parses ticked boxes proves acknowledgement, not
+ripple completion. The contributor authors both the changes and the PR body and
+can tick every box. Define, per ripple class, the evidence the check derives
+from the candidate tree or trusted GitHub state, and require the receiver-side
+reviewer to verify any judgement that cannot be automated. The check should
+fail on a missing classification/evidence record; it must not claim that a
+checked assertion is independently verified when it is not.
+
+Likewise, GitHub branch protection controls merge, not ordinary closure. A
+required status check cannot prevent a contributor with close permission from
+closing without a reason. “Closing requires a reason” must be either:
+
+- an explicitly non-enforced receiver policy, with drift/reporting surfacing
+  reasonless closes; or
+- an installed receiver-owned app/workflow that records and enforces the
+  close-reason contract, with its permissions and failure/recovery semantics.
+
+Finally, §4b still says the up-to-date policy “must be stated” without choosing
+one. Pick the actual rule: require a branch current with the latest protected
+base at merge time (or use a merge queue that tests the queued merge group),
+and require the authoritative check on that exact candidate. If merge queue is
+enabled, the workflow and required context must support `merge_group`, not only
+`pull_request`.
+
+One PR per invocation is a sound transaction boundary provided all named inputs
+are validated and staged before the push. The command must fail without
+publication if any input is invalid/blocked; it must not silently omit that file
+and open a partial PR.
+
+### R2-F3 — MEDIUM: choose one isolation primitive and complete retry identity
+
+Creating a file absent from the base is mechanically sound: create it at its
+validated managed relative path in the isolated checkout, stage that path, and
+commit it with the rest of the proposal. It receives no base suppression under
+R2-F1. The plan should explicitly require that its target is in the managed
+allowlist, reject a base directory/symlink/type collision, create parents only
+within the isolated root, and include add/delete/type changes in the proposed
+file-set validation.
+
+“Isolated worktree or scratch clone” is still an implementation-significant
+choice. A linked worktree and a fetch through the operator's blueprint
+repository mutate shared Git metadata/refs even when its working-tree bytes
+stay untouched. A scratch clone/fetch in a temporary directory avoids that and
+best matches the promised boundary. Choose it, or narrow “untouched” to
+working-tree/index bytes and specify concurrent ref/worktree ownership.
+
+The pushed-branch/no-PR recovery direction is correct but “re-running finds the
+branch” is not yet an idempotency key. A fresh UTC timestamp creates a new name.
+Define a stable invocation/proposal id, where it persists or how it is recovered
+from receiver-owned remote state, and the exact match check (destination
+repository, base SHA, head SHA/tree and ordered target set) before attaching a
+PR. A same-looking branch must never be adopted by name alone. Also specify
+remote branch collision, base movement between fetch/push/PR creation, no-force
+push, and cleanup after merge/close.
+
+### R2-F4 — MEDIUM: required-check/ruleset wording still needs the complete protected-path contract
+
+The named check, ruleset and explicit bypass list are necessary, not sufficient
+as currently phrased. Carry forward round 1's receiver controls:
+
+- require pull requests for `main`; block contributor direct pushes, force
+  pushes and deletion;
+- require the exact receiver-owned check on every merge mode and require it
+  against the current base/merge-group candidate;
+- bind the status context to the expected GitHub App/workflow so an untrusted
+  producer cannot satisfy the same name;
+- enumerate ruleset bypass actors/apps and repository administrators, and state
+  who may change the workflow, guard, ruleset and bypass set;
+- require receiver-owned review for those policy surfaces and do not let path
+  filters or skipped jobs report the required context as successful.
+
+Repository-host settings are not established by committed workflow YAML. The
+implementation/delivery evidence must include the live ruleset export/API
+inspection and a negative test using a non-bypass actor. If settings cannot be
+managed as code, document the exact manual configuration and verification
+command as an acceptance artefact.
+
+### Round-2 disposition and implementation boundary
+
+Consensus is not yet reached. The base-only-marker concept is accepted after
+strengthening it to whole-line base identity; the isolated-base construction is
+accepted after choosing/narrowing the isolation primitive and defining retry
+identity; and the PR transaction boundary is accepted. R2-F1's trusted oracle
+and R2-F2's actual obligation/up-to-date/close-reason contracts remain
+consensus-blocking.
+
+Once those bounded contracts are incorporated, the implementation boundary from
+round 1 still applies. Add only the precision already implicit there:
+trusted-base helper loading and base-line suppression comparison; receiver
+ruleset/live-configuration evidence; PR template/check or reporting needed by
+the chosen ripple and close-reason policy; and scratch-checkout/idempotency
+tests for absent files and partial push/PR recovery. There is still no
+authorisation for fork mode, automatic merge, an offline proposal store,
+general branch development, arbitrary hosting support, unrelated sync work, or
+weakening the contamination classes.

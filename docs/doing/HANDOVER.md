@@ -4,12 +4,12 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-26 (evening handover; VSCode/session restart pending).**
-> BUG-001/002/003 + audit findings fixed, four-eyes-reviewed, PUSHED; awaiting
-> founder acceptance. **A-09 is FULLY CLOSED (both halves) and pushed.** Open
-> audit findings now led by **A-07** then A-03. Two loose ends carried into the
-> next session: one unpushed commit (R12a) and a half-finished timestamp switch
-> on the agent-exchange board — see §1 and §3.
+> **Last updated: 2026-07-29.** **A-07 is DELIVERED and pushed** —
+> `origin/main` at `e605476`, nothing unpushed, Codex four-eyes CLEAN on round
+> 7. `doing/` holds no in-flight work. Everything now sits in
+> `waiting-acceptance/` behind the founder; start at its **INDEX.md**. Open
+> audit findings led by **A-03** then A-08. One loose end remains: the
+> half-finished agent-exchange timestamp switch (§3a) — founder's call.
 
 ## 0. STATUS
 
@@ -36,22 +36,42 @@
 
 ## 1. RESUME — live state + immediate action
 
-- **A-09 FULLY CLOSED, pushed `32adcf3`** (dispatcher/state-dir half at `1a876c8`,
-  sonar half + review record after). 8+ four-eyes rounds, Codex CLEAN; Codex
-  delegated each push (sandbox SSH/index.lock block) so Sylvia pushed the
-  authorized SHAs.
-- **IMMEDIATE NEXT ACTION — A-07.** `blueprint a2bp` copies a project file into
-  the blueprint with a bare `cp` — no name reverse-substitution, no contamination
-  scan. It is the vector that created BUG-002 and A-09; guarding it stops the next
-  literal-placeholder leak at source. This is the P-11 lead in the cross-stream
-  plan and the head of the "guard the pipe" order.
-- **LOOSE END 1 — push/review `205f6f7` (R12a).** Committed, unpushed, unreviewed
-  (test-only). Fold into the A-07 review batch or hand to Codex standalone.
-- **LOOSE END 2 — agent-exchange timestamp switch is HALF DONE (see §3).** The
-  board was being converted UTC→Berlin local (`+02:00`). 15/16 headers converted,
-  **uncommitted**; 1 header + the README format line remain; blocked by a
-  permissions issue. Finish or revert — founder to decide the permission approach
-  first.
+- **A-07 DELIVERED, pushed `e605476`.** `blueprint a2bp` was a bare `cp` — the
+  vector that put BUG-002 and A-09 into the blueprint. Now: placeholder
+  restoration by positional diff against the blueprint's own copy; **every**
+  staged line scanned (no exemption — an exemption list was the one place a
+  misattribution could leak); staging round-trip verified; and ONE shared
+  substitution primitive (`scripts/lib/placeholders.sh`) used by pull, drift
+  and the verifier. 41 assertions in `tests/a2bp-contamination/`, gate-wired.
+  **Codex CLEAN on round 7 after six rejections** — full trail in
+  `docs/waiting-acceptance/A-07-a2bp-guard/CODEX-REVIEW-A07.md`.
+
+  Worth carrying forward: R1–R4 were four escalating attempts to *infer* which
+  bytes came from a placeholder, all defeated by the same fact — substitution
+  destroys that information. The fix was to stop inferring and make safety not
+  depend on the guess. Two of the defects along the way were mine, introduced
+  while fixing Codex's; one would have silently reintroduced A-22.
+- **A pre-existing `pull` defect fell out of R5:** project names containing `&`
+  or `\` were silently mangled by the interpolated `sed` (`&` means "the whole
+  match" in a replacement, and bash 5.2 gave `${//}` the same rule). Fixed by
+  the shared literal primitive. Unrelated to a2bp; it had been there all along.
+- **`205f6f7` (R12a) is pushed** — it went out in the A-07 batch and Codex found
+  no regression in it.
+- **IMMEDIATE NEXT ACTION — founder acceptance.** Nothing is in flight. Start at
+  `docs/waiting-acceptance/INDEX.md`: one row per work item, what it delivered,
+  where the evidence is. **A-22 is explicitly NOT accepted** (Jesko's caveat: a
+  human who clones and pushes without ever running the feed or drift is still
+  ungated). After acceptance, the next audit finding is **A-03**, then A-08.
+- **LOOSE END — agent-exchange timestamp switch is HALF DONE (see §3a).** The
+  board was being converted UTC→Berlin local (`+02:00`). 15/16 headers
+  converted, **uncommitted**; 1 header + the README format line remain. The
+  permissions blocker that stalled it was stood down by the founder on
+  2026-07-27. Finish or revert — founder's call.
+- **KNOWN GAP, pre-existing:** `docs/way-of-working.pdf` is ~6 weeks stale
+  (`.md` 2026-07-23, `.pdf` 2026-06-15). `scripts/build-deck.sh` exits 1 here —
+  marp-cli needs chrome/edge/firefox and none is installed on this host. The
+  script reports the failure correctly; it just cannot run. Rebuild it on a
+  machine with a browser, or install one.
 - **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which

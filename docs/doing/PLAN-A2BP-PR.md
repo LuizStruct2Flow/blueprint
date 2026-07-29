@@ -1,7 +1,18 @@
 # PLAN — `a2bp` files a feature request
 
-**Status:** DRAFT v16 — reviewer judges the remaining work **convergent**. No
-code written.
+**Status:** v17 — **implementation authorised** on this revision, within the
+boundary named in review round 11. No product or architecture question remains.
+
+**v17.** Three literal closures. Transport and object construction are now
+**separate phases with separate environments** — the determinism scrub removes
+`GIT_CONFIG_GLOBAL` and system config, which is exactly where credentials live,
+so fetching and pushing under it would break authentication while building
+objects outside it would reintroduce the ambient inputs. The ref is validated
+with **`git check-ref-format`** on the complete candidate rather than a
+hand-written character list that missed leading-dot and `.lock`. And the minimum
+git version is **2.32**, named with its reason (`GIT_CONFIG_GLOBAL`) rather than
+left as "pin a version". Also: "cannot collide" is replaced by
+collision-resistant plus exact-tip, since the tip check is the actual safety.
 
 **v16.** v15's tree build omitted `read-tree`, so an unseeded index plus three
 `cacheinfo` entries would have produced a tree of exactly three files — **the
@@ -275,17 +286,32 @@ No `push` alias.
   truncated id is a birthday problem against a namespace that persists — cheap
   to avoid, and the branch name is machine-read far more often than typed.
 
-  **The project name is validated as a ref component, separately from being
-  validated as a path component.** The two rule sets differ: git refs reject
-  `..`, `~`, `^`, `:`, `?`, `*`, `[`, backslash, control characters, leading or
-  trailing `/`, trailing `.`, and the sequence `@{`. A directory name that is
-  perfectly legal on disk can be an invalid ref, and v15 assumed one implied the
-  other. If the name fails ref validation the request is **refused with the
-  reason**, not silently mangled into something valid — a slug that quietly
-  differs from the project's real name breaks the provenance the ref exists to
-  carry.
+  **The COMPLETE candidate ref is validated with `git check-ref-format`**, not
+  against a hand-written character list. v16 enumerated the rules from memory
+  and missed at least the leading-dot and `.lock`-suffix cases; git already
+  knows them and will keep knowing them as they change:
+
+  ```sh
+  git check-ref-format --branch "a2bp/<project>/<digest64>"   # whole candidate
+  ```
+
+  Validating the *whole* ref matters — a project name can be individually fine
+  and still produce an invalid ref in composition. Failure **refuses with the
+  reason**; it does not slug the name into something valid, because a slug that
+  quietly differs from the project's real name breaks the provenance the ref
+  exists to carry. Boundary tests: leading `.`, a `.lock` suffix, `@{`, `..`,
+  a trailing `.`, control characters, and a name that is legal alone but invalid
+  once composed.
 
   Final ref: `refs/heads/a2bp/<validated-project>/<digest64>`.
+
+  **On collisions, stated accurately.** A full SHA-256 digest is
+  **collision-resistant**, not collision-*proof*, and v16 said two requests
+  "cannot collide". The actual safety is not the width of the id: it is the
+  **exact-tip comparison** on adoption. Even given an astronomically improbable
+  digest collision, the tips would differ and the push would refuse rather than
+  overwrite. The id makes accidental reuse vanishingly rare; the tip check is
+  what makes it safe.
 
 - **The commit must be DETERMINISTIC, or exact-tip adoption never matches.**
   v12 specified a content key and forgot that **git hashes the commit, not the
@@ -390,6 +416,24 @@ No `push` alias.
   2. `git init --bare` there; add the remote from `blueprint_remote`. A bare
      repo has no working tree to be filtered through and no hooks to run.
 
+     **Two phases, two environments** (R11-F3) — and this is a conflict v16
+     did not see. The scrub below removes `GIT_CONFIG_GLOBAL` and system config,
+     which is exactly where **credentials** live: helpers, `insteadOf`, proxy
+     settings. Fetching and pushing under the scrub would either fail to
+     authenticate or force the operator to re-supply credentials; running object
+     construction *without* the scrub reintroduces the ambient inputs the scrub
+     exists to remove. So:
+
+     | Phase | Environment |
+     |---|---|
+     | **Transport** — `fetch`, `ls-remote`, `push` | The operator's normal environment. Credentials, `insteadOf`, proxies all work. Determinism is irrelevant here: these move bytes, they do not create objects. |
+     | **Object construction** — `hash-object`, `read-tree`, `update-index`, `write-tree`, `commit-tree` | Fully scrubbed, per the table below. No network, no credentials needed. |
+
+     The regression must inject hostile config **and redirection env**
+     (`insteadOf`, `url.*.pushInsteadOf`, `http.proxy`, `GIT_CONFIG_COUNT`
+     tuples) and prove the constructed SHA is unchanged while transport still
+     resolves the intended remote.
+
      **Bare is not isolated on its own** (R10-F1). The init still inherits:
 
      | Ambient input | Scrub |
@@ -400,8 +444,21 @@ No `push` alias.
      | Locale | `LC_ALL=C` — date and message rendering must not follow the operator's locale |
      | Date interpretation | Pass the base date in **raw** format (`<epoch> <±hhmm>`), which git parses unambiguously, rather than a formatted string |
 
-     Also pin a **minimum git version** and refuse below it, since plumbing
-     flags and defaults have moved. A **hostile-config test** proves the scrub:
+     **Minimum git version: 2.32**, refused below it — named with the reason,
+     since v16 said "pin a minimum version" without pinning one, which is the
+     same shape as "a stated digest" that states nothing. It is set by the two
+     newest things the build needs:
+
+     | Requirement | Since |
+     |---|---|
+     | `GIT_CONFIG_GLOBAL` (scrubbing global config without editing the operator's files) | **2.32** |
+     | `--object-format` on `init` | 2.29 |
+     | `update-index --cacheinfo <mode>,<sha>,<path>` comma form | 2.0 |
+
+     Boundary tests: refuse cleanly on a version below the floor with a message
+     naming the found and required versions, and pass on the floor itself.
+
+     A **hostile-config test** proves the scrub:
      run the build with `core.autocrlf=true`, a clean filter registered, a
      `commit.gpgsign=true` global, a non-C locale and `init.defaultObjectFormat
      =sha256` set, and require a byte-identical commit SHA to a clean run.

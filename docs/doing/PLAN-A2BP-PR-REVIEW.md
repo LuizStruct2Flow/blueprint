@@ -472,3 +472,142 @@ Still excluded: fork mode, automatic merge, an offline proposal store, general
 development branches, arbitrary hosting, unrelated sync changes, and weakening
 any contamination class beyond the explicitly documented source-identity
 degradation above.
+
+---
+
+## Round 4 — review of DRAFT v9
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v9
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — implementation is not yet authorised**
+
+v9 makes the important security consequence explicit: without a receiver-owned
+source-project mapping, CI cannot authoritatively run the residual-project-name
+class. That is an honest bounded degradation for the same-owner deployment.
+The remaining three file-only classes still move from a contributor-skippable
+local hook to receiver-owned enforcement, so the design retains substantial
+value.
+
+Two consensus-blocking contradictions remain, and the new ripple record is not
+yet safe as a required check.
+
+### R4-F1 — HIGH: mutable PR-body evidence is not bound to the required-check result
+
+The YAML shape is parseable, but putting it in the PR body does not make it an
+implementable required-check contract. Required checks are associated with the
+candidate commit/check suite; the PR body can be edited without changing the
+head SHA. A successful ripple check can therefore become stale after a body
+edit unless a receiver-owned mechanism guarantees re-evaluation and prevents a
+merge racing or bypassing that re-evaluation. The plan names neither such a
+mechanism nor its event/race semantics.
+
+Prefer evidence committed on the proposal branch (a canonical manifest or
+commit-bound metadata), so the evidence, changed-file set and check result share
+one SHA. If the body is retained, specify a receiver-owned GitHub App/workflow
+that runs on body edits, invalidates the prior result, evaluates the live body
+at merge time, and prove the no-stale-success property; ordinary prose plus a
+`pull_request: edited` trigger is not enough by itself.
+
+The schema also lets the contributor choose `class: B`, but the described
+trusted table maps **class to ripple paths** only. It cannot perform round 3's
+step “require all mechanically implied classes” without a trusted
+**changed-input-pattern to class(es)** mapping. Define:
+
+- whether `class` is singular or a set (round 3 required selected class(es));
+- canonical path/glob semantics and the exact base-pinned policy file;
+- the trusted input-path→class mapping and class→required/conditional-path
+  mapping;
+- strict parsing rules (exactly one record, unknown/duplicate keys rejected);
+- whether `touched` must equal the relevant paths in Git's changed-file set;
+- waiver uniqueness, non-empty reasons, and handling of rename/delete/type
+  changes.
+
+Receiver review still judges waiver truth and edit quality. With commit binding
+and those deterministic mappings, the check can enforce the narrower claim:
+every mechanically implied ripple is either present in the candidate diff or
+explicitly dispositioned.
+
+### R4-F2 — HIGH: the security claim still contradicts the admitted degradation
+
+Section 2.3 still calls the server-side guard “authoritative, unbypassable.”
+Section 1.1 correctly says that a contributor can remove the local scan and get
+a residual project name past CI. Both cannot describe the same guard. Replace
+§2.3 with the scoped claim: receiver CI authoritatively enforces the three
+file-only classes on the protected merge path; residual-name scanning is local,
+contributor-supplied and advisory in this phase.
+
+The end of §1.1 likewise says “the guard is bypassable only” by privileged
+receiver actors. Qualify that statement to the receiver-enforced classes.
+Also replace “the project name is known and trustworthy” locally with “known to
+the local tool”: contributor-controlled execution is not a security trust
+boundary, as the next paragraph itself demonstrates.
+
+The degradation does not undermine more than v9 admits once those claims are
+scoped. It does mean CI cannot promise genericization with respect to project
+identity; it promises only the three enumerated contamination classes. The
+same-owner boundary is an accepted deployment assumption, not a technical
+closure of that gap.
+
+### R4-F3 — MEDIUM: §3.3b is still a summary, not the requested complete contract
+
+Round 3's inventory findings were not all incorporated:
+
+- `.blueprint-source` still has no backward-compatible schema/migration for
+  remote, base and contribution mode;
+- the ruleset row omits explicit PR-only `main`, direct/force-push/deletion
+  controls, expected app/status identity, administrator/change-control actors,
+  skipped/path-filter behaviour, merge-group coverage, live export and a
+  non-bypass negative verification;
+- absent-file directory/symlink/type-collision rejection and isolated parent
+  creation are absent;
+- `prs`/`drift` policy for drafts, closed PRs, bot PRs and API/auth failures is
+  absent;
+- the PR template, policy tables, checker implementation and tests are not
+  named as concrete existing or deliberately-new artefacts.
+
+“Merge queue if available” is also weaker than an implementation choice. Name
+the actual current-base mechanism and its required workflow event/check
+identity. Similarly, abandoned-branch cleanup needs a retention threshold,
+owner/action, treatment of branches with closed PRs versus no PR, and
+no-force/no-delete safety checks; saying “a policy” leaves implementation to
+invent the policy.
+
+### R4-F4 — MEDIUM: stable publication identity remains underspecified
+
+The timestamp contradiction is fixed, but round 3 asked for one canonical key
+including destination repository, target base SHA, ordered target paths and
+proposed content/tree. Section 2.2 currently names only paths and staged
+content, while §2.1b says “content and target” without defining target.
+
+Include destination repository identity and base SHA. Otherwise the same
+proposal after base movement reuses a branch whose rebuilt commit necessarily
+has a different parent, then refuses forever on the remote-tip mismatch instead
+of obtaining a new proposal identity. Specify canonical encoding, digest
+algorithm/length, and collision refusal. Use that exact key consistently for
+branch naming, retry lookup and remote-tip verification.
+
+One smaller terminology contradiction also survived the grep pass: §2.1b
+chooses a scratch **clone**, then says “The scratch worktree is removed.”
+Make the latter “scratch clone/directory”; a linked worktree is explicitly not
+the selected primitive.
+
+### Round-4 disposition and implementation boundary
+
+Consensus is close but not reached. The degraded contamination model is
+accepted once all operative claims are scoped to its three receiver-enforced
+classes. The implementation boundary remains:
+
+- PR-based, same-owner branch-mode `a2bp`;
+- scratch-clone construction and commit-bound idempotent publication/recovery;
+- receiver-owned enforcement of host paths, per-project state dirs and emails,
+  with whole-line base-owned suppressions; local/advisory residual-name scan;
+- commit-bound deterministic ripple evidence plus receiver review of
+  judgements;
+- `prs`/drift discovery, concrete repository policy/configuration evidence,
+  complete cleanup, tests and synchronized docs.
+
+Still excluded: fork mode, automatic merge, an offline proposal store,
+arbitrary hosting, general development branches, unrelated sync work, or
+silently restoring an authoritative residual-name claim without a
+receiver-owned identity mapping.

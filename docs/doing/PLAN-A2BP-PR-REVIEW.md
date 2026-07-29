@@ -611,3 +611,158 @@ Still excluded: fork mode, automatic merge, an offline proposal store,
 arbitrary hosting, general development branches, unrelated sync work, or
 silently restoring an authoritative residual-name claim without a
 receiver-owned identity mapping.
+
+---
+
+## Round 5 — review of DRAFT v10
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v10 (`49a00d8`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — implementation is not yet authorised**
+
+v10 fixes the two round-4 contradictions it set out to fix. A grep-driven
+inventory confirms that every operative contamination-class claim now excludes
+the residual-project-name scan or explicitly scopes receiver enforcement to
+host paths, per-project state directories and emails. The local project name is
+correctly described as known but not receiver-trusted. Moving ripple evidence
+from mutable PR prose into the proposal tree also closes the original
+body-edit-without-rerun defect.
+
+That move does not by itself define a safe merge contract, however, and two
+earlier design requirements remain unincorporated.
+
+### R5-F1 — HIGH: commit binding is sound only if the checked evidence reaches the merge unchanged
+
+The manifest and changed-file set now share the proposal SHA, so editing either
+invalidates the check. But §4b leaves whether `.a2bp-ripples.yml` is “removed by
+the merge or kept as record” to implementation. An ordinary GitHub merge does
+not selectively remove a file from the checked head. Removing it requires a new
+commit, merge-queue transformation or post-check automation, and each creates a
+new candidate tree that must itself receive the required check. Otherwise the
+design has moved the stale-evidence gap from PR-body editing to merge-time tree
+mutation.
+
+Choose before implementation:
+
+- retain the manifest in the merged tree under a collision-free,
+  repository-defined record path; or
+- generate a new commit/merge-group candidate without it and require both
+  checks on that exact candidate SHA before merge.
+
+The ruleset must reject a merge whose final candidate tree is not the tree (or
+merge-group SHA) that passed. A post-merge deletion is too late: it may keep an
+audit trail in history, but it does not make the unchecked merge atomic. Also
+define manifest namespace/collision behaviour for concurrent PRs; one fixed
+root `.a2bp-ripples.yml` makes unrelated proposals conflict and, if retained,
+prevents the next proposal from using the same evidence path cleanly.
+
+### R5-F2 — HIGH: the deterministic ripple policy cannot be deferred wholesale to implementation
+
+The undefined list contains both syntax details and product policy. The trusted
+input-pattern→class mapping, class multiplicity/composition, path/glob matching,
+the meaning of `touched`, waiver eligibility, and rename/delete/type-change
+semantics determine what changes the required check permits. They are the gate,
+not incidental implementation choices. Consensus cannot authorise a developer
+to invent them while coding.
+
+The plan must choose a minimal normative contract first:
+
+1. base-owned policy maps canonical changed paths to a **set** of implied
+   classes; all matches union rather than one declaration winning;
+2. each class maps to unconditional and dispositionable ripple requirements;
+3. changed paths come from a base-to-candidate diff with explicit status
+   semantics, including both old and new paths for rename and a declared policy
+   for deletions and type changes;
+4. `touched` is either removed as redundant or defined exactly against that
+   canonical diff set;
+5. waivers may cover only dispositionable requirements, are unique per
+   requirement, carry a non-blank reason, and cannot waive an implied class or
+   the evidence file itself; and
+6. the manifest and policy are strict, versioned, fail-closed formats:
+   one record, known keys/types only, no YAML aliases/custom tags/duplicate
+   keys, canonical repository-relative paths, and unknown policy/schema
+   versions rejected.
+
+Exact serialization/library choice, diagnostic wording and internal data
+structures are implementation detail. The allow/deny semantics above are not.
+
+### R5-F3 — HIGH: the publication identity requirement from round 4 is still absent
+
+Round 4 required one canonical retry key containing destination repository
+identity, target base SHA, ordered target paths and proposed content/tree, plus
+encoding, digest algorithm/length and collision refusal. v10 still says only
+“content and target” in §2.1b and “target paths and staged content” in §2.2.
+It never defines target, omits destination repository and base SHA, and does
+not choose a canonical encoding or digest.
+
+This remains consensus-blocking. Base movement necessarily changes the parent
+and proposal commit. Without base SHA in the key, the retry finds the old ref
+and permanently refuses on tip mismatch rather than creating the proposal for
+the new base. Define the key once and use it identically for branch naming,
+retry lookup and exact remote-tip verification.
+
+### R5-F4 — MEDIUM: residual-name scoping is complete, but the bypass actor claim is not
+
+The contamination-class scope is now consistent. The authority sentence is
+still too absolute:
+
+- §1.1 says the three checks are bypassable only by someone who can change the
+  base or ruleset, “which is the founder”;
+- §2.3 repeats only base/ruleset actors.
+
+Those statements omit configured ruleset bypass actors, administrators,
+privileged apps and any actor able to satisfy or alter the required-check
+identity—the exact actors §1.1 and §3.3b say must be inventoried live. Until
+that verification has run, the defensible statement is conditional: actors
+outside the **verified enumerated privileged control plane** cannot merge a
+recognized finding in the three receiver-enforced classes. “Which is the
+founder” becomes true only if the live negative test and configuration export
+prove the founder is the sole member.
+
+### R5-F5 — MEDIUM: §3.3b names categories but still delegates operative choices
+
+The new rows are a useful acceptance inventory, not yet the “full contract”
+claimed by the v10 note:
+
+- “merge queue if available” still does not choose current-base enforcement or
+  name the `pull_request`/`merge_group` check identity;
+- abandoned-branch cleanup still has no retention threshold, owner/action,
+  closed-PR versus no-PR treatment, or safe refusal rules;
+- absent-file collision says “containment rule” but does not choose the rule
+  or explicitly require directory/symlink/type collision rejection and
+  isolated-root parent creation;
+- draft/closed/bot/API behaviour is named but not defined;
+- exact files for the PR template, base policy, evidence checker, ruleset
+  export/acceptance evidence and their tests remain unnamed;
+- `.blueprint-source` asks for a version marker/migration but still does not
+  specify the versioned fields (`local_path`, repository identity, base,
+  contribution mode), legacy interpretation, atomic rewrite or unsupported
+  remote/mode failure.
+
+These choices can be deliberately simple, but they affect safety, compatibility
+and operational ownership and therefore belong in the agreed design. Concrete
+workflow/checker filenames are inventory detail; merge event identity,
+migration semantics, collision policy and failure behaviour are design.
+
+### Round-5 disposition and boundary
+
+This round is still finding design defects, not merely code-shape details:
+final-tree check binding, gate allow/deny semantics, retry identity and
+configuration/failure policy. Do not start implementation yet.
+
+The recommendation is **not** to descope the PR architecture. Descope the
+first implementation to the smallest enforceable slice: same-owner branch
+mode; one versioned `.blueprint-source` GitHub schema; one canonical
+base-SHA-bound publication key; retained, namespaced commit evidence; strict
+exact-path ripple policy (add globs later); no bot auto-merge; explicit
+fail-closed API behaviour; and manual abandoned-branch cleanup reported by
+`blueprint prs`. That removes merge-time evidence deletion, glob ambiguity,
+automation identity and cleanup mutation from v1 while preserving the security
+property worth building.
+
+Once those bounded choices are written into the plan, implementation may decide
+libraries, functions, diagnostic text and file-internal structure. The
+previously agreed exclusions remain unchanged: fork mode, automatic merge,
+offline persistence, arbitrary hosting, general development branches and an
+authoritative residual-name scan.

@@ -4,17 +4,17 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-29 (late).** **A-07 DELIVERED and pushed** (four-eyes
-> CLEAN on round 7). **A-03 is IN FLIGHT**: its first fix reached `origin` as
-> `1c4dd4c` *before* four-eyes, the review then found a real hole in it, and the
-> corrective range is **committed but UNPUSHED** pending a clean round. The
-> agent-exchange timestamp switch is **done and committed**. `origin/main` is at
-> `1c4dd4c`. Next after A-03: **A-08**.
+> **Last updated: 2026-07-29 (end of session).** **A-07 and A-03 are both
+> DELIVERED and pushed**, four-eyes CLEAN (round 7 and round 11 respectively).
+> `origin/main` is at **`b89e7a4`**; nothing unpushed. `doing/` holds no
+> in-flight work. Everything is behind the founder now — start at
+> [`waiting-acceptance/INDEX.md`](../waiting-acceptance/INDEX.md). Next audit
+> finding: **A-08**.
 
 ## 0. STATUS
 
 - **Blueprint self-audit + BUG-001: PUSHED, awaiting acceptance.** `origin/main`
-  is at **`1c4dd4c`**. Delivered: **BUG-001** (fork-bomb process leak in the activity
+  is at **`b89e7a4`**. Delivered: **BUG-001** (fork-bomb process leak in the activity
   feed — a host was pegged at load 175 for 2.7 days by ~17,400 leaked processes),
   **BUG-002** (linkedin-watcher contamination in a generic file), **BUG-003**
   (the security gate could not tell a scanner *failure* from a scanner
@@ -63,20 +63,26 @@
   the shared literal primitive. Unrelated to a2bp; it had been there all along.
 - **`205f6f7` (R12a) is pushed** — it went out in the A-07 batch and Codex found
   no regression in it.
-- **IMMEDIATE NEXT ACTION — A-03 is mid-review, committed but UNPUSHED.** The
-  secret gate had never run: `gitleaks protect --staged` scans an index that is
-  empty at pre-push time. The first fix went to `origin` as `1c4dd4c` **before
-  four-eyes**, and the review then found a real hole in it (the new-ref
-  selector subtracted every remote, so a commit already on a private mirror was
-  skipped on first disclosure to a public one). Six rounds later: a new ref is
-  scanned in FULL, bounded by one per-push deadline with a required
-  `timeout`/`gtimeout` provider, and an unfinished scan blocks as INCOMPLETE.
-  Trail: `docs/doing/A-03-secret-gate/CODEX-REVIEW-A03.md`.
-  **Push only after a clean round.** Codex's R6 read: the security
-  implementation has converged; remaining items are record accuracy, not design.
-- **Also unpushed in the same range:** the dispatch settle window +
-  `scripts/signal-set.sh` (atomic baton publication), and the README contract
-  narrowing that was reported fixed but never committed.
+- **A-03 DELIVERED, pushed `b89e7a4`, four-eyes CLEAN on round 11.** The secret
+  gate had never run: `gitleaks protect --staged` scans an index that is empty
+  at pre-push time. Measured with a real secret in the outgoing commit — 0
+  commits scanned vs 1 commit and a caught leak. Now scans `remote..local` per
+  ref; a **new ref is scanned in full** because nothing local is trustworthy
+  enough to subtract (`--not --remotes` and `--not --remotes=<dest>` were both
+  tried and rejected in review), bounded by **one per-push deadline** with a
+  required `timeout`/`gtimeout` provider, and an unfinished scan blocks as
+  INCOMPLETE. Trail:
+  `docs/waiting-acceptance/A-03-secret-gate/CODEX-REVIEW-A03.md`.
+
+  **The first fix reached `origin` as `1c4dd4c` BEFORE four-eyes, and the
+  review then found a real hole in it.** That is the cost of pushing ahead of
+  the gate, recorded so it is not repeated.
+- **Shipped in the same range:** atomic baton publication
+  (`scripts/signal-set.sh`) + the dispatch settle window, and the README
+  contract narrowing that had been reported fixed but never committed.
+- **IMMEDIATE NEXT ACTION — founder acceptance.** Nothing is in flight. Start at
+  [`waiting-acceptance/INDEX.md`](../waiting-acceptance/INDEX.md). After that,
+  the next audit finding is **A-08**.
 - **Founder acceptance still owed** on everything in
   `docs/waiting-acceptance/INDEX.md`. **A-22 is explicitly NOT accepted**
   (Jesko's caveat: a human who clones and pushes without ever running the feed
@@ -112,9 +118,9 @@
   declared destination (GitHub's per-user run notifications aside).
 - **The founder-agreed "guard the pipe" order, current state:**
   - **A-07** — DONE, pushed, four-eyes CLEAN on round 7.
-  - **A-03** — DONE in substance, **corrective range UNPUSHED** pending a clean
-    round. See §1 above for the full state; it is not repeated here so this list
-    cannot drift away from it again.
+  - **A-03** — DONE, pushed `b89e7a4`, four-eyes CLEAN on round 11. See §1
+    above for the full state; it is not repeated here so this list cannot drift
+    away from it again.
   - **A-08** — **NEXT.** `LWA_FEED_*` env vars in `scripts/log-activity.sh`:
     BUG-002's contamination in env-var-namespace form, still present.
   - **A-09** — DONE. Dispatcher/state-dir half pushed `1a876c8`; sonar-key half

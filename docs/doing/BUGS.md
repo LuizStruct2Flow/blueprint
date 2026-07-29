@@ -23,11 +23,15 @@ What is genuinely in flight right now:
 
 | Item | State |
 |---|---|
-| **A-03 follow-up** — secret-gate multi-remote hole | The first A-03 fix was **pushed as `1c4dd4c` BEFORE four-eyes**, and the review then found a real hole in it (F1: `--not --remotes` subtracts *every* remote, so a commit already on a private mirror is skipped when first disclosed to a public one). Fix + regressions committed, **unpushed**, awaiting the next review round. Record: [`A-03-secret-gate/`](A-03-secret-gate/). |
-| **Dispatch settle window** | Watcher waits for the signal to stop changing before dispatching. First cut (refuse identical Task) was rejected by four-eyes and replaced. Committed, unpushed. |
+| _(nothing in flight)_ | Everything is pushed and behind the founder. |
 
-Next after those: **A-08** (`LWA_FEED_*` env vars — BUG-002's contamination in
-namespace form), in [BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md).
+**NEXT: A-08** (`LWA_FEED_*` env vars in `scripts/log-activity.sh` — BUG-002's
+contamination in env-var-namespace form), in
+[BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md).
 
-**A-07** was pushed on 2026-07-29 after seven four-eyes rounds and moved to
-[`waiting-acceptance/A-07-a2bp-guard/`](../waiting-acceptance/A-07-a2bp-guard/).
+Both delivered on 2026-07-29 and moved to `waiting-acceptance/`:
+**A-07** after seven four-eyes rounds
+([A-07-a2bp-guard/](../waiting-acceptance/A-07-a2bp-guard/)) and **A-03** after
+eleven ([A-03-secret-gate/](../waiting-acceptance/A-03-secret-gate/)). A-03's
+first cut was pushed before four-eyes and the review then found a real hole in
+it — recorded there rather than smoothed over.

@@ -603,3 +603,85 @@ substitution-exemption, template-file, or bootstrap routing regression was
 found. The shared primitive still needs to be non-recursive across its two
 tokens and must either preserve arbitrary bytes or reject unsupported input
 before changing it.
+
+## Round 7 — re-review of `b467271`
+
+**Date:** 2026-07-29
+**Commits reviewed:** `205f6f7`, `2787332`, `63fac8e`, `5d3ff5e`, `d3e21a2`,
+`4ac7b01`, `fd57648`, `5a112bd`, `230eea9`, `c8f8987`, `b467271`
+**Verdict:** **CLEAN — do not push (per handoff instruction)**
+
+Both Round 6 findings are closed.
+
+### R6-F1 closure — the composition is genuinely one-pass
+
+`bp_substitute_line` now chooses the source token with the earliest prefix,
+appends that token's replacement, and advances only through the unconsumed
+input. Replacement bytes never return to `s`, so a name containing a complete
+token or a token fragment cannot create another match. Adjacent lower/upper
+tokens resolve in source order; incomplete and overlap-shaped suffixes remain
+literal; direct line-helper substitution also handles an empty replacement.
+The public stream rejects an empty project name deliberately, which is
+consistent with its stated filesystem-basename contract.
+
+`${PWD##*/}` preserves basename bytes without a command-substitution boundary,
+and `bp_validate_project_name` correctly uses `$'\n'` to reject the
+line-unrepresentable case. The rejection reaches pull, drift, and a2bp through
+the shared primitive; it does not silently normalize the name.
+
+### R6-F2 closure — binary refusal and newline preservation are sound
+
+`bp_contains_nul` distinguishes both boundary files correctly:
+
+- an all-NUL file becomes empty on the `tr` side and differs from the source,
+  so the predicate reports NUL;
+- an empty file compares equal to the empty transformed stream, so it reports
+  no NUL.
+
+The preflight occurs before any output from `bp_substitute_stream`.
+`bp_substitute_in_place` writes only to a temporary file and moves it over the
+target only after a successful stream, so NUL refusal leaves the target
+byte-identical.
+
+The line loop preserves empty input, a single unterminated line, a terminated
+line, multiple empty lines (including files made only of newlines), and mixed
+terminated/unterminated content. Its separator-before-subsequent-line scheme
+plus the final-byte check emits exactly the source newline topology. No
+whole-file array remains.
+
+### Missing-helper and R12a fixture review
+
+The missing-placeholder-helper stubs cover both substitution entry points used
+by the CLI. `drift` reaches `arm_gate` first and then fails loudly at the first
+substitution; it cannot report a clean no-op. Any `pull` or a2bp path that needs
+forward substitution likewise reaches a stubbed operation (directly or through
+the contamination helper) and fails rather than copying unverified output.
+Commands and exempt-file paths that require no substitution remain
+intentionally usable.
+
+The gate-arming fixture's `git ls-tree` enumeration copies every current
+`scripts/lib/` file from `HEAD`, so adding another top-level shared helper no
+longer creates a selectively incomplete CLI fixture. The fixture remains
+commit-faithful and its positive-control Git configuration check still prevents
+vacuous gate assertions. No R12a regression was found.
+
+### Round 7 checks run
+
+- `bash tests/a2bp-contamination/test.sh` — PASS (41 assertions)
+- `bash tests/gate-arming/test.sh` — PASS (11 cases)
+- `bash tests/marker-merge/test.sh` — PASS
+- `bash -n scripts/blueprint scripts/lib/placeholders.sh
+  scripts/lib/contamination.sh tests/a2bp-contamination/test.sh
+  tests/gate-arming/test.sh` — PASS
+- `git diff --check` — PASS before this review-note edit
+- custom literal probes — adjacent tokens, incomplete/overlap-shaped tokens,
+  token fragments spanning emitted replacement/input, and empty replacement:
+  PASS
+- custom byte probes — all-NUL detected; empty file not detected as NUL: PASS
+- custom stream/cmp matrix — empty, one/two newline-only, single unterminated
+  text/token line, and mixed final-newline cases: byte-identical PASS
+- isolated missing-helper CLI probe — `files` rc 0; `drift` rc 1 with explicit
+  missing-helper error; `core.hooksPath=.githooks` already armed: PASS
+
+No correctness, safety, fixture, or DoD defect was found in `b467271`. Round 7
+is clean.

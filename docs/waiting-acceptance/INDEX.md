@@ -17,6 +17,7 @@ open them only if you want the evidence behind a claim.
 | **A-22** — the pre-push gate was never armed | `core.hooksPath` is repo-local, so a fresh clone had no gate — 12 commits went out ungated. Now armed by `arm_gate` from two paths that already run at wake. | [A-22-gate-arming/](A-22-gate-arming/) — 8 rounds | **NOT accepted** — Jesko's caveat: residual gap for a human who clones and pushes without ever running the feed or drift |
 | **A-09** — cross-project log contamination | A redcare Codex verdict surfaced live in *this* repo's feed. Feed + all dispatchers now derive one per-project state dir. Sonar key half fixed too. | [A-09-state-dir/](A-09-state-dir/) | Awaiting founder |
 | **BUG-002** — linkedin-watcher name in a generic file | Reopened once (the Gemini half was still literal), fixed with A-09, re-pushed. | [A-09-state-dir/](A-09-state-dir/) | Awaiting founder |
+| **A-07** — the `a2bp` pipe was unguarded | `blueprint a2bp` was a bare `cp` — the vector that put BUG-002 and A-09 into the blueprint. Now restores `{{PROJECT_NAME}}` by positional diff, scans **every** staged line, and round-trip verifies staging. Also closed a **pre-existing `pull` bug**: project names containing `&` or `\` were silently mangled. | [A-07-a2bp-guard/](A-07-a2bp-guard/) — **7 review rounds** | Awaiting founder |
 
 ## The two QA verdicts
 

@@ -23,4 +23,9 @@ What is genuinely in flight right now:
 
 | Item | State |
 |---|---|
-| **A-07** — `blueprint a2bp` contamination guard | Implemented, committed, **UNPUSHED** (5 commits). Four-eyes R1/R2/R3 all returned CHANGES-REQUESTED; all addressed. R4 pending. Trail: [CODEX-REVIEW-A07.md](CODEX-REVIEW-A07.md). |
+| _(nothing in flight)_ | A-07 was pushed on 2026-07-29 after seven four-eyes rounds and moved to [`waiting-acceptance/A-07-a2bp-guard/`](../waiting-acceptance/A-07-a2bp-guard/). |
+
+Next in the founder-agreed "guard the pipe" order: **A-03** (`gitleaks
+protect --staged` scans an empty index at pre-push time), then **A-08**
+(`LWA_FEED_*` env vars — BUG-002's contamination in namespace form). Both are
+in [BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md).

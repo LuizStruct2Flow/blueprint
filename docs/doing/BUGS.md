@@ -23,15 +23,17 @@ What is genuinely in flight right now:
 
 | Item | State |
 |---|---|
-| _(nothing in flight)_ | Everything is pushed and behind the founder. |
+| **A-22 — REOPENED 2026-07-29** | QA-2 rejected it with a live reproduction: a fresh clone, a real high-entropy token committed, `origin` redirected to a throwaway bare repo, and a real push executed without ever running the feed or drift — `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`. `arm_gate` works; the acceptance boundary was never "the arming paths work" but "a human cannot clone and push without invoking them". **Not closable by another local hook** — a pre-push hook is repo-local, absent on a clone, and defeated by `--no-verify`. Needs a founder trade on server-side enforcement (**A-37**): required checks do block direct pushes to a protected branch, but a SHA must exist on some ref for checks to run, and this repo is trunk-based with no branches. Folder: [A-22-gate-arming/](A-22-gate-arming/). |
 
-**NEXT: A-08** (`LWA_FEED_*` env vars in `scripts/log-activity.sh` — BUG-002's
-contamination in env-var-namespace form), in
+**A-22 needs a decision before it needs code.** Do not attempt another local
+mechanism — that is what the rejection rules out. The open question is whether
+the founder accepts branch-based or protected-branch enforcement, or accepts
+the residual risk explicitly.
+
+**NEXT after that: A-08** (`LWA_FEED_*` env vars in `scripts/log-activity.sh` —
+BUG-002's contamination in env-var-namespace form), in
 [BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md).
 
-Both delivered on 2026-07-29 and moved to `waiting-acceptance/`:
-**A-07** after seven four-eyes rounds
-([A-07-a2bp-guard/](../waiting-acceptance/A-07-a2bp-guard/)) and **A-03** after
-eleven ([A-03-secret-gate/](../waiting-acceptance/A-03-secret-gate/)). A-03's
-first cut was pushed before four-eyes and the review then found a real hole in
-it — recorded there rather than smoothed over.
+Everything else delivered on 2026-07-29 is ACCEPTED and in
+[`../done/`](../done/) — eight items, verdicts and evidence in
+[`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).

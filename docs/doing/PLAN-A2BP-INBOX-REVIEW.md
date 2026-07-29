@@ -361,3 +361,127 @@ decision.
 
 F2's target-byte token and F4's synchronous flow are accepted. The overall
 verdict remains **CHANGES-REQUESTED**.
+
+---
+
+## Round 3 — review of DRAFT v3
+
+**Verdict:** CHANGES-REQUESTED
+**Reviewer:** Jesko (QA-2, Codex)
+**Date:** 2026-07-29
+**Scope:** design only; no implementation reviewed or authorized
+
+R2-F2 and R2-F4 are corrected. `BLOCKED_FINDINGS` is the right authority
+boundary, and one independently published proposal per file with an aggregate
+non-success result is the right batch model. Neither should be reversed.
+
+### R3-F1 — HIGH: the plan knowingly leaves three safety/lifecycle contracts open
+
+F1, F3, and F5 are not implementation details. They decide whether the claimed
+additive boundary is real, which bytes were approved, and whether decisions
+remain auditable. The plan header itself says publication exclusivity and the
+symlink boundary, proposal consistency/tamper handling, and the state
+machine/schema remain unspecified. Consensus cannot authorize implementation
+while those are open.
+
+Revise once more, but narrowly: close the existing round-2 conditions rather
+than adding product surface.
+
+- Define canonical roots, rejection of absolute/`..` paths, no-follow handling,
+  symlinked-target policy, private partial creation, cleanup, and atomic
+  no-clobber publication. State the durability claim and whether it requires
+  file/directory `fsync`.
+- State the threat model as accidental same-user modification, not a malicious
+  local writer, unless a real external trust anchor is added. Make proposal
+  **content/base identity immutable**; recompute/verify the displayed diff and
+  guard output from those authoritative bytes. Mutable lifecycle data must be a
+  CLI-owned decision record, not trusted target/path fields edited in
+  `PROPOSAL.md`.
+- Specify the states and allowed actors/transitions at minimum:
+  `PENDING` / `BLOCKED_FINDINGS` → `APPLIED_PENDING_RIPPLES` or `REJECTED` →
+  `COMPLETED`, plus `STALE` and explicit rebase creating a newly reviewable
+  revision. Retain actor, timestamp, reason/waiver, and digests. Rejection must
+  not delete the only record or mutate `docs/config/findings.md` as a proxy.
+  Define archive and later explicit purge.
+- Specify the exact apply contract from R2-F5: guard stored content against the
+  current target, require the resulting staged bytes to equal the approved
+  content digest, and replace exactly those bytes. A transformation at apply is
+  a new revision requiring a new decision.
+
+On the lock: v3's narrowed claim is now honest. A shared managed-target lock for
+all cooperating CLI writers is preferable, but an editor remains explicitly
+outside the guarantee; do not spend another design round pretending shell
+rename can provide compare-and-swap against arbitrary writers.
+
+### R3-F2 — HIGH: v3's operative sections still specify the rejected v1/v2 behavior
+
+The corrective prose in §3b does not update the normative command and test
+sections:
+
+- §2.2 still exposes `a2bp --apply-now`.
+- Test 2 still says a blocked file creates **no proposal**.
+- Test 9 still requires `--apply-now`.
+- Test 10 still calls an untracked proposal “tracked.”
+- §5 still says rollback is additive because `--apply-now` reproduces the old
+  path, and says proposals are deleted on apply/reject.
+- §2.2 still says `reject` removes the proposal and appends to
+  `docs/config/findings.md`.
+
+These are direct contradictions, not harmless stale commentary. Remove
+`--apply-now` from the initial design, align blocked tests with
+`BLOCKED_FINDINGS`, replace “tracked” with explicit pull/collision durability
+semantics, and make rollback preserve the retained lifecycle records. Also
+update the title/status from “DRAFT v2.”
+
+### R3-F3 — MEDIUM: per-file publication is right, but batch outcomes need precise statuses
+
+Keep one proposal per file. All-or-nothing would let one heuristic finding hide
+clean, independently reviewable requests and would create a larger staging
+transaction without a user benefit.
+
+Define distinct aggregate results so automation can distinguish:
+
+- all clean proposals published: decision pending;
+- clean plus `BLOCKED_FINDINGS` proposals published: blocked decision pending;
+- operational publication failure: error, naming every successfully published
+  ID and every unpublished file.
+
+A blocked finding is not an operational publication failure. Once published it
+is resolvable by reject or explicit blueprint-side waive-and-apply, so it does
+not create an intrinsically unresolvable inbox item. Age/escalation plus a
+retained rejection path handles abandonment. “Immutable” must mean its proposed
+bytes/findings cannot be silently edited; it must not mean lifecycle transitions
+are impossible.
+
+### R3-F4 — MEDIUM: the cleanup inventory is close, but the executable inventory is still incomplete
+
+The new prose inventory catches the important user-facing descriptions. A
+repository-wide live-surface search found two executable migration entries that
+must be explicit:
+
+- `tests/a2bp-contamination/test.sh` itself, not only the new
+  `tests/a2bp-inbox/test.sh`;
+- `.github/workflows/security.yml`, which directly invokes the old suite, not
+  only the shorthand “CI” cell.
+
+The §3 affected-files table must also absorb the surfaces already discovered in
+§3b: it currently still says `contamination.sh` needs no change and omits
+`docs/DOCUMENTATION.md`. Keep `.githooks/pre-push-project` explicit. Current
+state/resume records (`docs/doing/BLUEPRINT-AUDIT-2026-07-23.md` and
+`docs/doing/HANDOVER.md`) need normal doc-sync when implementation changes the
+authoritative A-07/current-work account; historical `docs/done/` review and
+acceptance evidence should not be rewritten.
+
+The remaining search hits in `placeholders.sh`, `state-dir.sh`,
+`agent-activity.sh`, marker/gate fixtures, and `.githooks/pre-push` are either
+still-true technical context or unrelated copy behavior; they are not additional
+behavior migrations. Dropping the misleading `push` alias is the correct
+product decision.
+
+## Direct recommendation
+
+Revise for F1/F3/F5 before consensus. This is not polishing: those items define
+the security boundary, approval identity, and durable decision model. One
+focused v4 should be enough. After it closes the contradictions and schema/state
+machine above, implementation can determine function-level mechanics without
+another prose expansion.

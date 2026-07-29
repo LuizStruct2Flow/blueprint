@@ -16,12 +16,20 @@ missed, including `docs/DOCUMENTATION.md` and the `a2bp|push` alias. §3b.3's
 test count is corrected from an invented "~25 of 41" to a measured **27 of 38**.
 The lock's guarantee in §2.1 is narrowed to what it actually provides.
 
-**Still open (F1, F3, F5):** proposal publication must be exclusive and
-symlink-safe as a filesystem invariant rather than a directory convention;
-re-running the guard checks content but does not *authenticate* it, so the
-content blob needs tamper-evidence; and the full lifecycle state machine and
-`PROPOSAL.md` schema are still unspecified. These are addressed in the next
-revision, not this one.
+**v4, after review round 3 — the focused close.** F1/F3/F5 are closed in §2.1b,
+§2.1c and §2.1d rather than deferred to implementation, per the reviewer's
+direct answer that they are not deferrable. Exit statuses are distinguished
+(decision-pending ≠ blocked ≠ operational failure). The executable inventory is
+completed — the test suite, the CI workflow, the audit register and HANDOVER
+were all missing from §3.
+
+**And the residual contradictions are removed.** v3 reversed the `--apply-now`
+recommendation in §6 while leaving the command operative in the §2.2 table, and
+replaced the no-proposal-on-BLOCK rule in §3b.6 while leaving the old §4 test
+asserting it. That is the fix-the-instance-not-the-class habit, inside the
+document whose §3b exists precisely because I did the same thing to the audit
+register four rounds running. Swept this time: seven live references found by
+grep, all resolved.
 **Raised by:** founder, 2026-07-29 — *"can we not change the a2bp, to instead of
 doing directly the change it adds the change to the blueprint backlog. And the
 blueprint waking protocol sees the change? And ask the user to decide?"*
@@ -129,16 +137,119 @@ explicit `inbox rebase <id>` that recomputes the diff against the current target
 and requires a **new** decision. Silently re-basing a proposal onto moved
 content would re-create exactly the unreviewed write this plan exists to remove.
 
+### 2.1b Publication is a filesystem invariant, not a convention — closes F1
+
+"Additive" is only a safety property if the filesystem enforces it. A directory
+name does not. Publication therefore:
+
+- **Resolves and validates the path before any write.** The proposal directory
+  must resolve, after full symlink resolution, to a path **inside** the
+  blueprint's inbox root. Anything else — a symlinked inbox, `..` in a derived
+  id, a target outside the root — is refused. The derived project supplies the
+  *source project name*, which is attacker-influenced input in the same sense
+  the project name was in A-07: it must never be concatenated into a path
+  without validation.
+- **Creates exclusively and never clobbers.** The proposal directory is created
+  with `mkdir` (which fails if it exists) into a **unique** id; files inside are
+  written with an `O_EXCL`-equivalent (`set -o noclobber`). No proposal may
+  overwrite another, ever — that is the collision property this whole design
+  claims.
+- **Publishes atomically.** Content is written to a private staging path and
+  made visible by a single rename within the same filesystem, so a reader never
+  sees a half-written proposal. (The redcare stream hit exactly this on their
+  instance guard: a directory visible before its contents are complete is a
+  window, and a post-hoc consistency check is the third-fallback-layer shape.)
+- **Never writes outside the inbox root.** Asserted by test, not by inspection:
+  snapshot the managed tree before and after every `a2bp` variant and require
+  byte-identity.
+
+### 2.1c What was approved, exactly — closes F3
+
+Re-running the contamination guard at apply time checks the content. It does
+**not** authenticate it. Between publication and apply, the `content` blob is an
+ordinary file in the repo that a person or a script can edit.
+
+So the proposal records a **digest of its own content at publication**, and
+`inbox apply`:
+
+1. recomputes the content digest and compares — a mismatch means the proposal
+   was modified after publication and apply **refuses**, naming the id;
+2. re-runs the guard on the content actually about to be written;
+3. writes exactly those bytes.
+
+The digest makes tampering **evident**, not impossible — anyone who can edit
+`content` can edit `PROPOSAL.md`. That is an honest limit, and it is acceptable
+because both live in the blueprint repo under git: the defence against a
+malicious local editor is `git diff` and review, not the CLI. What the digest
+*does* buy is catching the realistic case — an accidental edit, a half-finished
+manual fix, a merge artifact — which is the failure that would otherwise apply
+silently.
+
+**What "approved" means is therefore pinned:** the bytes whose digest is
+recorded in `PROPOSAL.md`, re-verified immediately before the write.
+
+### 2.1d Lifecycle and schema — closes F5
+
+States are a machine, not prose:
+
+```
+                 ┌──────────────────────┐
+   a2bp ────────▶│ PENDING_DECISION     │
+                 └──────┬───────────┬───┘
+   a2bp (BLOCK) ─┐      │ apply     │ reject
+                 ▼      ▼           ▼
+      ┌────────────────────┐   ┌──────────┐
+      │ BLOCKED_FINDINGS   │   │ REJECTED │  (retained, with reason)
+      └─────────┬──────────┘   └──────────┘
+                │ apply --force (blueprint side only)
+                ▼
+   ┌───────────────────────────┐
+   │ APPLIED_PENDING_RIPPLES   │──── playbook complete ───▶ CLOSED
+   └───────────────────────────┘
+```
+
+Transitions the **derived side may perform: none.** It creates
+`PENDING_DECISION` or `BLOCKED_FINDINGS` and has no verb that changes either.
+
+`STALE` is a *computed* property, not a stored state — it is derived by
+comparing the recorded target digest against the current file, so it cannot go
+out of date on disk. `inbox rebase` produces a new proposal and leaves the
+original for the record.
+
+`PROPOSAL.md` carries a **versioned schema** (`schema: 1`) so a future change
+can be detected rather than misparsed, with required keys: source project, its
+absolute path, normalised target path, target-existed flag, target digest,
+content digest, blueprint HEAD (provenance only), scan findings, state, created
+timestamp, and rationale. Apply refuses on an unknown schema version rather than
+guessing.
+
 ### 2.2 CLI surface
 
 | Command | Behaviour |
 |---|---|
-| `blueprint a2bp FILE...` | Guard, then write a proposal. **No managed file is touched.** |
-| `blueprint a2bp --apply-now FILE...` | Today's behaviour, explicitly requested. Loud. |
-| `blueprint inbox` | List pending proposals: id, project, target, age. |
-| `blueprint inbox show <id>` | Print `PROPOSAL.md` + `diff`. |
-| `blueprint inbox apply <id>` | Re-run the guard, check staleness, write the managed file. |
-| `blueprint inbox reject <id> --why "<reason>"` | Remove the proposal, append a line to `docs/config/findings.md`. |
+| `blueprint a2bp FILE...` | Guard, then publish proposals. **No managed file is touched, on any path.** |
+| `blueprint inbox` | List proposals: id, project, target, state, age. |
+| `blueprint inbox show <id>` | Print `PROPOSAL.md` + `diff` + findings. |
+| `blueprint inbox apply <id>` | Re-verify, check staleness under lock, write the managed file. |
+| `blueprint inbox apply <id> --force` | Apply despite `BLOCKED_FINDINGS`. **Blueprint-side only.** |
+| `blueprint inbox rebase <id>` | Recompute against the current target; requires a NEW decision. |
+| `blueprint inbox reject <id> --why "<reason>"` | Move to `REJECTED`, retain provenance, record the reason. |
+
+There is **no `--apply-now`** and no `push` alias. Both are removed, not
+demoted — see §6 and §3b.2. A derived project has exactly one verb against the
+blueprint: propose.
+
+**Exit statuses are distinct, because they mean different things** (review R3):
+
+| Status | Meaning |
+|---|---|
+| `0` | All proposals published clean. |
+| decision-pending | Published, awaiting a decision. The normal outcome, and deliberately non-zero so a script cannot mistake it for "landed". |
+| blocked | At least one proposal is `BLOCKED_FINDINGS`. |
+| operational failure | The CLI could not do its job — unwritable inbox, missing helper, bad path. |
+
+Collapsing these into one non-zero was v3's implicit design and is wrong: "your
+change awaits review" and "the tool broke" are not the same event.
 
 **Rejection requires a reason.** A silently deleted proposal is
 indistinguishable from one that was never made, and the next person from the
@@ -208,8 +319,12 @@ still ignored at 40. Age is what makes neglect visible.
 | `README.md` §"2. Push" | same | yes |
 | `docs/way-of-working.md` | sync slide says "apply-to-blueprint" | yes |
 | `docs/backlog/README.md` | document the inbox subdirectory | yes |
-| `tests/a2bp-inbox/test.sh` | new | — |
-| `.githooks/pre-push-project`, CI | wire the new suite | — |
+| `tests/a2bp-contamination/test.sh` | **27 of 38 assertions migrated** (§3b.3) | — |
+| `tests/a2bp-inbox/test.sh` | new — publication, lifecycle, concurrency | — |
+| `.githooks/pre-push-project` | A-07 gate text is wrong once a2bp cannot write; re-wire suites | — |
+| `.github/workflows/security.yml` | suite names change; new suite added | yes |
+| `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md` | the A-07 row describes a guard that gates a **copy** | — |
+| `docs/doing/HANDOVER.md` | same — its A-07 entry describes the copy path | — |
 
 Every managed file touched here ships to every derived project, which is
 precisely why this needs consensus before code.
@@ -356,7 +471,11 @@ plan's own escape hatch.
 Behavioural, driven through the real CLI against fixture repos.
 
 1. `a2bp` creates a proposal **and the managed file is byte-identical** after.
-2. Contaminated content is refused at propose time — no proposal is created.
+2. Contaminated content produces a `BLOCKED_FINDINGS` proposal carrying the
+   content and the full findings — **not** a refusal. It is non-applicable, and
+   `inbox apply` without `--force` refuses it.
+2b. The derived side **cannot** promote a `BLOCKED_FINDINGS` proposal out of
+   that state by any command or by editing the proposal.
 3. `inbox apply` writes the file and the result matches `content` exactly.
 4. `inbox apply` **refuses when the blueprint moved** since propose time.
 5. `inbox apply` re-runs the guard: a proposal whose content was hand-edited in
@@ -365,7 +484,10 @@ Behavioural, driven through the real CLI against fixture repos.
 7. Two projects proposing the same file produce **two proposals**, neither
    overwriting the other. (Today the second silently wins.)
 8. `drift` reports count and age; zero proposals prints nothing.
-9. `--apply-now` reproduces today's behaviour and says loudly that it did.
+9. **No path writes a managed file except `inbox apply`.** Assert it directly:
+   run every `a2bp` variant and confirm the managed tree is byte-identical
+   afterwards. This is the plan's central safety claim and needs its own test
+   rather than being implied by other cases.
 10. A proposal survives a blueprint `git pull` — it is tracked, not scratch.
 
 Mutation-check each: a test that passes with the behaviour removed is
@@ -374,10 +496,14 @@ review, not by me.
 
 ## 5. Rollback
 
-The change is additive at the CLI level and `--apply-now` reproduces the old
-path exactly, so rollback is a single `git revert` of one commit. Any proposals
-already in the inbox remain readable markdown + content files; nothing is lost
-and nothing needs migrating. No state lives outside the repo.
+Rollback is a single `git revert` of the implementation commit, which restores
+the direct-write `cmd_a2bp`. Any proposals already in the inbox remain readable
+markdown + content files and can be applied by hand or left in place; nothing is
+lost and nothing needs migrating. No state lives outside the repo.
+
+Note this is a **revert, not a fallback** — v3 claimed rollback was cheap partly
+because `--apply-now` preserved the old path. With that removed, the old path
+exists only in git history, which is the correct trade but a different one.
 
 ## 6. Open decision for the founder
 
@@ -407,11 +533,19 @@ not. That asymmetry decides it.
   not that the inbox needs another reminder.
 - **Staleness.** A proposal against a moved blueprint must be re-made. Correct,
   but it is friction, and heavy blueprint churn makes it worse.
-- **More steps.** Propose → notice → review → apply is four beats where it was
-  one. That is the point, and it is also the thing most likely to make people
-  reach for `--apply-now`.
-- **Repo growth.** Proposals carry full file content. Small in practice
-  (managed files are text, mostly < 50 KB) and they are deleted on apply/reject.
+- **More steps.** Propose → decide → apply → ripples is four beats where it was
+  one. That is the point. With no `--apply-now`, the pressure valve is no longer
+  a flag but **hand-editing the blueprint directly** — which loses the guard and
+  the record together. That is the failure to watch for, and the argument for
+  keeping the synchronous flow (§2.4) genuinely cheap.
+- **Repo growth.** Proposals carry full file content and are **retained**, not
+  deleted: `APPLIED_PENDING_RIPPLES` until the playbook closes, `REJECTED` with
+  its reason, `BLOCKED_FINDINGS` until resolved. v3 said "deleted on
+  apply/reject", which contradicts the lifecycle in §2.1d — retention is the
+  point, since a deleted proposal takes its provenance with it. Growth is small
+  in practice (managed files are text, mostly < 50 KB) but it is unbounded
+  without a **closed-proposal retention policy**, which §2.1d does not yet
+  define. Flagged as the one gap I know remains.
 
 ## 8. Why this is worth doing now
 

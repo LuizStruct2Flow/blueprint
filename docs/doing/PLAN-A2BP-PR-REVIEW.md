@@ -1034,6 +1034,96 @@ working tree.
 
 ---
 
+## Round 11 — convergence review of DRAFT v16
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v16 (working tree, git-hand commit pending)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — the tree and key constructions are sound; three literal contract edits remain**
+
+v16 closes the dangerous unseeded-index defect. `read-tree "$base"` followed by
+cache-info replacement and `write-tree` preserves the base tree. Assertion 7b
+would reject a mis-seeded build whenever omission changes the result: the diff
+would contain deletions outside the retained target set. The regression must
+include at least one unrelated base entry and prove its mode, object id and bytes
+survive, rather than testing a base made only of targets.
+
+The all-field length framing is unambiguous: after consuming the declared byte
+count, the next decimal length begins; path mode is fixed-width; content is
+length-framed; and records are sorted byte-wise. Full SHA-256 output removes the
+avoidable truncated-prefix collision exposure. Three points still need literal
+closure before coding:
+
+### R11-F1 — MEDIUM: ref validation is described, but not yet executable or complete
+
+“Validated as a ref component” is not itself a Git command, and the explanatory
+rejection list omits at least components beginning with `.` and components ending
+in `.lock`. State that the implementation constructs the complete candidate ref
+and requires `git check-ref-format "$ref"` before remote contact, while retaining
+the real project bytes in the key/message and refusing rather than slugging.
+Add leading-dot and `.lock` project regressions.
+
+The concurrency paragraph also still says different projects “can no longer
+collide.” A full SHA-256 digest is collision-resistant, not a proof of
+non-collision. Say collisions are no longer a practical namespace risk and that
+the existing exact-tip mismatch refusal remains the safety boundary for any
+pre-existing or colliding ref.
+
+### R11-F2 — MEDIUM: the minimum Git version is still delegated to the implementer
+
+“Pin a minimum git version” does not pin one. Name the literal minimum supported
+version, derived from every required option (`init --object-format`,
+`hash-object --no-filters`, NUL-safe index installation, and the chosen version
+comparison), and add tests immediately below and at the boundary. Otherwise two
+implementations can comply with the plan while accepting different toolchains.
+
+### R11-F3 — LOW: isolate object construction without accidentally deleting transport credentials
+
+The deterministic construction environment is otherwise complete: scrub
+inherited `GIT_*` (including config injection and object/index redirection),
+disable system/global config, force SHA-1 and C locale, use an isolated index and
+raw dates, and explicitly set commit identity/config. The hostile test should
+also inject hostile `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*` and redirection variables,
+not only hostile global config.
+
+Clarify that the hermetic environment applies to initialization and object/index/
+commit inspection and construction. Fetch, `ls-remote`, push and `gh` may require
+the operator's transport credential variables (`GIT_SSH_COMMAND`, askpass, agent
+state); do not silently make authenticated remotes unusable. Transport must still
+reject Git variables that redirect the scratch repository/object/index or inject
+configuration. Re-enter the fully scrubbed construction environment after every
+transport step.
+
+### Round-11 answers and implementation boundary
+
+1. **Tree build:** accepted. The base-seeded isolated index is correct; the
+   exact-diff assertion catches a materially mis-seeded tree, and the unrelated-
+   base-entry regression makes that protection observable.
+2. **Isolation:** construction scrub is substantively correct, subject to naming
+   the minimum version and separating safe credential transport inputs from
+   object-construction inputs.
+3. **Ref/key:** v3 framing is sound. Final-ref validation and collision wording
+   need the edits above.
+4. **Remaining:** only R11-F1–F3. No product or architecture question remains.
+
+After those edits, implementation is authorised within this boundary:
+same-owner GitHub request creation; version-2 remote/base config; unchanged
+contamination staging except removal of whole-file `--force`; hermetic SHA-1
+plumbing construction from the exact fetched base via a base-seeded isolated
+index; v3 full-digest request identity; final-ref validation; exact-tip/no-force
+ref recovery; open/closed PR response-loss recovery; bounded stale-base handling
+and honest reporting; `prs`; migration of the 27 CLI-driven assertions; and the
+source/base topology, unrelated-base-preservation, hostile-config/environment,
+version-boundary, retry/race and no-working-tree-write regressions plus the
+synchronized §4.2 documentation inventory.
+
+Still excluded: receiver enforcement, `contamination.sh` semantic changes,
+cases #13/#14 changes, fork mode, automatic merge, offline persistence,
+arbitrary hosting, general development branches, and direct writes to either
+working tree.
+
+---
+
 ## Round 10 — plumbing-contract review of DRAFT v15
 
 **Plan reviewed:** `PLAN-A2BP-PR.md` v15 (`3e787ba`)

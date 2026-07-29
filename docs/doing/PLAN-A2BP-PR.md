@@ -1,7 +1,19 @@
 # PLAN — `a2bp` files a feature request
 
-**Status:** DRAFT v14 — reframe, behavioural boundary and `CLAUDE.md` rule all
-accepted. This revision closes the build contract. No code written.
+**Status:** DRAFT v15 — reframe, behavioural boundary and `CLAUDE.md` rule
+accepted; rebuild-and-compare accepted. No code written.
+
+**v15.** v14 fixed the commit metadata and left the **tree** ambient: checkout,
+write and `git add` run through `.gitattributes`, clean filters, `core.autocrlf`,
+hooks and signing, so identical inputs could yield different blobs on different
+machines. The build now uses **plumbing only in a bare repo** — `hash-object
+--no-filters`, `update-index --cacheinfo`, `write-tree`, `commit-tree` — with an
+assertion that the final diff touches exactly the target paths. The key gains
+**canonical project identity** (schema `v2`): v14 put the project in the ref and
+the message but not the key, then claimed identical keys meant identical
+requests, which was false. Adds the fetched-base collision policy (directory,
+symlink, gitlink, unrepresentable mode, blob parent) and scopes the base-freshness
+guarantee to what two non-atomic ref operations can actually provide.
 
 **v14.** v13 specified a verification step that **cannot be implemented**:
 "verify the SHA the key predicts". A content key cannot yield a git commit SHA —
@@ -212,11 +224,19 @@ No `push` alias.
   **The key, exactly.** Concatenate, in order, with `\n` between records:
 
   ```
-  v1                                     # key schema version
+  v2                                     # key schema version
   <destination remote URL, verbatim>
   <target branch name>
   <base commit SHA, 40 hex, lowercase>
+  <project length in bytes> <canonical project identity>
   ```
+
+  **The project belongs in the key** (R9-F3). v1 left it out while putting it in
+  the branch ref *and* the commit message — so two projects filing identical
+  content against an identical base computed the same key, and v14 claimed that
+  meant "the same request, adopt it". False: their refs and messages differ, so
+  the commits differ, and adoption would refuse anyway. Length-framed like every
+  other component. Schema bumped to `v2` because the key changed.
 
   then, for each target path **sorted byte-wise ascending**, one record:
 
@@ -295,30 +315,78 @@ No `push` alias.
   | Partial no-op | The unchanged files are dropped from the request, and **reported as dropped**; the rest proceed. |
   | Two inputs canonicalising to the same target | Impossible after dedup, but asserted rather than assumed. |
 
-- **Concurrent push to the same branch id.** Two projects producing an identical
-  key means identical content against an identical base — the same request.
-  Whoever pushes second finds the ref exists, compares tips, and **adopts** it
-  (§ exact-tip). A push rejected as non-fast-forward means the tips differ,
-  which is the refuse-and-print-both case. Never force, never retry-with-force.
+  **Collisions in the FETCHED BASE**, which v14 omitted entirely (R9-F2) — the
+  project side is validated above, but the base is a separate tree with its own
+  shape:
+
+  | Base holds… | Rule |
+  |---|---|
+  | A **directory** at the target path | Refuse. Replacing a tree with a blob is not an edit to a managed file; it is a restructure and belongs in a hand-authored change. |
+  | A **symlink** (mode `120000`) at the target path | Refuse. Overwriting it with a regular file silently changes what every consumer resolves. |
+  | A **gitlink / submodule** (`160000`) | Refuse. |
+  | A **regular file** with an unrepresentable mode | Refuse, naming the mode. |
+  | Nothing at the path, but a **parent component is a blob or symlink** | Refuse — the entry cannot be created without restructuring the base. |
+  | Nothing at the path, parents clean | Creation; already called out in the PR body. |
+
+  Every refusal names the path and what was found, because "refused" without the
+  reason sends the operator to read the base tree by hand.
+
+- **Concurrent push to the same branch id.** With the project now in the key
+  (v2), an identical key means **the same project**, the same content and the
+  same base — genuinely the same request, filed twice. Whoever pushes second
+  finds the ref, compares tips, and **adopts** on exact match. Two *different*
+  projects can no longer collide on an id, which is what v14 wrongly claimed was
+  fine. A push rejected as non-fast-forward means the tips differ: refuse and
+  print both. Never force, never retry-with-force.
 - **Exact scratch-clone algorithm**, step by step, because "clone and commit"
   hides the decisions:
 
+  **No working tree is ever used to build the commit** (R9-F1). v14 said
+  checkout → write → `git add`, and every one of those steps is ambient:
+  `.gitattributes`, clean filters, `core.autocrlf`, hooks, signing and commit
+  encoding all vary per machine, so identical inputs could produce different
+  blobs and rebuild-and-compare would refuse for reasons unrelated to the
+  request. Plumbing only:
+
   1. `mktemp -d` under the system temp dir — **never inside either repository**,
      so a failure cannot leave residue in a tracked tree.
-  2. `git init` there; add the remote from `blueprint_remote`.
-  3. `git fetch --depth 1 <remote> <branch>` — shallow, since only the base tree
-     is needed; capture the resolved SHA as **the** base for the key.
-  4. `git checkout` that SHA detached.
-  5. Write the staged bytes to the target paths, creating parent directories;
-     set modes from the key.
-  6. `git add` exactly the target paths — **never `-A`**, so nothing incidental
-     in the scratch tree can ride along.
-  7. Commit with the fixed identity, date and message template above.
+  2. `git init --bare` there; add the remote from `blueprint_remote`. A bare
+     repo has no working tree to be filtered through and no hooks to run.
+  3. `git fetch --depth 1 <remote> <branch>`; capture the resolved SHA as **the**
+     base for the key.
+  4. Read the base tree with `git ls-tree` — never a checkout.
+  5. Write each staged blob with `git hash-object -w --no-filters --stdin`.
+     `--no-filters` is the point: it bypasses `.gitattributes` and clean
+     filters entirely.
+  6. Build the new tree from the base tree with the target entries replaced or
+     added, via `git update-index --cacheinfo <mode>,<blob>,<path>` against a
+     temporary index, then `git write-tree`. Entry order is git's, so it is
+     stable.
+  7. `git commit-tree <tree> -p <base>` with the fixed identity, date and
+     message, run with `core.hooksPath=/dev/null`, `commit.gpgsign=false`,
+     `core.autocrlf=false`, `i18n.commitEncoding=UTF-8` set on the command.
+  7b. **Assert the result**: the commit's parent equals the captured base; its
+     diff against that base touches **exactly** the target paths and no others,
+     with the expected modes; and each target blob's bytes equal the staged
+     bytes. Refuse on any mismatch — this is the exact-final-diff proof round 8
+     asked for and v14 omitted.
+  7c. `git update-ref` the branch to that commit.
   8. **Re-check the base** — `git ls-remote` the target branch and confirm it
      still resolves to the captured SHA. Placed *here*, immediately before the
      push and after the build, because a base that moved during the build makes
      the commit's parent stale. If it moved: discard, rebuild against the new
      base, and re-check once; on a second move, refuse rather than loop.
+
+     **What this guarantee is and is not** (R9-F4). Checking the base ref and
+     pushing the request ref are two operations on two different refs; no
+     amount of ordering makes them atomic. So the claim is **narrow**: the base
+     was current at a point after the build and before the push, which closes
+     the wide window (a build that took minutes against a base that moved early)
+     and leaves a **final window** of the round-trip between check and push.
+     That residual window is surfaced in the output — the PR body records the
+     base SHA the request was built against, so a reviewer can see if the base
+     has since moved rather than assuming freshness. Pretending the check is
+     atomic would be the same class of overclaim as "unbypassable".
   9. Push the branch.
   10. Remove the directory on **every** exit path; if removal fails, print the
       path and say it must be cleaned by hand.

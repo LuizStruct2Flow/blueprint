@@ -561,21 +561,22 @@ edited-placeholder
 TAIL
 EOF
 rc=$(run_a2bp "$CARRIER")
-# CONTRACT, stated plainly. Codex proved across R1–R4 that no content-derived
+# CONTRACT, narrowly. Codex proved across R1–R4 that no content-derived
 # matching recovers edit history, so the alignment WILL sometimes misattribute
-# and this fixture is one of those layouts. What is guaranteed is not "the
-# attribution is right" but:
+# and this fixture is one of those layouts. What is asserted here is the
+# narrow invariant Codex agreed this case can legitimately evidence (R5-F2):
 #
-#   1. no project-specific bytes reach the blueprint, and
-#   2. staging preserves meaning under substitution (asserted by the
-#      round-trip check).
+#   ON THE DEFAULT PATH, the literal project basename does not land upstream.
 #
-# Under those, a misattribution here writes {{PROJECT_NAME}} where the operator
-# typed a literal `acme-flow`. That is the correct generic content for a
-# blueprint file — a literal project name there would BE the contamination —
-# so the failure mode is benign by construction rather than by argument.
+# It is NOT evidence for any broader "no project-specific bytes ever" claim —
+# `--force`, `a2bp-allow` and the NOTICE class all deliberately let things
+# through, and case #5 proves a host path landing under `--force`. Reframing
+# this case as proof of the wider contract would have been dishonest; scoped
+# to the default path it is sound.
 #
-# What must never happen is the literal reaching upstream.
+# A misattribution here writes {{PROJECT_NAME}} where the operator typed a
+# literal `acme-flow`, which is the correct generic content for a blueprint
+# file — a literal project name there would BE the contamination.
 if grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
   fail "#19 the literal project name reached the blueprint — this is the leak the whole guard exists to stop (Codex R3-F1)"
 elif grep -q 'edited-placeholder' "$FAKE_BP/$CARRIER"; then
@@ -627,6 +628,106 @@ elif [ "$rc" -eq 0 ]; then
 else
   pass "#21 a diff capability/runtime failure fails closed, even under --force (R3-F3)"
 fi
+
+# ===========================================================================
+# 22. R5-F1 (Codex round 5) — ONE substitution semantics.
+#     The round-trip check is the load-bearing safety property, and it used
+#     bash ${//} to verify what pull's sed would later produce. Those differ
+#     for legal directory names. Measured on this host:
+#
+#       name       bash ${//}           sed                  correct
+#       foo\bar    foo\bar              foobar               foo\bar
+#       a&b        a{{PROJECT_NAME}}b   a{{PROJECT_NAME}}b   a&b
+#
+#     `&` means "the whole match" in a sed replacement, and bash 5.2 gave it
+#     the same meaning — so BOTH were wrong, differently. pull itself has been
+#     mangling such names all along, independent of a2bp.
+#
+#     Drives the real CLI: a2bp must restore the placeholder, and the staged
+#     bytes must round-trip through THE primitive back to the project's file.
+# ===========================================================================
+for META in 'foo\bar' 'a&b'; do
+  MP="$WORK/$META"
+  rm -rf "$MP"
+  mkdir -p "$MP/docs/mocks" "$FAKE_BP/docs/mocks"
+  printf '# Mocks\nName={{PROJECT_NAME}}\n' > "$FAKE_BP/$CARRIER"
+  printf '# Mocks\nName=%s\n' "$META" > "$MP/$CARRIER"
+  cat >"$MP/.blueprint-source" <<EOF
+blueprint_source = $FAKE_BP
+bootstrap_sha    = test-fixture
+bootstrap_date   = test-fixture
+EOF
+  ( cd "$MP" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "#22[$META] a2bp exited $rc for a legal basename containing a substitution metacharacter — see $WORK/out"
+  elif grep -qF "$META" "$FAKE_BP/$CARRIER"; then
+    fail "#22[$META] the literal project name reached the blueprint — the placeholder was not restored"
+  elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
+    fail "#22[$META] placeholder not restored: $(cat "$FAKE_BP/$CARRIER")"
+  else
+    pass "#22[$META] a metacharacter-bearing project name round-trips through one substitution semantics (R5-F1)"
+  fi
+done
+
+# ===========================================================================
+# 23. R5-F1 — the primitive itself must be literal in both directions, and
+#     pull must agree with it. This is the assertion that would have caught
+#     the divergence: substituting a placeholder with a metacharacter name
+#     must yield the name verbatim, not sed's or bash 5.2's interpretation.
+# ===========================================================================
+# shellcheck source=../../scripts/lib/placeholders.sh
+. "$ROOT/scripts/lib/placeholders.sh"
+for META in 'foo\bar' 'a&b' 'p.q' 'x*y'; do
+  got=$(bp_substitute_line 'Name={{PROJECT_NAME}}' "$META" "$(bp_placeholder_upper "$META")")
+  if [ "$got" != "Name=$META" ]; then
+    fail "#23[$META] substitution is not literal: got '$got', want 'Name=$META'"
+  else
+    pass "#23[$META] the project name is substituted as literal data (R5-F1)"
+  fi
+done
+
+# ===========================================================================
+# 24. R5-F1, THE case that actually catches it — pull → a2bp must round-trip.
+#     #22 drives a2bp alone, and on the parent commit a2bp used bash ${//} on
+#     BOTH sides, so it agreed with itself and passed. The divergence Codex
+#     found is between a2bp's verifier and PULL's sed, so the regression has
+#     to cross that boundary: pull the file down into a project whose basename
+#     carries a metacharacter, then push it straight back untouched. The
+#     blueprint must be byte-identical afterwards.
+#
+#     On the parent, pull's sed writes `foobar` into the project while a2bp
+#     expects `foo\bar` — the placeholder cannot be restored and the literal
+#     is left behind.
+# ===========================================================================
+for META in 'foo\bar' 'a&b'; do
+  RP="$WORK/rt-$$"
+  rm -rf "$RP"
+  mkdir -p "$RP"
+  MP="$RP/$META"
+  mkdir -p "$MP/docs/mocks" "$FAKE_BP/docs/mocks"
+  printf '# Mocks\nName={{PROJECT_NAME}}\nUpper={{PROJECT_NAME_UPPER}}\n' > "$FAKE_BP/$CARRIER"
+  cp "$FAKE_BP/$CARRIER" "$WORK/bp-original"
+  cat >"$MP/.blueprint-source" <<EOF
+blueprint_source = $FAKE_BP
+bootstrap_sha    = test-fixture
+bootstrap_date   = test-fixture
+EOF
+  ( cd "$MP" && "$BLUEPRINT_BIN" pull "$CARRIER" --yes ) >"$WORK/out" 2>&1
+  if ! grep -qF "Name=$META" "$MP/$CARRIER" 2>/dev/null; then
+    fail "#24[$META] pull did not substitute the name literally: $(sed -n '2p' "$MP/$CARRIER" 2>/dev/null)"
+    continue
+  fi
+  ( cd "$MP" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "#24[$META] a2bp refused an untouched pull→a2bp round-trip (exit $rc) — pull and the verifier disagree on this name (R5-F1); see $WORK/out"
+  elif ! diff -q "$WORK/bp-original" "$FAKE_BP/$CARRIER" >/dev/null 2>&1; then
+    fail "#24[$META] pull→a2bp was not a no-op: $(diff "$WORK/bp-original" "$FAKE_BP/$CARRIER" | head -4)"
+  else
+    pass "#24[$META] pull→a2bp round-trips byte-identically (R5-F1, the cross-boundary case)"
+  fi
+done
 
 echo
 if [ "$FAILED" -eq 0 ]; then

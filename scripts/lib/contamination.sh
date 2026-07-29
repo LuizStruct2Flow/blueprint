@@ -36,20 +36,39 @@
 #       overridable, and every override must be visible — see "BLOCKING vs
 #       NOTICE" below.
 #
-# THE CONTRACT, stated so it can be checked rather than argued:
+# THE CONTRACT — stated narrowly, because the first version of this comment
+# claimed "a2bp never introduces project-specific bytes" and that is simply
+# false (Codex R5-F2). `--force` copies every BLOCK finding by design, a
+# justified `a2bp-allow` suppresses every check on its line, emails are
+# NOTICE-only, and the scanner knows a handful of heuristic classes rather
+# than all contamination. Test #5 itself demonstrates a host path landing
+# under `--force`. An absolute claim contradicted by intentional product
+# behaviour is worse than a narrow one, because it stops people looking.
 #
-#   1. a2bp never introduces project-specific bytes into the blueprint. The
-#      scan enforces this on every line, unconditionally.
-#   2. Staging never changes the file's meaning: forward-substituting the
-#      staged result reproduces the project's file byte-for-byte, and that is
-#      asserted rather than assumed. A misattributed line therefore cannot
-#      corrupt anything observable — the worst it can do is write
-#      {{PROJECT_NAME}} where a literal project name stood, which is the
-#      correct generic content for a blueprint file anyway.
+# What is actually enforced:
 #
-# Those two together are what the guard actually needs to promise, and neither
-# depends on knowing which occurrence came from which placeholder — the
-# question that cannot be answered from content.
+#   1. ON THE DEFAULT PATH, a recognized BLOCK class cannot land. Every staged
+#      line is scanned — no alignment-derived exemption exists, which is what
+#      closed the R4-F2 relocation leak.
+#   2. EVERY OVERRIDE IS LOUD AND AUDITABLE. `--force` names each finding it
+#      waives; `a2bp-allow` requires a written justification on the line and a
+#      bare marker does not suppress.
+#   3. STAGING NEVER CHANGES MEANING UNDER SUBSTITUTION. Forward-substituting
+#      the staged result reproduces the project's file byte-for-byte, asserted
+#      via the one shared primitive that production substitution also uses
+#      (R5-F1). This one holds unconditionally — `--force` waives scan
+#      findings, not this check.
+#
+# (3) is what makes a misattributed alignment harmless: the worst it can do is
+# write {{PROJECT_NAME}} where a literal project name stood, which is the
+# correct generic content for a blueprint file. None of the three depends on
+# knowing which occurrence came from which placeholder — the question that
+# cannot be answered from content at all.
+#
+# NOT claimed: that contamination is impossible. The scanner is heuristic and
+# the overrides are deliberate. What is claimed is that the default path is
+# closed for the classes it recognizes, and that stepping outside it leaves a
+# trail.
 #
 # Sourced by scripts/blueprint. Kept as a shared lib rather than inlined so
 # the gate and new-project.sh can reuse the same patterns — the same reason
@@ -166,8 +185,6 @@ _contamination_is_placeholder_email() {
 # scripts/blueprint would corrupt scripts/blueprint).
 contamination_stage() {
   local pf="$1" bpf="$2" proj_name="$3" staged_out="$4"
-  local proj_upper
-  proj_upper=$(printf '%s' "$proj_name" | tr 'a-z-' 'A-Z_')
 
   if [ ! -f "$bpf" ]; then
     cat "$pf" > "$staged_out"
@@ -187,28 +204,18 @@ contamination_stage() {
   mapfile -t proj_lines < "$pf"
 
   # What `pull` would have produced from the blueprint's copy. The blueprint's
-  # own final-newline state has to be reproduced too: `diff` treats a complete
-  # and an incomplete last line as different, so unconditionally terminating
-  # bp_sub would leave the last line of an incomplete file permanently
-  # unalignable — and therefore never restored (R3-F2's second half).
-  local bp_final_nl=1
-  if [ -s "$bpf" ] && [ "$(tail -c1 "$bpf" | wc -l)" -eq 0 ]; then
-    bp_final_nl=0
-  fi
-  local bp_sub bl sub bi bn
+  # own final-newline state is preserved by the primitive, which matters here:
+  # `diff` treats a complete and an incomplete last line as different, so
+  # unconditionally terminating bp_sub would leave the last line of an
+  # incomplete file permanently unalignable, and never restored (R3-F2).
+  #
+  # bp_substitute_stream is THE forward substitution (scripts/lib/placeholders.sh)
+  # and preserves a missing final newline itself, so what we diff against is
+  # byte-for-byte what `pull` would have handed the project — not a local
+  # re-implementation that disagrees on names containing `&` or `\` (R5-F1).
+  local bp_sub
   bp_sub=$(mktemp)
-  bn=${#bp_lines[@]}
-  : > "$bp_sub"
-  for (( bi=1; bi<=bn; bi++ )); do
-    bl=${bp_lines[$(( bi - 1 ))]}
-    sub=${bl//\{\{PROJECT_NAME_UPPER\}\}/$proj_upper}
-    sub=${sub//\{\{PROJECT_NAME\}\}/$proj_name}
-    if [ "$bi" -eq "$bn" ] && [ "$bp_final_nl" -eq 0 ]; then
-      printf '%s' "$sub" >> "$bp_sub"
-    else
-      printf '%s\n' "$sub" >> "$bp_sub"
-    fi
-  done
+  bp_substitute_stream "$bpf" "$proj_name" > "$bp_sub"
 
   # Positional alignment. The three --*-line-format options emit one record
   # per line in file order: '=' common, '-' only upstream, '+' only in the
@@ -298,38 +305,21 @@ contamination_stage() {
   #
   # This is a real check, not a comment: if diff aligns something in a way that
   # would change the file, staging fails and cmd_a2bp refuses the copy.
+  # Verified with THE substitution primitive, not a local copy of it. That is
+  # the whole of R5-F1: a round-trip check that verifies a *different* forward
+  # operation than production uses proves nothing. `foo\bar` passed the old
+  # bash-based check while `pull`'s sed rendered it `foobar`.
   local verify_staged verify_proj
   verify_staged=$(mktemp)
   verify_proj=$(mktemp)
-  _contamination_subst_file "$staged_out" "$proj_name" "$proj_upper" "$final_nl" > "$verify_staged"
-  _contamination_subst_file "$pf"         "$proj_name" "$proj_upper" "$final_nl" > "$verify_proj"
+  bp_substitute_stream "$staged_out" "$proj_name" > "$verify_staged"
+  bp_substitute_stream "$pf"         "$proj_name" > "$verify_proj"
 
   if ! cmp -s "$verify_staged" "$verify_proj"; then
     rm -f "$verify_staged" "$verify_proj"
     return 3
   fi
   rm -f "$verify_staged" "$verify_proj"
-}
-
-# _contamination_subst_file FILE NAME UPPER FINAL_NL
-# Forward-substitutes FILE to stdout, preserving a missing final newline.
-# Used only by the round-trip check above.
-_contamination_subst_file() {
-  local src="$1" nm="$2" up="$3" fnl="$4"
-  local -a ls
-  mapfile -t ls < "$src"
-  local i n l
-  n=${#ls[@]}
-  for (( i=1; i<=n; i++ )); do
-    l=${ls[$(( i - 1 ))]}
-    l=${l//\{\{PROJECT_NAME_UPPER\}\}/$up}
-    l=${l//\{\{PROJECT_NAME\}\}/$nm}
-    if [ "$i" -eq "$n" ] && [ "$fnl" -eq 0 ]; then
-      printf '%s' "$l"
-    else
-      printf '%s\n' "$l"
-    fi
-  done
 }
 
 # --- contamination_scan FILE PROJECT_NAME ---------------------------------

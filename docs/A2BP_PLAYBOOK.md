@@ -65,6 +65,14 @@ blueprint working tree it does two things (A-07 — `scripts/lib/contamination.s
    this is rare — the host-path pattern scores zero hits across the whole
    managed tree.
 
+**What the guard does and does not promise.** It is not "contamination is
+impossible": the scan is heuristic, `--force` copies every finding by design,
+`a2bp-allow` suppresses its line, and emails are advisory only. What holds is
+narrower and checkable — on the **default path** a recognized BLOCK class
+cannot land; every override is **loud and auditable**; and staging **never
+changes meaning under substitution** (asserted, and not waivable by
+`--force`). Treat it as a strong default, not a proof.
+
 This exists because `a2bp` is how **BUG-002** (a project's own state dir
 hardcoded into the generic feed) and **A-09** (every checkout colliding on one
 shared state dir) got into the blueprint in the first place. The playbook used

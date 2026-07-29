@@ -407,3 +407,93 @@ Add the reproduction above.
 The record-protocol and runtime-failure fixes in `fd57648` are good. The batch
 is still unsafe because the alignment is being asked to prove occurrence
 history that it cannot contain, both for rewriting and for scan exemption.
+
+## Round 5 — re-review of `230eea9`
+
+**Date:** 2026-07-29
+**Commits reviewed:** `205f6f7`, `2787332`, `63fac8e`, `5d3ff5e`, `d3e21a2`,
+`4ac7b01`, `fd57648`, `5a112bd`, `230eea9`
+**Verdict:** **CHANGES REQUESTED — do not push**
+
+The handoff named `5a112bd` as the two-change implementation, but that SHA is
+the lifecycle-documentation commit. The unconditional scan and round-trip
+changes are in `230eea9`; this review attacks that actual delta.
+
+### R5-F1 — BLOCKER: the verifier does not use `pull`'s substitution semantics
+
+The round-trip assertion is the new load-bearing safety property, but
+`_contamination_subst_file` does not call the substitution implementation that
+defines meaning in production. It uses Bash parameter replacement, while
+`substitute_placeholders` and `substituted_blueprint_copy` use an interpolated
+`sed` replacement:
+
+```bash
+l=${l//\{\{PROJECT_NAME\}\}/$nm}
+sed -e "s/{{PROJECT_NAME}}/${proj_name}/g"
+```
+
+Those are not equivalent for legal repository basenames containing replacement
+metacharacters. A one-backslash basename is concrete:
+
+```text
+project directory: foo\bar
+blueprint before:  OLD
+project edit:      Name={{PROJECT_NAME}}
+```
+
+The real CLI accepts `a2bp` and writes `Name={{PROJECT_NAME}}` upstream. The
+verifier says its substituted meaning is `Name=foo\bar`; a subsequent real
+`pull` renders it as `Name=foobar`, because `sed` consumes the backslash in the
+replacement string. Thus staging passed the asserted check while production
+substitution gave different bytes.
+
+This is not a request for another parallel approximation. Make forward
+substitution one shared primitive and use that exact primitive for pull,
+comparison, and verification, with project names treated as literal data.
+Add a real-CLI regression using a basename containing `\` (and cover `&`,
+which both current implementations happen to interpret specially rather than
+literally). The contract can only say “meaning under substitution” when there
+is one substitution semantics.
+
+### R5-F2 — HIGH: contract (1) says “never”, but the interface explicitly leaks
+
+Removing the alignment exemption fixes R4-F2 and is the right direction. It
+does not establish the stated contract:
+
+> a2bp never introduces project-specific bytes into the blueprint
+
+`--force` deliberately copies every BLOCK finding, a justified
+`a2bp-allow` suppresses every check on its line, email findings are NOTICE-only,
+and the scanner recognizes only several heuristic classes. Case #5 itself
+proves that `/home/someuser/...` reaches the blueprint under `--force`.
+Non-`_should_substitute` files are scanned, which is good, but they have the
+same overrides. “Every line is scanned” is therefore not “project-specific
+bytes never land.”
+
+State the enforceable contract narrowly: by default, recognized BLOCK classes
+cannot land; explicit overrides are loud and auditable. If literal
+project-name bytes specifically are intended to be impossible even under
+`--force`, enforce that invariant outside the waivable scan. Otherwise the
+current absolute claim is contradicted by intentional product behavior.
+
+Case #19's reframing is sound only as a test of the narrower invariant that the
+literal project basename does not land on the default path. It is dishonest as
+evidence for the present universal “no project-specific bytes” contract,
+because that contract is neither what the scanner nor the override interface
+implements.
+
+### R5 checks run
+
+- `bash tests/a2bp-contamination/test.sh` — PASS (22 printed cases / 23 assertions)
+- `bash -n scripts/blueprint scripts/lib/contamination.sh tests/a2bp-contamination/test.sh` — PASS
+- `git diff --check` — PASS before this review-note edit
+- real-CLI `foo\bar` basename reproduction — **a2bp accepts; verifier and pull
+  disagree (`foo\bar` versus `foobar`)**
+- status inspection — staging `2`/`3` is correctly caught under `set -e`;
+  `cmd_a2bp` intentionally normalizes either refusal into its aggregate
+  non-zero result. No false PASS found in that propagation.
+
+The exemption removal closes the relocation leak from R4-F2, and normal
+staging failures now fail closed. The round-trip property is not yet total
+because it verifies a different forward operation, and the declared
+no-contamination contract remains materially broader than the code.

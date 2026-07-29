@@ -1031,3 +1031,95 @@ Still excluded: receiver enforcement, `contamination.sh` semantic changes,
 cases #13/#14 changes, fork mode, automatic merge, offline persistence,
 arbitrary hosting, general development branches, and direct writes to either
 working tree.
+
+---
+
+## Round 8 — build-contract review of DRAFT v13
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v13 (`32db81d`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — the travelling boundary is accepted; implementation is not yet authorised**
+
+v13 fixes the reported dry-run contradiction, supplies a parseable
+length-framed request-key serialization, and actually records the behavioural
+boundary in `CLAUDE.md`. The latter is clear and correctly ties request
+integration to the existing spike/promotion doctrine.
+
+### R8-F1 — HIGH: deterministic commit bytes are still choices, not a contract
+
+The request key itself is now sufficiently concrete for branch identity:
+destination string, branch, exact base, sorted path/mode/content records,
+SHA-256, lowercase hex and a 12-character id. The commit object used for
+exact-tip recovery is not yet concrete:
+
+- identity is only an example (`e.g.`);
+- date is one of two alternatives (“a fixed epoch, or the base commit's own
+  date”), with no chosen value or Git date/timezone byte representation;
+- the message is an unspecified “fixed template”;
+- no branch ref format/namespace is stated; and
+- “the SHA the key predicts” has no independent construction algorithm. The key
+  digest is not the Git commit SHA. Verifying a SHA against the SHA of the same
+  just-created commit is tautological unless the expected commit object/tree is
+  separately constructed (for example with a precisely parameterized
+  `git write-tree` + `git commit-tree`) and then compared to the published
+  object.
+
+Choose the literal identity, timestamp including timezone, exact message bytes,
+branch ref format, and one expected-commit construction. A retry must be able
+to reproduce the commit with no implementation discretion.
+
+### R8-F2 — MEDIUM: the scratch procedure still omits requested input and tree invariants
+
+The ten steps are a useful lifecycle, but they do not close R7-F2. The plan
+still needs observable choices for:
+
+- duplicate arguments and canonical path spellings;
+- regular-file/symlink/type policy and how the source mode enters the key;
+- directory/symlink collisions in the fetched base and proof that created
+  parents remain beneath the scratch root;
+- the no-op case; and
+- a post-stage assertion that the scratch diff contains exactly the validated
+  target set.
+
+Step 5's “write bytes” and “set modes” does not decide these cases. The current
+managed set being ordinary files is not a durable contract because
+`MANAGED_FILES` and executable modes already vary. Also place the promised base
+re-check explicitly before publication and define the race outcome: after a
+normal no-force push loses to a concurrent creator, fetch the winning ref and
+apply the same exact-tip comparison rather than returning a generic push error.
+
+### R8-F3 — MEDIUM: the removed-override route remains self-contradictory
+
+Section 3.1 still says a blocked requester “can say so in the request,” and
+§3.3/§4.1 still list “file the request describing why the guard is wrong” as an
+alternative to `--force`. But a blocking guard cannot file that request. With
+`--force` removed, the executable choices are: fix the bytes, or add a
+justified `a2bp-allow` marker whose text explains why the finding is benign.
+State those two choices. A request about a scanner false positive would need a
+separate clean change or another communication channel; it is not a bypass for
+the blocked invocation.
+
+### Round-8 answers and implementation boundary
+
+1. **Canonical key:** yes for branch identity; **no for exact-tip retry** until
+   the literal commit/ref bytes and expected-SHA construction are chosen.
+2. **Scratch procedure:** lifecycle is correct, but incomplete on the R8-F2
+   input/tree/race cases.
+3. **`CLAUDE.md` boundary:** **accepted.** It carries the request-versus-delivery
+   rule and the distinct blueprint-context decision clearly.
+4. **Remaining contradiction:** the blocked request still cannot carry the
+   explanation offered as its own bypass.
+
+After R8-F1–F3, the implementation boundary remains: same-owner GitHub request
+creation; version-2 remote/base config; unchanged staging and round-trip guard
+semantics except removal of whole-file `--force`; scratch construction from an
+exact fetched base; deterministic base-bound request/commit identity;
+no-force, exact-tip ref/PR recovery; `prs`; migrated CLI tests plus
+input/topology/race/retry/no-write tests; and the synchronized documentation
+inventory in §4.2.
+
+Still excluded: receiver enforcement, `contamination.sh` semantic changes,
+cases #13/#14 changes, fork mode, automatic merge, offline persistence,
+arbitrary hosting, general development branches, and direct writes to either
+working tree.

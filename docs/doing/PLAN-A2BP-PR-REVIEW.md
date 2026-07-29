@@ -916,3 +916,118 @@ Excluded: receiver-enforced contamination/ripple checks, changes to
 `contamination.sh` semantics or cases #13/#14, fork mode, automatic merge,
 offline persistence, arbitrary hosting, general branch development, and any
 direct write to either working tree.
+
+---
+
+## Round 7 — build-contract review of DRAFT v12
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v12 (`1bdb7d8`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — reframe remains accepted; implementation is not yet authorised**
+
+The operating reframe remains sound. A documented behavioural boundary is
+appropriate for the explicitly same-owner phase as long as it is described
+honestly rather than claimed as mechanical enforcement. Section 3.0 now does
+that: the filing invocation cannot integrate, automatic merge is prohibited,
+and a separate blueprint-context decision owns merge-as-is. Receiver gating
+remains correctly deferred.
+
+v12 does not yet contain the executable build contract it claims, however. It
+mostly names the categories requested in R6-F2/F3 without making their operative
+choices.
+
+### R7-F1 — HIGH: the canonical request identity is still not specified, and exact-tip retry is not reproducible
+
+The final row of the identity table literally says “stated digest + encoding”
+and “named in the plan,” but the plan names neither. It also says only
+“length-prefixed per path,” without defining the serialized fields, byte order,
+length width, path encoding, mode encoding, or canonical destination-repository
+normalization. Those choices are the identity.
+
+More importantly, exact-tip adoption requires the retry to reconstruct the
+same Git commit, not merely the same tree. Ordinary commits vary with author /
+committer identity and timestamps. The plan does not define deterministic
+commit metadata, commit-message bytes, parent list, or an alternative recovery
+comparison which is both sufficient and consistent with “exact tip.” A retry
+can therefore derive the same branch name, rebuild equivalent content, produce
+a different commit SHA, and reject its own branch.
+
+Choose one complete contract. For example: canonical UTF-8 repository identity
+and paths; an explicitly specified length-framed binary record including field
+tags, fixed-width big-endian lengths, mode and bytes; SHA-256 rendered as the
+full lowercase hex digest in `a2bp/<digest>`; collision refusal; and a
+deterministic commit object whose parent, tree, author/committer, timestamps and
+message are all defined. A different precise encoding is fine. The plan must
+choose it rather than delegate it.
+
+### R7-F2 — MEDIUM: the R6-F3 configuration and scratch-build contract is still a summary
+
+“Versioned config” currently specifies only a version marker, remote identity,
+and refusal when absent. It does not define the fields and syntax for local
+path, canonical GitHub repository, target branch, legacy-file interpretation,
+missing base/version behaviour, or unsupported host/version behaviour.
+
+Likewise, “all inputs validated” covers only membership and readability. It
+still omits duplicate/canonical path handling, regular-file versus symlink/type
+policy, deletion policy, and no-op policy. The scratch paragraph does not state
+directory/symlink/type-collision rejection, parent containment, or the required
+post-install assertion that the diff contains exactly the validated target set.
+“Clone with no checkout, fetch the single base ref at the captured SHA” also
+leaves the initial SHA-resolution/fetch sequence undefined.
+
+These are small choices now, but they are observable safety and compatibility
+behaviour. R6-F3 explicitly required them before implementation.
+
+### R7-F3 — MEDIUM: dry-run and advisory/override semantics contradict the new boundary
+
+The CLI promises that `--dry-run` makes no remote contact, while §3.4 says it
+“resolves” the base it would build against without choosing the local-snapshot
+semantics offered in round 6. It must say that it uses the configured local
+blueprint snapshot, report that snapshot SHA, and state publication will
+re-fetch/rebuild; otherwise “the base it would build against” implies remote
+resolution which the command prohibits.
+
+Section 3.1 says findings block filing, then says a requester whose content the
+guard dislikes “can say so in the request,” while removing `--force`. A blocked
+request cannot carry that explanation. The plan also says there is “nothing to
+waive,” although the local guard is explicitly still a blocking gate for the
+requester. Choose either: retain the existing loud override as a requester-side
+waiver; or remove it and state that recognized findings cannot be filed until
+the bytes/marker are changed. Do not describe a route that the CLI removes.
+
+### R7-F4 — MEDIUM: the travelling operating rule is claimed but not present
+
+The v12 note and §3.0 say the distinct-decision rule was recorded in
+`CLAUDE.md` §Back-propagating. Commit `1bdb7d8` changes only the plan, and the
+current `CLAUDE.md` still describes direct copying, same-session completion and
+`--force`; it contains no new request/integration boundary. This may be intended
+for the implementation docs sweep, but the plan presently claims it is already
+recorded. Either land that normative rule with the plan or change the text to
+say it will be part of the synchronized implementation.
+
+### Round-7 disposition and implementation boundary
+
+Answers to the requested four questions:
+
+1. **Canonical key:** the component set is sufficient, but the key and
+   reconstructible commit are not yet specified, so retry correctness is not.
+2. **Operating boundary:** yes, a behavioural rule is sufficient for the
+   explicitly trusted same-owner phase, provided it travels in `CLAUDE.md` and
+   is not represented as mechanical enforcement.
+3. **Build contract:** not yet. R7-F1/F2 are implementation-significant missing
+   choices; R7-F3 is contradictory observable behaviour.
+4. **Other contradictions:** the absent `CLAUDE.md` rule and the
+   advisory/override and dry-run claims above.
+
+Once those points are pinned, the implementation boundary is unchanged from
+round 6: same-owner GitHub request creation; versioned remote/base config;
+unchanged local staging/round-trip guard semantics; scratch-clone build from an
+exact base; deterministic base-bound identity and no-force exact-tip recovery;
+open/closed PR recovery plus honest `prs`; CLI/topology/retry/no-working-tree
+tests; and synchronized docs.
+
+Still excluded: receiver enforcement, `contamination.sh` semantic changes,
+cases #13/#14 changes, fork mode, automatic merge, offline persistence,
+arbitrary hosting, general development branches, and direct writes to either
+working tree.

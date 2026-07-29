@@ -57,10 +57,15 @@ in the founder-agreed "guard the pipe" order:
   record in [`../waiting-acceptance/A-07-a2bp-guard/`](../waiting-acceptance/A-07-a2bp-guard/).
   It also surfaced a pre-existing `pull` defect: project names containing `&`
   or `\` were silently mangled by the interpolated `sed`, independent of a2bp.
-- ~~**A-03**~~ — **FIXED (awaiting acceptance).** The secret gate scanned an
-  index that is always empty at pre-push time. Now scans `remote..local` for
-  every ref being pushed; regression `tests/pre-push-secrets/` (6 cases,
-  gate-wired) plus an end-to-end run against the real gitleaks.
+- **A-03** — **PARTIALLY FIXED, follow-up unpushed.** The secret gate scanned
+  an index that is always empty at pre-push time; now scans `remote..local`
+  per ref (pushed `1c4dd4c`). **That push went out BEFORE four-eyes**, and the
+  review then found a real hole in it: the new-branch selector `--not
+  --remotes` subtracts *every* configured remote, so a commit already on a
+  private mirror is skipped when first disclosed to a public one. Scoped to
+  `--remotes=<destination>` with a full-history fallback for bare-URL
+  destinations; regressions #7/#8 added and mutation-verified. **Committed,
+  not yet pushed, pending the next review round.**
 - **A-08** — `LWA_FEED_*` in `scripts/log-activity.sh`: BUG-002's contamination
   in env-var-namespace form.
 - **A-09** — dispatchers still write a literal `~/.{{PROJECT_NAME}}/`, shared

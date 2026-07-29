@@ -121,10 +121,14 @@ fi
 mkdir -p "$(dirname "$LOG_FILE")"
 
 last_trigger_key=""
-# The Task text of the last dispatch actually made. Deliberately NOT reset when
-# the state leaves the target — it has to outlive the whole round to catch a
-# stale re-dispatch. See trigger_if_needed.
 last_dispatched_task=""
+# Settle state: a candidate trigger key and when it was first seen. The signal
+# must hold still for SETTLE_SECONDS before it is dispatched, so a two-edit
+# write (Task then State, or State then Task) fires ONCE on its final content
+# rather than mid-write. See trigger_if_needed.
+pending_key=""
+pending_since=0
+SETTLE_SECONDS="${AGENT_SIGNAL_SETTLE:-6}"
 last_mtime="$(file_mtime "$SIGNAL_FILE")"
 
 trigger_if_needed() {
@@ -136,6 +140,8 @@ trigger_if_needed() {
 
   if [[ "$state" != "$TARGET_STATE" ]]; then
     last_trigger_key=""
+    pending_key=""
+    pending_since=0
     return 1
   fi
 
@@ -143,27 +149,33 @@ trigger_if_needed() {
     return 1
   fi
 
-  # --- Stale-dispatch guard -------------------------------------------------
+  # --- Settle window --------------------------------------------------------
   # The signal is TWO fields written by two separate edits. Flipping `State` to
   # the target before writing `Task` produces a brand-new trigger key while
   # `Task` still holds the PREVIOUS round's text — so the agent is dispatched,
-  # authentically, against work that is already done.
+  # authentically, against work that is already done. That happened twice in one
+  # session here, the second time hours after the "flip the mic last" rule was
+  # written into AGENTS.md and HANDOVER by the same author who then broke it.
+  # A rule you must remember while busy is the wrong kind of fix (the A-22
+  # lesson): put it in code on the path that already runs.
   #
-  # That happened twice in one session here. The protocol answer is "flip the
-  # mic last", and it was written down in AGENTS.md and in HANDOVER before the
-  # second occurrence, which is what makes it the wrong kind of fix: a rule
-  # someone has to remember at the exact moment they are busy. Same lesson as
-  # A-22 — put it in code on the path that already runs.
+  # WHY NOT "refuse a Task identical to the last dispatched one" — that was the
+  # first attempt and Codex was right to reject it. Task text is not a round
+  # identity: identical instructions can legitimately recur, and the guard
+  # blocked them for the entire life of the watcher rather than the "one poll
+  # interval" its author claimed. It also died on restart, so it never covered
+  # a wrong-order flip across one.
   #
-  # A Task byte-identical to the one last dispatched means nobody has written a
-  # new instruction yet. Refuse, say why, and let the next poll pick it up once
-  # the Task lands. Costs at most one poll interval on a legitimate re-dispatch
-  # of identical text, which does not occur in practice: every round carries its
-  # own round number.
-  if [[ -n "$last_dispatched_task" && "$task" == "$last_dispatched_task" ]]; then
-    printf '[%s] SKIPPED: State=%s but Task is unchanged since the last dispatch — waiting for the new Task (write Task first, flip the mic last).\n' \
-      "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$state" | tee -a "$LOG_FILE"
-    last_trigger_key="$key"
+  # Waiting for the signal to STOP CHANGING settles it instead of guessing. A
+  # multi-edit write is dispatched once, on its final content, whatever order
+  # the fields were written in; an intentional identical re-dispatch still
+  # fires; nothing is remembered across a restart because nothing needs to be.
+  if [[ "$key" != "$pending_key" ]]; then
+    pending_key="$key"
+    pending_since="$(date +%s)"
+    return 1
+  fi
+  if [[ $(( $(date +%s) - pending_since )) -lt "$SETTLE_SECONDS" ]]; then
     return 1
   fi
 

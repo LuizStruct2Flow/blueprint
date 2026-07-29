@@ -529,6 +529,30 @@ Walk every box. If any is unchecked, finish it; do **not** flip
 - [ ] Findings register (`docs/config/findings.md` or equivalent)
       finding block has "Status: Fixed"
 
+#### F.1 The review object is a COMMIT, never the working tree
+- [ ] The handoff **names the exact commit(s)** under review
+      (`git log --oneline <base>..HEAD`), and the reviewer reviews that
+      diff — `git show` / `<base>..<sha>` — not whatever happens to be
+      in the tree.
+- [ ] `git status --short` is captured in the handoff. **Any tracked
+      modification inside the claimed scope blocks the flip** until it is
+      committed or explicitly named as out of scope.
+- [ ] The doc-sync list in the claim is checked **against that diff**,
+      file by file.
+
+> **Why this is its own rule.** A cross-provider review that reads the
+> working tree can bless bytes that are not in the commit it approves.
+> That happened here: an R5 finding required narrowing an overclaimed
+> contract in four files; three were committed and `README.md` — at the
+> repo root, outside the path-scoped `git add -A scripts tests docs` used
+> for the rest — was not. The reviewer read the tree, saw the fix, and
+> recorded the finding closed. The pushed state did not contain it, and
+> the claim had already been reported to the founder as done. Neither
+> party was careless in a way the other could see; the review object was
+> simply the wrong artefact. A pre-push warning for tracked-but-unstaged
+> files is a useful backstop and not a substitute, because a repo often
+> holds legitimate unrelated edits and a generic warning gets normalised.
+
 ### G. Signal + resume doc reflect reality (→ AGENT_SIGNAL.md + HANDOVER.md + §10)
 - [ ] `AGENT_SIGNAL.md` `Holder` / `State` / `Task` / `Last update` all
       updated

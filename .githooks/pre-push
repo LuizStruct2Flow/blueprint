@@ -41,21 +41,41 @@ echo "🔒 Pre-push: security + build + lint + tests..."
 _PUSH_REFS="$(cat || true)"
 _ZERO=0000000000000000000000000000000000000000
 
+# The DESTINATION remote, which git passes as $1. It matters: "already
+# published" has to mean "already on the remote I am pushing to", not "on any
+# remote I happen to have configured. A commit sitting on a private mirror is
+# still a first disclosure when it goes to the public one.
+_PUSH_REMOTE="${1:-}"
+
 # push_log_opts — prints the `git log` selector covering everything about to be
 # published, or nothing when there is nothing to scan. Handles the three shapes
 # git can hand us:
 #   normal update  remote_sha..local_sha
 #   new branch     remote_sha is all-zero and is NOT a resolvable revision, so
-#                  `000..local` would make the scan ERROR. Ask instead for the
-#                  commits reachable from local that are on no other remote ref.
+#                  `000..local` would make the scan ERROR. Subtract only THIS
+#                  remote's tracking refs.
 #   deletion       local_sha is all-zero: nothing is published, so nothing to
 #                  scan — and a range built from it would be nonsense.
+#
+# The new-branch case originally used a bare `--not --remotes`, which subtracts
+# commits on EVERY configured remote. A commit already on a private mirror was
+# therefore skipped when first pushed to a public remote — precisely the
+# disclosure the scan exists to catch, and reproduced by Codex against a
+# fixture with the commit only on `refs/remotes/private/main`. Scoped to
+# `--remotes=<destination>`, and when the destination is a bare URL rather than
+# a named remote there are no tracking refs to trust, so nothing is subtracted
+# and the whole reachable history is scanned. Over-scanning is slow; under-
+# scanning ships secrets.
 push_log_opts() {
   echo "$_PUSH_REFS" | while read -r _lref _lsha _rref _rsha; do
     [ -n "${_lsha:-}" ] || continue
     [ "$_lsha" = "$_ZERO" ] && continue
     if [ "${_rsha:-$_ZERO}" = "$_ZERO" ]; then
-      echo "$_lsha --not --remotes"
+      if [ -n "$_PUSH_REMOTE" ] && git config --get "remote.$_PUSH_REMOTE.url" >/dev/null 2>&1; then
+        echo "$_lsha --not --remotes=$_PUSH_REMOTE"
+      else
+        echo "$_lsha"
+      fi
     else
       echo "$_rsha..$_lsha"
     fi

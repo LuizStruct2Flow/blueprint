@@ -198,6 +198,55 @@ else
   pass "#6 no ref info on stdin degrades safely rather than skipping or crashing"
 fi
 
+# ===========================================================================
+# 7. F1 (Codex) — "already published" means already on THE DESTINATION, not on
+#    any remote you happen to have configured.
+#
+#    `--not --remotes` subtracts every remote's tracking refs. A commit sitting
+#    on a private mirror is still a FIRST DISCLOSURE when it goes to the public
+#    remote, and the original fix skipped exactly that commit. Case #3 only
+#    proved the all-zero sha never reaches git; it said nothing about which
+#    remote is subtracted.
+# ===========================================================================
+(
+  cd "$FIX"
+  git remote add origin  https://example.invalid/pub.git  2>/dev/null
+  git remote add private https://example.invalid/priv.git 2>/dev/null
+  # The commit exists ONLY on the private mirror's tracking ref.
+  git update-ref refs/remotes/private/main "$HEADSHA"
+) 2>/dev/null
+
+mk_gitleaks 1
+rc=$(run_hook "refs/heads/main $HEADSHA refs/heads/main $ZERO
+")
+if [ "$rc" -eq 0 ]; then
+  fail "#7 a commit already on a PRIVATE remote was skipped when first pushed to origin — '--not --remotes' subtracted every remote, not the destination (Codex F1)"
+elif grep -qE '\-\-not --remotes( |$)' "$ARGV"; then
+  fail "#7 the scan subtracted ALL remotes; it must scope to the destination. argv: $(tr '\n' '|' <"$ARGV")"
+else
+  pass "#7 a new branch subtracts only the DESTINATION remote's refs (Codex F1)"
+fi
+
+# ===========================================================================
+# 8. F1, other half — when the destination is a bare URL rather than a named
+#    remote, there are no tracking refs worth trusting. Scan everything
+#    reachable rather than subtracting a remote that may not correspond.
+# ===========================================================================
+mk_gitleaks 1
+printf '%s' "refs/heads/main $HEADSHA refs/heads/main $ZERO
+" | (
+  cd "$FIX" && PATH="$FIX/bin:$PATH" sh .githooks/pre-push \
+    "https://example.invalid/direct.git" "https://example.invalid/direct.git"
+) >"$WORK/out" 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "#8 pushing to a bare URL skipped the scan entirely"
+elif grep -q '\-\-remotes=' "$ARGV"; then
+  fail "#8 a bare-URL destination was treated as a named remote. argv: $(tr '\n' '|' <"$ARGV")"
+else
+  pass "#8 a bare-URL destination scans all reachable history rather than trusting tracking refs (Codex F1)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-03 — the secret gate scans the pushed commits, not the empty index."

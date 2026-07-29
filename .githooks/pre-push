@@ -27,6 +27,41 @@ set -e
 
 echo "🔒 Pre-push: security + build + lint + tests..."
 
+# --- What is actually being pushed (A-03) ------------------------------------
+# git feeds a pre-push hook one line per ref on STDIN:
+#     <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Read it ONCE, here, into a variable. Nothing further down consumes stdin, and
+# a later step that did would otherwise silently eat the ref list.
+#
+# This exists because the secret scan used to run `gitleaks protect --staged`,
+# which scans the INDEX — empty at pre-push time, since the commit is already
+# made. Verified against a real gitleaks with a real secret in the outgoing
+# commit: "0 commits scanned, ~0 bytes ... no leaks found". The gate that
+# CLAUDE.md §Security calls blocking was a no-op in the normal flow.
+_PUSH_REFS="$(cat || true)"
+_ZERO=0000000000000000000000000000000000000000
+
+# push_log_opts — prints the `git log` selector covering everything about to be
+# published, or nothing when there is nothing to scan. Handles the three shapes
+# git can hand us:
+#   normal update  remote_sha..local_sha
+#   new branch     remote_sha is all-zero and is NOT a resolvable revision, so
+#                  `000..local` would make the scan ERROR. Ask instead for the
+#                  commits reachable from local that are on no other remote ref.
+#   deletion       local_sha is all-zero: nothing is published, so nothing to
+#                  scan — and a range built from it would be nonsense.
+push_log_opts() {
+  echo "$_PUSH_REFS" | while read -r _lref _lsha _rref _rsha; do
+    [ -n "${_lsha:-}" ] || continue
+    [ "$_lsha" = "$_ZERO" ] && continue
+    if [ "${_rsha:-$_ZERO}" = "$_ZERO" ]; then
+      echo "$_lsha --not --remotes"
+    else
+      echo "$_rsha..$_lsha"
+    fi
+  done
+}
+
 # --- Security: gitleaks + Semgrep + osv-scanner (docs/SECURITY.md cross-recipe rules) ---
 # All three are skipped with a warning if the binary isn't installed locally
 # — CI re-runs them as a backstop. This keeps a fresh clone from being
@@ -40,12 +75,53 @@ if command -v gitleaks >/dev/null 2>&1; then
   # shrug off spurious failures will shrug off a real one.
   _gl_out="$(mktemp)"
   _gl_rc=0
-  gitleaks protect --staged --redact --no-banner >"$_gl_out" 2>&1 || _gl_rc=$?
+  _gl_ranges="$(push_log_opts)"
+
+  if [ -z "$_gl_ranges" ]; then
+    if [ -n "$_PUSH_REFS" ]; then
+      # Every ref was a deletion — nothing is being published.
+      echo "     nothing published (branch deletion) — no content to scan."
+    else
+      # No ref lines: the hook was invoked by hand, by CI, or by a fixture
+      # rehearsing the gate. Scanning nothing here would turn "run the gate
+      # manually" into a hole, so fall back to the outgoing commits against the
+      # upstream, and to the whole history when there is no upstream to
+      # subtract. Never silently skip.
+      _gl_up="$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)"
+      if [ -n "$_gl_up" ]; then
+        _gl_ranges="$_gl_up..HEAD"
+      else
+        _gl_ranges="--all"
+      fi
+      echo "     no ref info on stdin — scanning $_gl_ranges"
+    fi
+  fi
+
+  # Same exit-code discipline as semgrep below (BUG-003): 1 means gitleaks
+  # FOUND something, >=2 means it could not run. They are different failures
+  # and are reported differently — an operator who learns to shrug off a
+  # spurious one will shrug off a real one.
+  # The loop runs in a subshell, so the exit status is passed back through the
+  # output file rather than a variable — one range per line, any of which may
+  # find something.
+  printf '%s\n' "$_gl_ranges" | while IFS= read -r _gl_range; do
+    [ -n "$_gl_range" ] || continue
+    gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
+      || echo "GITLEAKS_RC=$?" >>"$_gl_out"
+  done
+  _gl_rc=0
+  if grep -q '^GITLEAKS_RC=1$' "$_gl_out" 2>/dev/null; then
+    _gl_rc=1
+  elif grep -q '^GITLEAKS_RC=' "$_gl_out" 2>/dev/null; then
+    _gl_rc="$(grep -m1 '^GITLEAKS_RC=' "$_gl_out" | cut -d= -f2)"
+  fi
+
   if [ "$_gl_rc" -eq 1 ]; then
     tail -30 "$_gl_out"; rm -f "$_gl_out"
-    echo "❌ gitleaks found a secret in staged changes."
-    echo "   Unstage + rotate the credential. A leaked secret is compromised the"
-    echo "   moment it lands on origin; rotating is non-negotiable."
+    echo "❌ gitleaks found a secret in the commits you are pushing."
+    echo "   Rotate the credential FIRST, then rewrite the history that carries it."
+    echo "   A leaked secret is compromised the moment it lands on origin, and"
+    echo "   removing the commit does not un-leak it."
     exit 1
   elif [ "$_gl_rc" -ne 0 ]; then
     tail -30 "$_gl_out"; rm -f "$_gl_out"

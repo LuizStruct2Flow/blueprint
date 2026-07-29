@@ -91,6 +91,20 @@ if [ -f tests/state-dir/test.sh ]; then
   }
 fi
 
+# A-03 — the secret gate must scan the COMMITS BEING PUSHED, not the index.
+# `gitleaks protect --staged` scanned an index that is always empty at pre-push
+# time, so the gate CLAUDE.md §Security calls blocking was a no-op in the normal
+# commit-then-push flow. Unrun, this regression is invisible: a secret gate that
+# silently scans nothing looks exactly like one that finds nothing. ~0.3s.
+if [ -f tests/pre-push-secrets/test.sh ]; then
+  bash tests/pre-push-secrets/test.sh || {
+    echo "❌ tests/pre-push-secrets/test.sh failed (A-03)."
+    echo "   The secret scan must cover remote..local for every ref being"
+    echo "   pushed, or secrets ride out in commits nothing ever looked at."
+    exit 1
+  }
+fi
+
 # A-07 — `blueprint a2bp` is the ONLY write path from a project into the generic
 # blueprint, and it is how BUG-002 and A-09 both got in. It must reverse-
 # substitute the project name and refuse to copy contaminated content. Unrun,

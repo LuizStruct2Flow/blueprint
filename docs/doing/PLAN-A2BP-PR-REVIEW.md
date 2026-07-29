@@ -349,3 +349,126 @@ tests for absent files and partial push/PR recovery. There is still no
 authorisation for fork mode, automatic merge, an offline proposal store,
 general branch development, arbitrary hosting support, unrelated sync work, or
 weakening the contamination classes.
+
+---
+
+## Round 3 — review of DRAFT v8
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v8 (`48e0016`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — close, but implementation is not yet authorised**
+
+The central marker rule now holds. A candidate suppression is accepted only
+when the complete candidate line bytes exist as a validly-marked line at the
+same base path. A wholly new file has no base path content and therefore zero
+eligible suppressions: every marker in it is new and every recognized finding
+is evaluated. The trusted-tool requirement also correctly includes
+`placeholders.sh` and any other transitive executable helper.
+
+Four bounded issues remain. Three are internal contradictions or incomplete
+contracts that an implementer would otherwise have to resolve silently.
+
+### R3-F1 — HIGH: the publication and security contracts contradict themselves
+
+Section 2.1b correctly chooses a stable retry identity derived from content and
+target, but §2.2 still specifies `a2bp/<project>-<utc-timestamp>`. These cannot
+both be true. Specify one canonical branch-key input and encoding, including
+destination repository, target base SHA, ordered target paths and proposed
+tree/content; then use that same identity for retry and remote-tip verification.
+
+The earlier overclaims also survive in operative text:
+
+- §2.3 still calls the authoritative guard “unbypassable”;
+- §1.1 concludes that only the founder can bypass before the live ruleset,
+  administrator, app identity and bypass actors have been verified;
+- §2.2 again puts the source project's absolute local path in the PR body,
+  despite round 1 requiring that private, unauthenticated host datum be removed.
+
+Use the already-agreed protected-path claim instead. The PR body may carry
+descriptive repository identity, source commit, target base/head SHAs, ordered
+file list and local findings, but not an absolute host path and not trusted
+provenance.
+
+### R3-F2 — HIGH: trusted source-project identity is acceptable only with an explicit degradation
+
+Naming the unresolved identity is honest, and it does **not** block branch mode
+inside the recorded same-owner boundary. It does block treating the
+project-name-dependent contamination class as authoritative. The residual-name
+check needs the actual derived-project name; neither commit author, branch name
+nor PR body proves it.
+
+Therefore v8 must choose one of the round-2 outcomes:
+
+1. add a receiver-owned mapping from authenticated source repository identity
+   to project name; or
+2. state that the residual-project-name check is local/advisory in this phase,
+   while the receiver check authoritatively enforces only the classes whose
+   inputs come from the base and candidate trees.
+
+Option 2 is sufficient for consensus in the trusted-owner deployment. Merely
+saying the issue “does not bite” is not, because it leaves the CI interface and
+the scope of “recognized BLOCK finding” undefined.
+
+### R3-F3 — MEDIUM: the ripple-evidence check is implementable, but not yet specified
+
+The current prose describes a feasible check, not an implementable contract.
+The playbook has a useful class-to-“where to look” table, but entries contain
+judgement words such as “possibly”, “if implied”, “if framing changed” and
+“none usually”. A check cannot deterministically infer required paths from
+those phrases, and a contributor-authored checkbox cannot supply the missing
+judgement.
+
+Define a machine-readable evidence record in the PR (or a checked-in policy
+file): selected class(es), each deterministic required path, and an explicit
+`not-applicable` disposition with a reason for conditional paths. The
+receiver-owned check can then:
+
+1. derive the changed input paths from the Git diff;
+2. require all mechanically implied classes;
+3. require every unconditional ripple path to appear in the diff;
+4. reject missing dispositions for conditional paths; and
+5. leave the truth of a reasoned `not-applicable` judgement to receiver review.
+
+This verifies diff evidence without pretending to verify human judgement.
+Without that mapping and disposition schema, §3.1's “moves to the PR template +
+a check” and §4b remain design intent.
+
+### R3-F4 — MEDIUM: §3 is much better, but one final inventory pass is required
+
+The restored removals/non-removals, `security.yml`, marker logic, managed docs,
+audit register, HANDOVER and test-count correction are all right. The remaining
+implementation surfaces from rounds 1–2 must be explicit line items:
+
+- `.blueprint-source` needs a backward-compatible schema/migration for remote,
+  base and contribution mode, not only “a remote identity”;
+- repository ruleset/manual configuration and its acceptance artefact must
+  cover PR-only `main`, direct/force-push/deletion controls, current-base or
+  `merge_group`, expected app/status identity, bypass/admin actors, path-filter
+  behaviour, and live negative verification;
+- absent-file handling must reject directory/symlink/type collisions and
+  constrain parent creation to the isolated root;
+- remote `a2bp/*` branch cleanup after merge/close, and `prs`/`drift` handling
+  for drafts, closed PRs, bot PRs and API/auth failure, need an owner;
+- the PR template/check implementation and its tests should be named as files
+  or deliberately named new artefacts, rather than left as an abstract
+  “template”.
+
+Also rename “scratch worktree” to “scratch clone” in §2.1b. These are not a
+request to restore the inbox machinery; they complete the PR design's actual
+configuration, failure and cleanup boundary.
+
+### Round-3 disposition and implementation boundary
+
+No code implementation is authorised yet. Consensus is one revision away if
+v9 resolves R3-F1–F4 without expanding scope. The eventual implementation
+boundary remains the round-1/round-2 boundary: PR-based `a2bp`, trusted
+receiver-side contamination enforcement with base-owned suppressions,
+scratch-clone construction and idempotent publication/recovery, `prs`/drift
+visibility, repository-policy evidence, ripple evidence, the complete cleanup
+inventory and their tests/docs.
+
+Still excluded: fork mode, automatic merge, an offline proposal store, general
+development branches, arbitrary hosting, unrelated sync changes, and weakening
+any contamination class beyond the explicitly documented source-identity
+degradation above.

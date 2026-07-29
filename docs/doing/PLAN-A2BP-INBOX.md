@@ -1,4 +1,22 @@
-# PLAN — `a2bp` proposes, it does not write
+# PLAN — `a2bp` proposes, it does not write — ⚠️ SUPERSEDED
+
+> **SUPERSEDED 2026-07-29 by [`PLAN-A2BP-PR.md`](PLAN-A2BP-PR.md).**
+>
+> The founder asked: *"what about doing this with PRs, since this is an external
+> collaboration to the project"* — and that is the correction. A derived project
+> proposing a change to the blueprint **is** an external contribution, and pull
+> requests are the mechanism built for it.
+>
+> Every open finding against this document — atomic no-clobber publication,
+> approved identity and tamper-evidence, the lifecycle state machine, retention,
+> multi-file transactions, concurrent proposals — is something GitHub already
+> does. Five review rounds went into re-implementing that in shell, and round 5
+> established that part of it (opened-directory no-follow, true no-replace)
+> **cannot be written in portable shell at all**.
+>
+> **Kept, not deleted**, because the review trail is the useful part: it records
+> five specific ways a hand-rolled version of this fails, and the next person
+> tempted to build one should read it first.
 
 **Status:** DRAFT v2 — revised after Codex CHANGES-REQUESTED
 ([PLAN-A2BP-INBOX-REVIEW.md](PLAN-A2BP-INBOX-REVIEW.md)) and after the founder

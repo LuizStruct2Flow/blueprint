@@ -1,6 +1,19 @@
 # PLAN — `a2bp` files a feature request
 
-**Status:** DRAFT v11. No code written.
+**Status:** DRAFT v12 — **reframe accepted at review round 6**; this revision is
+the build contract. No code written.
+
+**v12.** §3.0 states the operating boundary the reframe rests on (no automatic
+merge, no self-integration without a distinct decision step) — without it "a
+person decides" is a habit, not a property. §3.4 restores **canonical request
+identity**, which v11 deleted along with the gate machinery: it was never
+gating, it is what makes the retry able to recognise its own branch. Plus
+PR-response-loss recovery that queries for open *and closed* PRs, base-movement
+handling, all-input validation before remote contact, versioned config, honest
+`--dry-run` base semantics, and `prs` failure behaviour. §3.1 pins what
+"advisory" means — findings still stop `a2bp`; they no longer decide what
+reaches the blueprint. §4.2 no longer lists `contamination.sh`, which §4.4 had
+already called unchanged.
 **Supersedes:** `PLAN-A2BP-INBOX.md` (678 lines, five review rounds) and this
 document's own v6–v10 (five further rounds).
 
@@ -70,11 +83,41 @@ into no working tree — not the blueprint's, not its own.
 may be merged as-is. A rule change is usually re-implemented with the ripples
 done properly, and the PR closed with a reference to the real commit.
 
+### 3.0 The operating boundary — without this, the reframe is nominal
+
+The whole design now rests on "a person decides upstream". That is a property of
+*behaviour*, not of the tool, and it evaporates silently if the same operator
+opens a request and merges it in the same breath. So it is stated as a rule
+rather than assumed as a habit:
+
+- **No automatic merge.** No auto-merge setting, no bot, no `--merge` flag on
+  `a2bp`. The tool has no verb that lands a request.
+- **No self-integration without a distinct decision step.** The same person may
+  well be on both ends — that is the normal case here — but opening a request
+  and integrating it are two acts, separated by actually reading the diff in the
+  blueprint's context. Merging a request seconds after filing it is the thing
+  this plan exists to stop, and no mechanism prevents it; only the rule does.
+- **Merging as-is is a decision, not a shortcut.** It is legitimate for a trivial
+  change. It is legitimate *because someone judged it trivial*, which is the step
+  that must not be skipped.
+
+Recorded in `CLAUDE.md` §Back-propagating, so it travels to every derived
+project rather than living in this plan's memory.
+
 ### 3.1 The guard is advisory, and that is now correct
 
-It runs locally at `a2bp` time, shows findings, and the requester fixes what it
-flags. It is **not** a gate, because the gate is a person deciding whether to
-implement.
+**"Advisory" means precisely this:** the guard runs locally at `a2bp` time and
+**still blocks the request from being filed** when it finds something — the
+requester fixes it or marks it, exactly as today. What it no longer does is
+decide what reaches the blueprint, because that decision is now a person's.
+
+So it is advisory *with respect to the blueprint*, not toothless with respect to
+the requester. The distinction matters: v11 said "advisory" and left it open
+whether findings still stop `a2bp`. They do.
+
+`--force` is gone because the guard no longer stands between a project and the
+blueprint — a requester who genuinely needs to file something the guard dislikes
+can say so in the request, and the person implementing decides.
 
 Optional later: a CI run on the PR as a **convenience signal** for the reviewer
 — "this request contains a host path" is useful to see. It is not load-bearing
@@ -96,6 +139,12 @@ implementation session, where it always belonged.
 | `blueprint a2bp --dry-run FILE...` | Guard and show the diff. No remote contact. |
 | `blueprint prs` | Open a2bp requests: number, project, files, age — plus pushed branches with no PR (§3.4). |
 
+`prs` behaviour, since a discovery command that is silent about its own failures
+is worse than none: it reports **drafts** and **closed-but-branch-present**
+distinctly, ignores nothing silently, and on a `gh` API failure **says the list
+is incomplete** rather than printing an empty one that reads as "nothing
+pending".
+
 No `--force` (nothing to waive — the guard is advisory). No `push` alias.
 
 ### 3.4 Build mechanics — the parts still genuinely needed
@@ -104,13 +153,48 @@ No `--force` (nothing to waive — the guard is advisory). No `push` alias.
   sharing their object store. A derived repo's history is unrelated to the
   blueprint's, so the commit must be built against the fetched blueprint base;
   there is no common ancestor to commit against locally.
-- **Stable branch id** derived from target paths + content, not a timestamp, so
-  a retry finds its own branch instead of creating a second one.
-- **Push-succeeded-PR-failed** is a real state: re-running verifies the remote
-  tip matches the commit it would have built and opens the PR, or refuses and
-  names both SHAs. Never force-push.
+- **Canonical request identity.** v11 deleted this along with the gate
+  machinery, which was wrong: it is load-bearing for the **retry**, not for
+  gating, and the retry survives. A stable id that cannot recognise its own
+  branch either duplicates it or adopts a stranger's. The key binds, in this
+  order:
+
+  | Component | Why |
+  |---|---|
+  | destination repo | the same content to two remotes is two requests |
+  | target branch | rebasing the request onto a different base is a different request |
+  | **exact base SHA** | not "the base branch" — a moved base changes what the diff means |
+  | target paths, **sorted** | so argument order cannot produce two ids for one request |
+  | staged bytes **and file modes**, framed | length-prefixed per path, so `ab`+`c` and `a`+`bc` cannot collide |
+  | stated digest + encoding | named in the plan, not left to the implementer |
+
+- **Adoption is exact-tip only, never force.** On retry: if a branch of that name
+  exists remotely, adopt it **only if its tip is byte-identical to the commit
+  just built**. Otherwise refuse and print both SHAs. Never force-push, and
+  never assume a name match is a content match.
+- **PR-response loss.** Push succeeded, PR creation returned no answer: the
+  request may or may not exist. Recovery **queries for an existing PR on that
+  branch — open *or closed*** — before creating one. Creating a duplicate of a
+  request the owner already closed is worse than failing.
+- **Base movement between build and push.** The base SHA is captured at build
+  and re-checked before push; if it moved, the request is rebuilt against the
+  new base or refused, never pushed as though built against the current one.
 - **Absent-from-base files** are creation; called out as such in the PR body.
-- Scratch clone removed on success and failure; path reported if removal fails.
+- **All inputs validated before any remote contact** — every path in
+  `MANAGED_FILES`, every file readable — so a bad argument cannot leave a branch
+  pushed and the run aborted.
+- **Exact scratch-clone algorithm:** clone with no working-tree checkout of
+  unrelated refs, fetch the single base ref at the captured SHA, apply staged
+  content, commit, push. Removed on success and failure; path reported if
+  removal fails.
+- **Versioned config.** `.blueprint-source` gains a remote identity with a
+  version marker and a stated behaviour when absent (refuse and say how to add
+  it, rather than guessing a remote).
+- **`--dry-run` base semantics, honestly.** It resolves and reports the base it
+  *would* build against, and says so — it does not promise that base will still
+  be current at push time, because it cannot.
+- **Existing staging behaviour is unchanged.** `contamination_stage` still
+  produces the bytes; only their destination changes.
 
 ## 4. What this removes
 
@@ -130,9 +214,14 @@ All managed: `CLAUDE.md` §Back-propagating, `README.md` §2 **and its command
 tree**, `docs/way-of-working.md` sync slide + CLI block, `docs/A2BP_PLAYBOOK.md`
 (reframed to "you are implementing a request"), `docs/DOCUMENTATION.md`
 §Back-propagation, the CLI header / `usage()` / comments / stale-drift message,
-`contamination.sh`'s contract comments, `.githooks/pre-push-project`'s A-07 gate
-text. Plus this repo's own `BLUEPRINT-AUDIT-2026-07-23.md` and `HANDOVER.md`,
-whose A-07 rows describe a guard gating a copy.
+and `.githooks/pre-push-project`'s A-07 gate text. Plus this repo's own
+`BLUEPRINT-AUDIT-2026-07-23.md` and `HANDOVER.md`, whose A-07 rows describe a
+guard gating a copy.
+
+**`contamination.sh` is NOT in this list.** v11 said it is unchanged in §4.4 and
+still listed its contract comments here — both cannot be true. Its comments
+describe a guard that blocks a copy, and under v11 that is still exactly what
+the *local, advisory* guard does for the requester. Nothing to change.
 
 ### 4.3 Changed
 

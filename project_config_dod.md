@@ -159,6 +159,39 @@ runs them on every push. Best-effort, not exhaustive — the
 |---|---|---|
 | | | |
 
+## Acceptance authority — delegated to QA-2 for infrastructure work
+
+> **Founder decision, 2026-07-29:** *"since this bugs are hard to do the manual
+> validation, I delegate these ones to the machine."*
+
+`docs/DoD.md` §1 and CLAUDE.md say the founder is the only gate into `done/`.
+For **this class of work that rule is delegated to QA-2 (Jesko, Codex)**, whose
+recorded ACCEPT/REJECT verdict is the acceptance. Accepted items move to
+`done/` without a further founder signal; rejected items go back to `doing/`.
+
+**Which class.** Agent-protocol and repo-infrastructure defects whose delivered
+behaviour a human cannot reasonably observe by hand: pre-push gate behaviour,
+the contamination guard, dispatcher and feed process behaviour, bootstrap
+contents, cross-project state isolation. These are validated by running
+commands and reading exit codes and process tables — exactly what an agent does
+better than a person clicking. It does **not** extend to user-surface work,
+where the founder's "would you show this to someone else" judgement is the
+whole point and no test can stand in for it.
+
+**Conditions, because delegation is not abdication:**
+
+- The verdict must carry **executed evidence** — commands and their output —
+  not inspection. This is the bar QA-2's own 2026-07-24 round-2 record set.
+- Rejections stand. A-22 was rejected once and its caveat (a human who clones
+  and pushes without ever running the feed or drift is still ungated) has not
+  been closed; delegated authority includes the authority to re-reject.
+- **Known limitation, stated rather than hidden:** the accepting agent is often
+  the same one that four-eyes-reviewed the work — Jesko reviewed A-03 across
+  eleven rounds and then accepts it. That is less independent than a human
+  acceptance test. It is mitigated by the evidence requirement and by other
+  personas (Slava, Kathrin) having reviewed parts of the same range, but it is
+  a real reduction in independence and the founder took it knowingly.
+
 ## Failure modes seen on this project
 
 > Project-specific incidents that motivated a rule. Add a row when a

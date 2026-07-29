@@ -1,37 +1,43 @@
-# Waiting acceptance — what is actually sitting here
+# Waiting acceptance — currently empty
 
-One row per **work item**, not per file. Everything below is pushed to `main`
-and waiting on your explicit accept/reject. Nothing here moves to `done/`
-without you saying so.
+Nothing is waiting here. The 2026-07-29 QA pass dispositioned everything:
 
-**If you only read one thing:** the two `ACCEPTANCE-JESKO-*` files are the QA
-verdicts written for you. The per-item folders are the Codex review trail —
-open them only if you want the evidence behind a claim.
+- **Eight items ACCEPTED** and promoted to [`../done/`](../done/) — BUG-001,
+  BUG-002, BUG-003, A-01/A-12/A-14, A-05/A-27, A-09, A-03, A-07. Each work-item
+  folder travelled with its row, so the Codex review trail sits beside the
+  thing it reviewed.
+- **A-22 REJECTED** and reopened into [`../doing/A-22-gate-arming/`](../doing/A-22-gate-arming/).
 
-| Item | What it delivered | Evidence | Status |
-|---|---|---|---|
-| **BUG-001** — fork-bomb process leak | The activity feed leaked ~17,400 processes and pegged a host at load 175 for 2.7 days. Now one flock-guarded supervisor tracking byte offsets, no `tail -F` followers. | [BUG-001-fork-bomb/](BUG-001-fork-bomb/) — plan + 12 review rounds | **QA-accepted 2026-07-24**, awaiting founder |
-| **BUG-003** — security gate could not tell a scanner *failure* from a scanner *finding* | A broken scanner used to read as a clean pass. Now fails closed. | [BUG-001-fork-bomb/](BUG-001-fork-bomb/) (reviewed in the same rounds) | **QA-accepted 2026-07-24**, awaiting founder |
-| **A-01 / A-12 / A-14** — roster + host paths + git identity | Host paths out of committed settings; roster on the `.env` model; bootstrap inherits your git identity instead of hardcoding one. | [A-01-A12-A14-roster/](A-01-A12-A14-roster/) | **QA-accepted 2026-07-24**, awaiting founder |
-| **A-05 / A-27** — bootstrap leaks | Bootstrap shipped the blueprint's own work items and copied `.env` into derived trees; all five `project_config_*.md` now ignored before a public push. | [A-05-A27-bootstrap/](A-05-A27-bootstrap/) — 3 rounds | **QA-accepted 2026-07-24**, awaiting founder |
-| **A-22** — the pre-push gate was never armed | `core.hooksPath` is repo-local, so a fresh clone had no gate — 12 commits went out ungated. Now armed by `arm_gate` from two paths that already run at wake. | [A-22-gate-arming/](A-22-gate-arming/) — 8 rounds | **NOT accepted** — Jesko's caveat: residual gap for a human who clones and pushes without ever running the feed or drift |
-| **A-09** — cross-project log contamination | A redcare Codex verdict surfaced live in *this* repo's feed. Feed + all dispatchers now derive one per-project state dir. Sonar key half fixed too. | [A-09-state-dir/](A-09-state-dir/) | Awaiting founder |
-| **BUG-002** — linkedin-watcher name in a generic file | Reopened once (the Gemini half was still literal), fixed with A-09, re-pushed. | [A-09-state-dir/](A-09-state-dir/) | Awaiting founder |
-| **A-03** — the secret gate had never run | `gitleaks protect --staged` scans the git index, which is **empty** at pre-push time because the commit already exists. Measured: 0 commits scanned vs 1 commit and a caught leak. Now scans `remote..local` per ref; a new ref is scanned in full (nothing local is trustworthy enough to subtract), bounded by one per-push deadline with a required `timeout`/`gtimeout`, and an unfinished scan blocks as INCOMPLETE. **Also shipped alongside:** atomic baton publication (`scripts/signal-set.sh`) + the dispatch settle window. | [A-03-secret-gate/](A-03-secret-gate/) — **11 review rounds** | Awaiting founder |
-| **A-07** — the `a2bp` pipe was unguarded | `blueprint a2bp` was a bare `cp` — the vector that put BUG-002 and A-09 into the blueprint. Now restores `{{PROJECT_NAME}}` by positional diff, scans **every** staged line without trusting that alignment as an exemption, and verifies that staged and project content remain byte-identical after forward substitution. Explicit `a2bp-allow` and `--force` operator overrides remain. Also closed a **pre-existing `pull` bug**: project names containing `&` or `\` were silently mangled. | [A-07-a2bp-guard/](A-07-a2bp-guard/) — **7 review rounds** | Awaiting founder |
+The verdicts and their evidence are in
+[`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).
 
-## The two QA verdicts
+## Why A-22 was rejected — worth reading even if you skip the rest
 
-- [ACCEPTANCE-JESKO-2026-07-24.md](ACCEPTANCE-JESKO-2026-07-24.md) — round 1.
-  Rejected BUG-002.
-- [ACCEPTANCE-JESKO-ROUND2-2026-07-24.md](ACCEPTANCE-JESKO-ROUND2-2026-07-24.md)
-  — round 2. Accepted seven items with executed evidence, **explicitly excluding
-  A-22**.
+`arm_gate` genuinely works: the feed and `blueprint drift` both arm an unarmed
+clone, and `tests/gate-arming/` proves it. But the acceptance boundary was never
+"the arming paths work" — it was **"a human must not be able to clone and push
+without ever invoking them."** QA-2 tested that directly rather than restating
+the caveat: a fresh clone, a newly generated high-entropy token committed,
+`origin` redirected to a throwaway bare repo, and a real push executed.
 
-## Why the folders
+```text
+fresh_clone_hooksPath=UNSET
+real_ungated_push_rc=0
+secret_commit_reached_destination=yes
+```
 
-The work-item folder rule (CLAUDE.md §"Documentation Structure"): an item
-needing more than one file to describe it gets its own folder, and the whole
-folder travels through `doing/` → `waiting-acceptance/` → `done/` together.
-This folder had grown to 30 flat files, 26 of them review records, which made
-the lifecycle state unreadable — the exact failure the rule exists to prevent.
+So the secret gate delivered as A-03 is real, **and** it is not a property of a
+clone. Both are true. A pre-push hook is advisory by construction — repo-local,
+absent on a clone, defeated by `--no-verify` — so this is not closable by
+another local hook. Enforcement is server-side, which is available here at the
+policy cost set out in **A-37**: required checks do block direct pushes to a
+protected branch, but a SHA must exist on some ref for checks to run before it
+reaches `main`, and this repo is trunk-based with no branches. That is a
+founder trade, not an impossibility.
+
+## How acceptance works on this project
+
+Acceptance for agent-protocol and repo-infrastructure work is **delegated to
+QA-2** (founder decision 2026-07-29). Scope, conditions, and the stated
+independence limitation are in `project_config_dod.md` §"Acceptance authority".
+User-surface work is explicitly excluded and still needs the founder's eye.

@@ -4,12 +4,13 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-29 (end of session).** **A-07 and A-03 are both
-> DELIVERED and pushed**, four-eyes CLEAN (round 7 and round 11 respectively).
-> `origin/main` is at **`b89e7a4`**; nothing unpushed. `doing/` holds no
-> in-flight work. Everything is behind the founder now — start at
-> [`waiting-acceptance/INDEX.md`](../waiting-acceptance/INDEX.md). Next audit
-> finding: **A-08**.
+> **Last updated: 2026-07-29 (end of session).** **QA acceptance is done: eight
+> items ACCEPTED into [`done/`](../done/), A-22 REJECTED and reopened into
+> [`doing/A-22-gate-arming/`](A-22-gate-arming/).** Acceptance for this class of
+> work is delegated to QA-2 by founder decision — see `project_config_dod.md`
+> §"Acceptance authority". **The one thing in flight is A-22, and it needs a
+> DECISION before it needs code** (§1). `waiting-acceptance/` is empty. Next
+> audit finding after A-22: **A-08**.
 
 ## 0. STATUS
 
@@ -27,12 +28,16 @@
   found no regression in it. Its lesson (a fixture must copy the whole
   `scripts/lib/`, never a named file) proved itself immediately: it is what made
   `tests/gate-arming` catch an `exit 1` that would have silently re-opened A-22.
-- **Artefacts awaiting acceptance:** start at
-  [`docs/waiting-acceptance/INDEX.md`](../waiting-acceptance/INDEX.md) — one row
-  per work item, what it delivered, where the evidence is, and its real
-  acceptance state. The Codex review trails now live in per-item folders rather
-  than 26 loose files. Do **not** promote to `done/` without an explicit founder
-  acceptance signal.
+- **ACCEPTED and delivered:** eight items in [`../done/`](../done/), each with
+  its review trail in a per-item folder. Verdicts and executed evidence:
+  [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).
+  `waiting-acceptance/` is empty.
+- **Acceptance authority is DELEGATED to QA-2** for agent-protocol and
+  repo-infrastructure work (founder decision 2026-07-29 — "these bugs are hard
+  to do the manual validation, I delegate these ones to the machine"). Scope,
+  conditions and the stated independence limitation live in
+  `project_config_dod.md` §"Acceptance authority". **User-surface work is
+  explicitly excluded** and still needs the founder's own eye.
 - **Register of everything found:** `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`
   — findings `A-01`…`A-37`, ranked by severity. It stays in `doing/` until the
   open ones are closed. (The count is stated as a range rather than a number on
@@ -50,7 +55,7 @@
   substitution primitive (`scripts/lib/placeholders.sh`) used by pull, drift
   and the verifier. 41 assertions in `tests/a2bp-contamination/`, gate-wired.
   **Codex CLEAN on round 7 after six rejections** — full trail in
-  `docs/waiting-acceptance/A-07-a2bp-guard/CODEX-REVIEW-A07.md`.
+  `docs/done/A-07-a2bp-guard/CODEX-REVIEW-A07.md`.
 
   Worth carrying forward: R1–R4 were four escalating attempts to *infer* which
   bytes came from a placeholder, all defeated by the same fact — substitution
@@ -72,7 +77,7 @@
   tried and rejected in review), bounded by **one per-push deadline** with a
   required `timeout`/`gtimeout` provider, and an unfinished scan blocks as
   INCOMPLETE. Trail:
-  `docs/waiting-acceptance/A-03-secret-gate/CODEX-REVIEW-A03.md`.
+  `docs/done/A-03-secret-gate/CODEX-REVIEW-A03.md`.
 
   **The first fix reached `origin` as `1c4dd4c` BEFORE four-eyes, and the
   review then found a real hole in it.** That is the cost of pushing ahead of
@@ -80,13 +85,20 @@
 - **Shipped in the same range:** atomic baton publication
   (`scripts/signal-set.sh`) + the dispatch settle window, and the README
   contract narrowing that had been reported fixed but never committed.
-- **IMMEDIATE NEXT ACTION — founder acceptance.** Nothing is in flight. Start at
-  [`waiting-acceptance/INDEX.md`](../waiting-acceptance/INDEX.md). After that,
-  the next audit finding is **A-08**.
-- **Founder acceptance still owed** on everything in
-  `docs/waiting-acceptance/INDEX.md`. **A-22 is explicitly NOT accepted**
-  (Jesko's caveat: a human who clones and pushes without ever running the feed
-  or drift is still ungated).
+- **IMMEDIATE NEXT ACTION — A-22 needs a FOUNDER DECISION, not more code.**
+  QA-2 rejected it on 2026-07-29 by reproducing the gap rather than restating
+  it: a fresh clone, a real high-entropy token committed, `origin` redirected to
+  a throwaway bare repo, a real push executed without ever running the feed or
+  drift — `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`.
+
+  **Do not attempt another local mechanism.** That is precisely what the
+  rejection rules out: a pre-push hook is repo-local, absent on a clone, and
+  defeated by `--no-verify`, so no local hook can make the gate a property of a
+  clone. The open question is a trade only the founder can make — server-side
+  enforcement via protected-branch required checks (available, but a SHA must
+  exist on some ref before it reaches `main`, which conflicts with the
+  no-branches rule — see **A-37**), or an explicit acceptance of the residual
+  risk. Folder: [A-22-gate-arming/](A-22-gate-arming/).
 - ~~LOOSE END — agent-exchange timestamp switch~~ **DONE.** All 16 headers on
   Berlin local, README format spec updated, committed in `../../agent-exchange`.
 - **`docs/way-of-working.pdf` — DEFERRED by founder decision (2026-07-29), not
@@ -97,7 +109,8 @@
   rebuilt once against a settled deck rather than repeatedly against a moving
   one. Do NOT treat the staleness as a doc-sync violation to fix in the
   meantime, and do not re-raise it each session.
-- **A-22 is FIXED and awaiting acceptance** (was the immediate next action).
+- **A-22 background (REJECTED 2026-07-29 — see the immediate-next-action entry
+  above for the current state; this is the history).**
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which
   went out **ungated**. The docs blamed a `postinstall` auto-wire that never

@@ -1,7 +1,19 @@
 # PLAN — `a2bp` opens a pull request
 
-**Status:** DRAFT v7 — supersedes `PLAN-A2BP-INBOX.md` (678 lines, five review
+**Status:** DRAFT v8 — supersedes `PLAN-A2BP-INBOX.md` (678 lines, five review
 rounds, still design-level findings). No code written.
+
+**v8.** §3 rewritten after the founder asked, for the second time, whether the
+cleanup is in the plan. It was thinner than the inbox plan's hard-won §3b: four
+carry-forwards missing, and **two items described as comment edits are
+substantial code** — `security.yml` (absent entirely, though it is the mechanism
+the security claim rests on) and `contamination.sh`'s marker scoping. Review
+round 2 findings folded in: the base-only marker rule now **byte-binds whole
+lines** rather than trusting line numbers, the trusted load covers **every
+helper** the guard sources, ripple checkboxes are called acknowledgement rather
+than evidence, the up-to-date policy is **chosen**, the build uses a **scratch
+clone** with a stable retry id and exact remote-tip matching, and **trusted
+source-project identity is named as unresolved**.
 
 **v7, after review of v6.** Three corrections, and the first was the claim I
 had explicitly asked to have attacked:
@@ -74,16 +86,28 @@ so is everything in it*:
 
 - CI checks out and runs the guard **from the base branch**, against the PR's
   merge result.
-- **An `a2bp-allow` marker introduced or modified by the PR does not
-  suppress.** Only markers already present in the base branch count. This is
-  the important one: it preserves the marker's legitimate use (documenting a
-  known-benign line that is already upstream) while removing it as a
-  contributor-side waiver.
+- **A suppression counts only if the entire candidate line matches, byte for
+  byte, a validly-marked line in the base.** v7 said "markers already present in
+  the base", which is not yet a rule — **a line number is not an identity**.
+  Text moves, and a changed line can land at a position that was marked in the
+  base. Byte-binding the whole line is what makes it checkable (R2-F1).
+- **The trusted load covers the guard *and every helper it sources*, at a
+  pinned base SHA.** v7 said "guard code from the base branch";
+  `contamination.sh` sources `placeholders.sh`, which would otherwise be
+  PR-controlled — the substitution primitive deciding what the guard sees.
 - A named **required check** and repository ruleset, with the bypass list
-  stated explicitly — "required" means nothing if administrators silently
-  bypass.
-- Provenance that matters is derived from **git** (commit author, branch, tree),
-  not from prose in the PR body.
+  stated explicitly and **verified against the live repository** — ruleset, app
+  identity and bypass actors — not assumed. "Required" means nothing if
+  administrators silently bypass, and nothing at all if the rule is not
+  actually configured.
+- Provenance comes from **git**, not from prose in the PR body.
+
+**Still unresolved and stated as such:** *trusted source-project identity.* Git
+author identifies a person, not which derived project a change came from, and
+the PR body is contributor-authored. Nothing in this plan currently establishes
+which project proposed something in a way that survives an untrusted
+contributor. Inside the trusted-owner boundary (§7) it does not bite; beyond it,
+it must be solved before fork mode is used.
 
 With those, the guard is bypassable only by someone who can change the base
 branch or the ruleset — which is the founder. That is a defensible claim.
@@ -142,18 +166,28 @@ difference between a plan that reads well and one that runs.
 The proposal commit is built **against the blueprint's base**, not the
 project's:
 
-1. Fetch the blueprint's base branch into an **isolated worktree or scratch
-   clone** — never the operator's blueprint working tree, which stays untouched.
+1. Fetch the blueprint's base branch into a **scratch clone** — preferred over a
+   worktree (R2-F3), because a worktree shares the operator's object store and
+   config and is one accident away from touching their tree. Never the
+   operator's blueprint working tree, which stays untouched.
 2. Apply the guard-staged content there.
 3. Commit on a fresh branch from that base, so the branch has exactly one commit
    with the blueprint's history behind it.
 4. Push the branch, then open the PR.
 
+**A managed file absent from the base** is creation, not modification, and is
+constrained accordingly (R2-F3): it must be in `MANAGED_FILES`, and creating a
+path that does not exist upstream is called out in the PR body, since "adds a
+new managed file" is a different review than "edits one".
+
 **Push succeeded but PR creation failed** is a real state and needs a contract:
-the branch exists on the remote with no PR attached. `a2bp` reports it by name
-and is **idempotent** — re-running finds the pushed branch and opens the PR
-rather than building a second one. Leaving an orphan branch and printing a stack
-trace is not acceptable.
+the branch exists on the remote with no PR attached. The branch name is a
+**stable retry id** derived from the content and target, not a timestamp, so
+re-running produces the same name rather than a second branch. `a2bp` is then
+**idempotent**: it finds the pushed branch, verifies the **remote tip matches
+the commit it would have built** — exact match, not "a branch of that name
+exists" — and opens the PR. On mismatch it refuses and names both SHAs rather
+than force-pushing over whatever is there.
 
 The scratch worktree is removed on success and on failure, and its path is
 reported if removal fails.
@@ -181,30 +215,85 @@ two and still ignored at forty.
 Unlike the inbox, an unmerged PR is **not** invisible — GitHub notifies. Wake
 reporting is a convenience here rather than the only discovery path.
 
-## 3. What this removes
+## 3. What changes — removals, additions, and what stays
 
-Beyond §1's table, from the current implementation:
+> Founder, twice now: *"is part of the plan also the cleanup needed?"* The first
+> version of this section was thinner than the inbox plan's §3b, which had taken
+> two review rounds to get right. Four carry-forwards never made it across, and
+> **two items I described as comment edits are substantial code**. Corrected
+> here rather than re-learned.
+
+### 3.1 Removed
 
 | What | Why |
 |---|---|
 | The direct write `cp "$staged" "$bp"` | The point of the exercise. |
-| `--force` on the project side | The waiver is a merge decision. |
-| `a2bp|push` alias | It opens a PR. |
-| Step A–E ripple checklist in `cmd_a2bp` (~110 lines) | Moves to the **PR template**, where the reviewer sees it. |
-| `BLUEPRINT_ROOT` as the write target | Still needed to compute the diff and run the guard; no longer written to. |
+| `--force` on the project side | The waiver is a merge decision now. |
+| `a2bp\|push` alias | It opens a PR; "push" was already misleading. |
+| Step A–E ripple checklist in `cmd_a2bp` (~110 lines) | Moves to the PR template + a check (§4b). |
+| `BLUEPRINT_ROOT` as a **write** target | Still needed to compute the diff and run the local guard. |
 
-**Docs** (all managed, all currently describe a direct copy): `CLAUDE.md`
-§Back-propagating, `README.md` §2, `docs/way-of-working.md` sync slide + CLI
-block, `docs/A2BP_PLAYBOOK.md` (largest rewrite — its premise is post-write),
-`docs/DOCUMENTATION.md` §Back-propagation, plus the CLI's own header, `usage()`,
-comments and stale-drift message, `contamination.sh`'s contract comments, and
+### 3.2 Added or substantially changed — understated in v6/v7
+
+| What | Scope |
+|---|---|
+| **`.github/workflows/security.yml`** | **Absent from v7's inventory entirely, and it is the mechanism the whole security claim rests on.** Needs a PR-triggered job that checks out the guard **and all its helpers** at a pinned trusted base SHA (R2-F1 — `contamination.sh` sources `placeholders.sh`, which would otherwise be PR-controlled), runs against the merge result, and is registered as a named required check. |
+| **`scripts/lib/contamination.sh`** | **Real logic, not the "contract comments" v7 implied.** Marker scoping: a suppression counts only if the *entire candidate line* matches, byte-for-byte, a validly-marked line in the base. A line number is not an identity — text moves, and a changed line can land where a marked one was (R2-F1). |
+| `scripts/blueprint` | `cmd_a2bp` rewritten; scratch-clone build (§2.1b); `prs` subcommand; `drift` reporting. |
+| `.blueprint-source` | Needs a **remote identity** alongside the local path. Named in §6's trade-offs but missing from the inventory. |
+| `project_config_paths.md` | Records the **trusted-owner boundary** (§7) so the first externally-owned project trips over it. |
+| PR template | Carries the ripple classification — as acknowledgement, not evidence (§4b). |
+
+### 3.3 Docs describing a flow that will not exist
+
+All managed, so a stale one ships to every derived project: `CLAUDE.md`
+§Back-propagating, `README.md` §2 **and its command tree**,
+`docs/way-of-working.md` sync slide + CLI block, `docs/A2BP_PLAYBOOK.md`
+(largest rewrite — its premise is post-write), `docs/DOCUMENTATION.md`
+§Back-propagation, the CLI's own header / `usage()` / comments / stale-drift
+message, `contamination.sh`'s contract comments, and
 `.githooks/pre-push-project`'s A-07 gate text.
 
-**Tests:** `tests/a2bp-contamination/` emits **38** assertions (measured, not
-estimated — the inbox plan asserted 41 from memory and was wrong twice). **27
-run through the CLI** and need migration: success is now "a PR exists and no
-managed file changed". The other 11 are `placeholders.sh` primitive assertions
-and are unaffected.
+Plus, in this repo's own records: `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md` and
+`docs/doing/HANDOVER.md`, whose A-07 entries describe a guard that gates a copy.
+
+### 3.4 What deliberately does NOT go
+
+Stated explicitly because a cleanup inventory invites over-deletion — the inbox
+plan learned this and v7 dropped the lesson:
+
+- `scripts/lib/placeholders.sh` — unchanged.
+- `MANAGED_FILES` validation — still the first check.
+- `_should_substitute` — unchanged.
+- `blueprint pull` / `drift` — this changes one direction only.
+- The **local** guard run — demoted to advisory, not deleted. It is the fast
+  feedback the operator with context needs.
+
+### 3.5 Not removable, contrary to v7's implication
+
+Multi-file accounting. `a2bp` still takes `FILE...`; one invocation opens **one**
+PR covering all of them, so the failure modes are all-inputs-or-none and the
+pushed-branch-without-PR retry (§2.1b) — not per-file partial writes. The old
+*partial-write* accounting dies; the *batch* accounting changes shape. The inbox
+plan made exactly this mistake and had it caught in review.
+
+### 3.6 Tests
+
+`tests/a2bp-contamination/` emits **38** assertions (measured by running it —
+the inbox plan asserted 41 from memory and was wrong twice). **27 run through
+the CLI** and need migration: success becomes "a PR exists and no managed file
+changed".
+
+**More than 27 in practice:** cases **#13 and #14** pin `a2bp-allow` suppression
+semantics, and the base-only rule *changes* those semantics. They need rewriting
+on top of the harness migration, not just re-pointing.
+
+The other 11 are `placeholders.sh` primitive assertions and are unaffected.
+
+New suites: PR construction from a scratch clone, the base-only marker rule
+(including a marker added by the PR, and a wholesale-new file where every marker
+is new), and a CI-rejects-a-bypassed-guard case driven by pushing a branch
+directly rather than through `a2bp`.
 
 ## 4. Tests
 
@@ -225,17 +314,23 @@ A PR supplies lifecycle. It does not supply obligations, and v6 implied it did:
 
 - **Ripple closure.** Merging is not completing the doc-sync ripples the
   A2BP_PLAYBOOK exists for. The PR template carries the classification
-  checklist, and a required check verifies the ripple boxes are ticked — the
-  obligation has to be visible on the artefact being merged, or it goes the way
-  of the four §6.4 violations that produced the playbook.
-- **Rejection reasons.** Closing a PR without a comment is a silently discarded
-  contribution. Closing requires a reason, same rule the inbox plan had.
+  checklist — but **a ticked box is acknowledgement, not evidence**, and v7
+  implied a required check could verify it. It cannot: it can verify the box is
+  ticked, which is a different claim. Real evidence means a check that inspects
+  the diff for the ripple files the classification implies. Anything weaker
+  should be described as a prompt, not a gate.
+- **Rejection reasons.** Closing a PR without a comment silently discards a
+  contribution. **No required check can prevent it** — GitHub has no such hook.
+  This is a process convention, stated as one rather than dressed as
+  enforcement.
 - **Partial publication.** One `a2bp` invocation opens **one PR** covering all
-  named files. Per-file PRs would fragment a coherent change; the partial state
-  to handle is §2.1b's pushed-branch-without-PR, not a half-populated PR.
-- **Up-to-date policy.** Whether a PR must be rebased on a moved base before
-  merge is a ruleset setting and must be stated, not left to whatever GitHub
-  defaults to.
+  named files, **atomically over its inputs**: either every file is in the PR or
+  none is, and a per-file guard failure fails the whole invocation. The partial
+  state to handle is §2.1b's pushed-branch-without-PR.
+- **Up-to-date policy — chosen, not listed.** Require the branch to be current
+  with base before merge, via merge queue if available. A stale-base merge is
+  precisely how a proposal built against one version of a managed file silently
+  reverts someone else's change.
 
 ## 5. Rollback
 

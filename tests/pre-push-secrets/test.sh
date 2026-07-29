@@ -24,11 +24,15 @@
 
 set -u
 
-# --fast omits the BUDGET cases (#9, #10, #11). They drive a deliberately
-# hanging scanner and cost ~6s of a hard 30s pre-push ceiling, which the gate
-# had already blown at 30.8s. They run in full in CI. The split is by COST, not
-# by importance: the correctness cases that prove the gate scans the right
-# commits all stay local, because those catch a silent fail-open.
+# --fast omits ONLY the two cases that deliberately burn time: #9 and #10 hang
+# a scanner to prove the budget, costing ~5s of a hard 30s pre-push ceiling
+# that the gate had already blown at 30.8s. They run in full in CI.
+#
+# #11 stays local despite being a "budget" case by topic, because the split is
+# by COST and #11 costs nothing — it runs the hook on a curated PATH and fails
+# immediately at the dependency probe. Grouping it with the slow cases was
+# inconsistent with the rule stated right here, and removed the only local
+# guard on a newly mandatory dependency (Codex R5-F2).
 FAST=0
 [ "${1:-}" = "--fast" ] && FAST=1
 
@@ -277,17 +281,9 @@ else
   pass "#8 a bare-URL destination scans all reachable history (Codex F1)"
 fi
 
-if [ "$FAST" -eq 1 ]; then
-  echo "  – skipped in --fast (run in CI): #9 budget exhaustion, #10 per-push budget, #11 no-timeout fail-closed"
-  echo
-  if [ "$FAILED" -eq 0 ]; then
-    echo "PASS: A-03 — the secret gate scans the pushed commits, not the empty index."
-    exit 0
-  fi
-  echo "FAILED: A-03 — the secret gate is not scanning what is being pushed."
-  exit 1
-fi
+run_budget_cases(){ [ "$FAST" -eq 0 ]; }
 
+if run_budget_cases; then
 # ===========================================================================
 # 9. R3-F2 — a scan that runs out of budget must BLOCK, distinctly.
 #    A new ref is scanned over its whole history, which is unbounded, while the
@@ -359,6 +355,9 @@ elif ! grep -qi 'INCOMPLETE\|did not finish' "$WORK/out"; then
   fail "#10 bounded, but does not report the scan as incomplete: $(tail -3 "$WORK/out")"
 else
   pass "#10 the budget bounds the whole push (${_elapsed}s for 3 refs on a 3s cap), not each ref (Codex R4-F1)"
+fi
+else
+  echo "  – skipped in --fast (run in CI): #9, #10 — the two cases that deliberately burn ~5s"
 fi
 
 # ===========================================================================

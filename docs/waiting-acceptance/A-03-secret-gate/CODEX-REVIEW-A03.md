@@ -409,3 +409,83 @@ locally and move timeline/infrastructure behavior to CI.
 Do not push. Bound the scan once per push on every supported platform, preserve
 horizontal Task content deliberately, add the missing regressions, commit, and
 hand the resulting range back to the other provider.
+
+# Review round 5
+
+Date: 2026-07-29
+Reviewer: Jesko (Codex, QA-2)
+Reviewed range: `1c4dd4c..8dc887c`
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 4
+
+- R4-F1 is closed. One deadline covers the whole gitleaks step. Recomputing
+  integer seconds is conservative across a clock-second boundary, and a
+  deadline already reached before a ref records 124 and stops. The `while`
+  intentionally runs in a pipeline subshell; its `break` exits the only loop
+  that must stop, while the output-file status channel remains visible to the
+  parent.
+- R4-F2 is closed in the implementation. `timeout`, then `gtimeout`, is
+  required whenever local gitleaks exists; absence blocks before scanning.
+  Homebrew installs coreutils for macOS. Minimal containers must either install
+  the declared dependency or omit local gitleaks and rely on the existing
+  warning/CI path. Git for Windows installations need a GNU-compatible
+  `timeout`; merely having an unrelated executable of that name is not a
+  supported provider.
+- Case #10 tests the production deadline mechanism, not a timeout mock: the
+  scanner hangs, while the real provider kills it. Case #11 controls PATH and
+  reaches the production dependency probe. Both pass.
+
+## R5-F1 — MEDIUM — “horizontal content is preserved” still strips indentation
+
+`scripts/signal-set.sh` says everything horizontal is left exactly as written
+and specifically names indentation as content the fix now protects. The final
+normalizer still runs:
+
+```text
+sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+```
+
+`[[:space:]]` includes ordinary spaces and tabs. Leading indentation, trailing
+spaces, and leading/trailing tabs are therefore still deleted. Case #3c starts
+with `run:` and case #3d places its tab internally, so neither exercises the
+remaining rewrite.
+
+Either preserve horizontal bytes completely after replacing CR/LF, or narrow
+and document the policy without claiming indentation is preserved. Add
+leading/trailing space and tab assertions matching that policy.
+
+## R5-F2 — LOW — the `--fast` split excludes a cheap dependency regression
+
+Skipping #9 and #10 locally is an honest cost trade: they deliberately consume
+about two and three seconds. Case #11 does not hang or consume the scan budget;
+it only runs the hook with a curated PATH and fails immediately at the provider
+probe. Grouping it with the expensive cases contradicts the stated “split is by
+cost” rule and needlessly removes the local regression for the newly mandatory
+portable dependency.
+
+Keep #11 in `--fast`; leave only #9/#10 in full CI. This retains the cost
+savings while locally guarding the fail-closed provider contract.
+
+## R5-F3 — LOW — the active audit describes a rejected implementation
+
+`docs/doing/BLUEPRINT-AUDIT-2026-07-23.md` still says the new-ref fix is scoped
+to `--remotes=<destination>` with a bare-URL fallback. Round 2 rejected that
+strategy because local tracking refs are not authoritative, and the hook now
+correctly scans every new ref in full. Update the active audit to describe the
+implementation actually awaiting review.
+
+## Verification
+
+- `bash tests/pre-push-secrets/test.sh` — pass, all cases; about 7 seconds.
+- `bash tests/pre-push-secrets/test.sh --fast` — pass, correctness cases.
+- `bash tests/signal-set/test.sh` — pass, but misses boundary whitespace.
+- Shell syntax checks for the changed hook and targeted scripts — pass.
+- `git diff --check 1c4dd4c..HEAD` — only the review record's pre-existing
+  Markdown hard-break whitespace.
+- Handoff worktree before this review edit contained only `AGENT_SIGNAL.md`;
+  the claimed scope was accurate.
+
+Do not push. Preserve or accurately specify boundary whitespace, keep cheap
+case #11 in the local gate, correct the stale audit description, commit, and
+hand the resulting range back for round 6.

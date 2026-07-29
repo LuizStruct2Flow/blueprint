@@ -62,10 +62,18 @@ in the founder-agreed "guard the pipe" order:
   per ref (pushed `1c4dd4c`). **That push went out BEFORE four-eyes**, and the
   review then found a real hole in it: the new-branch selector `--not
   --remotes` subtracts *every* configured remote, so a commit already on a
-  private mirror is skipped when first disclosed to a public one. Scoped to
-  `--remotes=<destination>` with a full-history fallback for bare-URL
-  destinations; regressions #7/#8 added and mutation-verified. **Committed,
-  not yet pushed, pending the next review round.**
+  private mirror is skipped when first disclosed to a public one.
+
+  Scoping that to `--remotes=<destination>` was the **second** wrong answer and
+  was rejected in turn — it is only a namespace selector over
+  `refs/remotes/<dest>/*`, never an answer from the destination, so a
+  stale-ahead or phantom local ref under-scans. **A new ref is now scanned in
+  FULL, subtracting nothing**; updated refs keep `remote..local`, where the old
+  sha comes from git on stdin and is authoritative. The full scan is bounded by
+  one per-push deadline (`GITLEAKS_TIMEOUT_SECONDS`, default 20) with a
+  required `timeout`/`gtimeout` provider, and an unfinished scan blocks as
+  INCOMPLETE. Regressions #7/#7b/#8/#9/#10/#11, mutation-verified.
+  **Committed, not yet pushed, pending the next review round.**
 - **A-08** — `LWA_FEED_*` in `scripts/log-activity.sh`: BUG-002's contamination
   in env-var-namespace form.
 - **A-09** — dispatchers still write a literal `~/.{{PROJECT_NAME}}/`, shared

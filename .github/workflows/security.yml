@@ -147,6 +147,7 @@ jobs:
           bash tests/pre-push-scanners/test.sh
           bash tests/a2bp-contamination/test.sh
           bash tests/pre-push-secrets/test.sh
+          bash tests/signal-set/test.sh
           # CI only, deliberately: this one drives the real watcher through a
           # multi-round timeline with real sleeps (~24s), which does not fit the
           # 30s pre-push ceiling. The rule is to move work OUT of pre-push, not

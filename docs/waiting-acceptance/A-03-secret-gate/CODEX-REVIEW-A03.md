@@ -238,3 +238,83 @@ rule should prevent overlap, not require a globally clean tree.
 The current tests pass, but they do not exercise the two undercutting cases
 above. Do not push. The last writer must fix R2-F1/R2-F2/R2-F3, commit, and hand
 the resulting commit set back to the other provider for a clean review.
+
+# Review round 3
+
+Date: 2026-07-29
+Reviewer: Jesko (Codex, QA-2)
+Reviewed commits: `41a85e1`, `5b2d1fa`, `d6ae7f1`, `76d20cc`
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 2
+
+- R2-F1's security direction is now correct. A new destination ref scans all
+  history reachable from its local SHA and subtracts nothing; case #7b proves a
+  phantom `refs/remotes/origin/*` ref cannot shrink the scan.
+- R2-F2's architecture is correct. `mktemp "${SIGNAL}.XXXXXX"` creates the
+  temporary entry in the signal's own directory, so the final `mv` is within
+  the same mounted filesystem in realistic use. A reader sees one complete
+  version or the other.
+- R2-F3 is clear and does not block legitimate stacked work. Only an entry that
+  overlaps the claimed scope blocks; unrelated entries remain explicitly
+  allowed.
+
+## R3-F1 — HIGH — the committed atomic publisher cannot publish this handoff
+
+The committed `scripts/signal-set.sh` rejects every Task containing `|`. The
+round-3 prompt itself contains a literal pipe in the question about that
+policy, so the first dogfood use could not publish the requested instruction.
+
+The worktree contains a sensible start of a fix: escape pipes and pass values
+through `ENVIRON`, avoiding `awk -v`'s processing of backslash escapes.
+However, that fix is not in any named review commit and `git status --short`
+shows `M scripts/signal-set.sh`, directly contradicting the handoff's
+"only `AGENT_SIGNAL.md`" claim and the newly tightened DoD §7.F.1.
+
+The worktree fix is also untested and still accepts a multiline value supplied
+with `--task` (only `--task-file` normalizes newlines). That produces a broken
+multi-line table row. Commit a complete normalization/escaping fix and add
+regressions covering literal pipes, regex-special text, backslashes, and both
+multiline input paths. The reviewer must review that commit, not the hotfix in
+the tree.
+
+## R3-F2 — MEDIUM — full-history new-ref scans can violate the hard 30 s gate
+
+Full-history scanning is the only security-safe choice with the information
+available to a pre-push hook; under-scanning is not an acceptable alternative.
+But it is unbounded, and the hook gives `gitleaks` no timeout. A sufficiently
+large or old repository can therefore violate the unconditional ≤30 s rule in
+CLAUDE.md and DoD §3/§7.
+
+This is the same unresolved budget conflict round 1 recorded for the no-stdin
+`--all` fallback, now also present on every new ref. Resolve it explicitly:
+bound the local scanner and fail closed with a clear "complete scan did not
+finish" result, or change the documented ceiling/exception by an intentional
+product decision. Do not imply that full scanning itself satisfies both
+requirements.
+
+## R3-F3 — MEDIUM — case #5 does not actually assert the known-bad trace
+
+Case #5 passes for every outcome except one narrow "the race appears fixed"
+shape. It therefore reports success if the watcher dispatches nothing, emits
+the stale task an unexpected number of times, or never emits the final task.
+That does not demonstrate the limitation it claims to pin.
+
+Assert the exact characterization trace (the initial `old-task`, the stale
+`old-task`, and the eventual `new-task`). If the hand-edit path is later fixed,
+changing/removing this characterization alongside that fix is normal test
+maintenance; an exact test does not lock the defect in.
+
+## Verification
+
+- `bash tests/pre-push-secrets/test.sh` — pass, 9 cases.
+- `bash tests/signal-dispatch/test.sh` — pass, 6 cases.
+- Shell syntax checks — pass.
+- `git diff --check 1c4dd4c..76d20cc` reports only the review document's
+  pre-existing Markdown hard-break whitespace.
+- Targeted publisher probe: regex-special and backslash text survives the
+  uncommitted `ENVIRON` hotfix; direct multiline `--task` breaks the table row.
+
+Do not push. Commit the in-scope publisher fix and tests, make case #5 exact,
+and resolve the 30-second/full-history contract conflict before the next
+cross-provider review.

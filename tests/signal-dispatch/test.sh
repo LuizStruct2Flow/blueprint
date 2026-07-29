@@ -183,10 +183,20 @@ write_signal ACTIVE "old-task"
 run_watch 26
 wait 2>/dev/null
 
-if grep -qx 'new-task' "$HITS" 2>/dev/null && [ "$(grep -cx 'old-task' "$HITS")" -eq 1 ]; then
-  fail "#5 the settle window closed a race it cannot close — if this passes, the timeout is doing more than it should be able to"
+# CHARACTERIZATION, asserted exactly. An earlier version of this case passed
+# for almost every outcome — no dispatches, extra dispatches, a missing final
+# task — and so demonstrated nothing. The precise trace is: round 1's task,
+# then the STALE task (the torn state), then the real one.
+#
+# If the hand-edit path is ever given a real publication boundary, this case
+# SHOULD fail; updating it alongside that fix is normal maintenance. An exact
+# characterization does not lock a defect in — a vague one hides it.
+expected="$(printf 'old-task\nold-task\nnew-task')"
+actual="$(cat "$HITS" 2>/dev/null)"
+if [ "$actual" = "$expected" ]; then
+  pass "#5 a pause longer than settle publishes a torn state — exact trace old/old/new (Codex R2-F2, documented limit)"
 else
-  pass "#5 a pause longer than settle DOES publish a torn state — the timeout is a mitigation, not a boundary (Codex R2-F2, documented limit)"
+  fail "#5 expected the exact characterization trace [old-task, old-task, new-task], got [$(printf '%s' "$actual" | tr '\n' ',')]"
 fi
 
 # ===========================================================================

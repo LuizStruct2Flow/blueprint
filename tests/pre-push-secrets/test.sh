@@ -269,6 +269,40 @@ else
   pass "#8 a bare-URL destination scans all reachable history (Codex F1)"
 fi
 
+# ===========================================================================
+# 9. R3-F2 — a scan that runs out of budget must BLOCK, distinctly.
+#    A new ref is scanned over its whole history, which is unbounded, while the
+#    ≤30s gate ceiling is not. Those cannot both hold silently, so the local
+#    scan is capped and an unfinished scan blocks — it is not a clean one, and
+#    it is not the same thing as a crashed scanner either.
+# ===========================================================================
+cat >"$FIX/bin/gitleaks" <<EOF
+#!/bin/sh
+echo "\$@" >>"$ARGV"
+case "\$1" in
+  detect) sleep 30 ;;
+esac
+exit 0
+EOF
+chmod +x "$FIX/bin/gitleaks"
+: > "$ARGV"
+
+printf '%s' "refs/heads/main $HEADSHA refs/heads/main $BASE
+" | (
+  cd "$FIX" && PATH="$FIX/bin:$PATH" GITLEAKS_TIMEOUT_SECONDS=2 \
+    sh .githooks/pre-push origin "git@example.com:x/y.git"
+) >"$WORK/out" 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "#9 an unfinished scan passed as clean — the budget cap fails open (Codex R3-F2)"
+elif ! grep -qi 'INCOMPLETE\|did not finish' "$WORK/out"; then
+  fail "#9 blocked, but does not say the scan was incomplete — indistinguishable from a real finding: $(tail -3 "$WORK/out")"
+elif grep -qi 'found a secret' "$WORK/out"; then
+  fail "#9 a timeout was reported as a secret finding"
+else
+  pass "#9 a scan that exceeds its budget blocks AS incomplete, distinctly (Codex R3-F2)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-03 — the secret gate scans the pushed commits, not the empty index."

@@ -39,9 +39,20 @@ arbitrary high-entropy strings, etc.
 > existed. If you are copying this recipe into another project, copy the
 > `detect --log-opts` form.
 
-A new branch has an all-zero remote sha, which is not a resolvable revision,
-so the range becomes `<local> --not --remotes` — everything not already on
-some remote. A branch deletion publishes nothing and is not scanned.
+A new branch has an all-zero remote sha, so there is no range — and nothing
+local is trustworthy enough to subtract. `refs/remotes/<dest>/*` is a namespace
+selector, not an answer from the destination: a stale-ahead or hand-created ref
+there would subtract commits the destination need not have, which under-scans.
+So a **new ref is scanned in full**, over its whole reachable history. A branch
+deletion publishes nothing and is not scanned.
+
+> **The budget conflict, decided rather than implied.** A full-history scan is
+> unbounded; the ≤30 s pre-push ceiling is not. Both cannot hold silently, so
+> the local scan is **capped** (`GITLEAKS_TIMEOUT_SECONDS`, default 20) and an
+> unfinished scan **blocks** with a distinct "INCOMPLETE" message — it is
+> neither a clean scan nor a crashed scanner. Raise the cap deliberately for a
+> one-off, push a narrower range, or let CI carry the full history. What is not
+> on offer is skipping quietly to stay inside the budget.
 
 For accidental commits that already happened: `gitleaks detect` over
 the full history, then rewrite with `git filter-repo` and rotate the

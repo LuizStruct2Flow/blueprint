@@ -121,6 +121,28 @@ else
   pass "#3c repeated spaces are preserved; only line breaks are normalised"
 fi
 
+# Boundary whitespace IS trimmed — a real edit, asserted rather than glossed.
+# The earlier comment claimed everything horizontal was preserved while this
+# same sed stripped the edges, and no case exercised a boundary so nothing
+# caught the contradiction (Codex R5-F1).
+fresh
+bash "$SETTER" --file "$SIG" --holder H --state S \
+  --task '   leading and trailing   ' >/dev/null 2>&1
+if [ "$(task_cell)" != 'leading and trailing' ]; then
+  fail "#3e boundary whitespace policy is not what the code documents: [$(task_cell)]"
+else
+  pass "#3e boundary whitespace is trimmed (documented policy, not an accident)"
+fi
+
+fresh
+bash "$SETTER" --file "$SIG" --holder H --state S \
+  --task "$(printf '\tboundary tabs\t')" >/dev/null 2>&1
+if [ "$(task_cell)" != 'boundary tabs' ]; then
+  fail "#3f boundary TABS are not trimmed the same way as boundary spaces: [$(task_cell)]"
+else
+  pass "#3f boundary tabs are trimmed like boundary spaces (one policy, not two)"
+fi
+
 fresh
 bash "$SETTER" --file "$SIG" --holder H --state S --task "$(printf 'has\ta tab')" >/dev/null 2>&1
 if ! task_cell | grep -qP 'has\ta tab' 2>/dev/null; then

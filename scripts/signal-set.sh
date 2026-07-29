@@ -59,15 +59,23 @@ fi
 # branch left `--task $'a\nb'` producing a broken multi-line table row — one
 # input path validated, the other not, which is how a guard grows a hole.
 #
-# ONLY line breaks are touched. They genuinely break the row, so CR and LF
-# become a single space. Everything horizontal is left exactly as written:
-# an earlier version also ran `sed 's/  */ /g'`, which silently rewrote
-# legitimate Task content — indentation, aligned snippets, a quoted argument
-# whose repeated spaces are deliberate — none of which threatens the table.
-# Tabs are preserved as tabs for the same reason; markdown renders them inside
-# a cell without complaint, and folding them into spaces would lose data to no
-# purpose. Trailing and leading whitespace is trimmed so the cell reads
-# cleanly.
+# The policy, stated exactly, because the previous comment overclaimed it:
+#
+#   CR and LF        → a single space. They genuinely break the table row.
+#   INTERIOR spaces  → preserved byte-for-byte, including runs. An earlier
+#                      version ran `sed 's/  */ /g'` and silently rewrote
+#                      indentation inside snippets, aligned columns, and quoted
+#                      arguments whose repeated spaces are deliberate.
+#   INTERIOR tabs    → preserved as tabs. Markdown renders them in a cell.
+#   BOUNDARY space   → TRIMMED, both ends. This is a real edit and is not
+#                      "preserving everything horizontal", which is what the
+#                      comment used to claim while doing this anyway. It is
+#                      deliberate: `--task-file` almost always ends in a
+#                      newline, which becomes a trailing space, and leading
+#                      indentation of the whole cell carries no meaning in a
+#                      one-line table cell. If you need boundary whitespace to
+#                      survive, it belongs in the body of the instruction, not
+#                      at its edges.
 TASK="$(printf '%s' "$TASK" | tr '\n\r' '  ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 
 # A literal `|` would end the table cell early and truncate the instruction.

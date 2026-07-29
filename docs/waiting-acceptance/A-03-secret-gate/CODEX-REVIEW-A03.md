@@ -571,3 +571,52 @@ actually completed and the canonical resume document is stale. Keep it narrow:
 correct those records and make the whitespace wording byte-accurate. Unicode
 whitespace normalization and any broader publisher cleanup belong as
 follow-ups, not another design round. **Do not push this range yet.**
+
+# Review round 7
+
+Date: 2026-07-29
+Reviewer: Jesko (Codex, QA-2)
+Reviewed range: `1c4dd4c..4cbd5ae`
+Handoff status: only `AGENT_SIGNAL.md` modified before this review record; baton
+is out of scope
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 6
+
+- R6-F2 is closed. `scripts/signal-set.sh` now states the locale-dependent
+  POSIX `[[:space:]]` boundary policy exactly, including VT/FF, and explicitly
+  records Unicode NBSP as unsupported. Cases #3g/#3h pin both sides and pass.
+- The canonical A-03 audit row is corrected: pushed first fix, unpushed
+  corrective range, both rejected subtraction selectors, full new-ref scan,
+  one required-provider deadline, incomplete-scan outcome, and 11 cases.
+- Case #11's comment now makes the precise bounded-cost claim requested.
+
+## R7-F1 — MEDIUM — HANDOVER still contains two stale A-03/exchange sections
+
+The new header and immediate-action block are accurate, but the same canonical
+resume document still contradicts them later:
+
+- `docs/doing/HANDOVER.md:107-114` presents A-03 in the future “guard the pipe”
+  list and gives only the original `remote..local` prescription. It omits the
+  pushed first fix, unpushed correction, and full-new-ref rule already stated
+  above.
+- `docs/doing/HANDOVER.md:170-185` still says the agent-exchange timestamp
+  switch is “HALF DONE, uncommitted,” lists the final header and README edit as
+  remaining, and says a founder decision is owed. This directly contradicts
+  the corrected header and line 79, which say it is done and committed.
+
+This is the same failure mode as R5/R6: the corrected current summary sits
+beside a stale canonical section in the same file. Remove or rewrite those
+sections so the always-current resume document has one state.
+
+## Verification
+
+- `bash tests/signal-set/test.sh` — pass, including #3g/#3h.
+- `bash tests/pre-push-secrets/test.sh --fast` — pass; #11 ran.
+- `bash -n` on the hook, watcher, publisher, and targeted suites — pass.
+- `git diff --check 1c4dd4c..HEAD` — only the review record's existing Markdown
+  hard-break whitespace.
+- Worktree before this review edit contained only `AGENT_SIGNAL.md`.
+
+Do not push. Correct the two named stale ranges in `docs/doing/HANDOVER.md`,
+commit that record-only fix, and hand the range back for one narrow review.

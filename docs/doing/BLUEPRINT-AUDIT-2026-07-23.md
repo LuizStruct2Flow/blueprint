@@ -52,10 +52,11 @@ in the founder-agreed "guard the pipe" order:
   copies with a bare `cp`: `scripts/lib/contamination.sh` restores
   `{{PROJECT_NAME}}` by positional diff alignment against the blueprint's own
   copy, and blocks host paths / foreign state dirs / residual names.
-  Regression `tests/a2bp-contamination/` (31 assertions, gate-wired). Codex
-  four-eyes rejected **five** successive cuts — see the register row. It also
-  surfaced a pre-existing `pull` defect: project names containing `&` or `\`
-  were silently mangled by the interpolated `sed`, independent of a2bp.
+  Regression `tests/a2bp-contamination/` (41 assertions, gate-wired). Codex
+  four-eyes rejected **six** successive cuts and returned CLEAN on the seventh;
+  record in [`../waiting-acceptance/A-07-a2bp-guard/`](../waiting-acceptance/A-07-a2bp-guard/).
+  It also surfaced a pre-existing `pull` defect: project names containing `&`
+  or `\` were silently mangled by the interpolated `sed`, independent of a2bp.
 - **A-03** — `gitleaks protect --staged` scans the index, empty at pre-push time.
 - **A-08** — `LWA_FEED_*` in `scripts/log-activity.sh`: BUG-002's contamination
   in env-var-namespace form.

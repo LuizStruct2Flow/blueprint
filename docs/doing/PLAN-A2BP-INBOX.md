@@ -4,11 +4,24 @@
 ([PLAN-A2BP-INBOX-REVIEW.md](PLAN-A2BP-INBOX-REVIEW.md)) and after the founder
 asked what the change *removes*. No code written yet.
 
-**What changed in v2:** §3b is new — the cleanup inventory, which the first
-draft omitted entirely. §6 reverses the `--apply-now` recommendation. The
-staleness token (§2.1) and the wake-vs-same-session flow (§2.4) are rewritten
-per review findings F2 and F4, which were the two points I had flagged as my
-least confident and which were both real.
+**v2:** §3b added (the cleanup inventory the founder asked for and the first
+draft omitted); `--apply-now` recommendation reversed to omit; staleness token
+and session flow rewritten per F2/F4.
+
+**v3, after review round 2:** §3b.6 corrects a contradiction v2 itself
+introduced — a blocked file must still produce an inspectable, non-applicable
+proposal, or `apply --force` has nothing to waive. §3b.7 defines multi-file
+transaction semantics, which v2 left undefined. §3b.2 adds the surfaces v2
+missed, including `docs/DOCUMENTATION.md` and the `a2bp|push` alias. §3b.3's
+test count is corrected from an invented "~25 of 41" to a measured **27 of 38**.
+The lock's guarantee in §2.1 is narrowed to what it actually provides.
+
+**Still open (F1, F3, F5):** proposal publication must be exclusive and
+symlink-safe as a filesystem invariant rather than a directory convention;
+re-running the guard checks content but does not *authenticate* it, so the
+content blob needs tamper-evidence; and the full lifecycle state machine and
+`PROPOSAL.md` schema are still unspecified. These are addressed in the next
+revision, not this one.
 **Raised by:** founder, 2026-07-29 — *"can we not change the a2bp, to instead of
 doing directly the change it adds the change to the blueprint backlog. And the
 blueprint waking protocol sees the change? And ask the user to decide?"*
@@ -100,10 +113,16 @@ HEAD is still recorded, as **provenance** — useful for a human reading the
 record — but it is not the concurrency token.
 
 At apply: re-read the target, re-check it is still managed, and compare digests
-**immediately before replacement, while holding a lock**. Check-then-write has a
-TOCTOU window; two concurrent applies, or an editor working in the blueprint,
-can both pass the check and the later writer still wins. Apply therefore needs
-an inbox lock, a re-check inside it, and atomic same-filesystem replacement.
+**immediately before replacement, while holding a lock**, then replace
+atomically on the same filesystem.
+
+**Stated limit, because v2 implied more than it delivers:** the lock serialises
+*cooperating* writers — other invocations of this CLI. It does **not** exclude
+an editor, a script, or a `git checkout` operating on the blueprint outside the
+CLI. Against those, the digest re-check inside the lock narrows the window to
+the interval between check and rename but does not eliminate it. The honest
+claim is "no lost update between two applies, and a very small window against
+an uncooperative writer", not mutual exclusion.
 
 A stale proposal is **not** discarded. It is preserved and marked stale, with an
 explicit `inbox rebase <id>` that recomputes the diff against the current target
@@ -211,8 +230,8 @@ load-bearing. Everything below follows from taking it literally.
 | What | Why it goes |
 |---|---|
 | `cp "$staged" "$bp"` in `cmd_a2bp` | The direct write. This is the whole point. |
-| `--force` **on the project side** | Today a derived project can waive the guard and push contaminated bytes upstream. Under the premise it must not be able to. Findings travel WITH the proposal; the waiver decision belongs to whoever applies it, as `inbox apply --force`. This is a genuine reduction in what a derived project can do to the blueprint, not a relocation of a flag. |
-| The `blocked` / partial-run exit accounting in `cmd_a2bp` | Rejection at propose time means "no proposal written", which is simpler than "some files copied, some refused, exit non-zero". |
+| `--force` **on the project side** | Today a derived project can waive the guard and push contaminated bytes upstream. Under the premise it must not be able to. The waiver decision belongs to whoever applies it, as `inbox apply --force`. A genuine reduction in what a derived project can do, not a relocation of a flag. **But see §3b.6 — v2 also said a blocked file creates no proposal, which contradicts this and leaves `apply --force` nothing to waive.** |
+| ~~The `blocked` / partial-run exit accounting~~ **NOT removable** | v2 claimed this dies with the direct write. It does not. `a2bp` still takes `FILE...`, and contaminated input is now *quarantined* rather than dropped, so multi-file outcomes still need accounting. Only the **managed-file partial-WRITE** accounting is dead. The transaction has to be defined first (§3b.6), and only the branches that definition makes unreachable can then be deleted. |
 | `cmd_a2bp`'s Step A–E ripple checklist (~110 lines, `scripts/blueprint:773-885`) | It instructs the operator to commit and push **from the blueprint**. That audience no longer exists on the project side. Per F4 the checklist moves to `inbox apply`, where the person doing the committing actually is. It is not deleted; it is delivered to the right party. |
 | `docs/A2BP_PLAYBOOK.md` §"Step A0 — the contamination guard" framing | A0 currently tells the operator what the guard did to the file it just wrote. It becomes what the guard recorded in the proposal. |
 | The playbook's "do NOT open a new prompt in the blueprint repo" warning | Still true in spirit, but the mechanism changes: the anti-pattern is no longer "context-switch to the blueprint", it is "abandon the proposal". Reworded, not removed — F4 keeps same-session as the primary flow. |
@@ -233,30 +252,82 @@ blueprint-managed, so a stale one ships to every derived project:
   post-write.
 - `docs/backlog/README.md` — must document the inbox subdirectory and that it
   is **not** ordinary parked work (it awaits a decision, not prioritisation).
+- `docs/DOCUMENTATION.md` §"Back-propagation" — **missed in v2.** It also says
+  the file has already landed, calls the checklist post-`a2bp`, and describes
+  hints emitted "per file copied". Managed, so it ships everywhere.
+
+**Behaviour-bearing text inside files that survive** — also missed in v2, and
+each one is a description that will be false rather than a file to delete:
+
+- `scripts/blueprint` — the header comment, `usage()`, the stale-drift message,
+  inline comments, and **the `a2bp|push` alias**.
+- `scripts/lib/contamination.sh` — its own contract comments say findings
+  "block the copy" and that `--force` copies them.
+- `.githooks/pre-push-project` — the A-07 gate text ("the ONLY write path",
+  "refuse to copy"), plus the CI/gate wiring if the suite is renamed or split.
+- `README.md` — the command-tree and playbook labels, not only §2.
+
+**Decision needed on the `push` alias.** Keeping `push` for a command that only
+*proposes* is actively misleading — it is the one word that most implies the
+behaviour being removed. Removing it touches docs, help and tests and is a
+compatibility break for anyone with muscle memory. v2 omitted it entirely.
+Recommendation: **drop the alias**, since the whole change is about not calling
+this a push. Flagged rather than assumed.
 
 ### 3b.3 Tests that pin the OLD behaviour and must be migrated, not merely joined
 
-This is the part the first draft missed most seriously. `tests/a2bp-contamination/`
-is **41 assertions**, and a large share assert *the blueprint file was written*:
-`bp_untouched`, "copied", the `--force` copy path, the byte-exact round-trip
-cases. Under the new design the correct assertion for most of them is **"a
-proposal was created and the managed file is byte-identical"**.
+**Counted by running the suite, not by reading it.** `tests/a2bp-contamination/`
+emits **38** assertions. v2 of this plan said "~25 of 41"; both numbers were
+wrong, from memory of the file rather than execution — the same over-claim habit
+this plan's own §3b was written to correct.
 
-So the work is a migration of an existing suite, not an addition alongside it.
-Concretely:
+Of the 38:
 
-- Cases asserting `copied` → assert `proposal created`.
-- Cases asserting `bp_untouched` on rejection → **strengthen**: the managed file
-  must be untouched on *every* path now, including success.
-- `--force` cases (#5) → move to `inbox apply --force`, or delete if the
-  founder rules `--apply-now`/force out of the project side entirely.
-- The byte-exactness cases (#15, #20, #22, #24) → assert against the proposal's
-  `content` blob, then again after apply. They get *stronger*, because the
-  bytes are now checkable at two points.
+- **27 are driven through the real `a2bp` CLI** (emitted assertions 1–25 through
+  case `#22`, plus the two `#24` pull→a2bp assertions). **All 27 need harness
+  and oracle migration**, because success is no longer observed by reading the
+  managed target, blocked findings become a proposal *state* rather than a
+  refusal, project-side `--force` disappears, and the decision-pending exit is
+  deliberately non-zero.
+- **11 are direct `placeholders.sh` primitive assertions** (`#23`, `#25`–`#28`)
+  and stay substantively unchanged; only grouping and comments move.
 
-**Estimated: ~25 of 41 assertions need rewriting.** Any of them left asserting
-a direct write would pass only because the old path still existed — which is
-precisely how a "migration" quietly leaves the old behaviour alive.
+So: **27 of 38**. The new inbox / concurrency / lifecycle tests are *additional*
+to that migration, not a substitute for it. Any case left asserting a direct
+write would pass only because the old path still existed — which is exactly how
+a migration quietly leaves the old behaviour alive.
+
+### 3b.6 Blocked findings still produce a proposal — correcting a contradiction in v2
+
+v2 asserted both of these, and they cannot both be true:
+
+- "findings travel WITH the proposal, the waiver belongs to whoever applies";
+- test 2: "contaminated content is refused at propose time — **no proposal is
+  created**".
+
+If no proposal exists, the blueprint side never sees the content or the
+findings, and `inbox apply --force` has nothing to waive. Removing the derived
+project's authority to waive was right. Refusing to let it even *ask* for review
+was not — that turns a heuristic false positive into an inability to raise the
+question at all, which is how people end up hand-editing the blueprint.
+
+**Corrected:** a BLOCK creates an **immutable proposal in a `BLOCKED_FINDINGS`
+state**, carrying the full findings and the content. It is **non-applicable**,
+and the derived side cannot promote it out of that state. Only a blueprint-side
+decision can reject it, or explicitly waive and apply it. The authority boundary
+holds; the ability to ask survives.
+
+### 3b.7 Multi-file transaction semantics — undefined in v2, decided here
+
+`a2bp FILE...` accepts several files and v2 never said what happens when some
+are clean and some blocked. Proposed: **one proposal per file** (they cannot
+collide, which is the point), each independently clean or `BLOCKED_FINDINGS`,
+with a **non-success aggregate exit** if any file blocked. All-or-nothing
+publication was the alternative and is worse: it makes one false positive
+suppress a batch of good proposals.
+
+**Flagged for the reviewer** — this is a decision, not a derivation, and it is
+the kind I have got wrong before by picking the tidier-sounding option.
 
 ### 3b.4 What deliberately does NOT go
 

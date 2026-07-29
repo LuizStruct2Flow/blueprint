@@ -3,6 +3,18 @@
 **Status:** DRAFT v9 — supersedes `PLAN-A2BP-INBOX.md` (678 lines, five review
 rounds, still design-level findings). No code written.
 
+**v10.** Every operative claim about the guard is now **scoped to the three
+receiver-enforced file-only classes**. v9 wrote the degradation in one section
+and left "authoritative, unbypassable" in §2.3 and an unqualified bypass claim
+in §1.1 — the third time in this document that I applied a correction where I
+was looking and nowhere else. Also: "known and trustworthy" was wrong about the
+local guard, which runs under contributor control. And a real design defect —
+`a2bp-ripples` was in the **PR body**, which is mutable without a head-SHA
+change, so a passing required check could be edited out from under itself. It is
+now a file in the proposal commit. §3.3b gains the `.blueprint-source` migration
+schema, the full ruleset contract with live negative verification, absent-file
+collision containment, and draft/closed/bot/API behaviour.
+
 **v9.** Marker byte-binding accepted, including wholesale-new files. This
 revision fixes **two contradictions I wrote and did not sweep** — §2.2 named
 timestamped branches beside §2.1b's "stable id, not a timestamp", and put
@@ -134,9 +146,11 @@ appearing to be a full scan:
 - **Runs server-side:** host paths, per-project state dirs, emails — the checks
   that catch the BUG-002 and A-09 shapes, which is what this guard exists for.
 - **Does not run server-side:** residual project name. It runs **locally** at
-  `a2bp` time, where the project name is known and trustworthy, and its result
-  is reported in the PR body as contributor-supplied — informative, not
-  authoritative.
+  `a2bp` time, where the project name is **known** — but **not trustworthy from
+  the receiver's side**, because that guard runs on the contributor's machine
+  under their control. v9 wrote "known and trustworthy"; the second word was
+  doing work it had not earned. Its result is reported as contributor-supplied:
+  informative to a reviewer, evidence to nobody.
 
 **The honest consequence:** a contributor who strips the local guard can get a
 residual project name past CI. That is a real hole in the "guard moves
@@ -147,9 +161,15 @@ The alternative — CI inferring the project name from the branch or PR body —
 worse: it would be trusting contributor-authored input to decide what to scan
 for, which is the exact class of error §1.1 exists to correct.
 
-With those, the guard is bypassable only by someone who can change the base
-branch or the ruleset — which is the founder. That is a defensible claim.
-"Unbypassable" was not.
+With those, **the three receiver-enforced checks** — host home paths, literal
+per-project state dirs, and emails — are bypassable only by someone who can
+change the base branch or the ruleset, which is the founder.
+
+**That scope is the whole claim, and it must be repeated wherever the guard is
+described.** It does *not* cover residual project name, which cannot run
+server-side at all (below). v9 wrote the limitation in one section and left
+"authoritative, unbypassable" standing in another; a caveat that is not applied
+everywhere the claim appears is decoration.
 
 ### 1.2 It may also close A-22
 
@@ -253,8 +273,11 @@ v8's §1.1 said exactly this and v8's §2.2 said provenance goes in the body;
 
 - **Locally at `a2bp` time** — fast feedback to the operator who has the
   context, exactly as today. Advisory.
-- **In the blueprint's CI on the PR** — authoritative, unbypassable, a required
-  check. This is where `--force` used to live and no longer can.
+- **In the blueprint's CI on the PR** — a required check, and **receiver-enforced
+  for the three file-only classes** (host paths, per-project state dirs,
+  emails). Bypassable only by an actor who can change the base branch or the
+  ruleset. It does **not** cover residual project name (§1.1). This is where
+  `--force` used to live and no longer can.
 
 ### 2.4 Wake integration
 
@@ -322,6 +345,10 @@ Not code, but nothing works without it, and v8 left it implicit:
 | Remote branch cleanup | Delete-on-merge; **and a policy for abandoned `a2bp/*` branches**, which otherwise accumulate exactly as an unemptied inbox would |
 | Branch discovery | `blueprint prs` lists open a2bp PRs **and pushed branches without a PR** — §2.1b's failure state is invisible otherwise |
 | `gh` auth | Required in each derived project; failure mode must name it |
+| `.blueprint-source` migration | **Schema change** — a remote identity is added. Needs a version marker, a migration path for existing files, and a stated behaviour when the field is absent. v9 named the need and not the schema. |
+| Ruleset contract, in full | Required checks by exact name; app identity; admin/bypass actors; path filters; merge-group behaviour — **with a live negative verification** that an unapproved change actually fails, rather than assuming the configuration is in force |
+| Absent-file collision | Two proposals creating the same new managed path: containment rule, not last-merge-wins |
+| Draft / closed / bot PRs, API failure | `blueprint prs` and the checks must define behaviour for drafts, closed-then-reopened, bot-authored PRs, and `gh` API failures — silence on these is how a discovery command becomes untrustworthy |
 
 ### 3.4 What deliberately does NOT go
 
@@ -384,27 +411,40 @@ A PR supplies lifecycle. It does not supply obligations, and v6 implied it did:
   implied a required check could verify it. It cannot: it can verify the box is
   ticked, which is a different claim.
 
-  **Deterministic ripple evidence, since "inspects the diff for the files the
-  classification implies" is prose, not a schema.** A machine-readable block in
-  the PR body:
+  **Evidence lives in the COMMIT, not the PR body.** v9 put the
+  `a2bp-ripples` block in the body, and a **PR body is mutable without changing
+  the head SHA** — so a required check passes, the evidence is edited away, and
+  nothing re-runs because nothing it keys on changed. Body-based evidence is not
+  a gate; it is a gate-shaped hole.
+
+  So the block is a **file in the proposal commit** (`.a2bp-ripples.yml`,
+  removed by the merge or kept as record — decided at implementation):
 
   ```yaml
-  a2bp-ripples:
-    class: B            # from A2BP_PLAYBOOK §A
-    touched: [docs/SECURITY.md, docs/way-of-working.md]
-    waived:
-      - path: README.md
-        why: "no user-facing surface changed"
+  class: B                     # from A2BP_PLAYBOOK §A
+  touched: [docs/SECURITY.md, docs/way-of-working.md]
+  waived:
+    - path: README.md
+      why: "no user-facing surface changed"
   ```
 
-  The check reads the class, looks up **that class's required paths from a
-  table committed in the base branch**, and requires each one either present in
-  the PR's changed-file set or waived with a reason. Deterministic, and the
-  class-to-paths table is trusted because it lives in the base.
+  Editing it changes the head SHA, which re-runs the check. That is the whole
+  reason to move it.
 
-  It still cannot judge whether an edit is *good* — no check can. It can prove
-  the file was touched or the omission was argued, which is strictly more than
-  a ticked box.
+  The check reads the class, looks up **that class's required paths from a table
+  committed in the base branch**, and requires each either present in the
+  changed-file set or waived with a reason.
+
+  **Undefined and needing specification before implementation** (review R4): a
+  trusted changed-input-pattern→class mapping, without which the check can
+  verify a *declared* class but cannot require a class the change mechanically
+  implies; whether `class` is singular or a list; strict parse-or-fail; exact
+  paths versus globs; whether `touched` must equal or merely intersect the
+  changed set; waiver validity rules; and rename, delete and type-change
+  semantics.
+
+  It still cannot judge whether an edit is *good* — nothing can. It can prove
+  the file was touched or the omission argued, which is more than a ticked box.
 - **Rejection reasons.** Closing a PR without a comment silently discards a
   contribution. **No required check can prevent it** — GitHub has no such hook.
   This is a process convention, stated as one rather than dressed as

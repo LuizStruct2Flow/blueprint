@@ -729,6 +729,92 @@ EOF
   fi
 done
 
+# ===========================================================================
+# 25. R6-F1 (Codex round 6) — the two tokens must be resolved in ONE pass.
+#     Replacing UPPER and then feeding the result to the lowercase pass is a
+#     pipeline, and a pipeline re-scans its own output: for a project named
+#     `x{{PROJECT_NAME}}y` the bytes emitted by the first pass were
+#     re-interpreted by the second, giving Xx{{PROJECT_NAME}}yY instead of
+#     X{{PROJECT_NAME}}Y — contradicting the library's own claim that
+#     replacement data is never re-scanned.
+# ===========================================================================
+TOKNAME='x{{PROJECT_NAME}}y'
+got=$(bp_substitute_line '{{PROJECT_NAME_UPPER}}' "$TOKNAME" "$(bp_placeholder_upper "$TOKNAME")")
+if [ "$got" = 'X{{PROJECT_NAME}}Y' ]; then
+  pass "#25 a project name containing the token itself is not re-scanned (R6-F1)"
+else
+  fail "#25 emitted replacement bytes were re-scanned: got '$got', want 'X{{PROJECT_NAME}}Y'"
+fi
+
+# Both tokens on one line must each resolve exactly once.
+got=$(bp_substitute_line 'a{{PROJECT_NAME}}b{{PROJECT_NAME_UPPER}}c' 'zz' 'ZZ')
+if [ "$got" = 'azzbZZc' ]; then
+  pass "#25b both tokens on one line resolve once each, earliest-first (R6-F1)"
+else
+  fail "#25b one-pass scan mis-ordered the tokens: got '$got', want 'azzbZZc'"
+fi
+
+# ===========================================================================
+# 26. R6-F1 — a name blueprint sync cannot represent must be REFUSED, not
+#     silently altered. A newline-bearing basename is legal on the filesystem;
+#     the substitution, the diff alignment and the scan are all line-oriented.
+#     It used to be silently truncated by `$(basename ...)`.
+# ===========================================================================
+if bp_validate_project_name "$(printf 'a\nb')" 2>/dev/null; then
+  fail "#26 a newline-bearing project name was accepted — sync cannot represent it and would mangle it silently"
+else
+  pass "#26 an unrepresentable project name is refused explicitly (R6-F1)"
+fi
+if bp_validate_project_name 'perfectly-normal' 2>/dev/null; then
+  pass "#26b an ordinary project name is accepted"
+else
+  fail "#26b a normal project name was rejected — the validator is too strict"
+fi
+
+# ===========================================================================
+# 27. R6-F2 — NUL-bearing content must be REFUSED, never truncated.
+#     Shell variables cannot hold NUL, so a bash rewrite silently discards it
+#     and everything after: `printf 'A\0{{PROJECT_NAME}}\0Z'` came back as a
+#     lone `A`. The old sed path preserved those bytes, so routing pull through
+#     the primitive could have TRUNCATED a managed file. Fail closed instead.
+# ===========================================================================
+NULF="$WORK/nul-input"
+printf 'A\0{{PROJECT_NAME}}\0Z' > "$NULF"
+if bp_substitute_stream "$NULF" acme-flow >"$WORK/nul-out" 2>/dev/null; then
+  fail "#27 a NUL-bearing file was substituted rather than refused — output would be truncated to '$(od -An -c "$WORK/nul-out" | head -1 | tr -s ' ')'"
+else
+  pass "#27 NUL-bearing content is refused, not silently truncated (R6-F2)"
+fi
+# And the in-place form must leave the original untouched on refusal.
+cp "$NULF" "$WORK/nul-inplace"
+bp_substitute_in_place "$WORK/nul-inplace" acme-flow 2>/dev/null || true
+if cmp -s "$NULF" "$WORK/nul-inplace"; then
+  pass "#27b a refused in-place substitution leaves the file byte-identical (R6-F2)"
+else
+  fail "#27b the file was modified despite the refusal — half-written output"
+fi
+
+# ===========================================================================
+# 28. R6-F2 — a large managed file must stream, not be held whole. This is a
+#     behavioural floor (it completes, and byte-exactly), not a memory probe.
+# ===========================================================================
+BIGF="$WORK/big-input"
+: > "$BIGF"
+i=0
+while [ "$i" -lt 4000 ]; do
+  echo "line $i mentions {{PROJECT_NAME}} in passing" >> "$BIGF"
+  i=$((i+1))
+done
+if ! bp_substitute_stream "$BIGF" acme-flow > "$WORK/big-out" 2>/dev/null; then
+  fail "#28 substitution failed on a 4000-line file"
+elif [ "$(grep -c 'acme-flow' "$WORK/big-out")" -ne 4000 ]; then
+  fail "#28 large-file substitution lost lines: $(grep -c 'acme-flow' "$WORK/big-out")/4000"
+elif grep -q '{{PROJECT_NAME}}' "$WORK/big-out"; then
+  fail "#28 large-file substitution left unresolved tokens"
+else
+  pass "#28 a 4000-line file substitutes completely (R6-F2 streaming)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: a2bp reverse-substitutes and refuses to launder project specifics."

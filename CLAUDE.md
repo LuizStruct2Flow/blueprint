@@ -50,7 +50,23 @@ anything else:
 
    > Spawned, non-primary personas must **not** start it. Every-wake spawning is
    > what turned a broken idempotency guard into BUG-001 (load 175 for 2.7 days).
-3. **Then orchestrate** the roster — dispatch the Codex/Gemini personas, spawn / hand
+3. **Arm the wake-time Monitors.** Reactivity is a `Monitor`, not a habit of
+   remembering to look:
+
+   - **The mic** (generic, every project) — watch `AGENT_SIGNAL.md` and emit on
+     any change to `Holder` / `State`. Without it you discover a dispatched
+     agent has finished only when the founder tells you, which turns every
+     hand-off into a manual poll. Emit on **every** state change, not just
+     `OVER_TO_<you>`: a watcher that only matches the happy path is silent
+     when a dispatch dies.
+   - **Whatever `project_config_paths.md` §"Wake-time Monitors" declares** —
+     cross-stream exchange boards, shared queues, anything a second stream
+     writes that nothing else will notify you about.
+
+   Both are `persistent: true` and must emit **only on change**. A raw tail is
+   noise, and a monitor that floods gets muted — which leaves you exactly as
+   blind as having none.
+4. **Then orchestrate** the roster — dispatch the Codex/Gemini personas, spawn / hand
    off to the other Claude personas, integrate their work.
 
 A **spawned, non-primary** Claude session does the opposite: it adopts the persona
@@ -784,9 +800,16 @@ strong reminder pointing at the playbook below.
 
 **It is guarded (A-07).** Before anything lands, `a2bp` restores
 `{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
-copy proves unchanged, then scans for host home paths, literal per-project
-state dirs, and any project name that survived. Findings block the copy and
-exit non-zero.
+copy proves unchanged, then scans **every** staged line for host home paths,
+literal per-project state dirs, and any project name that survived. Findings
+block the copy and exit non-zero.
+
+The promise is deliberately narrow: on the **default path** a recognized
+finding cannot land, and every override — `--force`, or a justified inline
+`a2bp-allow` — is loud and auditable. It is *not* a claim that contamination
+is impossible; the scan is heuristic and the overrides are intentional. One
+property does hold unconditionally: staging never changes the file's meaning
+under substitution, and that is asserted rather than assumed.
 
 The restore is **alignment-based, not a search-and-replace** — there is no
 general textual inverse of the substitution, and no content-based shortcut

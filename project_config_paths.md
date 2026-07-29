@@ -60,3 +60,17 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 | Service | Purpose | Console / dashboard URL |
 |---|---|---|
 | | | |
+
+## Wake-time Monitors (this project)
+
+> Armed on every wake by the Orchestrator — see CLAUDE.md §"On wake".
+> Paths are relative to the repo root. The generic mic monitor is described
+> in CLAUDE.md; this table is for the project-specific ones.
+
+| What | Path | Poll | Why |
+|---|---|---|---|
+| Cross-stream exchange board | `../../agent-exchange/EXCHANGE.md` | 10s | A second working stream posts here. Nothing notifies this session otherwise, so without a monitor the board is only read when someone remembers to look — which is how the half-finished timestamp switch sat uncommitted for days. |
+
+Arm it with a `Monitor` whose command emits only on change, e.g. compare
+`cksum` and echo the newest `### ` header when it moves. Emit on *change*,
+never a raw tail — an unfiltered board is noise and gets muted.

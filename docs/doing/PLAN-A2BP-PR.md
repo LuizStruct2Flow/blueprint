@@ -1,7 +1,19 @@
 # PLAN — `a2bp` files a feature request
 
-**Status:** DRAFT v12 — **reframe accepted at review round 6**; this revision is
-the build contract. No code written.
+**Status:** DRAFT v13 — reframe and behavioural boundary accepted; this revision
+completes the build contract. No code written.
+
+**v13.** The operating boundary is now **actually in `CLAUDE.md`** — v12 said
+"Recorded in CLAUDE.md, so it travels" and never recorded it, which is the same
+failure as reporting a fix landed in four files when it landed in three. The
+canonical key now **states** its digest, encoding and framing rather than saying
+"stated"; and **commit metadata is fixed**, because git hashes the commit, not
+the content — an identical tree with a moved timestamp is a different SHA, so
+without this the exact-tip retry silently degrades to "always refuse". Config
+validation and the scratch-clone algorithm are procedures now. Two
+contradictions removed: `--dry-run` claimed "no remote contact" while also
+resolving the base, and `--force` was justified by "nothing to waive" when §3.1
+says findings still stop `a2bp`.
 
 **v12.** §3.0 states the operating boundary the reframe rests on (no automatic
 merge, no self-integration without a distinct decision step) — without it "a
@@ -136,7 +148,7 @@ implementation session, where it always belonged.
 | Command | Behaviour |
 |---|---|
 | `blueprint a2bp FILE...` | Guard locally, build branch in a scratch clone, push, open PR, print URL. |
-| `blueprint a2bp --dry-run FILE...` | Guard and show the diff. No remote contact. |
+| `blueprint a2bp --dry-run FILE...` | Guard, resolve the base, show the diff. **Reads the remote; writes nothing.** |
 | `blueprint prs` | Open a2bp requests: number, project, files, age — plus pushed branches with no PR (§3.4). |
 
 `prs` behaviour, since a discovery command that is silent about its own failures
@@ -145,7 +157,16 @@ distinctly, ignores nothing silently, and on a `gh` API failure **says the list
 is incomplete** rather than printing an empty one that reads as "nothing
 pending".
 
-No `--force` (nothing to waive — the guard is advisory). No `push` alias.
+**No `--force`, and the reason is not "nothing to waive".** §3.1 is explicit
+that findings still stop `a2bp`, so there *is* something a waiver would waive —
+v12 said otherwise in two places and contradicted its own §3.1. The flag is
+absent because the right responses to a finding are to **fix it**, to mark the
+line with a justified `a2bp-allow`, or to file the request describing why the
+guard is wrong and let the implementer judge. A blanket override on the
+requester's side adds nothing those three do not cover, and it is the flag that
+let a project push contamination upstream in the first place.
+
+No `push` alias.
 
 ### 3.4 Build mechanics — the parts still genuinely needed
 
@@ -166,12 +187,50 @@ No `--force` (nothing to waive — the guard is advisory). No `push` alias.
   | **exact base SHA** | not "the base branch" — a moved base changes what the diff means |
   | target paths, **sorted** | so argument order cannot produce two ids for one request |
   | staged bytes **and file modes**, framed | length-prefixed per path, so `ab`+`c` and `a`+`bc` cannot collide |
-  | stated digest + encoding | named in the plan, not left to the implementer |
+  | stated digest + encoding | see below — v12 said "stated" and then did not state them |
+
+  **The key, exactly.** Concatenate, in order, with `\n` between records:
+
+  ```
+  v1                                     # key schema version
+  <destination remote URL, verbatim>
+  <target branch name>
+  <base commit SHA, 40 hex, lowercase>
+  ```
+
+  then, for each target path **sorted byte-wise ascending**, one record:
+
+  ```
+  <path length in bytes> <path> <mode, 6 octal digits> <content length in bytes> <content bytes>
+  ```
+
+  Length-prefixing both path and content is what stops `ab`+`c` colliding with
+  `a`+`bc`. The digest is **SHA-256** over that byte string, rendered
+  **lowercase hex**; the branch id uses its **first 12 characters**. Schema
+  version leads the key so a future change is a different id rather than a
+  silent collision.
+
+- **The commit must be DETERMINISTIC, or exact-tip adoption never matches.**
+  v12 specified a content key and forgot that **git hashes the commit, not the
+  content** — an identical tree with a moved timestamp is a different SHA, so
+  every retry would refuse and the mechanism would silently degrade to
+  "always refuse". Therefore, all fixed:
+
+  | Field | Value |
+  |---|---|
+  | tree | from the staged content — already deterministic |
+  | parent | the captured base SHA |
+  | author + committer name/email | a fixed identity, e.g. `blueprint-a2bp <a2bp@localhost>` — **not** the operator's git config, which varies per machine |
+  | author + committer date | derived from the key, not the clock: a fixed epoch, or the base commit's own date |
+  | message | a fixed template over the sorted target paths |
+
+  Nothing in the commit may come from the environment. If any of it does, the
+  retry contract is decoration.
 
 - **Adoption is exact-tip only, never force.** On retry: if a branch of that name
-  exists remotely, adopt it **only if its tip is byte-identical to the commit
-  just built**. Otherwise refuse and print both SHAs. Never force-push, and
-  never assume a name match is a content match.
+  exists remotely, adopt it **only if its tip SHA equals the commit just
+  built**. Otherwise refuse and print both SHAs. Never force-push, and never
+  assume a name match is a content match.
 - **PR-response loss.** Push succeeded, PR creation returned no answer: the
   request may or may not exist. Recovery **queries for an existing PR on that
   branch — open *or closed*** — before creating one. Creating a duplicate of a
@@ -183,16 +242,54 @@ No `--force` (nothing to waive — the guard is advisory). No `push` alias.
 - **All inputs validated before any remote contact** — every path in
   `MANAGED_FILES`, every file readable — so a bad argument cannot leave a branch
   pushed and the run aborted.
-- **Exact scratch-clone algorithm:** clone with no working-tree checkout of
-  unrelated refs, fetch the single base ref at the captured SHA, apply staged
-  content, commit, push. Removed on success and failure; path reported if
-  removal fails.
-- **Versioned config.** `.blueprint-source` gains a remote identity with a
-  version marker and a stated behaviour when absent (refuse and say how to add
-  it, rather than guessing a remote).
-- **`--dry-run` base semantics, honestly.** It resolves and reports the base it
-  *would* build against, and says so — it does not promise that base will still
-  be current at push time, because it cannot.
+- **Exact scratch-clone algorithm**, step by step, because "clone and commit"
+  hides the decisions:
+
+  1. `mktemp -d` under the system temp dir — **never inside either repository**,
+     so a failure cannot leave residue in a tracked tree.
+  2. `git init` there; add the remote from `blueprint_remote`.
+  3. `git fetch --depth 1 <remote> <branch>` — shallow, since only the base tree
+     is needed; capture the resolved SHA as **the** base for the key.
+  4. `git checkout` that SHA detached.
+  5. Write the staged bytes to the target paths, creating parent directories;
+     set modes from the key.
+  6. `git add` exactly the target paths — **never `-A`**, so nothing incidental
+     in the scratch tree can ride along.
+  7. Commit with the fixed identity, date and message template above.
+  8. Verify the resulting SHA equals the one the key predicts; refuse if not,
+     because a mismatch means the commit is not deterministic and the retry
+     contract is void.
+  9. Push the branch.
+  10. Remove the directory on **every** exit path; if removal fails, print the
+      path and say it must be cleaned by hand.
+- **Versioned config — the procedure, not a summary.** `.blueprint-source`
+  gains two keys:
+
+  ```
+  config_version   = 2
+  blueprint_remote = git@github.com:Owner/blueprint.git
+  blueprint_branch = main
+  ```
+
+  Validation order, before any remote contact: file exists → `config_version`
+  present and understood (**unknown version refuses**, naming the version it
+  saw and the one it supports) → `blueprint_remote` present and non-empty →
+  `blueprint_branch` present, defaulting to `main` only if the key is absent
+  under version 2.
+
+  **Absent `config_version` means version 1** — the pre-existing local-path-only
+  file — and `a2bp` refuses with the exact two lines to add. It does **not**
+  infer the remote from the local blueprint checkout's `origin`: that checkout
+  may point somewhere the operator did not intend to file against, and guessing
+  a push destination is not a recoverable mistake.
+- **`--dry-run` base semantics, honestly.** It **reads the remote** to resolve
+  the base and reports the SHA it would build against — a diff against a guessed
+  base is worse than no diff. It writes nothing: no branch, no push, no PR. It
+  does not promise that base is still current at a later push, because it
+  cannot. v12 said "no remote contact" here and "resolves the base" three
+  paragraphs down; resolving the base *is* remote contact, and the first claim
+  was the wrong one. **There is no offline mode**; if one is wanted it is a
+  separate feature, not a property to imply.
 - **Existing staging behaviour is unchanged.** `contamination_stage` still
   produces the bytes; only their destination changes.
 
@@ -203,7 +300,7 @@ No `--force` (nothing to waive — the guard is advisory). No `push` alias.
 | What | Why |
 |---|---|
 | The direct write `cp "$staged" "$bp"` | The point of the exercise. |
-| `--force` on the project side | The guard is advisory; there is nothing to waive. |
+| `--force` on the project side | Not because there is nothing to waive (§3.1 — findings still stop `a2bp`), but because fix / `a2bp-allow` / say-so-in-the-request already cover it. It is the flag that let a project push contamination upstream. |
 | `a2bp\|push` alias | It files a request. |
 | Step A–E ripple checklist in `cmd_a2bp` | Belongs to the implementer, i.e. the playbook. |
 | `BLUEPRINT_ROOT` as a **write** target | Still read, to compute the diff and run the local guard. |

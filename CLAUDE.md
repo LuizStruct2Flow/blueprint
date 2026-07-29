@@ -798,6 +798,26 @@ blueprint a2bp docs/DoD.md
 naming every file that has to be touched in the same commit and a
 strong reminder pointing at the playbook below.
 
+**A back-propagation is a REQUEST, not a delivery.** What travels upstream is a
+proposal that an improvement proved itself downstream; the blueprint owner then
+**implements it in the blueprint** — merging it as-is, adapting it, or rewriting
+it. This is the same rule the repo already applies to spikes ("*re-implemented*
+… never `mv`'d wholesale from the spike folder", §"Documentation Structure") and
+to promotion generally (§"The blueprint is derived, not designed").
+
+Three consequences, stated because the property is behavioural and evaporates
+quietly:
+
+- **No automatic merge.** No auto-merge setting, no bot, no tool verb that lands
+  a back-propagation.
+- **No self-integration without a distinct decision step.** The same person is
+  usually on both ends — that is normal — but filing and integrating are two
+  acts, separated by reading the diff in the blueprint's context. Landing a
+  proposal seconds after raising it is the thing this rule exists to stop, and
+  nothing mechanical prevents it.
+- **Merging as-is is legitimate *because someone judged it trivial*.** That
+  judgement is the step that must not be skipped.
+
 **It is guarded (A-07).** Before anything lands, `a2bp` restores
 `{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
 copy proves unchanged, then scans **every** staged line for host home paths,

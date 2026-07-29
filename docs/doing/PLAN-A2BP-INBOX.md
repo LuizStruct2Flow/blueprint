@@ -16,6 +16,16 @@ missed, including `docs/DOCUMENTATION.md` and the `a2bp|push` alias. §3b.3's
 test count is corrected from an invented "~25 of 41" to a measured **27 of 38**.
 The lock's guarantee in §2.1 is narrowed to what it actually provides.
 
+**v5, after review round 4.** The publication scheme in v4 did not compose —
+`mkdir`-reserve plus `rename`-publish are mutually exclusive, since rename
+clobbers — and is replaced by one primitive (§2.1b). The content-digest scheme
+did not establish an approved identity, because the digest lived in the same
+mutable file as everything it guarded; **the anchor is now a git commit**
+(§2.1c), which is the compose-with-existing-primitives answer I should have
+reached unprompted. The state machine is now a complete transition table with
+illegal/repeat/crash contracts (§2.1d), and **retention is specified** (§2.1e) —
+it was consensus-blocking, as flagged.
+
 **v4, after review round 3 — the focused close.** F1/F3/F5 are closed in §2.1b,
 §2.1c and §2.1d rather than deferred to implementation, per the reviewer's
 direct answer that they are not deferrable. Exit statuses are distinguished
@@ -142,28 +152,86 @@ content would re-create exactly the unreviewed write this plan exists to remove.
 "Additive" is only a safety property if the filesystem enforces it. A directory
 name does not. Publication therefore:
 
-- **Resolves and validates the path before any write.** The proposal directory
-  must resolve, after full symlink resolution, to a path **inside** the
-  blueprint's inbox root. Anything else — a symlinked inbox, `..` in a derived
-  id, a target outside the root — is refused. The derived project supplies the
-  *source project name*, which is attacker-influenced input in the same sense
-  the project name was in A-07: it must never be concatenated into a path
-  without validation.
-- **Creates exclusively and never clobbers.** The proposal directory is created
-  with `mkdir` (which fails if it exists) into a **unique** id; files inside are
-  written with an `O_EXCL`-equivalent (`set -o noclobber`). No proposal may
-  overwrite another, ever — that is the collision property this whole design
-  claims.
-- **Publishes atomically.** Content is written to a private staging path and
-  made visible by a single rename within the same filesystem, so a reader never
-  sees a half-written proposal. (The redcare stream hit exactly this on their
-  instance guard: a directory visible before its contents are complete is a
-  window, and a post-hoc consistency check is the third-fallback-layer shape.)
-- **Never writes outside the inbox root.** Asserted by test, not by inspection:
-  snapshot the managed tree before and after every `a2bp` variant and require
-  byte-identity.
+**v4's scheme did not compose, and v5 replaces it.** v4 said `mkdir` reserves
+the directory and a `rename` publishes into it. Those are mutually exclusive:
+an ordinary `rename` is atomic but **clobbers**, so it cannot publish into a
+name `mkdir` was meant to protect — and if the name exists, the rename destroys
+what the reservation was for. Resolving a path and then writing to the resolved
+string is also TOCTOU.
 
-### 2.1c What was approved, exactly — closes F3
+**One primitive, stated so it can be implemented rather than paraphrased:**
+
+- **Operate relative to an opened canonical directory, no-follow.** The inbox
+  root is opened once; every subsequent operation is *relative to that open
+  directory* and refuses to traverse a symlink. This removes the
+  resolve-then-use window rather than narrowing it. The source project name is
+  attacker-influenced input — the same class as the project name in A-07 — and
+  is validated as a single path component, never concatenated.
+- **Publication is genuine no-replace.** The visible proposal appears via an
+  operation that **fails if the destination exists** (link-style), not one that
+  replaces it. No proposal can ever overwrite another; that is the collision
+  property the design claims and `rename` cannot provide it.
+- **Content is complete before it is visible.** Written to a private staging
+  location first, published in one no-replace step. A directory visible before
+  its contents are complete is a window — the exact shape the redcare stream hit
+  on their instance guard, where a post-hoc consistency check was rightly
+  rejected as the third-fallback-layer answer.
+- **Partial failure cleans up.** A crash mid-publication leaves unreferenced
+  private residue, never a half-visible proposal, and the residue is removable
+  without touching a published one.
+- **Durability is stated, not implied.** Either the required `fsync` order for
+  file-then-directory is specified, or the plan makes **no crash-durability
+  claim at all**. v4 implied durability it had not designed.
+- **Never writes outside the inbox root.** Asserted by test: snapshot the whole
+  managed tree before and after every `a2bp` invocation and require
+  byte-identity, plus explicit boundary cases (symlinked inbox, `..` in a
+  supplied name, absolute path in a supplied name).
+
+### 2.1c What was approved, exactly — git IS the anchor
+
+**Corrected in v5.** v4 recorded a content digest inside `PROPOSAL.md` and had
+apply recompute it. That establishes nothing: the digest, the target path, the
+base identity, the state and the schema all live in the *same mutable file*, so
+recomputing a digest read from that file catches an edit to `content` only if
+whoever made it forgot to update the line next to it. There was no approved
+identity, only a checksum guarding itself.
+
+**The anchor is a git commit.** Git already provides immutable,
+content-addressed identity, and the blueprint is a git repository — inventing a
+second integrity mechanism beside it was the mistake.
+
+- Publishing a proposal **commits it**. The proposal's identity is that commit
+  (tree/blob ids), not a path in a working tree.
+- **Approval names that revision.** A decision record says "apply proposal `X`
+  at revision `abc123`".
+- **Apply loads target path, base identity, content and findings *from the
+  anchored revision*** — never from the mutable working tree — and **refuses if
+  the working tree diverges** from it.
+- **Lifecycle events are separate, append-only, CLI-owned records**, each
+  carrying actor, timestamp, action, reason-or-waiver, and the approved
+  digests. They are not fields edited in place in `PROPOSAL.md`, because an
+  editable state field is not a lifecycle.
+- `diff` and the rendered scan output are **derived, display-only**, recomputed
+  when shown. They are not part of the anchored identity and must never be what
+  a decision is read from.
+
+#### The exact apply byte contract
+
+Missing from v3 and v4, and named twice in review:
+
+1. Load `content` from the anchored revision.
+2. Run the guard against that content **and the current target**.
+3. Require the guard's resulting staged bytes to **equal the approved content
+   digest**. If the guard would transform the bytes at all, that inequality is
+   the signal to stop — apply refuses rather than writing something nobody
+   approved.
+4. Atomically replace the target with **exactly those staged bytes**.
+
+"Re-run the guard, then write exactly those bytes" was ambiguous about whether
+the guard transforms anything. It can, and that is precisely why equality has to
+be asserted rather than assumed.
+
+### 2.1c-old (superseded) — the digest-only scheme
 
 Re-running the contamination guard at apply time checks the content. It does
 **not** authenticate it. Between publication and apply, the `content` blob is an
@@ -211,10 +279,57 @@ States are a machine, not prose:
 Transitions the **derived side may perform: none.** It creates
 `PENDING_DECISION` or `BLOCKED_FINDINGS` and has no verb that changes either.
 
-`STALE` is a *computed* property, not a stored state — it is derived by
-comparing the recorded target digest against the current file, so it cannot go
-out of date on disk. `inbox rebase` produces a new proposal and leaves the
-original for the record.
+**Complete transition table** (v4's diagram was not one — three transitions its
+own prose required were missing):
+
+| From | Event | To | Notes |
+|---|---|---|---|
+| — | `a2bp`, clean | `PENDING_DECISION` | |
+| — | `a2bp`, findings | `BLOCKED_FINDINGS` | |
+| `PENDING_DECISION` | `apply` | `APPLIED_PENDING_RIPPLES` | |
+| `PENDING_DECISION` | `reject --why` | `REJECTED` | |
+| `PENDING_DECISION` | `rebase` | `SUPERSEDED` | **new proposal created; the old one is superseded, not left pending** |
+| `BLOCKED_FINDINGS` | `reject --why` | `REJECTED` | **was required by prose, absent from the diagram** |
+| `BLOCKED_FINDINGS` | `apply --force` | `APPLIED_PENDING_RIPPLES` | waiver recorded with actor and reason |
+| `BLOCKED_FINDINGS` | `rebase` | `SUPERSEDED` | |
+| `APPLIED_PENDING_RIPPLES` | `close --evidence` | `CLOSED` | **executable, with evidence — not a state someone remembers to set** |
+| `REJECTED` / `CLOSED` / `SUPERSEDED` | `archive` | archived | see retention below |
+
+**Contracts v4 left undefined:**
+
+- **Illegal transition** → refuse, name the current state and the legal events
+  from it, change nothing.
+- **Repeated transition** → idempotent. Applying an already-applied proposal is
+  a no-op that says so, not a second write.
+- **Crash recovery** → because lifecycle events are append-only and the target
+  write is atomic, a crash leaves either "event not recorded, target unwritten"
+  or "event recorded, target written". A recovery check reconciles the two and
+  reports any proposal it cannot classify rather than guessing.
+
+`STALE` is **reported, not stored** — computed by comparing the anchored base
+identity against the current target at display time, so it can never be a
+stale field on disk. `rebase` anchors the new proposal to the *current* target
+and **supersedes** the original; v4 left the original pending, which would have
+produced two live proposals for one change.
+
+### 2.1e Retention — consensus-blocking, so specified
+
+Proposals are retained, which makes the inbox grow without bound unless
+retention is defined. Round 3 required archive-plus-explicit-purge; v4 did not
+deliver it and the reviewer was right that this blocks consensus.
+
+- `REJECTED`, `CLOSED` and `SUPERSEDED` proposals **archive** — moved out of the
+  active inbox to `docs/backlog/a2bp-inbox/archive/`, so `blueprint inbox` shows
+  only what needs a decision while the record survives.
+- **Purge is explicit and never automatic:** `blueprint inbox purge --before
+  <date>` removes archived proposals older than a stated date, and prints what
+  it removed. Nothing is deleted by a timer, because a record that vanishes on
+  its own is worse than one that grows.
+- The archive is in git, so purging removes it from the working tree and not
+  from history.
+- `blueprint inbox` reports active count and **oldest age**; the archive is
+  reported separately and never inflates the number that is supposed to prompt
+  action.
 
 `PROPOSAL.md` carries a **versioned schema** (`schema: 1`) so a future change
 can be detected rather than misparsed, with required keys: source project, its
@@ -250,6 +365,11 @@ blueprint: propose.
 
 Collapsing these into one non-zero was v3's implicit design and is wrong: "your
 change awaits review" and "the tool broke" are not the same event.
+
+**Partial-batch output contract** (required in round 3, dropped in v4): a
+multi-file run **names every proposal it published and every file it did not**,
+with the reason per file. An aggregate exit status alone tells the operator that
+something went wrong but not which of six files it was.
 
 **Rejection requires a reason.** A silently deleted proposal is
 indistinguishable from one that was never made, and the next person from the

@@ -1034,6 +1034,119 @@ working tree.
 
 ---
 
+## Round 9 — build-contract review of DRAFT v14
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v14 (`d65f280`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — rebuild-and-compare is sound, but the proposed build is not yet deterministic or containment-safe**
+
+v14 correctly removes the nonexistent “SHA the key predicts,” chooses the
+commit metadata, makes the guard response reachable, and turns most input
+validation into rules. Rebuilding and comparing the resulting commit to the
+remote tip is the right recovery comparison. The remaining defects are in how
+that commit is constructed and in two invariants round 8 explicitly requested.
+
+### R9-F1 — HIGH: `git checkout` + filesystem writes + `git add` does not produce a deterministic tree across machines
+
+The plan fixes author/committer metadata but still builds the tree through the
+operator's Git environment. `git add` can transform the requested bytes through
+the base tree's `.gitattributes` and configured clean filters or line-ending
+conversion. Global/system configuration can also supply `core.autocrlf`,
+`core.hooksPath`, signing, and commit-encoding behaviour. Setting
+`GIT_AUTHOR_*` / `GIT_COMMITTER_*` controls only the named fields; it does not
+isolate those other inputs. Two machines can therefore create different trees
+or commit objects from the same key.
+
+This is also a content-integrity defect: the key hashes the staged bytes from
+`contamination_stage`, but the published blob may not contain those bytes.
+
+Construct the object graph with plumbing, not a checkout/add/commit pipeline:
+write each already-validated byte stream as a blob, build an isolated temporary
+index from the fetched base tree, install each exact `(mode, blob, path)` via
+cache info, `write-tree`, then `commit-tree` with the fixed parent, identity,
+raw date and message. Run with system/global config disabled and explicitly
+disable signing; assert each resulting blob's bytes, tree diff target set and
+parent before publication. An equivalently complete hermetic construction is
+fine, but ordinary `git add` is not.
+
+### R9-F2 — HIGH: fetched-base symlinks and directory collisions remain unchecked
+
+Round 8 asked for directory/symlink collision rejection, parent containment,
+and proof that the built diff contains exactly the validated targets. v14
+checks only the **source project** target type. Step 5 then writes through a
+checked-out base path. If the fetched base contains a symlink at a target or
+one of its parents, that write follows it; a file/directory collision can also
+fail after remote contact. The plan still contains none of the three requested
+post-fetch invariants and nevertheless labels the input table complete.
+
+The plumbing construction above avoids following working-tree links. It must
+still define and test base-shape policy: reject a target whose base entry is a
+tree/symlink/non-blob, reject any non-tree parent collision, permit an absent
+target only under tree/absent parents, and assert that the final tree diff is
+exactly the retained canonical target set with their requested modes and blob
+bytes.
+
+### R9-F3 — MEDIUM: the key/ref/commit disagree about project identity
+
+The key excludes `<project>`, while both the branch ref and commit message
+include it. Consequently two projects can have the same key digest but produce
+different full branch names and different commit SHAs. The concurrency section
+instead says two projects producing an identical key use the same branch and
+commit. That is false under the specified formats.
+
+Add the already-validated canonical project name as a length-framed key field,
+or remove it from both ref and commit. The former preserves useful attribution.
+Validate it before remote contact with the existing project-name primitive, and
+length-frame it (and every other variable header field, or explicitly forbid
+LF/NUL there) so header values cannot alter record boundaries.
+
+### R9-F4 — MEDIUM: the base check is correctly placed but cannot provide the stated atomic guarantee
+
+Checking after build and immediately before push is the best available
+placement, and one rebuild then refusal is a sound bounded policy. But the
+target branch can advance after `ls-remote` and before the request-ref push;
+that push has no compare-and-swap precondition on the target ref. Therefore
+“never pushed as though built against the current one” is not mechanically
+true.
+
+State the honest guarantee: the tool detects movement observed before
+publication, binds the request key and parent to the captured base, and refuses
+after one observed repeat; movement in the final race window may leave a
+request immediately behind its target and must be surfaced by the PR/`prs`
+staleness reporting. Do not claim atomic freshness across two refs.
+
+### Round-9 answers and implementation boundary
+
+1. **Rebuild-and-compare:** yes. **Cross-machine determinism:** no while tree
+   construction and commit behaviour remain exposed to attributes and ambient
+   Git configuration.
+2. **Input table:** source-side cases are substantially complete, but the
+   fetched-base shape and exact-output assertions requested in round 8 are
+   still missing. No-op/partial-no-op comparison necessarily occurs after the
+   base fetch, so it should be described as post-fetch semantic validation,
+   not part of “all inputs validated before remote contact.”
+3. **Base re-check:** placement and bounded retry are right; the guarantee must
+   acknowledge the unavoidable final race.
+4. **Implementability:** all remaining gaps have direct implementations once
+   the build is made hermetic and the identity framing is reconciled.
+
+Implementation is not yet authorised. After R9-F1–F4, the boundary remains:
+same-owner GitHub request creation; version-2 remote/base config; unchanged
+local contamination staging except removal of whole-file `--force`; hermetic
+scratch object construction from an exact fetched base; deterministic
+base-bound request/ref/commit identity; no-force exact-tip ref and open/closed
+PR recovery; honest stale-base reporting; `prs`; migrated CLI tests plus
+source-input, base-shape, attributes/config-isolation, race, retry and
+no-working-tree-write tests; and the synchronized §4.2 documentation inventory.
+
+Still excluded: receiver enforcement, `contamination.sh` semantic changes,
+cases #13/#14 changes, fork mode, automatic merge, offline persistence,
+arbitrary hosting, general development branches, and direct writes to either
+working tree.
+
+---
+
 ## Round 8 — build-contract review of DRAFT v13
 
 **Plan reviewed:** `PLAN-A2BP-PR.md` v13 (`32db81d`)

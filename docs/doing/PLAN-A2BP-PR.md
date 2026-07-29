@@ -426,8 +426,13 @@ No `push` alias.
 
      | Phase | Environment |
      |---|---|
-     | **Transport** — `fetch`, `ls-remote`, `push` | The operator's normal environment. Credentials, `insteadOf`, proxies all work. Determinism is irrelevant here: these move bytes, they do not create objects. |
-     | **Object construction** — `hash-object`, `read-tree`, `update-index`, `write-tree`, `commit-tree` | Fully scrubbed, per the table below. No network, no credentials needed. |
+     | **Transport** — `fetch`, `ls-remote`, `push`, `gh` | **Credential inputs preserved** (`GIT_SSH_COMMAND`, askpass, agent state, helpers, proxies) — silently breaking authenticated remotes is not acceptable. **Not** a free pass: variables that redirect the scratch repo or inject config are still rejected — `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*`/`GIT_CONFIG_VALUE_*`. Determinism is irrelevant here; integrity of *which repo* is being operated on is not. |
+     | **Object construction** — `hash-object`, `read-tree`, `update-index`, `write-tree`, `commit-tree`, and every inspection | Fully scrubbed, per the table below. No network, no credentials needed. |
+
+     **Re-enter the scrubbed environment after every transport step.** The
+     phases interleave — fetch, construct, re-check base, push — so this is not
+     a one-time switch, and a construction step running in a transport
+     environment is exactly the leak the split exists to prevent.
 
      The regression must inject hostile config **and redirection env**
      (`insteadOf`, `url.*.pushInsteadOf`, `http.proxy`, `GIT_CONFIG_COUNT`

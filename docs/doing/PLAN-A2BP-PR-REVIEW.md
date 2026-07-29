@@ -766,3 +766,153 @@ libraries, functions, diagnostic text and file-internal structure. The
 previously agreed exclusions remain unchanged: fork mode, automatic merge,
 offline persistence, arbitrary hosting, general development branches and an
 authoritative residual-name scan.
+
+---
+
+## Round 6 — fresh-design review of DRAFT v11
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v11
+**Reviewer:** Christian (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **REFRAME ACCEPTED; CHANGES REQUESTED on the surviving publication contract**
+
+The founder's premise holds. If `a2bp` produces a request which a blueprint-side
+operator deliberately implements, adapts, or exceptionally accepts as-is, then
+receiver-enforced contamination and ripple evidence are not load-bearing for
+this slice. The v6–v10 machinery solved a delivery-channel threat model which
+v11 no longer has. Deferring that machinery, while retaining those rounds as
+the design record for a future untrusted-contributor boundary, is the right
+call. `contamination.sh` and cases #13/#14 should remain unchanged.
+
+This is not yet an implementable plan, however. The reframe removes the merge
+gate; it does not remove the smaller distributed-publication protocol required
+to create and recover the request.
+
+### R6-F1 — HIGH: “request” needs an explicit integration boundary
+
+The diagram relies on a blueprint owner making a decision, but §3 also permits
+merge-as-is and §6 says all derived projects belong to the same owner. With
+branch-write/merge permission, the requester can enable auto-merge or merge
+their own PR; a bot may also merge it. In either case the PR again becomes a
+delivery mechanism without the human decision on which the reframe rests.
+
+State the v1 operating contract:
+
+- `a2bp` only creates or recovers a PR; it never approves, enables auto-merge,
+  merges, or pushes to the protected base;
+- automatic merge of `a2bp/*` requests is out of scope/prohibited;
+- a blueprint-side operator other than the requesting invocation must decide
+  whether to re-implement, adapt, or merge as-is and owns the playbook/ripples;
+- merge-as-is is an explicit blueprint-side implementation decision, not the
+  default completion path.
+
+This can remain a documented human-review property for the same-owner phase;
+v11 need not build receiver enforcement for it. But the trust boundary is
+“requests are operated this way,” not merely “repositories have the same
+owner.” If self-merge is intentionally allowed, the plan must honestly say the
+human decision is conventional rather than structurally guaranteed.
+
+### R6-F2 — HIGH: canonical publication identity is still load-bearing
+
+The plan deletes “canonical publication keys” and “collision rules,” then
+requires a stable branch id and exact-tip recovery. Those are the same
+requirements in smaller form. “Target paths + content” is insufficient:
+
+- the same paths/content against a new base produce a different commit, but
+  find the old branch and permanently refuse;
+- identical content sent to another repository or base branch aliases unless
+  destination identity is included;
+- unspecified path ordering, content framing, hash algorithm and truncation
+  make independently reconstructed retries unstable;
+- a hash-prefix collision or a pre-existing hostile branch still needs a
+  refusal rule.
+
+Define one request identity over the canonical destination repository identity,
+target branch, exact fetched base SHA, sorted canonical target paths, and the
+length-framed staged bytes (including file mode/type if supported). Choose the
+digest and branch encoding. Re-running against the same base reconstructs the
+same commit and may recover it; re-running after base movement creates a new
+identity and must report the old orphan/request rather than silently overwrite
+it. A pre-existing ref is adopted only after exact tip verification; it is
+never force-updated.
+
+This is much less machinery than v10's merge-safe publication scheme, but it
+cannot be deleted while retry is a promised feature.
+
+### R6-F3 — MEDIUM: §3.4 omits the executable build and recovery algorithm
+
+Specify the following before implementation:
+
+1. Parse a versioned `.blueprint-source` schema with local path, canonical
+   GitHub repository identity and target branch; define legacy/missing-field
+   and unsupported-host behaviour.
+2. Validate the entire invocation before publication: duplicate/canonical
+   managed paths, source regular-file existence, and the policy for
+   add/delete/symlink/type changes. No input may be silently skipped into a
+   partial request.
+3. Produce each staged file with the existing positional placeholder
+   restoration and round-trip assertion. Define “advisory”: the current scan
+   blocks on `BLOCK`; removing `--force` preserves a local, bypassable safety
+   check, whereas “show and continue” is different behaviour.
+4. Clone/fetch the configured destination into a temporary directory, resolve
+   the exact remote target SHA, check out that SHA, reject directory/symlink/
+   type collisions, create parents only under the scratch root, install only
+   the validated staged targets, and verify the resulting diff contains
+   exactly that target set. Treat a no-op explicitly.
+5. Commit, derive/use the request identity, push the one ref without force,
+   and create the PR against the configured base. Record descriptive project,
+   ordered files, base SHA and head SHA in commit/PR metadata; local absolute
+   paths remain excluded.
+6. On retry, query for an existing open **or closed** PR as well as a bare
+   remote ref. Verify destination, base and exact remote tip before returning
+   an existing URL or opening a missing PR. This covers a successful PR create
+   whose client response was lost.
+7. Define base movement between fetch, push and PR creation. At minimum the PR
+   remains a request based on its recorded base and `prs` reports it as stale;
+   no implicit force/rebase is allowed.
+
+`blueprint prs` also promises project, files and age for a pushed branch with no
+PR. A content-only branch name cannot supply those fields, so the commit
+metadata/query algorithm and API-failure behaviour are part of this contract.
+
+`--dry-run` cannot both make no remote contact and guarantee the diff against
+the current fetched base. It may preview against the configured local
+blueprint snapshot, but must print that snapshot SHA and label the result as a
+preview which publication will recompute; alternatively it must contact the
+remote. Choose one.
+
+Scratch cleanup on every exit, with a reported retained path on cleanup
+failure, is sound. So are one PR per fully validated invocation and explicit
+absent-from-base creation.
+
+### R6-F4 — MEDIUM: the affected-surface inventory contains one contradiction
+
+§4.2 says `contamination.sh` contract comments are rewritten, while §4.4 says
+`scripts/lib/contamination.sh` is unchanged. The latter matches the reframe and
+the handoff instruction: remove it from §4.2. The CLI and playbook comments do
+need reframing; the scanner does not.
+
+### Round-6 disposition and implementation boundary
+
+The premise should have been challenged at the first architecture review,
+before threat-model refinement: every review should first ask whether the
+artifact is evidence/request or executable delivery, and who performs the
+integration decision.
+
+Consensus is reached on the product reframe and the receiver-guard deferral,
+but not yet on build/retry mechanics. After R6-F1–F4 are incorporated, the
+implementation boundary is:
+
+- same-owner GitHub branch-mode `a2bp` as request creation only;
+- versioned remote/base configuration;
+- existing local staging, round-trip assertion and advisory/bypassable guard;
+- scratch-clone construction from an exact fetched base;
+- canonical base-bound request identity, no-force publication and exact-tip
+  PR/ref recovery;
+- `prs` discovery, migrated CLI tests, new topology/retry/no-write tests, and
+  the synchronized documentation inventory in v11.
+
+Excluded: receiver-enforced contamination/ripple checks, changes to
+`contamination.sh` semantics or cases #13/#14, fork mode, automatic merge,
+offline persistence, arbitrary hosting, general branch development, and any
+direct write to either working tree.

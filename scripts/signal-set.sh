@@ -58,9 +58,17 @@ fi
 # Normalise AFTER both input paths converge. Doing it only in the --task-file
 # branch left `--task $'a\nb'` producing a broken multi-line table row — one
 # input path validated, the other not, which is how a guard grows a hole.
-# The Task lives in a single table cell, so newlines become spaces rather than
-# truncating the instruction: a half-delivered prompt is worse than an ugly one.
-TASK="$(printf '%s' "$TASK" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ //; s/ *$//')"
+#
+# ONLY line breaks are touched. They genuinely break the row, so CR and LF
+# become a single space. Everything horizontal is left exactly as written:
+# an earlier version also ran `sed 's/  */ /g'`, which silently rewrote
+# legitimate Task content — indentation, aligned snippets, a quoted argument
+# whose repeated spaces are deliberate — none of which threatens the table.
+# Tabs are preserved as tabs for the same reason; markdown renders them inside
+# a cell without complaint, and folding them into spaces would lose data to no
+# purpose. Trailing and leading whitespace is trimmed so the cell reads
+# cleanly.
+TASK="$(printf '%s' "$TASK" | tr '\n\r' '  ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 
 # A literal `|` would end the table cell early and truncate the instruction.
 # ESCAPE it rather than refuse: `\|` renders as a pipe inside a markdown table,

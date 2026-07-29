@@ -318,3 +318,94 @@ maintenance; an exact test does not lock the defect in.
 Do not push. Commit the in-scope publisher fix and tests, make case #5 exact,
 and resolve the 30-second/full-history contract conflict before the next
 cross-provider review.
+
+# Review round 4
+
+Date: 2026-07-29
+Reviewer: Jesko (Codex, QA-2)
+Reviewed range: `1c4dd4c..fe62809`
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 3
+
+- R3-F1 is committed, gate-wired, and exercised through both input paths.
+  Literal pipes, backslashes, regex metacharacters, ampersands, and multiline
+  input survive well enough to keep the baton structurally valid. The actual
+  round-4 handoff also arrived past every literal pipe, so the truncation defect
+  is closed.
+- R3-F3 is exact now. Dispatch case #5 requires precisely
+  `old-task, old-task, new-task`; missing, duplicated, or reordered dispatches
+  fail.
+- The timeout outcome is fail-closed and separately worded as INCOMPLETE on the
+  tested GNU/Linux, single-ref path. Making a slow scan pass is not a bypass:
+  it blocks.
+
+## R4-F1 — HIGH — the advertised scan budget is per ref, not per push
+
+`_gl_budget=20` is passed to a fresh `timeout` invocation inside the loop over
+push ref lines. A push containing two slow refs may therefore spend about 40
+seconds in gitleaks; three may spend about 60, before the rest of the gate runs.
+The implementation does not establish the documented “local scan is capped”
+property or resolve the hard 30-second total-gate conflict. Case #9 supplies
+only one ref line, so it cannot detect this.
+
+Apply one deadline to the whole gitleaks operation (all ranges), or compute and
+enforce a decreasing remaining budget. Add a multi-ref hanging-scanner
+regression that proves elapsed time is bounded for the push, not merely for
+each invocation.
+
+## R4-F2 — HIGH — the cap silently vanishes when `timeout` is unavailable
+
+The hook conditionally uses `timeout`, but its fallback runs gitleaks
+unbounded. `Brewfile` does not install GNU coreutils and the repository does
+not probe `gtimeout`; therefore the documented default is not a portable
+property of the blueprint. This is especially relevant to the documented
+`brew bundle` / macOS install path. Case #9 also tests the ambient host tool,
+not this branch: on a host without `timeout` it waits for its mock's full
+30-second sleep and then correctly fails the suite, but there is no shipped
+bounded mechanism.
+
+Either make a timeout provider a required, fail-closed dependency (supporting
+the platform's actual binary name), or implement a portable bound. Do not
+describe the scan as capped while retaining an explicitly unbounded fallback.
+
+## R4-F3 — MEDIUM — normalization changes more than row-breaking bytes
+
+`tr '\n\r\t' '   '` is structurally safe, but the following
+`sed 's/  */ /g'` collapses every run of ordinary spaces too. That changes
+legitimate Task data such as indentation, aligned snippets, or commands whose
+quoted argument intentionally contains repeated spaces. Tabs also become
+indistinguishable from spaces. This is not a table-integrity requirement.
+
+Normalize CR/LF to a single separator, but preserve existing horizontal
+content; choose and document a policy for tabs rather than folding all
+whitespace globally. Add an assertion for repeated spaces (and, if tabs are
+accepted input, their chosen representation). The current tests prove their
+expected normalized examples, but do not prove preservation.
+
+## Gate-budget judgement
+
+Move `tests/signal-set/test.sh` out of blocking pre-push first and keep it in
+CI. It protects the coordination publisher, not the correctness/security of
+the commit being pushed, whereas `tests/pre-push-secrets/test.sh` protects the
+secret gate itself and catches a silent fail-open class. The signal-set suite
+is currently cheap, so this is only the first principled move; it will not
+recover much wall-clock time. The larger correction is to stop treating 27.6
+seconds as acceptable headroom: retain only fast, push-critical regressions
+locally and move timeline/infrastructure behavior to CI.
+
+## Verification
+
+- `bash tests/signal-set/test.sh` — pass, 6 assertions/cases.
+- `bash tests/pre-push-secrets/test.sh` — pass, 9 cases, about 3 seconds with
+  the test's 2-second timeout.
+- Shell syntax checks for the changed hook, publisher, and targeted suites —
+  pass.
+- `git diff --check 1c4dd4c..HEAD` — only the review record's pre-existing
+  Markdown hard-break whitespace.
+- Handoff worktree before this review edit contained only `AGENT_SIGNAL.md`;
+  the claimed review scope was accurate.
+
+Do not push. Bound the scan once per push on every supported platform, preserve
+horizontal Task content deliberately, add the missing regressions, commit, and
+hand the resulting range back to the other provider.

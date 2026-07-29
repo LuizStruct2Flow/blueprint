@@ -105,6 +105,36 @@ else
 fi
 
 # ===========================================================================
+# 3c. Only LINE BREAKS are normalised. Horizontal content is the author's and
+#     must survive byte-for-byte: an earlier version folded every run of
+#     spaces, silently rewriting indentation, aligned snippets and quoted
+#     arguments whose repeated spaces are deliberate. None of that threatens
+#     the table, so none of it is the normaliser's business.
+# ===========================================================================
+fresh
+bash "$SETTER" --file "$SIG" --holder H --state S \
+  --task 'run:  cmd --flag   "a  b"  end' >/dev/null 2>&1
+got="$(task_cell)"
+if [ "$got" != 'run:  cmd --flag   "a  b"  end' ]; then
+  fail "#3c repeated spaces were collapsed — legitimate Task content was rewritten: [$got]"
+else
+  pass "#3c repeated spaces are preserved; only line breaks are normalised"
+fi
+
+fresh
+bash "$SETTER" --file "$SIG" --holder H --state S --task "$(printf 'has\ta tab')" >/dev/null 2>&1
+if ! task_cell | grep -qP 'has\ta tab' 2>/dev/null; then
+  # grep -P is unavailable on some hosts; fall back to a literal comparison.
+  if [ "$(task_cell)" != "$(printf 'has\ta tab')" ]; then
+    fail "#3d a tab was altered: [$(task_cell)]"
+  else
+    pass "#3d tabs are preserved as tabs (documented policy)"
+  fi
+else
+  pass "#3d tabs are preserved as tabs (documented policy)"
+fi
+
+# ===========================================================================
 # 4. The rest of the file is project-owned prose and must be untouched.
 # ===========================================================================
 fresh

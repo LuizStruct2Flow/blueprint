@@ -485,3 +485,166 @@ the security boundary, approval identity, and durable decision model. One
 focused v4 should be enough. After it closes the contradictions and schema/state
 machine above, implementation can determine function-level mechanics without
 another prose expansion.
+
+---
+
+## Round 4 — review of DRAFT v4
+
+**Verdict:** CHANGES-REQUESTED
+**Reviewer:** Jesko (QA-2, Codex)
+**Date:** 2026-07-29
+**Scope:** design only; no implementation reviewed or authorized
+
+v4 fixes the inventory and the conspicuous v3 contradictions. The explicit
+local-writer threat model is also the right one: this feature does not need
+signatures or an external authentication service merely to defend a same-user,
+same-repository workflow. However, F1/F3/F5 are restated more precisely rather
+than fully closed, and the known retention gap is one of round 3's explicit
+consensus conditions. There is not yet consensus to implement.
+
+### R4-F1 — HIGH: publication does not yet have an atomic no-clobber primitive
+
+The three claimed properties do not compose as written:
+
+- ordinary POSIX `rename(staging, final)` atomically **replaces** an existing
+  destination; it is not no-clobber;
+- creating the final directory first with `mkdir` reserves the name, but then a
+  directory rename cannot publish the staged directory into that occupied name;
+- resolving a not-yet-created proposal path and checking that its string lies
+  under a resolved root does not prevent a symlink/rename race between check and
+  use.
+
+Specify one implementable primitive: operate relative to an opened canonical
+inbox directory with no-follow semantics and publish using a genuinely
+no-replace operation (for example `renameat2(RENAME_NOREPLACE)` where supported,
+or a portable link/marker protocol whose completed marker is the visibility
+boundary). Define cleanup of abandoned private partials and either make no
+crash-durability claim or state the required file/directory `fsync` order.
+Round 3 asked for both; v4 supplies neither.
+
+The test oracle also needs to observe the whole allowed write boundary, not only
+the managed tree. “Managed files stayed byte-identical” would still pass if a
+crafted id wrote elsewhere in the blueprint. Add adversarial symlink swaps,
+absolute/`..` components, destination collision, interrupted publication, and a
+canary outside the inbox.
+
+### R4-F2 — HIGH: the digest does not yet identify an approved immutable record
+
+Real authentication is unnecessary for the stated accidental-modification
+threat model, and v4 is right to say that a malicious same-user writer can
+rewrite both bytes and their digest. But the proposed check still trusts the
+same mutable `PROPOSAL.md` for the content digest, target path, base digest,
+state, and schema. Recomputing a digest copied from that file detects an edit to
+`content` only when the corresponding line was not also edited; it does not
+establish “the bytes approved.”
+
+Define the review anchor. A sufficient local design is to bind the decision
+record to a committed proposal tree/blob identity (or another immutable
+revision id), then have apply load target path, base identity, content, and
+findings from that revision rather than mutable working-tree metadata. Mutable
+lifecycle events should be separate append-only CLI-owned records carrying
+actor, timestamp, action/reason or waiver, and the approved revision/digests.
+Apply must reject dirty divergence from the anchored revision.
+
+The exact apply contract from round 3 also remains absent: run the guard against
+stored content and the current target, require the guard's resulting staged
+bytes to equal the approved content digest, and atomically replace with exactly
+those staged bytes. “Re-run the guard, then write exactly those bytes” does not
+say whether the guard transforms bytes or how equality is established.
+`diff` and recorded scan output must be declared derived/display-only and
+recomputed for display, or included in the anchored identity.
+
+### R4-F3 — HIGH: the lifecycle cannot yet be executed or recovered
+
+The diagram names useful states but is not a complete transition system:
+
+- `BLOCKED_FINDINGS -> REJECTED` is required by the prose but absent from the
+  diagram.
+- `rebase` leaves the original proposal in a permanently pending state; it
+  needs a terminal `SUPERSEDED` event linked to the new id/revision.
+- No CLI command or evidence contract moves
+  `APPLIED_PENDING_RIPPLES -> CLOSED`; actor, timestamp, ripple evidence, and
+  allowed caller are unspecified.
+- The required decision actor/timestamp/reason/waiver/digests are absent from
+  schema 1's required keys.
+- Unknown current states and illegal/repeated transitions are not explicitly
+  refused.
+- The target replacement and lifecycle event are two filesystem operations.
+  A crash between them can leave “applied but PENDING” or “recorded applied but
+  target unchanged.” Define ordering plus recovery/idempotency under the same
+  lock.
+- Saying the derived side has no transition command does not make a mutable
+  `state:` line in `PROPOSAL.md` CLI-owned or authoritative.
+
+`STALE` as a computed view is correct. The earlier sentence saying a proposal
+is “marked stale” should instead say it is reported stale. A rebase must anchor
+a new reviewable revision and supersede, not silently mutate, the old one.
+
+### R4-F4 — MEDIUM: retention is consensus-blocking
+
+Yes. Round 3 explicitly required “define archive and later explicit purge,” and
+v4 knowingly leaves retention unbounded. Retaining provenance by default is
+right; silently deleting on apply/reject is not. Add a small policy rather than
+new product surface:
+
+- open states are never auto-purged;
+- terminal records move to a named archive location (or remain in place);
+- purge is explicit, blueprint-side only, terminal-state only, age-based, and
+  leaves a compact tombstone containing id, final action/reason, actor/time, and
+  anchored digests/revision;
+- drift reports open states, while grooming can report archive size/age.
+
+The exact retention period may remain a founder-configured value, but the
+states eligible for purge and the minimum retained audit record may not remain
+undefined.
+
+### R4-F5 — MEDIUM: live contradictions remain
+
+1. Test 6 still says `inbox reject` **removes** the proposal, contradicting
+   §2.1d and §7's retained `REJECTED` record.
+2. The exit table assigns both `0` (“all proposals published clean”) and
+   `decision-pending` (“published, awaiting a decision”) to the normal clean
+   publication outcome. One invocation cannot return both. Use
+   decision-pending for any successfully published clean proposal, blocked when
+   any blocked proposal was published, and operational failure for publication
+   errors; reserve `0` for a genuinely completed/no-op case if one exists.
+3. §2.1 says a stale proposal is “marked stale,” while §2.1d says staleness is
+   never stored.
+4. §3b.6 calls the proposal immutable, while §2.1c explicitly treats its
+   content and metadata as ordinary mutable files. Name the anchored immutable
+   revision versus mutable lifecycle records.
+5. Test 10 says publication is “tracked” and therefore survives `git pull`, but
+   the plan never defines `git add`/commit ownership or when publication becomes
+   a committed review anchor. An untracked directory merely tending to survive
+   a non-colliding pull is not the claimed guarantee.
+6. R3 required operational partial-batch output to name every successfully
+   published id and every unpublished file. v4 distinguishes the category but
+   drops that required result contract.
+
+The affected-file inventory is accepted. The removal of `--apply-now` and the
+`push` alias, independent per-file proposals, `BLOCKED_FINDINGS`, target-byte
+staleness, synchronous primary flow, and computed `STALE` should not be
+reopened.
+
+## Round-4 consensus conditions
+
+1. Choose an implementable atomic **no-replace** publication primitive,
+   no-follow/root-relative path handling, partial cleanup, and an honest
+   durability claim; add the adversarial boundary tests above.
+2. Anchor approval to an immutable local revision and separate mutable,
+   append-only decision events from authoritative proposal inputs. No external
+   authentication service is required for the accepted threat model.
+3. Pin the exact guard/staged-byte equality contract and declare `diff` and
+   findings authoritative or derived.
+4. Complete the transition table, including blocked rejection, supersession,
+   completion, illegal/repeated transitions, actor/evidence, and crash recovery.
+5. Define archive/explicit-purge eligibility and the retained tombstone.
+6. Resolve the six contradictions/result-contract gaps in R4-F5.
+
+Implementation authorization remains **withheld**. Once these bounded contracts
+are present, authorized implementation scope can be the affected-file table in
+§3 only: proposal publication/list/show/apply/rebase/reject/complete/purge,
+drift recovery reporting, migration of the existing contamination suite, the
+new lifecycle/concurrency/security tests, CI/gate wiring, and the named
+documentation/state-record updates. No `--apply-now`, project-side waiver,
+`push` alias, or unrelated sync behavior is authorized.

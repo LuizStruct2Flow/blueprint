@@ -202,10 +202,19 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
    state-based:** starting the dispatcher while the signal is already
    `OVER_TO_CODEX` fires it on the first poll — no re-flip needed.
 
-2. **Trigger Codex by flipping the signal, never by calling `codex`.** Set
-   `State -> OVER_TO_CODEX` and put the actual prompt in the `Task` field. **The
-   dispatcher must already be running before you flip** — otherwise the trigger
-   fires into the void (the #1 mistake).
+2. **Trigger Codex by flipping the signal, never by calling `codex`.** Write the
+   prompt into `Task` **first**, then set `State -> OVER_TO_CODEX` **last**. The
+   dispatcher polls every 2s and fires on the `State` edit, so flipping first
+   dispatches the *previous* round's Task — a real agent run against work that
+   is already finished. **The dispatcher must already be running before you
+   flip** — otherwise the trigger fires into the void (the #1 mistake).
+
+   Ordering is now enforced rather than trusted: the watcher refuses to
+   dispatch a `Task` byte-identical to the one it last dispatched, and logs
+   `SKIPPED` saying why. That guard exists because this rule was written down
+   here and in HANDOVER and then violated twice in one session anyway — a rule
+   you have to remember at the moment you are busy is the wrong kind of fix
+   (the A-22 lesson). Pinned by `tests/signal-dispatch/` (CI, ~24s).
 
 3. **Where output lands.** `~/.{{PROJECT_NAME}}/codex-runs.log` (full run log),
    `~/.{{PROJECT_NAME}}/codex-last-message.md` (final message), `~/.{{PROJECT_NAME}}/signal.log`

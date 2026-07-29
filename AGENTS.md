@@ -209,12 +209,20 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
    is already finished. **The dispatcher must already be running before you
    flip** — otherwise the trigger fires into the void (the #1 mistake).
 
-   Ordering is now enforced rather than trusted: the watcher refuses to
-   dispatch a `Task` byte-identical to the one it last dispatched, and logs
-   `SKIPPED` saying why. That guard exists because this rule was written down
-   here and in HANDOVER and then violated twice in one session anyway — a rule
-   you have to remember at the moment you are busy is the wrong kind of fix
-   (the A-22 lesson). Pinned by `tests/signal-dispatch/` (CI, ~24s).
+   Ordering is now tolerated rather than merely demanded: the watcher waits for
+   the signal to **stop changing** (`AGENT_SIGNAL_SETTLE`, default 6s) before
+   dispatching, so a two-edit write fires once, on its final content, whichever
+   order you wrote the fields in. Write `Task` first anyway — the settle window
+   is a safety net, and a long enough pause between the two edits still
+   dispatches the stale text.
+
+   This exists because the rule was written down here and in HANDOVER and then
+   violated twice in one session by its own author — a rule you must remember
+   at the moment you are busy is the wrong kind of fix (the A-22 lesson). The
+   first attempt refused any `Task` byte-identical to the last dispatched one;
+   four-eyes rejected it, correctly, because task text is not a round identity,
+   identical instructions can legitimately recur, and that block lasted the
+   whole life of the watcher. Pinned by `tests/signal-dispatch/` (CI, ~80s).
 
 3. **Where output lands.** `~/.{{PROJECT_NAME}}/codex-runs.log` (full run log),
    `~/.{{PROJECT_NAME}}/codex-last-message.md` (final message), `~/.{{PROJECT_NAME}}/signal.log`

@@ -50,68 +50,114 @@ chmod +x "$CMD"
 # every case fail for a reason that had nothing to do with the guard.
 run_watch(){ # seconds
   : > "$HITS"
-  HITS_FILE="$HITS" timeout "$1" bash "$WATCHER" \
+  HITS_FILE="$HITS" AGENT_SIGNAL_SETTLE=3 timeout "$1" bash "$WATCHER" \
     --file "$SIG" --poll 1 --log "$WORK/signal.log" -- "$CMD" >"$WORK/wlog" 2>&1
   return 0
 }
 hits(){ [ -s "$HITS" ] && grep -c . "$HITS" || echo 0; }
 
 # ===========================================================================
-# 1. THE REPRODUCER — mic flipped BEFORE the Task is written.
-#    Round 1 dispatches "task-one". Then State is flipped back to the target
-#    while Task still says "task-one". The watcher must NOT dispatch it again.
+# 1. THE REPRODUCER — the mic is flipped BEFORE the Task is written.
+#    This is the incident, exactly: State goes to the target while Task still
+#    holds the previous round's text, and the real Task lands a few seconds
+#    later. The watcher must dispatch ONCE, carrying the NEW text — never the
+#    stale text it briefly saw mid-write.
 # ===========================================================================
 write_signal ACTIVE "task-one"
 (
   sleep 2
   write_signal OVER_TO_CODEX "task-one"      # round 1 — legitimate
-  sleep 3
+  sleep 6
   write_signal ACTIVE "task-one"             # agent hands back
   sleep 2
-  write_signal OVER_TO_CODEX "task-one"      # mic flipped, Task NOT yet updated
-  sleep 3
+  write_signal OVER_TO_CODEX "task-one"      # WRONG ORDER: mic flipped first…
+  sleep 2
+  write_signal OVER_TO_CODEX "task-two"      # …real Task lands 2s later
+  sleep 6
 ) &
-run_watch 12
+run_watch 22
 wait 2>/dev/null
 
-n=$(hits)
-if [ "$n" -gt 1 ]; then
-  fail "#1 dispatched $n times for one Task — the second fired on a stale Task (mic flipped before the Task was written)"
-elif [ "$n" -eq 0 ]; then
-  fail "#1 never dispatched at all — the guard is blocking legitimate work; watcher log: $(tail -3 "$WORK/wlog")"
+if grep -qx 'task-one' "$HITS" 2>/dev/null && [ "$(grep -cx 'task-one' "$HITS")" -gt 1 ]; then
+  fail "#1 dispatched the stale 'task-one' twice — the mid-write state was taken as a real instruction"
+elif ! grep -qx 'task-two' "$HITS" 2>/dev/null; then
+  fail "#1 the real Task was never dispatched; hits: $(tr '\n' '|' <"$HITS")"
+elif [ "$(hits)" -ne 2 ]; then
+  fail "#1 expected exactly 2 dispatches (one per round), got $(hits): $(tr '\n' '|' <"$HITS")"
 else
-  pass "#1 a mic flip with an unchanged Task does not re-dispatch"
-fi
-
-if grep -qi 'SKIPPED' "$WORK/wlog"; then
-  pass "#1b the refusal is logged and says why, rather than failing silently"
-else
-  fail "#1b nothing in the log explains the skip — a silent refusal is indistinguishable from a dead watcher: $(tail -5 "$WORK/wlog")"
+  pass "#1 a wrong-order edit dispatches once, on the settled Task (not the stale one)"
 fi
 
 # ===========================================================================
-# 2. The guard must not block a REAL next round. A new Task after a hand-back
-#    is the normal case and must dispatch.
+# 2. A genuinely new Task after a hand-back is the normal case and must fire.
 # ===========================================================================
 write_signal ACTIVE "task-one"
 (
   sleep 2
   write_signal OVER_TO_CODEX "task-one"
-  sleep 3
+  sleep 6
   write_signal ACTIVE "task-one"
   sleep 2
   write_signal OVER_TO_CODEX "task-TWO"      # a genuinely new instruction
-  sleep 3
+  sleep 6
 ) &
-run_watch 12
+run_watch 18
 wait 2>/dev/null
 
 if ! grep -q 'task-one' "$HITS" 2>/dev/null; then
   fail "#2 the first round never dispatched"
 elif ! grep -q 'task-TWO' "$HITS" 2>/dev/null; then
-  fail "#2 a genuinely new Task was refused — the guard is too strict and would stall every round"
+  fail "#2 a genuinely new Task was refused — the guard would stall every round"
 else
   pass "#2 a new Task after a hand-back still dispatches"
+fi
+
+# ===========================================================================
+# 3. F2 (Codex) — an INTENTIONAL identical rerun must still dispatch.
+#    The first version of this guard refused any Task byte-identical to the
+#    last dispatched one. Codex's objection: task text is not a round identity,
+#    identical instructions can legitimately recur, and the block lasted the
+#    whole life of the watcher rather than the "one poll interval" I claimed.
+#    Case #2 could not catch that — it changes the Task text, so it never
+#    exercised the identical case at all.
+# ===========================================================================
+write_signal ACTIVE "same-task"
+(
+  sleep 2
+  write_signal OVER_TO_CODEX "same-task"     # round 1
+  sleep 9
+  write_signal ACTIVE "same-task"            # hand back
+  sleep 3
+  write_signal OVER_TO_CODEX "same-task"     # round 2 — deliberately identical
+  sleep 9
+) &
+run_watch 26
+wait 2>/dev/null
+
+n=$(hits)
+if [ "$n" -lt 2 ]; then
+  fail "#3 an intentional identical rerun was blocked (dispatched $n time(s)) — task text is being treated as a round identity (Codex F2)"
+else
+  pass "#3 two rounds with identical Task text both dispatch (Codex F2)"
+fi
+
+# ===========================================================================
+# 4. The settle window must not turn into a permanent stall: after everything
+#    quiesces, the watcher is still able to dispatch a later round.
+# ===========================================================================
+write_signal ACTIVE "later-task"
+(
+  sleep 2
+  write_signal OVER_TO_CODEX "later-task"
+  sleep 9
+) &
+run_watch 13
+wait 2>/dev/null
+
+if [ "$(hits)" -lt 1 ]; then
+  fail "#4 nothing dispatched after a settle — the watcher has wedged"
+else
+  pass "#4 the watcher still dispatches after settling (no permanent stall)"
 fi
 
 echo

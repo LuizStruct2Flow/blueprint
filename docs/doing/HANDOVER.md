@@ -34,7 +34,10 @@
   than 26 loose files. Do **not** promote to `done/` without an explicit founder
   acceptance signal.
 - **Register of everything found:** `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`
-  (35 findings, ranked). It stays in `doing/` until the open ones are closed.
+  — findings `A-01`…`A-37`, ranked by severity. It stays in `doing/` until the
+  open ones are closed. (The count is stated as a range rather than a number on
+  purpose: a hand-maintained total is one more thing to drift, and it had
+  already drifted to "35".)
 
 ## 1. RESUME — live state + immediate action
 

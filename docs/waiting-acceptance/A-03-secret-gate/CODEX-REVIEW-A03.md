@@ -620,3 +620,60 @@ sections so the always-current resume document has one state.
 
 Do not push. Correct the two named stale ranges in `docs/doing/HANDOVER.md`,
 commit that record-only fix, and hand the range back for one narrow review.
+
+# Review round 8
+
+Date: 2026-07-29
+Reviewer: Jesko (Codex, QA-2)
+Reviewed range: `1c4dd4c..a848847`
+Handoff status: only `AGENT_SIGNAL.md` modified before this review record; baton
+is out of scope
+Verdict: **CHANGES-REQUESTED**
+
+## Closed from round 7
+
+- R7-F1's two named contradictions are closed. The lower “guard the pipe” list
+  now gives A-03's current lifecycle state and defers to the detailed
+  immediate-action entry; §3a and §3b consistently say the exchange switch is
+  complete and the permissions question is stood down.
+- The wider HANDOVER sweep also corrected `origin/main`, `205f6f7`, the
+  acceptance-record layout, and the stale §3b title. Git confirms
+  `origin/main=1c4dd4c` and both `205f6f7` and `e605476` are ancestors of it.
+- Deferring the A-03 detail is the right trade. A reader entering at the ranked
+  list still sees DONE-in-substance / unpushed / pending-clean-review and an
+  explicit pointer about 40 lines upward; duplicating the selector and deadline
+  mechanics there would recreate the drift surface that caused R7.
+
+## R8-F1 — MEDIUM — the cross-register sweep still finds stale A-07 truth
+
+`docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`'s ranked A-07 row still describes an
+earlier rejected design: restoration and exemptions driven by positional
+alignment, `a2bp-allow` suppression plus `--force`, and a 19-assertion suite.
+The current HANDOVER and waiting-acceptance INDEX instead describe the shipped
+round-7 design: safety scans every staged line with no exemption, staging is
+round-trip verified, pull/drift/verifier share the literal placeholder
+primitive, and the suite has 41 assertions. The audit's short status summary at
+the top is stale in the same way (“positional diff alignment” as the operative
+mechanism).
+
+This is materially inconsistent with the requested end-to-end state even
+though it is outside the latest commit's HANDOVER diff. Update both A-07
+descriptions in the active audit to the shipped round-7 design.
+
+## R8-F2 — LOW — HANDOVER understates the audit register count
+
+`docs/doing/HANDOVER.md:37` says the audit register contains 35 findings. The
+register contains the complete sequence A-01 through A-37: 37 unique audit
+IDs. Update the count to 37 (or remove the brittle count).
+
+## Other cross-checks
+
+- `docs/doing/BUGS.md` consistently records A-03 and the dispatch publication
+  work as committed/unpushed, A-08 as next, and A-07 as pushed.
+- `docs/waiting-acceptance/INDEX.md` consistently records the pushed acceptance
+  set and the per-item-folder layout. Its historical statement that the folder
+  once contained 26 loose review records does not claim they are loose now.
+- HANDOVER itself otherwise holds one consistent current state end to end.
+
+Do not push. Correct the two remaining record discrepancies, commit, and hand
+the range back for a final records-only review.

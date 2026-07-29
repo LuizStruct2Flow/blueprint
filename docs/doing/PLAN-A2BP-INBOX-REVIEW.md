@@ -648,3 +648,169 @@ drift recovery reporting, migration of the existing contamination suite, the
 new lifecycle/concurrency/security tests, CI/gate wiring, and the named
 documentation/state-record updates. No `--apply-now`, project-side waiver,
 `push` alias, or unrelated sync behavior is authorized.
+
+---
+
+## Round 5 — review of DRAFT v5
+
+**Verdict:** CHANGES-REQUESTED
+**Reviewer:** Jesko (QA-2, Codex)
+**Date:** 2026-07-29
+**Scope:** design only; no implementation reviewed or authorized
+
+This is converging. The exact apply-byte contract, the substantive transition
+set, partial-batch reporting, and active-versus-archive reporting are now sound.
+Git is also the right immutable identity mechanism. The remaining gaps are not
+another product-design round, but two composition decisions that implementation
+cannot safely invent: how a proposal becomes a Git identity without an
+unreviewed derived-side commit to the blueprint branch, and how apply records
+and recovers the non-atomic target-write/event pair.
+
+### R5-F1 — HIGH: “publishing commits it” closes self-checksumming only by reopening authority and atomicity
+
+A commit closes R4-F2 **only if approval and apply name the exact commit/tree and
+load every authoritative input from it**. v5 gets that part right. But
+“publishing a proposal commits it” is not yet a publication protocol:
+
+- `a2bp` runs from a derived project. Updating the blueprint's current branch is
+  itself a blueprint mutation, conflicts with the stated “derived side can only
+  propose” authority boundary, and can race or absorb/interfere with unrelated
+  staged/working-tree work. A path-limited porcelain commit does not turn an
+  externally initiated branch update into an additive inbox write.
+- Filesystem publication followed by `git commit` leaves a visible mutable
+  proposal before the anchor exists; commit followed by filesystem publication
+  leaves an anchored but undiscoverable proposal if publication fails. The plan
+  does not define the identity used by lifecycle events across that gap.
+- Multiple proposal commits on the current branch serialize unrelated inbox
+  traffic with normal blueprint development. “Refuse on dirty divergence” is
+  also ambiguous: apply must reject divergence of the authoritative proposal
+  path from the named revision, not reject an unrelated dirty working tree.
+
+Use Git as the **publication primitive**, not as a second step after filesystem
+publication. A sufficient shape is: build proposal blobs/tree/commit with Git
+plumbing without touching the blueprint index or current branch, then publish
+the identity through an inbox-specific ref using an atomic compare-and-swap
+`update-ref` (or an equivalently specified Git transaction). The visible inbox
+is derived from that anchored object/ref. State whether proposals use one ref
+per id or an append-only inbox ref/log, how concurrent publishers retry without
+loss, and what keeps objects reachable. The normal blueprint branch may receive
+the proposal later through the ordinary reviewed commit flow; proposal
+publication itself must not silently commit unrelated branch state.
+
+This also answers the question about a separate operator commit: **it may be a
+separate normal branch commit only if publication has already created and
+published a stable reachable Git identity elsewhere.** Leaving ordinary mutable
+files to wait for an operator commit reopens F3. Conversely, automatically
+committing the current branch is not authorized merely because the commit is an
+anchor.
+
+### R5-F2 — HIGH: the stated filesystem primitive is not portable shell, and it should disappear if Git publishes
+
+Opened-directory-relative traversal with no-follow semantics plus atomic
+directory no-replace publication is not expressible by portable POSIX shell
+utilities as specified. It requires a helper exposing operations such as
+`openat`/`openat2` and `renameat2(RENAME_NOREPLACE)`, or a carefully proved
+link/marker protocol with a different visibility model. Shell can invoke such a
+helper; it cannot itself preserve an opened directory descriptor and make every
+pathname operation relative to it with the promised semantics.
+
+Do not leave implementation to approximate this with `realpath`, `test -L`,
+`mv -n`, or check-then-create. Either:
+
+1. make the Git object/ref transaction above the single publication and
+   collision primitive, which removes the staged-directory publication problem;
+   or
+2. authorize and inventory a helper binary/runtime, its portability matrix and
+   fail-closed behavior, then test the actual helper on every supported OS.
+
+This choice is a design boundary because it changes dependencies and the source
+of the safety invariant. Function names, helper language, and fsync mechanics
+after that choice are implementation details. Making no crash-durability claim
+is acceptable, but atomic visibility and no-clobber remain required.
+
+### R5-F3 — HIGH: crash recovery still omits the two real split outcomes
+
+The transition rows are now complete for ordinary operation. The crash contract
+is not. Target replacement and event append are distinct operations. Whichever
+is ordered first, a crash can leave one side completed and the other absent:
+
+- target equals approved result, but no applied event exists; or
+- applied/intention event exists, but target still equals the approved base.
+
+v5 instead lists “event not recorded, target unwritten” and “event recorded,
+target written,” the two non-split outcomes. Atomic target replacement does not
+make the pair atomic.
+
+Specify a recoverable protocol under the same target lock. For example, append
+an `APPLY_INTENT` containing proposal revision, base digest, exact result digest,
+actor/waiver and transaction id; replace only if the target equals the base;
+then append `APPLY_COMMITTED`. Recovery classifies exact base/result digests:
+base + intent may safely resume, result + intent may safely finalize, and
+anything else is reported unresolved without writing. The public lifecycle can
+still present `PENDING_DECISION` and `APPLIED_PENDING_RIPPLES`; intent is a
+journal event, not necessarily a new user-visible state.
+
+Also resolve the schema contradiction: §2.1c says lifecycle state is not edited
+in `PROPOSAL.md`, while schema 1 still requires `state`. The anchored proposal
+may carry its **initial** state; current state must be folded from anchored,
+append-only events. Unknown, duplicate, truncated, reordered, or conflicting
+events must fail closed. `rebase` must atomically link both sides
+(old=`SUPERSEDED`, new revision/id), or recovery must specify the same split.
+
+### R5-F4 — MEDIUM: retention is sufficient, with one precision fix
+
+Archive-on-terminal, explicit terminal-only age purge, Git-retained history,
+and separate active/archive reporting are sufficient for consensus. A second
+permanent tombstone file is unnecessary if the purged record remains reachable
+in normal Git history; the purge output/event should record ids and final
+revisions so the history is locatable.
+
+Define age from the terminal/archive event rather than proposal creation, and
+make `purge --before` reject every non-terminal current state after folding the
+event log. Archive should be a logical view/ref or an ordinary reviewed branch
+change consistent with F1—not an unauthenticated working-tree move that becomes
+the new lifecycle authority.
+
+### R5-F5 — MEDIUM: operative tests and exits still describe superseded behavior
+
+The normative test list still says rejection “removes” the proposal, a
+hand-edited working-tree proposal is the tamper oracle, and survival of pull is
+proved by being “tracked.” Replace those with retained/archived rejection,
+apply loading the named revision despite benign working-tree edits (and refusing
+authoritative-path divergence), and reachability/ref behavior across pull and
+GC. Add a test proving proposal publication does not change the blueprint index,
+current branch, managed files, or unrelated working-tree bytes.
+
+The exit table still assigns both `0` and `decision-pending` to an all-clean
+successful publication. Keep round 4's answer: any newly published clean
+proposal returns `decision-pending`; any batch containing a published blocked
+proposal returns `blocked`; any publication failure returns operational failure
+while naming published/unpublished items. Reserve `0` for list/show or a defined
+idempotent no-op.
+
+## Round-5 disposition and bounded next revision
+
+Consensus remains withheld. F1/F2 and F3 are **design/composition gaps**; F4 is
+accepted subject to the precision above; F5 is a mechanical consistency sweep.
+This does not justify widening the product. A focused v6 should:
+
+1. use one Git object/ref transaction as proposal publication, or explicitly
+   authorize a non-portable filesystem helper—do not specify both competing
+   publication systems;
+2. state branch/index/ref ownership, reachability, concurrency and the exact
+   divergence check;
+3. add an intent/commit journal protocol for apply and rebase recovery;
+4. remove `state` as mutable proposal authority and fold current state from
+   anchored events;
+5. align the exit table and old tests.
+
+If those contracts are made internally consistent, implementation may be
+authorized for exactly: the §3 affected-file table; proposal
+publish/list/show/apply/rebase/reject/close/archive/purge; inbox-specific Git
+object/ref and lifecycle-journal primitives; target locking and atomic
+replacement; drift recovery reporting; migration of the 27 CLI assertions plus
+new publication/lifecycle/concurrency/crash/path-security tests; CI/pre-push
+wiring; and the named documentation/audit/HANDOVER updates. It does **not**
+authorize `--apply-now`, a project-side waiver, the `push` alias, automatic
+commits to the blueprint's normal branch, unrelated sync changes, or a new
+external service.

@@ -44,8 +44,9 @@
 - **A-07 DELIVERED, pushed `e605476`.** `blueprint a2bp` was a bare `cp` — the
   vector that put BUG-002 and A-09 into the blueprint. Now: placeholder
   restoration by positional diff against the blueprint's own copy; **every**
-  staged line scanned (no exemption — an exemption list was the one place a
-  misattribution could leak); staging round-trip verified; and ONE shared
+  staged line scanned with no alignment-derived exemption (explicit
+  `a2bp-allow` and `--force` operator overrides remain); staging round-trip
+  verified after forward substitution of both sides; and ONE shared
   substitution primitive (`scripts/lib/placeholders.sh`) used by pull, drift
   and the verifier. 41 assertions in `tests/a2bp-contamination/`, gate-wired.
   **Codex CLEAN on round 7 after six rejections** — full trail in
@@ -70,7 +71,7 @@
   skipped on first disclosure to a public one). Six rounds later: a new ref is
   scanned in FULL, bounded by one per-push deadline with a required
   `timeout`/`gtimeout` provider, and an unfinished scan blocks as INCOMPLETE.
-  Trail: `docs/waiting-acceptance/A-03-secret-gate/CODEX-REVIEW-A03.md`.
+  Trail: `docs/doing/A-03-secret-gate/CODEX-REVIEW-A03.md`.
   **Push only after a clean round.** Codex's R6 read: the security
   implementation has converged; remaining items are record accuracy, not design.
 - **Also unpushed in the same range:** the dispatch settle window +

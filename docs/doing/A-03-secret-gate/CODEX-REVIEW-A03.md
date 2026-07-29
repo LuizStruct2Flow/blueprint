@@ -677,3 +677,41 @@ IDs. Update the count to 37 (or remove the brittle count).
 
 Do not push. Correct the two remaining record discrepancies, commit, and hand
 the range back for a final records-only review.
+## Round 9 — records sweep
+
+**Reviewed range:** `1c4dd4c..f1e8a1b`
+
+### R9-F1 — MEDIUM — A-07's corrected record still overstates the shipped guard
+
+Both A-07 register summaries said every staged line is scanned with “no
+exemption”. The implementation deliberately suppresses findings on a line with
+an explicit `a2bp-allow: <reason>` marker, and `--force` remains a loud operator
+override. What was removed in round 4 was the unsafe **alignment-derived**
+exemption. The same summaries also described staged output as reproducing the
+raw project file, while the asserted property is narrower and exact:
+`contamination_stage` forward-substitutes **both** staged output and the project
+file and requires those results to be byte-identical.
+
+Corrected the audit summary, ranked A-07 row, HANDOVER, and acceptance INDEX to
+name those semantics precisely.
+
+### R9-F2 — MEDIUM — the unpushed A-03 follow-up was filed as waiting acceptance
+
+`docs/waiting-acceptance/INDEX.md` says everything in that lifecycle directory
+is pushed, but `A-03-secret-gate/` records the committed and explicitly
+**unpushed** corrective range. Moved the folder to `docs/doing/` and updated its
+links. The pushed first cut remains recorded by SHA; the active corrective work
+now lives in the lifecycle state its own records claim.
+
+### Verification
+
+- Swept the complete audit register, `HANDOVER.md`, both `BUGS.md` files, and
+  `waiting-acceptance/INDEX.md`, including all remaining FIXED / acceptance
+  claims.
+- Read the shipped A-07 staging, scan, substitution, and CLI paths.
+- `bash tests/a2bp-contamination/test.sh` — PASS (41 assertions).
+- `git diff --check` — clean for the Round 9 edits. The range check continues
+  to report only the review record's pre-existing Markdown hard breaks.
+
+**Verdict: CHANGES MADE.** Per four-eyes, the writer must hand the corrected
+records back to the other provider for a clean review before push.

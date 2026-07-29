@@ -130,10 +130,23 @@ if command -v gitleaks >/dev/null 2>&1; then
   # The loop runs in a subshell, so the exit status is passed back through the
   # output file rather than a variable — one range per line, any of which may
   # find something.
+  # BOUNDED, and it fails closed when the bound is hit (A-03 R3-F2). A new ref
+  # is scanned in full — the only security-safe choice with what a pre-push hook
+  # knows — but "full" is unbounded, and the ≤30s gate ceiling in CLAUDE.md is
+  # unconditional. Those two cannot both be satisfied silently, so the conflict
+  # is resolved explicitly: cap the local scan, and if it does not finish, BLOCK
+  # and say the scan was incomplete. An unfinished scan is not a clean one.
+  # Push again after `--log-opts` narrows, or let CI do the full history.
+  _gl_budget="${GITLEAKS_TIMEOUT_SECONDS:-20}"
   printf '%s\n' "$_gl_ranges" | while IFS= read -r _gl_range; do
     [ -n "$_gl_range" ] || continue
-    gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
-      || echo "GITLEAKS_RC=$?" >>"$_gl_out"
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "$_gl_budget" gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
+        || echo "GITLEAKS_RC=$?" >>"$_gl_out"
+    else
+      gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
+        || echo "GITLEAKS_RC=$?" >>"$_gl_out"
+    fi
   done
   _gl_rc=0
   if grep -q '^GITLEAKS_RC=1$' "$_gl_out" 2>/dev/null; then
@@ -148,6 +161,15 @@ if command -v gitleaks >/dev/null 2>&1; then
     echo "   Rotate the credential FIRST, then rewrite the history that carries it."
     echo "   A leaked secret is compromised the moment it lands on origin, and"
     echo "   removing the commit does not un-leak it."
+    exit 1
+  elif [ "$_gl_rc" -eq 124 ]; then
+    tail -10 "$_gl_out"; rm -f "$_gl_out"
+    echo "❌ gitleaks did not finish within ${_gl_budget}s — the scan is INCOMPLETE."
+    echo "   Blocked, because an unfinished scan is not a clean one. This is the"
+    echo "   documented edge of the ≤30s pre-push budget (DoD §4): a brand-new"
+    echo "   ref is scanned over its whole history, which is unbounded."
+    echo "   Options: raise GITLEAKS_TIMEOUT_SECONDS deliberately for this push,"
+    echo "   push a smaller range first, or let CI scan the full history."
     exit 1
   elif [ "$_gl_rc" -ne 0 ]; then
     tail -30 "$_gl_out"; rm -f "$_gl_out"

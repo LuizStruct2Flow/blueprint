@@ -105,6 +105,18 @@ if [ -f tests/pre-push-secrets/test.sh ]; then
   }
 fi
 
+# The baton must publish atomically. Two-edit handoffs let a poller sample the
+# new State beside the previous round's Task and dispatch against finished work.
+# Every case here was found by the tool failing on its own first real use. ~0.2s.
+if [ -f tests/signal-set/test.sh ]; then
+  bash tests/signal-set/test.sh || {
+    echo "❌ tests/signal-set/test.sh failed."
+    echo "   The baton must survive pipes, backslashes and newlines, and a"
+    echo "   refused publish must leave the previous baton byte-identical."
+    exit 1
+  }
+fi
+
 # A-07 — `blueprint a2bp` is the ONLY write path from a project into the generic
 # blueprint, and it is how BUG-002 and A-09 both got in. It must reverse-
 # substitute the project name and refuse to copy contaminated content. Unrun,

@@ -51,16 +51,23 @@ done
 
 if [ -n "$TASK_FILE" ]; then
   [ -f "$TASK_FILE" ] || die "no such --task-file: $TASK_FILE"
-  # The Task lives in one table cell, so it has to be a single line. Newlines
-  # become spaces rather than silently truncating the instruction at the first
-  # one — a half-delivered prompt is worse than an ugly one.
-  TASK="$(tr '\n' ' ' < "$TASK_FILE" | sed 's/  */ /g; s/ *$//')"
+  TASK="$(cat "$TASK_FILE")"
 fi
 [ -n "$TASK" ] || die "--task or --task-file is required"
 
-case "$TASK" in
-  *'|'*) die "Task contains '|', which would break the markdown table cell" ;;
-esac
+# Normalise AFTER both input paths converge. Doing it only in the --task-file
+# branch left `--task $'a\nb'` producing a broken multi-line table row — one
+# input path validated, the other not, which is how a guard grows a hole.
+# The Task lives in a single table cell, so newlines become spaces rather than
+# truncating the instruction: a half-delivered prompt is worse than an ugly one.
+TASK="$(printf '%s' "$TASK" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ //; s/ *$//')"
+
+# A literal `|` would end the table cell early and truncate the instruction.
+# ESCAPE it rather than refuse: `\|` renders as a pipe inside a markdown table,
+# and refusing means a prompt cannot discuss shell pipelines, alternation, or
+# the escaping rule itself. Found by dogfooding — the very first dispatch
+# written with this tool was rejected for asking whether refusing was correct.
+TASK="$(printf '%s' "$TASK" | sed 's/|/\\|/g')"
 
 TODAY="$(date '+%Y-%m-%d')"
 TMP="$(mktemp "${SIGNAL}.XXXXXX")"
@@ -68,7 +75,20 @@ trap 'rm -f "$TMP"' EXIT INT TERM
 
 # Rewrite the four baton rows; everything else in the file is passed through
 # untouched, so the surrounding prose stays project-owned.
-awk -v holder="$HOLDER" -v state="$STATE" -v task="$TASK" -v today="$TODAY" '
+# Values come through ENVIRON, never `awk -v`. `-v` runs escape-sequence
+# processing over the value, so the `\|` escaping applied above was silently
+# undone and a raw pipe reached the table cell — truncating the instruction at
+# exactly the point it was explaining pipes. ENVIRON passes bytes through
+# untouched. (Found the hard way: the first dispatch published with this tool
+# was truncated by its own escaping.)
+SIGNAL_HOLDER="$HOLDER" SIGNAL_STATE="$STATE" SIGNAL_TASK="$TASK" SIGNAL_TODAY="$TODAY" \
+awk '
+  BEGIN {
+    holder = ENVIRON["SIGNAL_HOLDER"]
+    state  = ENVIRON["SIGNAL_STATE"]
+    task   = ENVIRON["SIGNAL_TASK"]
+    today  = ENVIRON["SIGNAL_TODAY"]
+  }
   /^\| Holder \|/      { print "| Holder | " holder " |"; next }
   /^\| State \|/       { print "| State | " state " |"; next }
   /^\| Task \|/        { print "| Task | " task " |"; next }

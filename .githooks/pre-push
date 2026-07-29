@@ -138,15 +138,40 @@ if command -v gitleaks >/dev/null 2>&1; then
   # and say the scan was incomplete. An unfinished scan is not a clean one.
   # Push again after `--log-opts` narrows, or let CI do the full history.
   _gl_budget="${GITLEAKS_TIMEOUT_SECONDS:-20}"
+
+  # A timeout provider is REQUIRED, not best-effort (R4-F2). The previous
+  # version fell back to running gitleaks unbounded when `timeout` was absent,
+  # which is exactly the documented macOS `brew bundle` path — so "the scan is
+  # capped" was not a property of the blueprint at all, just of this Linux box.
+  # coreutils installs it as `gtimeout` there; Brewfile now pulls it in.
+  _gl_timeout=""
+  if command -v timeout >/dev/null 2>&1; then
+    _gl_timeout="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    _gl_timeout="gtimeout"
+  else
+    echo "❌ no 'timeout' (or 'gtimeout') available — the secret scan cannot be bounded."
+    echo "   A new ref is scanned over its whole history, which is unbounded, so an"
+    echo "   unbounded scanner can blow the ≤30s gate budget with no way to stop it."
+    echo "   Install GNU coreutils: brew bundle  (from repo root, uses ./Brewfile)"
+    exit 1
+  fi
+
+  # ONE deadline for the whole gitleaks step, not one per ref (R4-F1). The
+  # budget used to be handed to a fresh `timeout` inside the loop, so a push
+  # with three slow refs could spend 3× the "cap" before the rest of the gate
+  # even started — the documented property was per-invocation while the ≤30s
+  # ceiling it claimed to respect is per-push.
+  _gl_deadline=$(( $(date +%s) + _gl_budget ))
   printf '%s\n' "$_gl_ranges" | while IFS= read -r _gl_range; do
     [ -n "$_gl_range" ] || continue
-    if command -v timeout >/dev/null 2>&1; then
-      timeout "$_gl_budget" gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
-        || echo "GITLEAKS_RC=$?" >>"$_gl_out"
-    else
-      gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
-        || echo "GITLEAKS_RC=$?" >>"$_gl_out"
+    _gl_left=$(( _gl_deadline - $(date +%s) ))
+    if [ "$_gl_left" -le 0 ]; then
+      echo "GITLEAKS_RC=124" >>"$_gl_out"
+      break
     fi
+    "$_gl_timeout" "$_gl_left" gitleaks detect --redact --no-banner --log-opts="$_gl_range" >>"$_gl_out" 2>&1 \
+      || echo "GITLEAKS_RC=$?" >>"$_gl_out"
   done
   _gl_rc=0
   if grep -q '^GITLEAKS_RC=1$' "$_gl_out" 2>/dev/null; then

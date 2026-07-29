@@ -12,6 +12,11 @@
 
 # --- Security gate (docs/SECURITY.md cross-recipe rules) ---
 brew "gitleaks"      # secret scan, pre-push (.githooks/pre-push)
+# Ships `gtimeout`. REQUIRED, not a nicety: the secret scan bounds itself with
+# a timeout, and macOS has no `timeout` in the base system. Without this the
+# hook fails closed and refuses to push rather than run an unbounded scan
+# (A-03 R4-F2 — the cap was previously a property of Linux boxes only).
+brew "coreutils"     # gtimeout, used to bound the secret scan
 brew "semgrep"       # SAST, pre-push + CI
 brew "osv-scanner"   # SCA / dependency CVE scan, pre-push + CI
 brew "jq"            # required to classify semgrep --json output in the pre-push gate

@@ -24,6 +24,14 @@
 
 set -u
 
+# --fast omits the BUDGET cases (#9, #10, #11). They drive a deliberately
+# hanging scanner and cost ~6s of a hard 30s pre-push ceiling, which the gate
+# had already blown at 30.8s. They run in full in CI. The split is by COST, not
+# by importance: the correctness cases that prove the gate scans the right
+# commits all stay local, because those catch a silent fail-open.
+FAST=0
+[ "${1:-}" = "--fast" ] && FAST=1
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$ROOT/.githooks/pre-push"
 WORK="$(mktemp -d)"
@@ -269,6 +277,17 @@ else
   pass "#8 a bare-URL destination scans all reachable history (Codex F1)"
 fi
 
+if [ "$FAST" -eq 1 ]; then
+  echo "  – skipped in --fast (run in CI): #9 budget exhaustion, #10 per-push budget, #11 no-timeout fail-closed"
+  echo
+  if [ "$FAILED" -eq 0 ]; then
+    echo "PASS: A-03 — the secret gate scans the pushed commits, not the empty index."
+    exit 0
+  fi
+  echo "FAILED: A-03 — the secret gate is not scanning what is being pushed."
+  exit 1
+fi
+
 # ===========================================================================
 # 9. R3-F2 — a scan that runs out of budget must BLOCK, distinctly.
 #    A new ref is scanned over its whole history, which is unbounded, while the
@@ -301,6 +320,80 @@ elif grep -qi 'found a secret' "$WORK/out"; then
   fail "#9 a timeout was reported as a secret finding"
 else
   pass "#9 a scan that exceeds its budget blocks AS incomplete, distinctly (Codex R3-F2)"
+fi
+
+# ===========================================================================
+# 10. R4-F1 — the budget is per PUSH, not per ref.
+#     The cap used to be handed to a fresh `timeout` inside the loop, so three
+#     slow refs could spend 3× the advertised cap before the rest of the gate
+#     even started. Case #9 supplies one ref line and therefore cannot see it.
+#     Three hanging refs with a 3s budget must still finish in well under 3×.
+# ===========================================================================
+cat >"$FIX/bin/gitleaks" <<EOF
+#!/bin/sh
+echo "\$@" >>"$ARGV"
+case "\$1" in
+  detect) sleep 30 ;;
+esac
+exit 0
+EOF
+chmod +x "$FIX/bin/gitleaks"
+: > "$ARGV"
+
+_t0=$(date +%s)
+printf '%s' "refs/heads/a $HEADSHA refs/heads/a $BASE
+refs/heads/b $HEADSHA refs/heads/b $BASE
+refs/heads/c $HEADSHA refs/heads/c $BASE
+" | (
+  cd "$FIX" && PATH="$FIX/bin:$PATH" GITLEAKS_TIMEOUT_SECONDS=3 \
+    sh .githooks/pre-push origin "git@example.com:x/y.git"
+) >"$WORK/out" 2>&1
+rc=$?
+_elapsed=$(( $(date +%s) - _t0 ))
+
+if [ "$rc" -eq 0 ]; then
+  fail "#10 three hanging refs passed the gate"
+elif [ "$_elapsed" -ge 9 ]; then
+  fail "#10 three refs took ${_elapsed}s against a 3s budget — the cap is per-ref, so a multi-ref push multiplies it (Codex R4-F1)"
+elif ! grep -qi 'INCOMPLETE\|did not finish' "$WORK/out"; then
+  fail "#10 bounded, but does not report the scan as incomplete: $(tail -3 "$WORK/out")"
+else
+  pass "#10 the budget bounds the whole push (${_elapsed}s for 3 refs on a 3s cap), not each ref (Codex R4-F1)"
+fi
+
+# ===========================================================================
+# 11. R4-F2 — with no timeout provider the cap does not exist, so the hook must
+#     REFUSE rather than run an unbounded scan. The old fallback ran gitleaks
+#     unbounded, which is precisely the documented macOS `brew bundle` path:
+#     "the scan is capped" was true of Linux boxes and nowhere else.
+# ===========================================================================
+cat >"$FIX/bin/gitleaks" <<EOF
+#!/bin/sh
+echo "\$@" >>"$ARGV"
+exit 0
+EOF
+chmod +x "$FIX/bin/gitleaks"
+: > "$ARGV"
+# A PATH with the fixture's shims but no timeout/gtimeout anywhere.
+mkdir -p "$WORK/notimeout"
+for t in gitleaks semgrep osv-scanner trivy git sh sed grep cat mktemp tail rm date printf; do
+  _src="$(command -v "$t" 2>/dev/null || true)"
+  [ -n "$_src" ] && ln -sf "$_src" "$WORK/notimeout/$t" 2>/dev/null
+done
+ln -sf "$FIX/bin/gitleaks" "$WORK/notimeout/gitleaks" 2>/dev/null
+ln -sf "$FIX/bin/semgrep"  "$WORK/notimeout/semgrep" 2>/dev/null
+
+printf '%s' "refs/heads/main $HEADSHA refs/heads/main $BASE
+" | (
+  cd "$FIX" && PATH="$WORK/notimeout" sh .githooks/pre-push origin "git@example.com:x/y.git"
+) >"$WORK/out" 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "#11 with no timeout available the hook ran the scan unbounded and passed — the cap silently vanished (Codex R4-F2)"
+elif ! grep -qi 'timeout\|coreutils' "$WORK/out"; then
+  fail "#11 blocked, but never explains that no timeout provider was found: $(tail -3 "$WORK/out")"
+else
+  pass "#11 no timeout provider fails closed with an actionable message (Codex R4-F2)"
 fi
 
 echo

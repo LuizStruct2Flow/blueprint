@@ -491,7 +491,8 @@ For every new user-facing route, command, or job — `DoD.md` §6.1 requires:
 Same principle as MALT, applied at a different timescale:
 
 1. **No secrets in code or git history.**
-   `gitleaks` blocks the push; leaked secrets get rotated, not unstaged.
+   `gitleaks` scans the commits being pushed and blocks; leaked secrets get
+   rotated, not unstaged.
 
 2. **Static analysis catches OWASP top-10** at commit time.
    Semgrep + lint security plugins, pre-push, with justified suppressions only.

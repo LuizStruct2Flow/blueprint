@@ -312,9 +312,12 @@ for the principle and `docs/SECURITY.md` for the recipes per stack.
 
 For every push:
 
-- [ ] **Secret scan clean** — `gitleaks protect --staged` passed in
-      pre-push. No `--no-verify` shortcut. If a secret was *ever*
-      committed, it's been rotated, not just unstaged.
+- [ ] **Secret scan clean** — `gitleaks detect` over the commits being
+      pushed passed in pre-push. No `--no-verify` shortcut. If a secret was
+      *ever* committed, it's been rotated, not just removed — the commit
+      does not have to reach `origin` for the credential to be burned.
+      (Not `protect --staged`: that scans the index, which is empty once the
+      commit exists, so it scanned nothing at all — A-03.)
 - [ ] **SAST clean** — Semgrep + lint security plugins ran clean
       (or every suppression has a justification comment naming the
       threat-model entry that makes it safe).

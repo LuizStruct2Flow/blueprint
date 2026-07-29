@@ -26,9 +26,22 @@ Lambda + DynamoDB + Amplify Hosting + CDK + CodePipeline.
 
 ### 1. Keep secrets out — `gitleaks` in the pre-push hook
 
-`.githooks/pre-push` runs `gitleaks protect --staged` before any push.
-Blocks on detection. Catches AWS keys, OpenAI tokens, JWT secrets,
+`.githooks/pre-push` runs `gitleaks detect` over **the commits being
+pushed** — `remote_sha..local_sha` for every ref git names on the hook's
+stdin. Blocks on detection. Catches AWS keys, OpenAI tokens, JWT secrets,
 arbitrary high-entropy strings, etc.
+
+> **Not `protect --staged` (A-03).** `--staged` scans the git *index*, and at
+> pre-push time the index is empty because the commit is already made.
+> Measured with a real secret in the outgoing commit: `protect --staged`
+> reported "0 commits scanned, ~0 bytes ... no leaks found" and exited 0.
+> The gate was a no-op in the normal commit-then-push flow for as long as it
+> existed. If you are copying this recipe into another project, copy the
+> `detect --log-opts` form.
+
+A new branch has an all-zero remote sha, which is not a resolvable revision,
+so the range becomes `<local> --not --remotes` — everything not already on
+some remote. A branch deletion publishes nothing and is not scanned.
 
 For accidental commits that already happened: `gitleaks detect` over
 the full history, then rewrite with `git filter-repo` and rotate the
@@ -209,7 +222,9 @@ These bind every project regardless of stack.
 
 Per the blueprint pre-push hook (DoD §4 enriched in §4.7):
 
-1. `gitleaks protect --staged` — fails on any secret
+1. `gitleaks detect --log-opts=<remote>..<local>` — fails on any secret in
+   the commits being pushed (**not** `protect --staged`, which scans an index
+   that is empty at pre-push time — A-03)
 2. `semgrep --config=auto` — fails on `WARNING+` severity
 3. `osv-scanner --lockfile=…` — fails on `HIGH+` CVE
 4. (lint security plugins ride inside `npm run lint` — already wired)

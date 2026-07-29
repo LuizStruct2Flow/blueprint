@@ -1034,6 +1034,119 @@ working tree.
 
 ---
 
+## Round 10 — plumbing-contract review of DRAFT v15
+
+**Plan reviewed:** `PLAN-A2BP-PR.md` v15 (`3e787ba`)
+**Reviewer:** Jesko (Codex / QA-2)
+**Date:** 2026-07-29
+**Verdict:** **CHANGES REQUESTED — the design is convergent, but the plumbing contract still has four bounded gaps**
+
+v15 fixes every substantive round-9 defect: object construction no longer
+passes through a working tree or attributes; the project is bound into the v2
+key; fetched-base collisions and the exact final diff are checked; and the
+base-freshness claim now acknowledges the unavoidable final race. The remaining
+issues are implementation-level seams, not a reason to revisit the request
+reframe.
+
+### R10-F1 — HIGH: a bare repo does not by itself make the Git process hermetic
+
+`git init --bare` still reads system/global configuration and the caller's Git
+environment. In particular, `init.defaultObjectFormat` can create a SHA-256
+repository on one machine while this plan and its 40-hex base contract require
+SHA-1. Inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, replacement/graft
+settings, config injection and locale can also redirect object/index access or
+change the explicitly byte-wise shell operations before Git sees them. The few
+`-c` settings on `commit-tree` do not clear those inputs.
+
+Run the construction under a scrubbed Git environment, disable system/global
+config (including injected config), set `LC_ALL=C`, and initialize explicitly
+with `git init --bare --object-format=sha1`. Pin the supported Git minimum that
+provides `--object-format` and `hash-object --no-filters`, and fail clearly
+otherwise. Express the inherited base committer date in Git's internal
+`<unix-seconds> <timezone>` form rather than through a locale-sensitive display
+format. Add a regression with hostile global config/environment, attributes and
+clean filters; both builds must produce the same tree and commit.
+
+### R10-F2 — MEDIUM: the temporary-index algorithm omits the operation that preserves the base tree
+
+Step 6 says to build “from the base tree” and immediately installs target
+entries with `update-index --cacheinfo`. A new temporary index contains no base
+entries, so that literal procedure writes a tree containing only the targets.
+The later exact-diff assertion would correctly reject every nontrivial build,
+but the documented algorithm itself cannot succeed.
+
+Create a new isolated `GIT_INDEX_FILE`, seed it with
+`git read-tree "$base"`, then apply the retained target records and
+`write-tree`. Specify a NUL-safe input form (`--index-info -z` or an equivalently
+safe per-path invocation) and use the **retained** set after partial-no-op
+drops as the exact-diff set. Test that unrelated base entries survive
+byte-for-byte.
+
+### R10-F3 — MEDIUM: the fetched-base collision table omits a gitlink parent
+
+The target table rejects a gitlink, but the parent row rejects only a blob or
+symlink. A gitlink parent is also a non-tree parent under which a target cannot
+be created without restructuring. State the general invariant: every existing
+parent component must be mode `040000` and type `tree`; reject blobs, symlinks,
+gitlinks and malformed mode/type combinations while naming what was found.
+At the target, accept only absent or a blob with mode `100644`/`100755`; reject
+all other mode/type combinations. Add a gitlink-parent regression.
+
+### R10-F4 — MEDIUM: v2 fixes the identity omission, but not the absolute ref-collision claim
+
+Putting canonical project bytes in the key fixes v14's deterministic
+cross-project alias. It does not make two projects unable to collide: the ref
+uses only 12 hex characters (48 bits), so distinct v2 keys can still share a
+branch id. Exact-tip refusal makes such a collision safe but unavailable; the
+plan should say that rather than “can no longer collide.”
+
+There is a second implementability issue in the ref itself. The existing
+project-name validator rejects only empty/newline names, while legal directory
+names may contain spaces, `~`, `^`, `:`, backslash, or end in `.lock`; several
+cannot appear verbatim in a Git ref. Keep the exact validated project bytes in
+the key/message, but define a ref-safe project slug/encoding and validate the
+final ref with `git check-ref-format`, or omit the project from the ref and use
+the full v2 digest. The latter is simpler and removes practical truncation
+collisions. Also length-frame the remote/branch header fields or explicitly
+reject record separators in them; currently only the project and path/content
+records are framed.
+
+### Round-10 answers and implementation boundary
+
+1. **Plumbing direction:** correct, but not yet cross-machine deterministic
+   until object format, Git environment/config, locale and raw date form are
+   pinned.
+2. **Base-collision policy:** complete after the parent invariant includes
+   gitlinks and malformed mode/type pairs.
+3. **v2 project binding:** it closes the logical cross-project identity defect;
+   exact-tip comparison safely detects a truncated-digest collision, but the
+   absolute “cannot collide” claim is false. A full-digest ref is the cleanest
+   closure.
+4. **Implementability:** seed the temporary index from the base, and make the
+   branch format valid for every accepted project name.
+
+This is **convergent**. The remaining changes are four local contract edits with
+direct regressions; none changes the product boundary. Implementation is not
+authorised until they are pinned.
+
+After those edits, the implementation boundary is: same-owner GitHub request
+creation; version-2 remote/base config; unchanged contamination staging except
+removal of whole-file `--force`; scrubbed SHA-1 bare-repository object
+construction from an exact fetched base using a base-seeded isolated index;
+deterministic full-digest request identity and exact-tip/no-force recovery;
+open/closed PR response-loss recovery; honest stale-base reporting and `prs`;
+migrated CLI tests plus source/base topology, hostile-config, retry/race and
+no-working-tree-write regressions; and the synchronized §4.2 documentation
+inventory.
+
+Still excluded: receiver enforcement, `contamination.sh` semantic changes,
+cases #13/#14 changes, fork mode, automatic merge, offline persistence,
+arbitrary hosting, general development branches, and direct writes to either
+working tree.
+
+---
+
 ## Round 9 — build-contract review of DRAFT v14
 
 **Plan reviewed:** `PLAN-A2BP-PR.md` v14 (`d65f280`)

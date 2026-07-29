@@ -121,6 +121,10 @@ fi
 mkdir -p "$(dirname "$LOG_FILE")"
 
 last_trigger_key=""
+# The Task text of the last dispatch actually made. Deliberately NOT reset when
+# the state leaves the target — it has to outlive the whole round to catch a
+# stale re-dispatch. See trigger_if_needed.
+last_dispatched_task=""
 last_mtime="$(file_mtime "$SIGNAL_FILE")"
 
 trigger_if_needed() {
@@ -139,7 +143,32 @@ trigger_if_needed() {
     return 1
   fi
 
+  # --- Stale-dispatch guard -------------------------------------------------
+  # The signal is TWO fields written by two separate edits. Flipping `State` to
+  # the target before writing `Task` produces a brand-new trigger key while
+  # `Task` still holds the PREVIOUS round's text — so the agent is dispatched,
+  # authentically, against work that is already done.
+  #
+  # That happened twice in one session here. The protocol answer is "flip the
+  # mic last", and it was written down in AGENTS.md and in HANDOVER before the
+  # second occurrence, which is what makes it the wrong kind of fix: a rule
+  # someone has to remember at the exact moment they are busy. Same lesson as
+  # A-22 — put it in code on the path that already runs.
+  #
+  # A Task byte-identical to the one last dispatched means nobody has written a
+  # new instruction yet. Refuse, say why, and let the next poll pick it up once
+  # the Task lands. Costs at most one poll interval on a legitimate re-dispatch
+  # of identical text, which does not occur in practice: every round carries its
+  # own round number.
+  if [[ -n "$last_dispatched_task" && "$task" == "$last_dispatched_task" ]]; then
+    printf '[%s] SKIPPED: State=%s but Task is unchanged since the last dispatch — waiting for the new Task (write Task first, flip the mic last).\n' \
+      "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$state" | tee -a "$LOG_FILE"
+    last_trigger_key="$key"
+    return 1
+  fi
+
   last_trigger_key="$key"
+  last_dispatched_task="$task"
   now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   printf '[%s] Holder=%s State=%s Task=%s\n' "$now" "$holder" "$state" "$task" | tee -a "$LOG_FILE"
 

@@ -1,7 +1,18 @@
 # PLAN — `a2bp` files a feature request
 
-**Status:** DRAFT v13 — reframe and behavioural boundary accepted; this revision
-completes the build contract. No code written.
+**Status:** DRAFT v14 — reframe, behavioural boundary and `CLAUDE.md` rule all
+accepted. This revision closes the build contract. No code written.
+
+**v14.** v13 specified a verification step that **cannot be implemented**:
+"verify the SHA the key predicts". A content key cannot yield a git commit SHA —
+the SHA is over the commit object. Replaced with rebuild-and-compare against the
+remote tip, which compares to something that exists. Commit metadata is now
+**chosen** rather than offered as options (identity fixed, date = the base
+commit's committer date, exact message and ref formats). Input validation is a
+full rule table — duplicates, canonicalisation, symlinks, types, modes, the
+no-op case. Base re-check is placed explicitly between build and push. And a
+third "option" for a blocked requester is removed: it was unreachable, since a
+blocked invocation files nothing.
 
 **v13.** The operating boundary is now **actually in `CLAUDE.md`** — v12 said
 "Recorded in CLAUDE.md, so it travels" and never recorded it, which is the same
@@ -159,12 +170,21 @@ pending".
 
 **No `--force`, and the reason is not "nothing to waive".** §3.1 is explicit
 that findings still stop `a2bp`, so there *is* something a waiver would waive —
-v12 said otherwise in two places and contradicted its own §3.1. The flag is
-absent because the right responses to a finding are to **fix it**, to mark the
-line with a justified `a2bp-allow`, or to file the request describing why the
-guard is wrong and let the implementer judge. A blanket override on the
-requester's side adds nothing those three do not cover, and it is the flag that
-let a project push contamination upstream in the first place.
+v12 said otherwise in two places and contradicted its own §3.1.
+
+The flag is absent because a finding has exactly **two** correct responses:
+
+1. **Fix it.**
+2. **Mark the line** with a justified `a2bp-allow: <why it is safe>`.
+
+v13 listed a third — "file the request describing why the guard is wrong and let
+the implementer judge". **That is not reachable:** a blocked invocation files
+nothing, and with `--force` gone there is no path from a finding to a request.
+Prose describing an option the mechanism does not provide is worse than no
+prose, and this is the second time in two rounds I have written one.
+
+If the guard is genuinely wrong, that is a bug in `contamination.sh` and it gets
+fixed as one — not routed around per-request.
 
 No `push` alias.
 
@@ -216,16 +236,34 @@ No `push` alias.
   every retry would refuse and the mechanism would silently degrade to
   "always refuse". Therefore, all fixed:
 
-  | Field | Value |
-  |---|---|
-  | tree | from the staged content — already deterministic |
-  | parent | the captured base SHA |
-  | author + committer name/email | a fixed identity, e.g. `blueprint-a2bp <a2bp@localhost>` — **not** the operator's git config, which varies per machine |
-  | author + committer date | derived from the key, not the clock: a fixed epoch, or the base commit's own date |
-  | message | a fixed template over the sorted target paths |
+  Every field **chosen**, not offered as options — v13 gave an "e.g." identity
+  and two candidate date rules, and determinism described as a menu is not
+  determinism:
 
-  Nothing in the commit may come from the environment. If any of it does, the
-  retry contract is decoration.
+  | Field | Value, exactly |
+  |---|---|
+  | tree | from the staged content |
+  | parent | the captured base SHA |
+  | author name / email | `a2bp` / `a2bp@blueprint.invalid` |
+  | committer name / email | identical to author |
+  | author date | **the base commit's committer date**, verbatim, including its timezone offset — available without a clock, and it ties the request to the base it was built from |
+  | committer date | identical to author date |
+  | message | exactly `a2bp: <n> file(s) from <project>\n\n` followed by one sorted target path per line, LF-terminated, no trailing blank line |
+  | branch ref | `refs/heads/a2bp/<project>-<id12>` where `<id12>` is the key digest's first 12 hex characters |
+
+  Set via `GIT_AUTHOR_*` / `GIT_COMMITTER_*` in the environment of the commit
+  call, never from the operator's `git config`.
+
+  **How determinism is verified — and how v13 got this wrong.** v13 said to
+  "verify the resulting SHA equals the one the key predicts". *There is no such
+  prediction.* A content key cannot produce a git commit SHA; the SHA is over
+  the commit object. That step was unimplementable and read as rigorous.
+
+  The real check is **rebuild and compare**: on retry, build the commit again
+  from the same inputs and compare **the rebuilt SHA to the remote tip**. Equal
+  → adopt. Different → refuse and print both. The key's only job is to name the
+  branch; the commit's identity is git's, and it is compared against something
+  that actually exists rather than something predicted.
 
 - **Adoption is exact-tip only, never force.** On retry: if a branch of that name
   exists remotely, adopt it **only if its tip SHA equals the commit just
@@ -239,9 +277,29 @@ No `push` alias.
   and re-checked before push; if it moved, the request is rebuilt against the
   new base or refused, never pushed as though built against the current one.
 - **Absent-from-base files** are creation; called out as such in the PR body.
-- **All inputs validated before any remote contact** — every path in
-  `MANAGED_FILES`, every file readable — so a bad argument cannot leave a branch
-  pushed and the run aborted.
+- **All inputs validated before any remote contact**, so a bad argument cannot
+  leave a branch pushed and the run aborted. The full rule set, since v13 said
+  "validated" and left the rules to the implementer:
+
+  | Case | Rule |
+  |---|---|
+  | Path not in `MANAGED_FILES` | Refuse, naming it. Unchanged from today. |
+  | **Duplicate paths** in one invocation | Deduplicate after canonicalisation; two spellings of one file are one input, not two records in the key. |
+  | **Canonical form** | Resolve `.`/`..` and normalise separators **before** the `MANAGED_FILES` check and before sorting, so the key is stable across spellings. |
+  | Path escaping the project root | Refuse. Same class as A-07's project name — argument-supplied path components are never trusted. |
+  | **Symlink** at the target | Refuse. A request must carry file content, and following a link would file bytes from somewhere the operator did not name. |
+  | Not a regular file (dir, device, fifo) | Refuse, naming the type. |
+  | **Mode** | Only `100644` and `100755` are representable; anything else refuses. The mode travels in the key, so a mode-only change is a real request. |
+  | Unreadable | Refuse before any remote contact. |
+  | **No-op** — staged content and mode identical to base for *every* input | Refuse with a distinct "nothing to request" status. Filing an empty PR wastes the reviewer's attention, which is the scarce resource this whole design is protecting. |
+  | Partial no-op | The unchanged files are dropped from the request, and **reported as dropped**; the rest proceed. |
+  | Two inputs canonicalising to the same target | Impossible after dedup, but asserted rather than assumed. |
+
+- **Concurrent push to the same branch id.** Two projects producing an identical
+  key means identical content against an identical base — the same request.
+  Whoever pushes second finds the ref exists, compares tips, and **adopts** it
+  (§ exact-tip). A push rejected as non-fast-forward means the tips differ,
+  which is the refuse-and-print-both case. Never force, never retry-with-force.
 - **Exact scratch-clone algorithm**, step by step, because "clone and commit"
   hides the decisions:
 
@@ -256,9 +314,11 @@ No `push` alias.
   6. `git add` exactly the target paths — **never `-A`**, so nothing incidental
      in the scratch tree can ride along.
   7. Commit with the fixed identity, date and message template above.
-  8. Verify the resulting SHA equals the one the key predicts; refuse if not,
-     because a mismatch means the commit is not deterministic and the retry
-     contract is void.
+  8. **Re-check the base** — `git ls-remote` the target branch and confirm it
+     still resolves to the captured SHA. Placed *here*, immediately before the
+     push and after the build, because a base that moved during the build makes
+     the commit's parent stale. If it moved: discard, rebuild against the new
+     base, and re-check once; on a second move, refuse rather than loop.
   9. Push the branch.
   10. Remove the directory on **every** exit path; if removal fails, print the
       path and say it must be cleaned by hand.

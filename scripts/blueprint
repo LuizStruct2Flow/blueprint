@@ -32,13 +32,21 @@ set -euo pipefail
 # comparison and a2bp's round-trip verifier. Sourced at top level so all three
 # provably use one semantics (A-07 R5-F1) — three near-copies had drifted apart
 # and disagreed on names containing `&` or `\`.
+#
+# A missing helper must NOT abort the whole CLI at load time. `blueprint drift`
+# is one of the two paths that arm the pre-push gate (A-22), and it arms it
+# before it needs any substitution — exiting here would leave a checkout
+# silently ungated, which is the exact defect A-22 closed. So substitution
+# fails loudly at the point of use, and everything that does not substitute
+# still works.
 _bp_placeholders="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/placeholders.sh"
-if [ ! -r "$_bp_placeholders" ]; then
-  echo "error: scripts/lib/placeholders.sh is missing — cannot substitute safely" >&2
-  exit 1
+if [ -r "$_bp_placeholders" ]; then
+  # shellcheck source=scripts/lib/placeholders.sh
+  . "$_bp_placeholders"
+else
+  bp_substitute_stream()   { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
+  bp_substitute_in_place() { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
 fi
-# shellcheck source=scripts/lib/placeholders.sh
-. "$_bp_placeholders"
 
 # --- Canonical list of blueprint-managed files ---
 # This is the SINGLE SOURCE OF TRUTH for "which files does the blueprint
@@ -281,7 +289,11 @@ substituted_blueprint_copy() {
     return 0
   fi
   local proj_name
-  proj_name=$(basename "$(pwd)")
+  # ${PWD##*/}, not $(basename ...) — command substitution strips trailing
+  # newlines, so a directory legally named with one was silently seen as a
+  # different project (A-07 R6-F1). Parameter expansion preserves the bytes;
+  # bp_validate_project_name then refuses what sync cannot represent.
+  proj_name=${PWD##*/}
   local tmp
   tmp=$(mktemp)
   # Same primitive as pull and as a2bp's verifier (A-07 R5-F1) — drift must
@@ -297,7 +309,11 @@ substitute_placeholders() {
   local f="$1"
   if ! _should_substitute "$f"; then return 0; fi
   local proj_name
-  proj_name=$(basename "$(pwd)")
+  # ${PWD##*/}, not $(basename ...) — command substitution strips trailing
+  # newlines, so a directory legally named with one was silently seen as a
+  # different project (A-07 R6-F1). Parameter expansion preserves the bytes;
+  # bp_validate_project_name then refuses what sync cannot represent.
+  proj_name=${PWD##*/}
   if grep -q '{{PROJECT_NAME' "$f" 2>/dev/null; then
     # A-07 R5-F1: one shared literal primitive, never an interpolated sed.
     # The project name is data; a name containing `&` or `\` was previously
@@ -600,7 +616,11 @@ cmd_a2bp() {
   fi
 
   local proj_name
-  proj_name=$(basename "$(pwd)")
+  # ${PWD##*/}, not $(basename ...) — command substitution strips trailing
+  # newlines, so a directory legally named with one was silently seen as a
+  # different project (A-07 R6-F1). Parameter expansion preserves the bytes;
+  # bp_validate_project_name then refuses what sync cannot represent.
+  proj_name=${PWD##*/}
 
   echo "${C_BOLD}Apply-to-blueprint${C_RESET}"
   echo "  project:    $(pwd)  ${C_DIM}(name: $proj_name)${C_RESET}"

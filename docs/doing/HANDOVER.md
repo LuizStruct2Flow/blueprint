@@ -114,10 +114,23 @@
 
 ## 3. EPHEMERAL — re-establish
 
-- **Active Monitors:** a persistent Codex dispatcher
-  (`scripts/start-codex-signal-watch.sh`). It resolves `CODEX_BIN` **once at
-  startup** — if the codex binary is moved or re-linked, restart it or every
-  dispatch fails with `codex: not found` (this happened once already).
+- **Active Monitors — two, both `persistent`, both re-armed on every wake**
+  (CLAUDE.md §"On wake" step 3):
+  1. **Mic** — `AGENT_SIGNAL.md` `Holder`/`State`, 5s poll, emits on change.
+  2. **Exchange board** — `../../agent-exchange/EXCHANGE.md`, 10s poll, emits
+     the newest `### ` header on change (`project_config_paths.md` §"Wake-time
+     Monitors").
+
+  Added 2026-07-29 after the founder asked "is your monitor working? are you
+  also monitoring agent-exchange?" — the answer was no to both. Six Codex
+  review rounds had been driven by manual polling and by the founder relaying
+  "codex is done". Reactivity is a Monitor, not a habit.
+- **Codex dispatcher:** persistent, `scripts/start-codex-signal-watch.sh`. It
+  resolves `CODEX_BIN` **once at startup** — if the codex binary is moved or
+  re-linked, restart it or every dispatch fails with `codex: not found` (this
+  happened once already). **Flip the mic LAST:** the watcher polls every 2s and
+  fires on the `State` edit, so writing `State` before the `Task` dispatches
+  the previous task's text. That happened on the first A-07 dispatch.
 - The feed does not survive a reboot; re-arm it with
   `env -u AGENT_STATE_HOME bash scripts/agent-activity.sh --daemon` (the
   `-u` strips any stale override so it reads its own `~/.blueprint`, per A-09).

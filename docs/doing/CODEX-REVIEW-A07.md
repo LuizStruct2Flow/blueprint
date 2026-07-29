@@ -497,3 +497,109 @@ The exemption removal closes the relocation leak from R4-F2, and normal
 staging failures now fail closed. The round-trip property is not yet total
 because it verifies a different forward operation, and the declared
 no-contamination contract remains materially broader than the code.
+
+## Round 6 — re-review of `c8f8987`
+
+**Date:** 2026-07-29
+**Commits reviewed:** `205f6f7`, `2787332`, `63fac8e`, `5d3ff5e`, `d3e21a2`,
+`4ac7b01`, `fd57648`, `5a112bd`, `230eea9`, `c8f8987`
+**Verdict:** **CHANGES REQUESTED — do not push**
+
+R5-F2 is closed: the user-facing and implementation contracts now describe the
+actual heuristic guard and its deliberate overrides. R5-F1 is closed for the
+reported `&` / `\` replacement-template defect, and case #24 is the correct
+cross-boundary reproducer. Two boundaries in the new primitive still prevent a
+clean review.
+
+### R6-F1 — HIGH: the two-token pipeline re-scans replacement bytes
+
+`bp_replace_literal` treats its individual replacement literally, but
+`bp_substitute_line` is a pipeline: it replaces `{{PROJECT_NAME_UPPER}}`, then
+hands the result to the lowercase-token pass. A project name containing the
+lowercase token therefore causes bytes inserted by the first pass to be
+interpreted by the second pass.
+
+Concrete helper reproduction:
+
+```text
+name:     x{{PROJECT_NAME}}y
+input:    {{PROJECT_NAME_UPPER}}
+expected: X{{PROJECT_NAME}}Y
+actual:   Xx{{PROJECT_NAME}}yY
+```
+
+That contradicts the library's claim that replacement data is “never
+re-scanned” and means the answer to the requested “name containing the token
+itself” attack is no. Glob characters and internal newlines survive the helper
+probe; empty replacement also works. A trailing-newline basename does not:
+each `proj_name=$(basename ...)` command substitution strips trailing newline
+bytes before the primitive sees them. Such names are unusual but legal on the
+pull/a2bp path (bootstrap's kebab-case validation does not constrain an
+existing checkout).
+
+Use a one-pass tokenizer/split that recognizes both source tokens before
+emitting either replacement, so emitted data cannot become input. Derive the
+basename without command substitution if the supported-name contract is truly
+arbitrary filesystem basenames; otherwise validate and state the narrower
+contract at the CLI boundary. Add token-bearing and newline-bearing basename
+regressions matching that decision.
+
+### R6-F2 — BLOCKER: pull/drift now corrupt NUL-containing managed files
+
+Routing pull and drift through `bp_substitute_stream` changes their previous
+stream behavior. Bash variables cannot contain NUL. `mapfile`/the per-line
+command substitutions therefore discard binary bytes; this probe:
+
+```bash
+printf 'A\0{{PROJECT_NAME}}\0Z' > input
+bp_substitute_stream input acme | od -An -tx1
+```
+
+emits only `41` (`A`) on this host. The prior `sed` path preserved NUL bytes
+around the replacement. Thus an existing managed file with binary-ish content
+can be truncated by `pull`, and drift compares against the same corrupted
+projection. No managed-file invariant rejects NUL content.
+
+The implementation also `mapfile`s the complete file and repeatedly builds
+shell strings, so pull/drift changed from streaming `sed` to memory proportional
+to the entire file (with additional copying). That is avoidable and is not a
+safe primitive for a very large managed file.
+
+Implement the literal replacement in a byte-safe streaming tool/algorithm,
+with replacement passed as data rather than program syntax. Pin NUL
+preservation, missing-final-newline preservation, and a reasonably large file.
+If binary files are intentionally unsupported instead, fail closed before
+writing and document/enforce that managed files are text; silent truncation is
+not an acceptable unsupported-mode behavior.
+
+### Existing-path review
+
+- Marker merge still calls substitution only after the same successful merge
+  or whole-copy branches; `tests/marker-merge/test.sh` passes.
+- `_should_substitute` is unchanged and still exempts only
+  `scripts/blueprint` and `scripts/new-project.sh` on pull and a2bp.
+- `TEMPLATE_FILES` routing is unchanged.
+- Bootstrap still uses its own `sed` loop, but bootstrap names are constrained
+  to `[a-z][a-z0-9-]*`, so the R5 replacement metacharacters are unreachable
+  there. This is not a newly observed bootstrap regression, though “one
+  substitution primitive” should continue to be scoped explicitly to
+  pull/drift/a2bp rather than bootstrap.
+
+### Round 6 checks run
+
+- `bash tests/a2bp-contamination/test.sh` — PASS (31 assertions)
+- `bash tests/marker-merge/test.sh` — PASS
+- `bash tests/bootstrap-contents/test.sh` — PASS
+- `bash -n scripts/blueprint scripts/lib/placeholders.sh
+  scripts/lib/contamination.sh tests/a2bp-contamination/test.sh` — PASS
+- `git diff --check` — PASS before this review-note edit
+- literal helper probes — empty, glob characters and internal newline pass;
+  token-bearing name fails the upper-token case; trailing newline is stripped
+  by basename capture
+- binary-ish stream probe — NUL input is truncated (`41` only)
+
+The narrowed contamination contract is now honest, and no marker,
+substitution-exemption, template-file, or bootstrap routing regression was
+found. The shared primitive still needs to be non-recursive across its two
+tokens and must either preserve arbitrary bytes or reject unsupported input
+before changing it.

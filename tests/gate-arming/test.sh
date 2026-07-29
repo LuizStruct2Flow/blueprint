@@ -46,7 +46,14 @@ mk_clone(){
   git -C "$ROOT" show HEAD:.githooks/pre-push        >"$d/.githooks/pre-push"
   git -C "$ROOT" show HEAD:scripts/agent-activity.sh >"$d/scripts/agent-activity.sh"
   git -C "$ROOT" show HEAD:scripts/blueprint         >"$d/scripts/blueprint"
-  git -C "$ROOT" show HEAD:scripts/lib/gate.sh       >"$d/scripts/lib/gate.sh" 2>/dev/null || true
+  # The WHOLE of scripts/lib/, never a named file (the R12a lesson): naming
+  # gate.sh alone meant that adding any other lib the CLI sources silently
+  # broke this fixture instead of testing it. That is precisely what happened
+  # when placeholders.sh arrived in A-07 R5.
+  while read -r _lib; do
+    [ -n "$_lib" ] || continue
+    git -C "$ROOT" show "HEAD:$_lib" >"$d/$_lib" 2>/dev/null || true
+  done < <(git -C "$ROOT" ls-tree --name-only HEAD scripts/lib/)
   git -C "$ROOT" show HEAD:AGENT_ROSTER.example.md   >"$d/AGENT_ROSTER.example.md" 2>/dev/null || true
   chmod +x "$d/.githooks/pre-push" "$d/scripts/agent-activity.sh" "$d/scripts/blueprint" 2>/dev/null
   printf '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | S |\n| State | ACTIVE |\n| Task | fixture |\n' \

@@ -4,12 +4,12 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-29.** **A-07 is DELIVERED and pushed** —
-> `origin/main` at `e605476`, nothing unpushed, Codex four-eyes CLEAN on round
-> 7. `doing/` holds no in-flight work. Everything now sits in
-> `waiting-acceptance/` behind the founder; start at its **INDEX.md**. Open
-> audit findings led by **A-03** then A-08. One loose end remains: the
-> half-finished agent-exchange timestamp switch (§3a) — founder's call.
+> **Last updated: 2026-07-29 (late).** **A-07 DELIVERED and pushed** (four-eyes
+> CLEAN on round 7). **A-03 is IN FLIGHT**: its first fix reached `origin` as
+> `1c4dd4c` *before* four-eyes, the review then found a real hole in it, and the
+> corrective range is **committed but UNPUSHED** pending a clean round. The
+> agent-exchange timestamp switch is **done and committed**. `origin/main` is at
+> `1c4dd4c`. Next after A-03: **A-08**.
 
 ## 0. STATUS
 
@@ -57,16 +57,26 @@
   the shared literal primitive. Unrelated to a2bp; it had been there all along.
 - **`205f6f7` (R12a) is pushed** — it went out in the A-07 batch and Codex found
   no regression in it.
-- **IMMEDIATE NEXT ACTION — founder acceptance.** Nothing is in flight. Start at
-  `docs/waiting-acceptance/INDEX.md`: one row per work item, what it delivered,
-  where the evidence is. **A-22 is explicitly NOT accepted** (Jesko's caveat: a
-  human who clones and pushes without ever running the feed or drift is still
-  ungated). After acceptance, the next audit finding is **A-03**, then A-08.
-- **LOOSE END — agent-exchange timestamp switch is HALF DONE (see §3a).** The
-  board was being converted UTC→Berlin local (`+02:00`). 15/16 headers
-  converted, **uncommitted**; 1 header + the README format line remain. The
-  permissions blocker that stalled it was stood down by the founder on
-  2026-07-27. Finish or revert — founder's call.
+- **IMMEDIATE NEXT ACTION — A-03 is mid-review, committed but UNPUSHED.** The
+  secret gate had never run: `gitleaks protect --staged` scans an index that is
+  empty at pre-push time. The first fix went to `origin` as `1c4dd4c` **before
+  four-eyes**, and the review then found a real hole in it (the new-ref
+  selector subtracted every remote, so a commit already on a private mirror was
+  skipped on first disclosure to a public one). Six rounds later: a new ref is
+  scanned in FULL, bounded by one per-push deadline with a required
+  `timeout`/`gtimeout` provider, and an unfinished scan blocks as INCOMPLETE.
+  Trail: `docs/waiting-acceptance/A-03-secret-gate/CODEX-REVIEW-A03.md`.
+  **Push only after a clean round.** Codex's R6 read: the security
+  implementation has converged; remaining items are record accuracy, not design.
+- **Also unpushed in the same range:** the dispatch settle window +
+  `scripts/signal-set.sh` (atomic baton publication), and the README contract
+  narrowing that was reported fixed but never committed.
+- **Founder acceptance still owed** on everything in
+  `docs/waiting-acceptance/INDEX.md`. **A-22 is explicitly NOT accepted**
+  (Jesko's caveat: a human who clones and pushes without ever running the feed
+  or drift is still ungated).
+- ~~LOOSE END — agent-exchange timestamp switch~~ **DONE.** All 16 headers on
+  Berlin local, README format spec updated, committed in `../../agent-exchange`.
 - **KNOWN GAP, pre-existing:** `docs/way-of-working.pdf` is ~6 weeks stale
   (`.md` 2026-07-23, `.pdf` 2026-06-15). `scripts/build-deck.sh` exits 1 here —
   marp-cli needs chrome/edge/firefox and none is installed on this host. The

@@ -143,6 +143,30 @@ else
   pass "#3f boundary tabs are trimmed like boundary spaces (one policy, not two)"
 fi
 
+# The trim is POSIX [[:space:]], which is wider than "space and tab": vertical
+# tab and form feed go too. Asserted so the documented policy is byte-accurate
+# rather than approximately true (Codex R6-F2).
+fresh
+bash "$SETTER" --file "$SIG" --holder H --state S \
+  --task "$(printf '\013\014vt and ff\013\014')" >/dev/null 2>&1
+if [ "$(task_cell)" != 'vt and ff' ]; then
+  fail "#3g boundary vertical-tab/form-feed are not trimmed, so the documented [[:space:]] policy is wrong: [$(task_cell)]"
+else
+  pass "#3g boundary VT/FF are trimmed too — the policy is POSIX [[:space:]], as documented"
+fi
+
+# Unicode whitespace is explicitly NOT supported. Pinned so the limitation is a
+# recorded decision rather than a surprise; if someone later adds Unicode
+# handling, this case tells them a documented contract is changing.
+fresh
+bash "$SETTER" --file "$SIG" --holder H --state S \
+  --task "$(printf '\302\240nbsp edges\302\240')" >/dev/null 2>&1
+if [ "$(task_cell)" = 'nbsp edges' ]; then
+  fail "#3h a non-breaking space was trimmed — the code now exceeds its documented [[:space:]] contract"
+else
+  pass "#3h Unicode NBSP survives at the boundary (documented as unsupported, not silently assumed)"
+fi
+
 fresh
 bash "$SETTER" --file "$SIG" --holder H --state S --task "$(printf 'has\ta tab')" >/dev/null 2>&1
 if ! task_cell | grep -qP 'has\ta tab' 2>/dev/null; then

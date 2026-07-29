@@ -1,7 +1,18 @@
 # PLAN — `a2bp` opens a pull request
 
-**Status:** DRAFT v8 — supersedes `PLAN-A2BP-INBOX.md` (678 lines, five review
+**Status:** DRAFT v9 — supersedes `PLAN-A2BP-INBOX.md` (678 lines, five review
 rounds, still design-level findings). No code written.
+
+**v9.** Marker byte-binding accepted, including wholesale-new files. This
+revision fixes **two contradictions I wrote and did not sweep** — §2.2 named
+timestamped branches beside §2.1b's "stable id, not a timestamp", and put
+provenance in the PR body beside §1.1's "the body is not evidence". Both times I
+corrected the section under discussion and left its neighbour asserting the
+opposite. Adds the consequence I had not drawn: **`contamination.sh`'s
+residual-project-name check cannot run server-side**, because CI has no trusted
+way to know the proposing project — so the CI scan explicitly degrades and says
+so, and the resulting hole is stated rather than hidden. Ripple evidence gets a
+deterministic schema; §3.3b adds the configuration inventory.
 
 **v8.** §3 rewritten after the founder asked, for the second time, whether the
 cleanup is in the plan. It was thinner than the inbox plan's hard-won §3b: four
@@ -109,6 +120,33 @@ which project proposed something in a way that survives an untrusted
 contributor. Inside the trusted-owner boundary (§7) it does not bite; beyond it,
 it must be solved before fork mode is used.
 
+#### The check that cannot run server-side — a consequence I had not drawn
+
+`contamination.sh` has four checks. Three need nothing but the file: host home
+paths, literal per-project state dirs, and emails. **The fourth — residual
+project name — needs to know which project proposed the change**, and in CI the
+blueprint has no trusted way to know that. It is the identity problem above,
+with a concrete casualty.
+
+So the CI run **explicitly degrades**, and says so in its output rather than
+appearing to be a full scan:
+
+- **Runs server-side:** host paths, per-project state dirs, emails — the checks
+  that catch the BUG-002 and A-09 shapes, which is what this guard exists for.
+- **Does not run server-side:** residual project name. It runs **locally** at
+  `a2bp` time, where the project name is known and trustworthy, and its result
+  is reported in the PR body as contributor-supplied — informative, not
+  authoritative.
+
+**The honest consequence:** a contributor who strips the local guard can get a
+residual project name past CI. That is a real hole in the "guard moves
+server-side" story and it is bounded by the trusted-owner boundary, not closed
+by it. Closing it needs the trusted mapping named above.
+
+The alternative — CI inferring the project name from the branch or PR body — is
+worse: it would be trusting contributor-authored input to decide what to scan
+for, which is the exact class of error §1.1 exists to correct.
+
 With those, the guard is bypassable only by someone who can change the base
 branch or the ruleset — which is the founder. That is a defensible claim.
 "Unbypassable" was not.
@@ -194,10 +232,22 @@ reported if removal fails.
 
 ### 2.2 Branch naming and provenance
 
-`a2bp/<project>-<utc-timestamp>` — the project name is validated as a single
-path component (attacker-influenced input, same class as A-07's project name).
-Provenance goes in the PR body: source project, its path, the files, and the
-local guard output including anything it flagged.
+**Corrected in v9 — v8 contradicted itself in two places, and I had written both
+halves.**
+
+**Branch name:** `a2bp/<project>-<short-digest>`, where the digest is derived
+from the target paths and the staged content. **Not a timestamp.** §2.1b already
+required a stable retry id so a re-run finds its own pushed branch rather than
+creating a second one; a timestamped name makes every re-run a new branch and
+defeats the retry contract it sits next to. The project name is validated as a
+single path component — attacker-influenced input, same class as A-07's project
+name.
+
+**Provenance:** derived from **git** — the commit, its tree, the branch. The PR
+body is **display-only** and carries a human-readable summary plus the local
+guard output, clearly labelled as contributor-authored and **not** evidence.
+v8's §1.1 said exactly this and v8's §2.2 said provenance goes in the body;
+§1.1 was right.
 
 ### 2.3 The guard runs twice, and the second time is the one that counts
 
@@ -256,6 +306,22 @@ message, `contamination.sh`'s contract comments, and
 
 Plus, in this repo's own records: `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md` and
 `docs/doing/HANDOVER.md`, whose A-07 entries describe a guard that gates a copy.
+
+### 3.3b Configuration and infrastructure inventory
+
+Not code, but nothing works without it, and v8 left it implicit:
+
+| Item | Detail |
+|---|---|
+| Repository ruleset on the base branch | Named required checks; **bypass actor list stated and verified against the live repo**, not assumed |
+| Required check: contamination guard | Runs from the pinned trusted base SHA, against the merge result |
+| Required check: ripple evidence | Reads the `a2bp-ripples` block against the base-committed class table |
+| Class→paths table | New file, committed in base; the trusted half of ripple evidence |
+| PR template | `a2bp-ripples` skeleton + the classification prompt |
+| Merge policy | Branch must be current with base; merge queue if available |
+| Remote branch cleanup | Delete-on-merge; **and a policy for abandoned `a2bp/*` branches**, which otherwise accumulate exactly as an unemptied inbox would |
+| Branch discovery | `blueprint prs` lists open a2bp PRs **and pushed branches without a PR** — §2.1b's failure state is invisible otherwise |
+| `gh` auth | Required in each derived project; failure mode must name it |
 
 ### 3.4 What deliberately does NOT go
 
@@ -316,9 +382,29 @@ A PR supplies lifecycle. It does not supply obligations, and v6 implied it did:
   A2BP_PLAYBOOK exists for. The PR template carries the classification
   checklist — but **a ticked box is acknowledgement, not evidence**, and v7
   implied a required check could verify it. It cannot: it can verify the box is
-  ticked, which is a different claim. Real evidence means a check that inspects
-  the diff for the ripple files the classification implies. Anything weaker
-  should be described as a prompt, not a gate.
+  ticked, which is a different claim.
+
+  **Deterministic ripple evidence, since "inspects the diff for the files the
+  classification implies" is prose, not a schema.** A machine-readable block in
+  the PR body:
+
+  ```yaml
+  a2bp-ripples:
+    class: B            # from A2BP_PLAYBOOK §A
+    touched: [docs/SECURITY.md, docs/way-of-working.md]
+    waived:
+      - path: README.md
+        why: "no user-facing surface changed"
+  ```
+
+  The check reads the class, looks up **that class's required paths from a
+  table committed in the base branch**, and requires each one either present in
+  the PR's changed-file set or waived with a reason. Deterministic, and the
+  class-to-paths table is trusted because it lives in the base.
+
+  It still cannot judge whether an edit is *good* — no check can. It can prove
+  the file was touched or the omission was argued, which is strictly more than
+  a ticked box.
 - **Rejection reasons.** Closing a PR without a comment silently discards a
   contribution. **No required check can prevent it** — GitHub has no such hook.
   This is a process convention, stated as one rather than dressed as

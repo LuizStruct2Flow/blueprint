@@ -129,6 +129,34 @@ if [ -f tests/a2bp-contamination/test.sh ]; then
   }
 fi
 
+# A2BP-PR — request identity. The branch name is derived from a length-framed
+# key, so a component's content can never be mistaken for a delimiter; without
+# the framing, "ab"+"c" and "a"+"bc" name the same branch and one project's
+# request silently adopts another's. ~0.3s.
+if [ -f tests/a2bp-request/test.sh ]; then
+  bash tests/a2bp-request/test.sh || {
+    echo "❌ tests/a2bp-request/test.sh failed (a2bp PR flow)."
+    echo "   The request key must stay framed and the ref must stay validated by"
+    echo "   git itself, or two distinct requests can collide on one branch."
+    exit 1
+  }
+fi
+
+# A2BP-PR — request construction. Two properties, both load-bearing:
+#   1. The request tree is seeded from the fetched base, so a request changes
+#      ONLY its target paths. Unseeded, it proposes deleting the whole blueprint.
+#   2. The commit is byte-reproducible, which is what lets a retry recognise its
+#      own earlier request instead of refusing forever.
+# Runs git plumbing against a scratch fixture; no network. ~1.5s.
+if [ -f tests/a2bp-build/test.sh ]; then
+  bash tests/a2bp-build/test.sh || {
+    echo "❌ tests/a2bp-build/test.sh failed (a2bp PR flow)."
+    echo "   A request must touch exactly the files it names and rebuild to the"
+    echo "   same SHA on any machine."
+    exit 1
+  }
+fi
+
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
 if [ -f tests/bootstrap-contents/test.sh ]; then

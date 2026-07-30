@@ -100,6 +100,55 @@ reads as "nothing pending".
 | blocked | The guard found something; nothing was filed. |
 | operational failure | The CLI could not do its job. |
 
+## 3b. `drift` reports a stale local checkout
+
+`drift` compares the project against **`BLUEPRINT_ROOT` — the local checkout**,
+not the remote. So it can report "you match the blueprint" when it means "you
+match your local copy of it". Today that is masked because `a2bp` also worked
+against the same local copy; once `a2bp` files against the remote, `drift`
+becomes the one command that can be confidently wrong.
+
+So `drift` also asks the remote where the base branch is, and reports the answer:
+
+```
+Blueprint drift check
+  project:    /home/luiz/dev/acme-flow
+  blueprint:  /home/luiz/sources/struct2flow/blueprint
+  blueprint HEAD: 3ff29d2
+  ⚠ local checkout is 4 commit(s) behind origin/main
+      fast-forward it now? [y/N]
+```
+
+### 3b.1 The offer is bounded, because this writes to another repository
+
+A `drift` run in a derived project updating the operator's blueprint checkout is
+**the same shape as the thing this plan removes from `a2bp`** — a command in one
+repo mutating another. It is acceptable only because it is narrow, so the bounds
+are part of the contract rather than implementation taste:
+
+| Condition | Behaviour |
+|---|---|
+| Local checkout **clean**, on the tracked branch, and behind by a strict ancestor | Offer a **fast-forward only** (`git merge --ff-only`). |
+| Working tree or index **dirty** | Warn, do **not** offer. Never touch a tree with uncommitted work. |
+| **Detached HEAD**, or on a different branch than `blueprint_branch` | Warn, do not offer. The operator is mid-something. |
+| Diverged — local has commits the remote does not | Warn, do not offer. That is a merge or rebase decision, not a prompt. |
+| Declined, or answer is anything but `y` | Proceed with the drift report unchanged. |
+| No remote configured, or `ls-remote` fails | Report that staleness is **unknown**, and continue. Never silently imply "current". |
+
+**Never a merge, never a rebase, never `--force`, never automatic.** If a
+fast-forward is not possible, `drift` says so and stops offering.
+
+### 3b.2 Non-interactive is the common case
+
+`drift` runs at **every agent wake**, usually with no TTY. A blocking prompt
+there would hang the wake protocol — which is the one thing worse than a stale
+checkout.
+
+So: **no TTY, or `--no-prompt`, means warn and continue**, exit status
+unchanged. The prompt appears only for a human at a terminal. The warning always
+appears, whether or not anything can be offered, because the information is the
+point and the offer is a convenience.
+
 ## 4. Request identity
 
 The branch id is a digest over a **length-framed** key. No delimiters: every
@@ -327,7 +376,12 @@ New regressions:
   `.`, control characters, legal-alone-but-invalid-composed;
 - retry and race: exact-tip adoption, non-fast-forward refusal, PR-response
   loss;
-- **no path writes a managed file** — snapshot the tree, assert byte-identity.
+- **no path writes a managed file** — snapshot the tree, assert byte-identity;
+- `drift` staleness (§3b): behind → warns; **dirty tree → warns and does not
+  offer**; detached HEAD → warns and does not offer; diverged → warns and does
+  not offer; **no TTY → warns, does not prompt, exit status unchanged**;
+  `ls-remote` failure → reports staleness unknown rather than implying current;
+  accepted offer fast-forwards and **only** fast-forwards.
 
 ## 10. Rollback
 

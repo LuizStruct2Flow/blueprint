@@ -14,9 +14,19 @@
 
 set -u
 
-# --fast omits case #5 only, which spends a real timeout against a black-holed
-# remote. CI runs it in full. The no-TTY case (#1) is NOT skippable at any
-# speed — it is the one that decides whether every agent wake blocks.
+# --fast runs ONLY #1 and #4 — the two that fire automatically, on every agent
+# wake, with no human in the loop: does drift block without a TTY, and does
+# staleness change its exit status. A regression in either breaks every wake in
+# every project silently.
+#
+# Everything else runs in CI. The offer bounds (#2, #3, #5) protect something
+# more severe — a fast-forward into a dirty or diverged checkout — but they only
+# fire after a human answers a prompt, so CI catches them before they can reach
+# anyone. That asymmetry, not the runtime, is what decides the split.
+#
+# The gate is at ~29s of a hard 30s ceiling before this suite exists, so there
+# is no room to be generous here. See docs/doing/BUGS.md — the watcher suite
+# alone is 18s of it, and that is the thing to fix, not this ceiling.
 FAST=0
 [ "${1:-}" = "--fast" ] && FAST=1
 
@@ -91,9 +101,9 @@ fi
 # 2. It reports staleness WITHOUT changing the other repository. drift is a
 #    report; a report with a side effect on someone else's checkout is not one.
 # ===========================================================================
-if [ "$(git -C "$BP" rev-parse HEAD)" != "$(git -C "$BP" rev-parse HEAD@{0})" ]; then
-  fail "#2 unexpected reflog state"
-fi
+if [ "$FAST" -eq 1 ]; then
+  echo "  -- #2 skipped (--fast): CI runs it"
+else
 bp_head_before=$(git -C "$BP" rev-parse HEAD)
 ( cd "$PROJ" && "$CLI" drift >/dev/null 2>&1 <&- )
 if [ "$(git -C "$BP" rev-parse HEAD)" != "$bp_head_before" ]; then
@@ -101,16 +111,21 @@ if [ "$(git -C "$BP" rev-parse HEAD)" != "$bp_head_before" ]; then
 else
   pass "#2 reporting leaves the blueprint checkout untouched"
 fi
+fi
 
 # ===========================================================================
 # 3. BP_NO_PROMPT is honoured even with a TTY available — the flag exists so a
 #    scripted caller can opt out regardless of how it was invoked.
 # ===========================================================================
+if [ "$FAST" -eq 1 ]; then
+  echo "  -- #3 skipped (--fast): CI runs it"
+else
 out=$(cd "$PROJ" && BP_NO_PROMPT=1 "$CLI" drift 2>&1 <&-)
 if printf '%s' "$out" | grep -q "fast-forward it now?"; then
   fail "#3 BP_NO_PROMPT=1 still prompted"
 else
   pass "#3 BP_NO_PROMPT=1 suppresses the offer"
+fi
 fi
 
 # ===========================================================================

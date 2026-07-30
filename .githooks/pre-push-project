@@ -163,14 +163,13 @@ fi
 # it reports, and both are covered here: reporting "current" when the probe
 # failed (false reassurance), and blocking — drift runs at every agent wake with
 # no TTY, so a prompt or an unbounded network call hangs the wake. ~2.5s.
-if [ -f tests/staleness/test.sh ]; then
-  bash tests/staleness/test.sh --fast || {
-    echo "❌ tests/staleness/test.sh failed (a2bp PR flow §3b)."
-    echo "   Staleness must never report 'current' on a failed probe, and must"
-    echo "   only ever offer a clean, on-branch, fast-forward-only update."
-    exit 1
-  }
-fi
+# tests/staleness/test.sh — the probe's VERDICTS (offer bounds, unknown-never-
+# current) — is CI-only, deliberately. Those bounds guard something severe (a
+# fast-forward into a dirty or diverged checkout) but they only fire after a
+# human answers a prompt. What runs here instead is the half that fires
+# automatically on every wake with nobody watching. The gate sits at ~29s of a
+# hard 30s ceiling before either exists, so this is a forced choice, not a
+# preference — see docs/doing/BUGS.md.
 if [ -f tests/staleness/drift-integration.sh ]; then
   bash tests/staleness/drift-integration.sh --fast || {
     echo "❌ tests/staleness/drift-integration.sh failed (a2bp PR flow §3b)."

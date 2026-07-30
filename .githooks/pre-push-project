@@ -157,6 +157,29 @@ if [ -f tests/a2bp-build/test.sh ]; then
   }
 fi
 
+# A2BP-PR §3b — `drift` reports whether the LOCAL blueprint checkout is behind
+# its remote, because otherwise "✓ all files match the blueprint HEAD" can mean
+# "you match a six-week-old copy". Two failure modes are worse than the staleness
+# it reports, and both are covered here: reporting "current" when the probe
+# failed (false reassurance), and blocking — drift runs at every agent wake with
+# no TTY, so a prompt or an unbounded network call hangs the wake. ~2.5s.
+if [ -f tests/staleness/test.sh ]; then
+  bash tests/staleness/test.sh --fast || {
+    echo "❌ tests/staleness/test.sh failed (a2bp PR flow §3b)."
+    echo "   Staleness must never report 'current' on a failed probe, and must"
+    echo "   only ever offer a clean, on-branch, fast-forward-only update."
+    exit 1
+  }
+fi
+if [ -f tests/staleness/drift-integration.sh ]; then
+  bash tests/staleness/drift-integration.sh --fast || {
+    echo "❌ tests/staleness/drift-integration.sh failed (a2bp PR flow §3b)."
+    echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
+    echo "   checkout, or change its exit status because of staleness."
+    exit 1
+  }
+fi
+
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
 if [ -f tests/bootstrap-contents/test.sh ]; then

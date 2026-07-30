@@ -157,6 +157,20 @@ if [ -f tests/a2bp-build/test.sh ]; then
   }
 fi
 
+# A2BP-PR §5.1/§8 — where a request is filed, and which bytes go into it. The
+# contamination guard checks what the content SAYS; this checks that the content
+# came from the file the operator named (not a symlink to somewhere else, not a
+# path escaping the root) and that it is going to the repository they declared
+# (never a remote inferred from a local checkout). ~0.2s.
+if [ -f tests/a2bp-inputs/test.sh ]; then
+  bash tests/a2bp-inputs/test.sh || {
+    echo "❌ tests/a2bp-inputs/test.sh failed (a2bp PR flow)."
+    echo "   a2bp must refuse symlinks, root-escaping paths, unmanaged files and"
+    echo "   version 1 configs — before anything reaches a remote."
+    exit 1
+  }
+fi
+
 # A2BP-PR §3b — `drift` reports whether the LOCAL blueprint checkout is behind
 # its remote, because otherwise "✓ all files match the blueprint HEAD" can mean
 # "you match a six-week-old copy". Two failure modes are worse than the staleness

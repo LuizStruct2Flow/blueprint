@@ -128,7 +128,8 @@ tip_after=$(git -C "$REMOTE" rev-parse "$REQ_REF")
 if [ "$tip_before" != "$tip_after" ]; then
   fail "#3 re-running moved the branch tip — a request already under review would be rewritten"
 elif [ "$rc" -ne "$RC_PENDING" ]; then
-  fail "#3 re-running gave $rc, expected $RC_PENDING"
+  fail "#3 re-running gave $rc, expected $RC_PENDING. Output:
+$out"
 elif ! printf '%s' "$out" | grep -qi "adopting"; then
   fail "#3 re-running did not report adopting the existing branch. Output:
 $out"

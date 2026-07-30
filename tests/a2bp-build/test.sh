@@ -127,6 +127,40 @@ else
 fi
 
 # ===========================================================================
+# 3b. THE REGRESSION. Determinism ACROSS A ONE-SECOND BOUNDARY.
+#
+# Cases #3 and #4 rebuild back-to-back, so both commits land in the same second
+# — and that made them blind to the actual defect: bp_request_hermetic unsets
+# GIT_AUTHOR_DATE/GIT_COMMITTER_DATE, so dates set on its command line were
+# stripped and commit-tree fell back to the WALL CLOCK. Two fast runs agreed;
+# the flow broke under the pre-push gate, where the runs were slow enough to
+# straddle a second.
+#
+# `sleep 1.1` is the whole point of this case. It is the only assertion here
+# that costs wall-clock, and removing it removes the regression's only witness.
+# ===========================================================================
+BARE_T=$(new_bare)
+S_T=$(spec docs/DoD.md 100644 "the DoD, improved")
+C_T1=$(bp_build_request "$BARE_T" "$BASE" "a2bp/acme/tsec" "acme" "$S_T")
+sleep 1.1
+BARE_T2=$(new_bare)
+S_T2=$(spec docs/DoD.md 100644 "the DoD, improved")
+C_T2=$(bp_build_request "$BARE_T2" "$BASE" "a2bp/acme/tsec" "acme" "$S_T2")
+if [ -z "$C_T1" ] || [ -z "$C_T2" ]; then
+  fail "#3b NOT EXERCISED — a build produced no commit"
+elif [ "$C_T1" != "$C_T2" ]; then
+  fail "#3b builds one second apart gave different SHAs ($C_T1 vs $C_T2) — the commit date is coming from the wall clock, so retry adoption refuses its own request"
+else
+  d1=$(bp_request_hermetic git -C "$BARE_T" show -s --format='%ct' "$C_T1")
+  dbase=$(bp_request_hermetic git -C "$BARE_T" show -s --format='%ct' "$BASE")
+  if [ "$d1" != "$dbase" ]; then
+    fail "#3b the commit date is $d1, not the base's $dbase — it is not being taken from the base"
+  else
+    pass "#3b builds a second apart are identical; the date comes from the base, not the clock"
+  fi
+fi
+
+# ===========================================================================
 # 4. Determinism under HOSTILE ambient config. Every one of these would leak
 #    into the commit if construction used a working tree or an unscrubbed env.
 # ===========================================================================

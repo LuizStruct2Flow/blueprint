@@ -129,6 +129,14 @@ bp_request_ref() {
 # TRANSPORT DOES NOT USE THIS. Credentials live in exactly the config this
 # scrubs, so fetch/push run in the operator's environment — see
 # bp_request_transport_env.
+#
+# NOTE for callers setting a deliberate date or identity: this unsets
+# GIT_AUTHOR_DATE and GIT_COMMITTER_DATE, so `GIT_AUTHOR_DATE=x
+# bp_request_hermetic git commit-tree ...` DOES NOT WORK — the value is stripped
+# and git falls back to the wall clock. Set them inside the scrub instead:
+# `bp_request_hermetic env GIT_AUTHOR_DATE=x git commit-tree ...`. This was a
+# real bug (see request-build.sh), and it was invisible to any test whose two
+# builds completed within the same second.
 bp_request_hermetic() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \

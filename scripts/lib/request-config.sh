@@ -90,6 +90,24 @@ bp_config_load() {
     return 1
   fi
 
+  # The bootstrap placeholder. `new-project.sh` writes it deliberately rather
+  # than guessing a remote, so it is the NORMAL state of a fresh project — and it
+  # is non-empty, which means the emptiness check above waves it straight
+  # through. Without this, a2bp would try to push to a repository literally named
+  # FILL-ME-IN and fail with a transport error naming neither the file nor the
+  # field.
+  case "$remote" in
+    FILL-ME-IN|FILL_ME_IN|'<owner>/<blueprint>'|*'<owner>'*)
+      echo "$file still has the bootstrap placeholder for blueprint_remote:" >&2
+      echo "  blueprint_remote = $remote" >&2
+      echo >&2
+      echo "Set it to the blueprint repository this project files requests against," >&2
+      echo "e.g. git@github.com:<your-org>/blueprint.git — it is not inferred from" >&2
+      echo "the local checkout's origin, because that would be silently wrong for" >&2
+      echo "anyone whose checkout tracks a fork." >&2
+      return 1 ;;
+  esac
+
   # `branch` defaults to main only under version 2, where its absence is a
   # deliberate omission rather than a config that predates the field.
   branch=$(bp_config_field "$file" blueprint_branch)

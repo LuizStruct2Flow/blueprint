@@ -169,13 +169,32 @@ if [[ -f "$TARGET_DIR/AGENT_ROSTER.example.md" && ! -f "$TARGET_DIR/AGENT_ROSTER
 fi
 
 # --- Record blueprint provenance ---
+#
+# `blueprint_remote` is written as a PLACEHOLDER the operator must fill in, not
+# guessed from the local checkout's `origin`. Bootstrap is exactly where guessing
+# is most tempting — the origin is right there — and exactly where it is worst:
+# the value silently becomes the destination every future a2bp request is pushed
+# to, and it would be wrong for anyone whose checkout tracks a fork. Pushing a
+# request to the wrong repository is not a recoverable mistake.
+#
+# a2bp refuses until it is filled in, and the refusal prints these same lines.
 BLUEPRINT_SHA="$(cd "$BLUEPRINT_ROOT" && git rev-parse HEAD 2>/dev/null || echo 'no-sha')"
 cat > "$TARGET_DIR/.blueprint-source" <<EOF
-# Records the blueprint commit this project was bootstrapped from.
+# Records the blueprint commit this project was bootstrapped from,
+# and where back-propagation requests are filed.
 # Used by the blueprint-sync workflow (see blueprint/README.md).
+config_version   = 2
+
+# LOCAL checkout — read by 'blueprint drift' and 'blueprint pull'.
 blueprint_source = $BLUEPRINT_ROOT
 bootstrap_sha    = $BLUEPRINT_SHA
 bootstrap_date   = $TODAY
+
+# REMOTE — where 'blueprint a2bp' files requests. FILL THIS IN; it is not
+# inferred from the local checkout on purpose (see above). a2bp refuses until
+# it names a real repository.
+blueprint_remote = FILL-ME-IN
+blueprint_branch = main
 EOF
 
 # --- git init + hook wire ---

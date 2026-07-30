@@ -128,6 +128,41 @@ bp_config_load "$CFG" >/dev/null 2>&1 && fail "#4 an invalid branch name was acc
 bp_config_load "$WORK/nope" >/dev/null 2>&1 && fail "#4 a missing config file was accepted"
 block_pass "#4 empty/missing remote, non-numeric version, bad branch, missing file all refuse"
 
+# --- 4b. THE BOOTSTRAP PLACEHOLDER. -----------------------------------------
+# new-project.sh writes `blueprint_remote = FILL-ME-IN` deliberately rather than
+# guessing a remote, so this is the NORMAL state of every freshly bootstrapped
+# project — and it is non-empty, so the emptiness check in #4 waves it straight
+# through. Unrejected, a2bp would try to push to a repository literally named
+# FILL-ME-IN and fail with a transport error naming neither the file nor the
+# field. A placeholder that validates is worse than no placeholder.
+block
+for ph in "FILL-ME-IN" "git@github.com:<owner>/<blueprint>.git"; do
+  write_cfg "config_version   = 2" "blueprint_remote = $ph"
+  if bp_config_load "$CFG" >/dev/null 2>&1; then
+    fail "#4b the bootstrap placeholder '$ph' was accepted as a push destination"
+  elif ! bp_config_load "$CFG" 2>&1 | grep -qi "placeholder"; then
+    fail "#4b refused '$ph' without saying it is a placeholder"
+  fi
+done
+block_pass "#4b the bootstrap placeholder is refused, naming itself as a placeholder"
+
+# And the value new-project.sh actually writes is the one that gets rejected —
+# asserted against the script rather than a copy of the string, so the two
+# cannot drift apart into a config that bootstraps unusable and validates fine.
+if [ -r "$ROOT/scripts/new-project.sh" ]; then
+  bootstrap_remote=$(grep -m1 '^blueprint_remote' "$ROOT/scripts/new-project.sh" | sed 's/^[^=]*=[[:space:]]*//')
+  if [ -z "$bootstrap_remote" ]; then
+    fail "#4c could not find the blueprint_remote line new-project.sh writes"
+  else
+    write_cfg "config_version   = 2" "blueprint_remote = $bootstrap_remote"
+    if bp_config_load "$CFG" >/dev/null 2>&1; then
+      fail "#4c new-project.sh writes '$bootstrap_remote', which bp_config_load ACCEPTS — a fresh project would push to it"
+    else
+      pass "#4c the exact placeholder new-project.sh writes is the one the validator refuses"
+    fi
+  fi
+fi
+
 # ===========================================================================
 # PART 2 — input validation (§5.1)
 # ===========================================================================

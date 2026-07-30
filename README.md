@@ -197,37 +197,62 @@ change back to the blueprint:
 blueprint a2bp docs/DoD.md scripts/codex-signal-watch.sh
 ```
 
-`a2bp` (apply-to-blueprint) copies the project's version of each named
-file into the blueprint working tree. It **stages** the change — it
-does not auto-commit. You then `cd ~/sources/struct2flow/blueprint`,
-review with `git diff`, and commit + push yourself. After the
-blueprint commit lands, `blueprint drift` in the project shows the
-project matches HEAD again.
+`a2bp` (apply-to-blueprint) **files a request**: it pushes a branch to the
+blueprint's remote and opens a pull request. It writes into no working tree —
+not yours, not the blueprint's — and it cannot land anything. The blueprint
+owner reads the request and implements it upstream: merging as-is, adapting, or
+rewriting.
+
+It requires `config_version = 2` in `.blueprint-source`, naming
+`blueprint_remote` and `blueprint_branch`; a version 1 config refuses and prints
+the lines to add. The remote is never inferred from a local checkout's `origin`,
+because that would be right often enough to be trusted and silently wrong for
+anyone tracking a fork.
+
+`blueprint a2bp --dry-run <file>` resolves the base and shows the diff without
+pushing. `blueprint prs` shows what is currently asked of the owner, including
+pushed branches with no PR — and says the list is *incomplete* if the API call
+fails, rather than printing an empty one that reads as "nothing pending".
+
+Filing returns a **non-zero** status on purpose: filed is not landed, and no
+script may read "PR opened" as "the blueprint has this".
 
 `a2bp` refuses files that aren't in the blueprint-managed list — if a
 new file *should* be managed, add it to the `MANAGED_FILES` array in
 `scripts/blueprint` first (a2bp itself), then re-run.
 
-**The contamination guard.** `a2bp` is the only write path from a project
-into the generic blueprint, so it does not copy bytes verbatim. It restores
-`{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
-copy proves unchanged, then scans **every** staged line for host home paths,
-literal per-project state dirs, and any project name that survived. Findings
-**block the copy** and exit non-zero.
+**The contamination guard.** It used to `cp` into the blueprint working tree,
+which is how both BUG-002 and A-09 entered. That write path is gone, and the
+guard that was added afterwards still runs — restoring `{{PROJECT_NAME}}` on the
+lines a positional diff against the **fetched base** proves unchanged, then
+scanning **every** staged line for host home paths, literal per-project state
+dirs, and any project name that survived. Findings **stop the request**.
 
-The promise is narrow on purpose: on the default path a recognized finding
-cannot land, and every override is loud and auditable. It does not claim
-contamination is impossible — the scan is heuristic and `--force` exists.
+It is advisory with respect to the blueprint — a person decides what lands now —
+and that is why there is **no `--force`**: the reviewer is the override. A
+finding is fixed, or marked with a justified `a2bp-allow: <why>`. The promise is
+narrow on purpose: on the default path a recognized finding cannot be filed. It
+does not claim contamination is impossible; the scan is heuristic, and
+`a2bp-allow` lets things through by design.
 
 The restore is deliberately alignment-based rather than a search-and-replace:
 `pull` substitutes an unambiguous token, but reversing would rewrite a bare
 word that also appears in prose — for a project named `blueprint`, every
 occurrence. Lines you edited are therefore left alone, and if one still
 carries the project name the guard blocks so you can write the placeholder
-explicitly. Mark a known-benign line with an inline
-`a2bp-allow: <why>` comment, or waive the whole file with `--force` — which
-prints every finding it waved through. This guard exists because both BUG-002
-and A-09 entered the blueprint through an unguarded `a2bp`.
+explicitly. Mark a known-benign line with an inline `a2bp-allow: <why>` comment;
+the justification is required.
+
+Every staged line is scanned, including lines identical to the base — the
+alignment-derived exemption was removed because it was the one path by which a
+misattributed line could wave contamination through. The cost is real and
+accepted: a project named after a common word blocks on its own generic prose.
+
+One constraint the request flow adds: the branch carries your project's name, and
+the name is never slugged into something valid, because a slug that differs from
+the real name destroys the provenance the branch exists to carry. A project whose
+directory basename cannot be a git ref component (`foo\bar`, `x*y`) can file no
+request, and is told so explicitly.
 
 ### What's managed and what isn't
 

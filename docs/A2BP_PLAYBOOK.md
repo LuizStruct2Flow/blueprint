@@ -1,41 +1,57 @@
-# A2BP Playbook — completing the back-propagation in one session
+# A2BP Playbook — implementing a back-propagation request in one session
 
-`blueprint a2bp` copies a file into the blueprint working tree. It does **not**
-complete the back-propagation. Most of the work — updating the deck, the
-README table, the recipe doc, the pitch-surface list, rebuilding the PDF,
-committing, pushing, verifying — happens *after* `a2bp`.
+## Who this addresses
 
-**Do every step here from the originating project's session.** You already
-read `$BLUEPRINT_ROOT` from `.blueprint-source`; you can `cat`, `edit`, and
-run `git -C $BLUEPRINT_ROOT ...` from where you are. There is no reason to
-open a second prompt in the blueprint repo, and four self-violations in
-one week of the §6.4 rule show that the second-prompt habit is exactly
-how doc-sync slips.
+**The implementer — whoever makes the change in the blueprint.** Not the
+requester.
+
+`blueprint a2bp` files a **request**: a branch and a pull request against the
+blueprint's remote. It writes into no working tree and cannot land anything.
+Everything in this playbook happens on the other side of that request, when
+someone decides to implement it.
+
+That split is the point. The requester's job ends at "this improvement proved
+itself downstream, here it is". Deciding which deck slides, recipe docs, README
+rows and pitch-surface entries travel with the change requires the blueprint's
+whole tree in front of you — so it belongs to the session that has it. A
+requester cannot do it, and the implementer cannot skip it.
+
+**Do every step here in one session.** Four self-violations of the §6.4 rule in
+a single week all came from deferring the ripples to "a later session in the
+blueprint". Later is where doc-sync goes to die.
 
 ---
 
 ## When to use this playbook
 
-After every `blueprint a2bp <file...>` invocation. The playbook is the
-fourth step in the sync loop:
+When you pick up an a2bp request. `blueprint prs` lists what is waiting.
 
-1. `blueprint drift` — confirm you're starting from a clean delta.
-2. Edit the file in the originating project. The change lands here first
-   (the "derived, not designed" rule — see CLAUDE.md §"The blueprint is
+The full loop, across two people or two sessions:
+
+1. *(requester)* `blueprint drift` — confirm a clean delta to start from.
+2. *(requester)* Edit the file in the originating project. The change lands
+   there first — the "derived, not designed" rule (CLAUDE.md §"The blueprint is
    derived, not designed").
-3. `blueprint a2bp <file...>` — stage the change in the blueprint working tree.
-4. **This playbook** — close the doc-sync ripples, commit, push, verify.
+3. *(requester)* `blueprint a2bp <file...>` — file the request. Their job is
+   now done.
+4. *(implementer)* Read the request. Decide: merge as-is, adapt, or rewrite.
+   **Merging as-is is legitimate *because you judged it trivial*** — that
+   judgement is the step that must not be skipped, and nothing mechanical
+   enforces it.
+5. *(implementer)* **This playbook** — implement, close the doc-sync ripples,
+   commit, push, verify.
 
-The agent calling `a2bp` is the agent who walks this playbook. Same session,
-same prompt, same head full of context. No handoff to a "blueprint repo
-session" — that habit is the failure mode.
+There is no tool verb that performs step 4 or 5. No auto-merge, no bot. If the
+same person is on both ends — which is normal — filing and integrating are still
+two acts, separated by reading the diff in the blueprint's context. Landing a
+request seconds after raising it is exactly what this rule exists to stop.
 
 ---
 
-## Step A0 — The contamination guard (runs for you)
+## Step A0 — What the requester's guard already did
 
-`a2bp` no longer copies bytes verbatim. Before anything lands in the
-blueprint working tree it does two things (A-07 — `scripts/lib/contamination.sh`):
+The contamination guard runs on the **project** side, at `a2bp` time, before the
+request is filed (A-07 — `scripts/lib/contamination.sh`). It does two things:
 
 1. **Placeholder restoration, by positional alignment.** `a2bp`
    forward-substitutes the blueprint's own copy — reproducing exactly what
@@ -55,7 +71,7 @@ blueprint working tree it does two things (A-07 — `scripts/lib/contamination.s
    Files that *implement* the substitution (`scripts/blueprint`,
    `scripts/new-project.sh`) are exempt — they carry the tokens as code.
 2. **Contamination scan.** Host home paths, literal per-project state dirs,
-   and any project name that survived step 1 **block the copy** and exit
+   and any project name that survived step 1 **stop the request** and exit
    non-zero. A personal email is reported as a `NOTICE` and does not block.
    **Every staged line is scanned — there is no exemption**, not even for
    lines that were already upstream. An exemption list is the one place a
@@ -65,42 +81,57 @@ blueprint working tree it does two things (A-07 — `scripts/lib/contamination.s
    this is rare — the host-path pattern scores zero hits across the whole
    managed tree.
 
-**What the guard does and does not promise.** It is not "contamination is
-impossible": the scan is heuristic, `--force` copies every finding by design,
-`a2bp-allow` suppresses its line, and emails are advisory only. What holds is
-narrower and checkable — on the **default path** a recognized BLOCK class
-cannot land; every override is **loud and auditable**; and staging **never
-changes meaning under substitution** (asserted, and not waivable by
-`--force`). Treat it as a strong default, not a proof.
+**What the guard does and does not promise — read this before trusting the
+diff.** It is not "contamination is impossible": the scan is heuristic,
+`a2bp-allow` suppresses its own line, and emails are advisory only. What holds is
+narrower and checkable — on the **default path** a recognized BLOCK class cannot
+be filed, every suppression is **loud and auditable**, and staging **never
+changes meaning under substitution** (asserted, not waivable).
 
-This exists because `a2bp` is how **BUG-002** (a project's own state dir
+**So it is a strong default, not a proof, and you are the one who decides.**
+That is now literally true rather than a caution: the guard is advisory *with
+respect to the blueprint*, because a person reads the request before anything
+lands. There is no `--force` — it existed to waive the guard and copy anyway,
+which only made sense when `a2bp` landed bytes directly. You are the override.
+Review the diff on its merits.
+
+This all exists because `a2bp` is how **BUG-002** (a project's own state dir
 hardcoded into the generic feed) and **A-09** (every checkout colliding on one
-shared state dir) got into the blueprint in the first place. The playbook used
-to open at Step A and assume the bytes were fine.
+shared state dir) got into the blueprint in the first place. The playbook used to
+open at Step A and assume the bytes were fine — and back then, a2bp wrote
+straight into the working tree, so nobody was going to catch it later.
 
-**If a file is rejected**, fix the named lines. Most often that means writing
-`{{PROJECT_NAME}}` yourself on a line you edited — the guard refuses to guess
-which occurrences were meant to be generic. If a hit is genuinely benign — a
-comment that quotes a historical bad path *as the incident record* — mark that
-line:
+### If the requester's a2bp was rejected
+
+They fix the named lines — usually by writing `{{PROJECT_NAME}}` themselves on a
+line they edited, since the guard refuses to guess which occurrences were meant
+to be generic. If a hit is genuinely benign — a comment quoting a historical bad
+path *as the incident record* — they mark that line:
 
 ```sh
 # (BUG-002: this used to hardcode ~/.old-project)  a2bp-allow: incident record, not a live path
 ```
 
-The justification text after `a2bp-allow:` is required; a bare marker does
-not suppress. Prefer the marker over `--force`: `--force` waives the **whole
-file**, including findings you never read, and says so in its output.
+The justification text after `a2bp-allow:` is required; a bare marker does not
+suppress. **When you see an `a2bp-allow` in a request, read it as a claim to
+check, not a decision already made** — it is the only thing that can carry a
+finding past the guard, so it is the line to look at first.
 
-Your project's own copy is never modified — `a2bp` stages a transformed copy
-and reads the original.
+Note also that every staged line is scanned, including lines that were already
+upstream. A project named after a common word therefore has to mark its own
+generic prose. Those markers are the benign case, and the reason to read the
+justification rather than count the markers.
+
+The requester's own file is never modified — `a2bp` stages a transformed copy and
+reads the original.
 
 ---
 
 ## Step A — Classify the change
 
-Before doing the ripples, classify the change. Pick the row(s) that match
-what you just `a2bp`'d:
+Before doing the ripples, classify the change. Pick the row(s) that match the
+files the request touches — the PR body lists them, and `blueprint prs` shows
+which request is which:
 
 | Class | What it is | Where to look for ripples |
 |---|---|---|
@@ -162,10 +193,15 @@ Always the same five steps, in this order:
 
 ---
 
-## Step D — Commit + push from `$BLUEPRINT_ROOT`
+## Step D — Land it, with the ripples, in one commit
 
-Single commit covering the `a2bp`'d file + every ripple touched + PDF.
-From the originating project's session:
+You are working in the blueprint, so how the request's content gets in is your
+call: merge the PR, cherry-pick it, or retype the change. **What must not happen
+is the request landing and the ripples following later** — that is the §6.4
+failure mode, and it is why this is one commit rather than two.
+
+If you merge the PR, the ripples still need a commit of their own on top, in the
+same session. If you implement by hand, one commit covers everything.
 
 ```sh
 cd $BLUEPRINT_ROOT
@@ -190,7 +226,13 @@ Commit message conventions:
 - **Conventional Commits prefix**: `feat(<scope>):`, `fix(<scope>):`,
   `docs(<scope>):`, `chore(<scope>):`.
 - **Scope**: the concern or layer touched (`security`, `docs`, `iac`, `agents`, `sync`).
-- **Cite the originating project** if the change came from one ("derived from a real incident in storm2flow's <X> path; back-propagated here").
+- **Cite the originating request** — the project it came from and the PR number
+  ("requested by acme-flow in #42; derived from a real incident in its <X>
+  path"). The request is the provenance; a commit that drops it makes the
+  blueprint look designed rather than derived.
+- **Say what you decided.** Merged as-is, adapted, or rewritten — and why. "Took
+  the rule verbatim; the deck wording needed rework because the slide already
+  said something narrower" is the sentence a future reader needs.
 - **List every ripple** — the bulleted list of files-touched is what proves
   §6.4 was respected. Reviewers (you, later) read this list to verify.
 

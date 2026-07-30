@@ -295,9 +295,22 @@ else
 fi
 
 # ===========================================================================
-# 5. --force is the documented escape hatch, and it must be LOUD.
-#    Contamination detection is heuristic, so an override has to exist; a
-#    silent override would just restore the old behaviour under a new name.
+# 5. --force IS GONE, and its removal is refused loudly rather than ignored.
+#
+#    THIS EXPECTATION IS INVERTED, deliberately. --force existed to waive the
+#    guard and copy anyway, which was a coherent thing to want while a2bp landed
+#    bytes in the blueprint: detection is heuristic, so an override had to exist
+#    or a false positive would block real work permanently.
+#
+#    A request is read by a person before anything lands, so there is nothing
+#    left for a waiver to buy — the reviewer IS the override. A finding now has
+#    exactly two answers: fix it, or mark the line with a justified
+#    `a2bp-allow: <why>`. If the guard is wrong, that is a bug in
+#    contamination.sh and gets fixed as one.
+#
+#    Silently ignoring the flag would be the worst outcome: an operator who
+#    passes --force believes the guard was waived, and would read a block as a
+#    tool malfunction.
 # ===========================================================================
 setup
 cat >"$PROJ/$CARRIER" <<'EOF'
@@ -305,17 +318,16 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 Run the tool from /home/someuser/sources/thing before review.
 EOF
 rc=$(run_a2bp --force "$CARRIER")
-if grep -q 'reject.*--force' "$WORK/out"; then
-  fail "#5 --force was parsed as a FILENAME, not a flag — the escape hatch does not exist"
-elif bp_untouched; then
-  fail "#5 --force did not copy — the escape hatch is missing (exit $rc)"
-elif ! grep -q '/home/someuser' "$WORK/out"; then
-  # A warning that doesn't say WHAT it waved through is not a warning. Assert
-  # the finding itself is echoed, not merely the word "force" (an earlier
-  # draft of this test passed on the CLI's own "reject --force" line).
-  fail "#5 --force copied without naming the contamination it let through — a silent override is the unguarded bare cp under a new name"
+if [ "$rc" -eq 0 ]; then
+  fail "#5 --force still waived the guard and filed the request"
+elif grep -q 'reject.*--force' "$WORK/out"; then
+  fail "#5 --force was parsed as a FILENAME rather than refused as a flag"
+elif ! grep -q 'a2bp-allow' "$WORK/out"; then
+  fail "#5 --force was refused without naming the sanctioned alternative: $(head -3 "$WORK/out")"
+elif ! bp_untouched; then
+  fail "#5 --force still reached the blueprint"
 else
-  pass "#5 --force copies but names the contamination it waved through"
+  pass "#5 --force is refused, naming a2bp-allow as the way through (the reviewer is the override now)"
 fi
 
 # ===========================================================================
@@ -325,24 +337,26 @@ fi
 #    _should_substitute. The a2bp side must honour the SAME exemption, or
 #    back-propagating the CLI corrupts the CLI.
 #
-#    Driven with --force on purpose. The only observable proof that reverse-
-#    substitution was skipped is the project name surviving verbatim — and the
-#    scan (correctly) blocks on exactly that. --force isolates the exemption
-#    from the scan so this case tests one behaviour, not two. Compare with #1,
-#    where the same input on a NON-exempt file comes out as {{PROJECT_NAME}}:
-#    that differential is the whole assertion.
+#    The only observable proof that reverse-substitution was skipped is the
+#    project name surviving verbatim — and the scan (correctly) blocks on exactly
+#    that. This used to be isolated with --force; with --force gone, the
+#    isolation comes from the SANCTIONED escape, a justified `a2bp-allow` on the
+#    one line that carries the name. That is now the only way through a finding,
+#    so exercising it here proves the mechanism as well as the exemption.
+#    Compare with #1, where the same input on a NON-exempt file comes out as
+#    {{PROJECT_NAME}}: that differential is the whole assertion.
 # ===========================================================================
 setup
 mkdir -p "$PROJ/scripts" "$FAKE_BP/scripts"
 printf 'SENTINEL\n' > "$FAKE_BP/scripts/new-project.sh"
 cat >"$PROJ/scripts/new-project.sh" <<'EOF'
 #!/bin/bash
-# Bootstrap. Mentions acme-flow only as example text in a comment.
+# Bootstrap. Mentions acme-flow only as example text.  a2bp-allow: example text in a comment, not a path
 sed -e "s/{{PROJECT_NAME}}/${proj}/g" "$f"
 EOF
-rc=$(run_a2bp --force scripts/new-project.sh)
+rc=$(run_a2bp scripts/new-project.sh)
 if grep -q '^SENTINEL' "$FAKE_BP/scripts/new-project.sh"; then
-  fail "#6 scripts/new-project.sh was not copied even under --force (exit $rc)"
+  fail "#6 scripts/new-project.sh was not filed (exit $rc) — see $WORK/out"
 elif ! grep -q 'acme-flow' "$FAKE_BP/scripts/new-project.sh"; then
   fail "#6 scripts/new-project.sh WAS reverse-substituted — the pull-side _should_substitute exemption is not mirrored on the a2bp side; back-propagating the CLI would corrupt it"
 elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/scripts/new-project.sh"; then
@@ -414,14 +428,20 @@ else
 fi
 
 # --- 7b. THE HALF THAT MATTERS: no silent corruption. -----------------------
-# Under --force the request is filed, so the staged bytes become observable —
-# and the prose must be verbatim. A global-sed inverse would have rewritten
-# every "blueprint" to {{PROJECT_NAME}} here and shipped it with no finding at
-# all, which is the F1 defect. Blocking is an inconvenience; this would be
-# corruption.
-rc=$(run_a2bp_in "$WORD_PROJ" --force "$CARRIER")
+# With the collision marked as benign — the sanctioned escape, and the only one
+# now that --force is gone — the request is filed and the staged bytes become
+# observable. The prose must be verbatim. A global-sed inverse would have
+# rewritten every "blueprint" to {{PROJECT_NAME}} here and shipped it with no
+# finding at all, which is the F1 defect. Blocking is an inconvenience; this
+# would be corruption.
+cat >"$WORD_PROJ/$CARRIER" <<'EOF'
+# Mocks
+The blueprint documentation explains blueprint sync.  <!-- a2bp-allow: generic prose; the project is merely named after the word -->
+A new generic line about mockups.
+EOF
+rc=$(run_a2bp_in "$WORD_PROJ" "$CARRIER")
 if [ "$rc" -ne 0 ]; then
-  fail "#7b --force did not file the request (exit $rc) — see $WORK/out"
+  fail "#7b a marked benign collision did not file (exit $rc) — see $WORK/out"
 elif grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
   fail "#7b CORRUPTION: the word 'blueprint' in generic prose was rewritten to {{PROJECT_NAME}} — this is Codex F1, the global-sed inverse"
 elif ! grep -q 'The blueprint documentation explains blueprint sync.' "$FAKE_BP/$CARRIER"; then
@@ -429,7 +449,7 @@ elif ! grep -q 'The blueprint documentation explains blueprint sync.' "$FAKE_BP/
 elif ! grep -q 'A new generic line' "$FAKE_BP/$CARRIER"; then
   fail "#7b the newly added generic line was not filed"
 else
-  pass "#7b under --force the prose survives verbatim — no global-sed corruption (F1)"
+  pass "#7b a marked benign collision files with the prose verbatim — no global-sed corruption (F1)"
 fi
 
 # ===========================================================================
@@ -741,10 +761,14 @@ rc=$(run_a2bp "$CARRIER")
 #   ON THE DEFAULT PATH, the literal project basename does not land upstream.
 #
 # It is NOT evidence for any broader "no project-specific bytes ever" claim —
-# `--force`, `a2bp-allow` and the NOTICE class all deliberately let things
-# through, and case #5 proves a host path landing under `--force`. Reframing
-# this case as proof of the wider contract would have been dishonest; scoped
-# to the default path it is sound.
+# `a2bp-allow` and the NOTICE class both deliberately let things through, and
+# case #6 files a host-path-free but name-bearing file through a marked line.
+# Reframing this case as proof of the wider contract would have been dishonest;
+# scoped to the default path it is sound.
+#
+# (`--force` used to be the third and widest of those escapes. It is gone —
+# §2.2 of the plan: a request is reviewed by a person, so there is nothing for a
+# waiver to buy. The narrow claim above is unaffected either way.)
 #
 # A misattribution here writes {{PROJECT_NAME}} where the operator typed a
 # literal `acme-flow`, which is the correct generic content for a blueprint
@@ -786,23 +810,28 @@ fi
 
 # ===========================================================================
 # 21. R3-F3 — if `diff` cannot do the alignment, FAIL CLOSED.
-#     The GNU --*-line-format switches are extensions. Swallowing an error
-#     into an empty alignment reads as "nothing is attributable" and, under
-#     --force, copies wholly unrestored project bytes upstream.
+#     The GNU --*-line-format switches are extensions. Swallowing an error into
+#     an empty alignment reads as "nothing is attributable", and wholly
+#     unrestored project bytes then travel upstream.
+#
+#     This used to be driven with --force, to prove the failure was closed even
+#     against the widest escape available. With --force gone the case is simpler
+#     and no weaker: there is no longer any flag that could have opened it, and
+#     the remaining escape (`a2bp-allow`) is per-line and cannot apply to a
+#     staging step that never produced lines to mark.
 # ===========================================================================
 setup
 printf '# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project.\n' > "$FAKE_BP/$CARRIER"
 printf '# Mocks\nGeneric guidance for the acme-flow project.\n' > "$PROJ/$CARRIER"
 SHIMDIR="$WORK/shim"; mkdir -p "$SHIMDIR"
 printf '#!/bin/sh\nexit 2\n' > "$SHIMDIR/diff"; chmod +x "$SHIMDIR/diff"
-( cd "$PROJ" && PATH="$SHIMDIR:$PATH" "$BLUEPRINT_BIN" a2bp --force "$CARRIER" ) >"$WORK/out" 2>&1
-rc=$?
+rc=$(PATH="$SHIMDIR:$PATH" run_a2bp "$CARRIER")
 if grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
-  fail "#21 a broken 'diff' let UNRESTORED project bytes reach the blueprint under --force (Codex R3-F3)"
+  fail "#21 a broken 'diff' let UNRESTORED project bytes reach the blueprint (Codex R3-F3)"
 elif [ "$rc" -eq 0 ]; then
   fail "#21 staging failure exited 0 — a tool that could not run must never read as a clean pass (BUG-003's rule)"
 else
-  pass "#21 a diff capability/runtime failure fails closed, even under --force (R3-F3)"
+  pass "#21 a diff capability/runtime failure fails closed (R3-F3)"
 fi
 
 # ===========================================================================

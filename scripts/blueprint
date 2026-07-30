@@ -732,18 +732,25 @@ cmd_a2bp() {
     . "$libdir/$lib"
   done
 
-  local force=0 dry_run=0
+  local dry_run=0
   local files=()
   local arg
   for arg in "$@"; do
     case "$arg" in
-      --force)   force=1 ;;
       --dry-run) dry_run=1 ;;
-      -*)        die "unknown option: $arg (usage: blueprint a2bp [--dry-run] [--force] FILE...)" ;;
+      # --force is GONE, and refused loudly rather than ignored. It existed to
+      # waive the guard and copy anyway — a decision that only made sense while
+      # a2bp landed bytes in the blueprint. A request is read by a person before
+      # anything lands, so there is nothing left for a waiver to buy: a finding
+      # is either fixed, or marked with a justified `a2bp-allow: <why>`. If the
+      # guard is wrong, that is a bug in contamination.sh and gets fixed as one.
+      --force)
+        die "--force is gone. a2bp files a request that a person reviews, so there is nothing to waive. Fix the finding, or mark the line with an inline 'a2bp-allow: <why it is safe>' comment. If the guard is wrong, that is a bug in scripts/lib/contamination.sh." ;;
+      -*)        die "unknown option: $arg (usage: blueprint a2bp [--dry-run] FILE...)" ;;
       *)         files+=("$arg") ;;
     esac
   done
-  [ "${#files[@]}" -gt 0 ] || die "usage: blueprint a2bp [--dry-run] [--force] FILE [FILE...]"
+  [ "${#files[@]}" -gt 0 ] || die "usage: blueprint a2bp [--dry-run] FILE [FILE...]"
 
   bp_request_check_git_version || return "$BP_RC_FAILED"
 
@@ -763,7 +770,6 @@ cmd_a2bp() {
   echo "  remote:   $BP_CFG_REMOTE"
   echo "  branch:   $BP_CFG_BRANCH"
   [ "$dry_run" -eq 1 ] && echo "  ${C_DIM}--dry-run: reads the remote, writes nothing${C_RESET}"
-  [ "$force" -eq 1 ] && echo "  ${C_YELLOW}--force: contamination findings will NOT block${C_RESET}"
   echo
 
   # --- input validation, before ANY remote contact (§5.1) -------------------
@@ -859,14 +865,13 @@ cmd_a2bp() {
         echo "      ${C_DIM}${text}${C_RESET}"
       done
     fi
-    if [ "$has_block" -eq 1 ] && [ "$force" -eq 0 ]; then
+    if [ "$has_block" -eq 1 ]; then
       echo "  ${C_RED}reject${C_RESET}  $path  (contamination)"
       echo "    ${C_DIM}Fix the lines above, or mark a known-benign one with an inline${C_RESET}"
-      echo "    ${C_DIM}'a2bp-allow: <why it is safe>' comment. --force waives the whole file.${C_RESET}"
+      echo "    ${C_DIM}'a2bp-allow: <why it is safe>' comment — the justification is required.${C_RESET}"
       blocked=$((blocked+1))
       continue
     fi
-    [ "$has_block" -eq 1 ] && echo "  ${C_YELLOW}forced${C_RESET}  $path  ${C_YELLOW}(contamination waived)${C_RESET}"
 
     specs+=("$path:$mode:$staged")
   done <<< "$validated"

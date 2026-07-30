@@ -1,6 +1,14 @@
-# Waiting acceptance — currently empty
+# Waiting acceptance
 
-Nothing is waiting here. The 2026-07-29 QA pass dispositioned everything:
+| Item | Pushed | What to test |
+|---|---|---|
+| [**A2BP-PR**](A2BP-PR/) — back-propagation becomes a request, not a write | 2026-07-30 | `blueprint a2bp` now files a branch + PR against the blueprint remote and **cannot write into the blueprint at all** — closing the door BUG-002 and A-09 both came through. Also: `blueprint prs`, `drift` staleness warning, `--force` removed, `config_version = 2`. Test list, accepted costs and the trust boundary are in that folder's [README](A2BP-PR/README.md). |
+
+---
+
+## Previously dispositioned
+
+The 2026-07-29 QA pass dispositioned everything before this:
 
 - **Eight items ACCEPTED** and promoted to [`../done/`](../done/) — BUG-001,
   BUG-002, BUG-003, A-01/A-12/A-14, A-05/A-27, A-09, A-03, A-07. Each work-item

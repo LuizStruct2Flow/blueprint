@@ -2,9 +2,18 @@
 
 | Item | Pushed | What to test |
 |---|---|---|
-| [**A2BP-PR**](A2BP-PR/) — back-propagation becomes a request, not a write | 2026-07-30 | `blueprint a2bp` now files a branch + PR against the blueprint remote and **cannot write into the blueprint at all** — closing the door BUG-002 and A-09 both came through. Also: `blueprint prs`, `drift` staleness warning, `--force` removed, `config_version = 2`. Test list, accepted costs and the trust boundary are in that folder's [README](A2BP-PR/README.md). |
+| [**FEATURE-001**](FEATURE-001-a2bp-pr/) — back-propagation becomes a request, not a write | 2026-07-30 | `blueprint a2bp` now files a branch + PR against the blueprint remote and **cannot write into the blueprint at all** — closing the door BUG-002 and audit finding A-09 both came through. Also: `blueprint prs`, `drift` staleness warning, `--force` removed, `config_version = 2`. Test list, accepted costs and the trust boundary are in that folder's [README](FEATURE-001-a2bp-pr/README.md). |
 
 ---
+
+## A note on the two ID namespaces
+
+`BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs. `A-NN` identifies a **finding**
+from the 2026-07-23 audit — a claim that something is wrong, not a work item. Live
+items were renumbered on 2026-07-30 (`A-22` → BUG-004, `A-38`/`A-39` → BUG-005,
+`A-08` → BUG-006); this file and everything in `done/` keep their `A-NN` IDs,
+because the Codex review documents argue about findings by those names. Full rule
+in [`../doing/BLUEPRINT-AUDIT-2026-07-23.md`](../doing/BLUEPRINT-AUDIT-2026-07-23.md).
 
 ## Previously dispositioned
 
@@ -14,12 +23,13 @@ The 2026-07-29 QA pass dispositioned everything before this:
   BUG-002, BUG-003, A-01/A-12/A-14, A-05/A-27, A-09, A-03, A-07. Each work-item
   folder travelled with its row, so the Codex review trail sits beside the
   thing it reviewed.
-- **A-22 REJECTED** and reopened into [`../doing/A-22-gate-arming/`](../doing/A-22-gate-arming/).
+- **A-22 REJECTED** and reopened as **BUG-004** in
+  [`../doing/BUG-004-gate-arming/`](../doing/BUG-004-gate-arming/).
 
 The verdicts and their evidence are in
 [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).
 
-## Why A-22 was rejected — worth reading even if you skip the rest
+## Why BUG-004 (then A-22) was rejected — worth reading even if you skip the rest
 
 `arm_gate` genuinely works: the feed and `blueprint drift` both arm an unarmed
 clone, and `tests/gate-arming/` proves it. But the acceptance boundary was never

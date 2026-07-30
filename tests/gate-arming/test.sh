@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/gate-arming/test.sh
 #
-# A-22: the pre-push gate must ARM ITSELF in a fresh clone.
+# BUG-004: the pre-push gate must ARM ITSELF in a fresh clone.
 #
 # The defect: `core.hooksPath` is repo-local config. `scripts/new-project.sh`
 # sets it at bootstrap, so a BOOTSTRAPPED project is gated — but a CLONE never
@@ -101,8 +101,8 @@ C="$WORK/c2"; mk_clone "$C"
 ( cd "$C" && HOME="$WORK/h2" bash scripts/agent-activity.sh --daemon ) >"$WORK/o2" 2>&1
 ( cd "$C" && HOME="$WORK/h2" bash scripts/agent-activity.sh --stop ) >/dev/null 2>&1
 if [ "$(hookspath "$C")" = ".githooks" ]; then
-  pass "#2 the feed arms an unarmed clone (A-22 reproducer)"
-else fail "#2 A-22: a clone stayed UNGATED after the feed ran — core.hooksPath='$(hookspath "$C")'"; fi
+  pass "#2 the feed arms an unarmed clone (BUG-004 reproducer)"
+else fail "#2 BUG-004: a clone stayed UNGATED after the feed ran — core.hooksPath='$(hookspath "$C")'"; fi
 
 # ===========================================================================
 # 2. Explicit by founder decision: the gate state is REPORTED, not silent.
@@ -167,7 +167,7 @@ D="$WORK/notarepo"; mkdir -p "$D"
 ( cd "$D" && . "$ROOT/scripts/lib/gate.sh" && arm_gate ) >"$WORK/o8" 2>&1
 rc8=$?
 # Both legs, independently. rc=0 alone is not the contract: a silent success is
-# exactly the "could not arm" / "never ran" ambiguity A-22 is about.
+# exactly the "could not arm" / "never ran" ambiguity BUG-004 is about.
 if [ "$rc8" -ne 0 ]; then
   fail "#8 arm_gate returned $rc8 outside a git repo — it would break every caller"
 elif grep -qi 'not a git work tree\|nothing to arm' "$WORK/o8"; then
@@ -201,7 +201,7 @@ if [ "$FAILED" -eq 0 ]; then
   # Self-reported so nobody has to wrap this call to learn the cost. The whole
   # pre-push gate has a 30 s ceiling (CLAUDE.md §"Pre-push tolerance") and this
   # suite is a named line item in that budget.
-  echo "PASS: A-22 — the gate arms itself on paths that already run. (${elapsed}s, 11 cases)"
+  echo "PASS: BUG-004 — the gate arms itself on paths that already run. (${elapsed}s, 11 cases)"
   exit 0
 fi
 echo "FAILED: see the FAIL lines above."

@@ -4,18 +4,35 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-29 (end of session).** **QA acceptance is done: eight
-> items ACCEPTED into [`done/`](../done/), A-22 REJECTED and reopened into
-> [`doing/A-22-gate-arming/`](A-22-gate-arming/).** Acceptance for this class of
-> work is delegated to QA-2 by founder decision — see `project_config_dod.md`
-> §"Acceptance authority". **The one thing in flight is A-22, and it needs a
-> DECISION before it needs code** (§1). `waiting-acceptance/` is empty. Next
-> audit finding after A-22: **A-08**.
+> **Last updated: 2026-07-30 (end of session).** `origin/main` is at **`271e0bd`**.
+>
+> **Read this first: there are two ID namespaces and only one is a work item.**
+> `BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs — what the commit convention,
+> the regression-test naming rule and the lifecycle folders key off. `A-NN` is a
+> **finding** from the 2026-07-23 audit, in the same category as a Codex finding
+> ID. Findings were being used as work items (folder names, `BUGS.md` rows) and
+> then extended with fresh numbers for unrelated new bugs; live items were
+> renumbered on 2026-07-30:
+>
+> | Was | Now |
+> |---|---|
+> | `A-22` | **BUG-004** — fresh clone is ungated |
+> | `A-38` + `A-39` | **BUG-005** — pre-push gate at its 30 s ceiling |
+> | `A-08` | **BUG-006** — `LWA_FEED_*` env-var contamination |
+> | the a2bp request flow | **FEATURE-001** — in `waiting-acceptance/` |
+>
+> `done/`, the audit register and the Codex review documents keep their `A-NN`
+> IDs: the reviews argue about findings by name, so renaming would break the trail
+> they exist to be. An `A-NN` reference anywhere is a citation of history.
+>
+> **TWO THINGS NEED A FOUNDER DECISION, NOT CODE: BUG-004 and BUG-005** (§1).
+> **FEATURE-001 is in `waiting-acceptance/`** awaiting your testing. Next after
+> the decisions: **BUG-006**.
 
 ## 0. STATUS
 
-- **Blueprint self-audit + BUG-001: PUSHED, awaiting acceptance.** `origin/main`
-  is at **`b89e7a4`**. Delivered: **BUG-001** (fork-bomb process leak in the activity
+- **Blueprint self-audit + BUG-001: PUSHED and ACCEPTED.** (That batch ended at
+  `b89e7a4`; `origin/main` is now `271e0bd`.) Delivered: **BUG-001** (fork-bomb process leak in the activity
   feed — a host was pegged at load 175 for 2.7 days by ~17,400 leaked processes),
   **BUG-002** (linkedin-watcher contamination in a generic file), **BUG-003**
   (the security gate could not tell a scanner *failure* from a scanner
@@ -31,7 +48,13 @@
 - **ACCEPTED and delivered:** eight items in [`../done/`](../done/), each with
   its review trail in a per-item folder. Verdicts and executed evidence:
   [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).
-  `waiting-acceptance/` is empty.
+- **`waiting-acceptance/` holds FEATURE-001** (pushed 2026-07-30, `271e0bd`):
+  `blueprint a2bp` no longer writes into the blueprint — it files a branch + PR
+  against the blueprint's remote and cannot land anything. That closes the door
+  BUG-002 and A-09 both came through, rather than guarding it. Also `blueprint
+  prs`, a `drift` staleness warning, `--force` removed, `config_version = 2`.
+  Test list, accepted costs and the trust boundary:
+  [`../waiting-acceptance/FEATURE-001-a2bp-pr/README.md`](../waiting-acceptance/FEATURE-001-a2bp-pr/README.md).
 - **Acceptance authority is DELEGATED to QA-2** for agent-protocol and
   repo-infrastructure work (founder decision 2026-07-29 — "these bugs are hard
   to do the manual validation, I delegate these ones to the machine"). Scope,
@@ -85,20 +108,41 @@
 - **Shipped in the same range:** atomic baton publication
   (`scripts/signal-set.sh`) + the dispatch settle window, and the README
   contract narrowing that had been reported fixed but never committed.
-- **IMMEDIATE NEXT ACTION — A-22 needs a FOUNDER DECISION, not more code.**
-  QA-2 rejected it on 2026-07-29 by reproducing the gap rather than restating
-  it: a fresh clone, a real high-entropy token committed, `origin` redirected to
-  a throwaway bare repo, a real push executed without ever running the feed or
-  drift — `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`.
+- **FEATURE-001 DELIVERED, pushed `271e0bd` (9 commits).** `blueprint a2bp` filed
+  requests instead of writing. Six defects surfaced in implementation that 17
+  rounds of plan review had not — including a commit dated from the **wall clock**
+  (so retry adoption silently became "always refuse", invisible to any test whose
+  two builds finished inside one second — the pre-push gate caught it), a cleanup
+  trap reading an out-of-scope `local`, and a contamination case that had been
+  passing **vacuously** since it was written. Full list in the folder README.
+
+- **IMMEDIATE NEXT ACTION — TWO DECISIONS, NEITHER NEEDS CODE.**
+
+  **BUG-004 — a fresh clone is ungated.** QA-2 rejected it on 2026-07-29 by
+  reproducing the gap rather than restating it: fresh clone, real high-entropy
+  token committed, `origin` redirected to a throwaway bare repo, real push
+  executed without ever running the feed or drift —
+  `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`.
 
   **Do not attempt another local mechanism.** That is precisely what the
   rejection rules out: a pre-push hook is repo-local, absent on a clone, and
   defeated by `--no-verify`, so no local hook can make the gate a property of a
-  clone. The open question is a trade only the founder can make — server-side
-  enforcement via protected-branch required checks (available, but a SHA must
-  exist on some ref before it reaches `main`, which conflicts with the
-  no-branches rule — see **A-37**), or an explicit acceptance of the residual
-  risk. Folder: [A-22-gate-arming/](A-22-gate-arming/).
+  clone. The trade is the founder's — protected-branch required checks (available,
+  but a SHA must exist on some ref before it reaches `main`, which conflicts with
+  the no-branches rule; costed as **A-37** §4c), or explicit acceptance of the
+  residual risk. Options laid out in
+  [BUG-004-gate-arming/README.md](BUG-004-gate-arming/README.md).
+
+  **BUG-005 — the gate is at its 30 s ceiling and coverage is being decided by the
+  clock.** ~29 s of 30, and `tests/agent-activity-bound --fast` alone is 18.1 s —
+  more than every other suite combined. It has already displaced real coverage:
+  `tests/a2bp-contamination/` (41 assertions, the A-07 guard) went entirely
+  CI-only, `tests/staleness/` is CI-only, `drift-integration --fast` is 2 of 5
+  cases. **The obvious fix does not work** — those 18 s are negative assertions
+  ("nothing was emitted"), which cannot be polled for, and are already small
+  multiples of a 0.25 s tick. The levers are shortening the multiples (weakens the
+  assertions) or moving cases to CI; both are coverage judgements. Untouched
+  because that suite protects BUG-001 (load 175 for 2.7 days).
 - ~~LOOSE END — agent-exchange timestamp switch~~ **DONE.** All 16 headers on
   Berlin local, README format spec updated, committed in `../../agent-exchange`.
 - **`docs/way-of-working.pdf` — DEFERRED by founder decision (2026-07-29), not
@@ -109,8 +153,8 @@
   rebuilt once against a settled deck rather than repeatedly against a moving
   one. Do NOT treat the staleness as a doc-sync violation to fix in the
   meantime, and do not re-raise it each session.
-- **A-22 background (REJECTED 2026-07-29 — see the immediate-next-action entry
-  above for the current state; this is the history).**
+- **BUG-004 background** (was audit finding `A-22`; REJECTED 2026-07-29 — see the
+  immediate-next-action entry above for current state; this is the history).
   `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
   the gate never ran — including on the push of the first 12 commits, which
   went out **ungated**. The docs blamed a `postinstall` auto-wire that never
@@ -137,7 +181,7 @@
   - **A-03** — DONE, pushed `b89e7a4`, four-eyes CLEAN on round 11. See §1
     above for the full state; it is not repeated here so this list cannot drift
     away from it again.
-  - **A-08** — **NEXT.** `LWA_FEED_*` env vars in `scripts/log-activity.sh`:
+  - **BUG-006** (was A-08) — **NEXT.** `LWA_FEED_*` env vars in `scripts/log-activity.sh`:
     BUG-002's contamination in env-var-namespace form, still present.
   - **A-09** — DONE. Dispatcher/state-dir half pushed `1a876c8`; sonar-key half
     fixed and four-eyes clean (both halves closed).

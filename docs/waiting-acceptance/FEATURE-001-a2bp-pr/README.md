@@ -1,4 +1,4 @@
-# A2BP-PR — back-propagation becomes a request, not a write
+# FEATURE-001 — back-propagation becomes a request, not a write
 
 **Pushed to `main` 2026-07-30. Awaiting founder acceptance.**
 
@@ -46,9 +46,9 @@ Concretely:
   (`foo\bar`, `x*y`) can file no request. The name is never slugged, because a
   slug that differs from the real name destroys the provenance the branch carries.
 - **`tests/a2bp-contamination/` moved to CI-only** — a real reduction in what
-  blocks a push, filed as **A-39**. It went 2.3s → 6.0s driving real transport and
-  A-38 left no room. The gate keeps `tests/a2bp-e2e/`, which covers the
-  leak-critical wiring.
+  blocks a push, filed as **BUG-005**. It went 2.3s → 6.0s driving real transport
+  and the gate had no 6s to give. The gate keeps `tests/a2bp-e2e/`, which covers
+  the leak-critical wiring. Reverses when BUG-005 is fixed.
 - **Network and `gh` auth are now required.** `a2bp` was local.
 
 ## Not a security boundary

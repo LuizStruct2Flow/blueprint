@@ -9,7 +9,7 @@
 # This happened twice in one session. "Flip the mic last" was already written
 # in AGENTS.md and in HANDOVER before the second occurrence, which is exactly
 # what makes a rule the wrong fix: it has to be remembered at the moment the
-# author is busy. Same lesson as A-22 — the guard belongs in code on the path
+# author is busy. Same lesson as BUG-004 — the guard belongs in code on the path
 # that already runs.
 #
 # Run from the blueprint repo root:  bash tests/signal-dispatch/test.sh

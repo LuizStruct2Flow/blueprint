@@ -10,6 +10,26 @@ defects · bootstrap+sync) + Codex/Slava (cross-provider four-eyes, per
 **deduplicated** across reviewers; the `Confirmed` column records whether I
 verified the claim myself rather than relaying it.
 
+> ## `A-NN` is a finding ID, not a work item
+>
+> The `A-NN` numbers in this document identify **findings from this one sweep** —
+> the same category as a Codex finding ID. A finding is a claim that something is
+> wrong. It becomes *work* only when it gets a `BUG-XXX` / `FEATURE-XXX` number,
+> which is what the commit convention, the regression-test naming rule and the
+> lifecycle folders all key off (CLAUDE.md §"Bug Management").
+>
+> They were being used as though they were work items — folder names, rows in
+> `doing/BUGS.md`, pre-push comments — and then extended with fresh numbers
+> (`A-38`, `A-39`) for findings that had nothing to do with this audit. Live items
+> were renumbered on 2026-07-30: `A-22` → **BUG-004**, `A-38` (+`A-39`) →
+> **BUG-005**, `A-08` → **BUG-006**.
+>
+> **This document and everything in `done/` keep their `A-NN` IDs.** The Codex
+> review documents argue about findings by name ("A-07 R4-F2"), so renaming them
+> would break the argument trail they exist to preserve. Treat an `A-NN`
+> reference anywhere as a citation of history. If you are about to work on one,
+> give it a `BUG-`/`FEATURE-` number first.
+
 **Fix status (authoritative) — updated by the 2026-07-29 QA acceptance pass.**
 
 **DELIVERED + QA-ACCEPTED.** Acceptance for this class of work is delegated to
@@ -26,7 +46,7 @@ than inspection. Records in [`../done/`](../done/):
 **A-02** is closed (scanners installed).
 
 **A-22 was REJECTED on 2026-07-29** and is reopened in
-[`A-22-gate-arming/`](A-22-gate-arming/) — see below.
+[`BUG-004-gate-arming/`](BUG-004-gate-arming/) — see below.
 
 > **Jesko's explicit caveat, recorded so it is not lost:** accepting these seven
 > is **not** acceptance of **A-22**. The gate that protects them is armed on this
@@ -62,10 +82,16 @@ than inspection. Records in [`../done/`](../done/):
 
 **STILL OPEN — everything else in the register below.** The live ones:
 
-- **A-22** — **REOPENED (rejected at acceptance).** Needs a founder decision on
-  server-side enforcement, not another local mechanism. Details above.
-- **A-08** — **NEXT.** `LWA_FEED_*` in `scripts/log-activity.sh`: BUG-002's
-  contamination in env-var-namespace form.
+- **A-22** → tracked as **[BUG-004](BUGS.md)**. **REOPENED (rejected at
+  acceptance).** Needs a founder decision on server-side enforcement (the option
+  costed as **A-37** §4c), not another local mechanism. Details above.
+- **A-08** → tracked as **[BUG-006](BUGS.md)**. **NEXT.** `LWA_FEED_*` in
+  `scripts/log-activity.sh`: BUG-002's contamination in env-var-namespace form.
+
+Two findings raised on 2026-07-30 do **not** belong to this audit and were
+briefly misfiled into its numbering as `A-38`/`A-39`. They are
+**[BUG-005](BUGS.md)** — the pre-push gate at its 30 s ceiling, and the coverage
+it has already displaced.
 
 Closed in the "guard the pipe" order, kept here for traceability:
 
@@ -183,7 +209,8 @@ BUG-002 → the rest.** Guard the pipe before cleaning the water.
 
 ## 3. BUG-001 consensus: Codex withheld it, and was right
 
-Full review: [CODEX-REVIEW-BUG-001.md](CODEX-REVIEW-BUG-001.md). It validated
+Full review: [CODEX-REVIEW-BUG-001.md](../done/BUG-001-fork-bomb/CODEX-REVIEW-BUG-001.md)
+(it travelled to `done/` with BUG-001). It validated
 the RCA (including my correction to the founder's diagnosis re: the losing
 racer) but found three genuine holes in **my** fix design:
 

@@ -64,14 +64,14 @@ if [ -f tests/pre-push-scanners/test.sh ]; then
   }
 fi
 
-# A-22 — the gate must arm itself on paths that already run, so a fresh clone
+# BUG-004 — the gate must arm itself on paths that already run, so a fresh clone
 # is not silently ungated. Also pins the boundaries: --status/--stop must not
 # arm (each on its own unset fixture — running --stop after --daemon cannot
 # tell "preserved unset" from "armed it"), a deliberate foreign core.hooksPath
 # must never be clobbered, and arm_gate must never fail its caller. ~2.3s.
 if [ -f tests/gate-arming/test.sh ]; then
   bash tests/gate-arming/test.sh || {
-    echo "❌ tests/gate-arming/test.sh failed (A-22)."
+    echo "❌ tests/gate-arming/test.sh failed (BUG-004)."
     echo "   A tracked hook is not an active hook — if arming regresses, clones"
     echo "   go back to pushing completely ungated."
     exit 1
@@ -116,11 +116,11 @@ fi
 # had reached 27.6s of a hard 30s ceiling, which is not headroom.
 
 # A-07 — tests/a2bp-contamination/ is now CI-ONLY, and that is a REDUCTION in
-# what blocks a push, recorded as A-39 in docs/doing/BUGS.md rather than left as
+# what blocks a push, recorded as BUG-005 in docs/doing/BUGS.md rather than left as
 # a quiet omission.
 #
 # It cost 2.3s while a2bp compared two files in place. Filing a request means 27
-# real transport runs against a local remote, which is 6.0s — and with A-38
+# real transport runs against a local remote, which is 6.0s — and with BUG-005
 # (tests/agent-activity-bound/ alone consuming 18s of the 30s ceiling) there is
 # no 6s to give. What the gate keeps instead is tests/a2bp-e2e/, whose case #8
 # covers the leak-critical WIRING: a contaminated file blocks the whole request
@@ -129,22 +129,22 @@ fi
 # cases. The door that BUG-002 and A-09 came through is still watched here; the
 # catalogue of what to watch for is watched in CI.
 #
-# This reverses the moment A-38 is resolved.
+# This reverses the moment BUG-005 is resolved.
 
-# A2BP-PR — request identity. The branch name is derived from a length-framed
+# FEATURE-001 — request identity. The branch name is derived from a length-framed
 # key, so a component's content can never be mistaken for a delimiter; without
 # the framing, "ab"+"c" and "a"+"bc" name the same branch and one project's
 # request silently adopts another's. ~0.3s.
 if [ -f tests/a2bp-request/test.sh ]; then
   bash tests/a2bp-request/test.sh || {
-    echo "❌ tests/a2bp-request/test.sh failed (a2bp PR flow)."
+    echo "❌ tests/a2bp-request/test.sh failed (FEATURE-001)."
     echo "   The request key must stay framed and the ref must stay validated by"
     echo "   git itself, or two distinct requests can collide on one branch."
     exit 1
   }
 fi
 
-# A2BP-PR — request construction. Two properties, both load-bearing:
+# FEATURE-001 — request construction. Two properties, both load-bearing:
 #   1. The request tree is seeded from the fetched base, so a request changes
 #      ONLY its target paths. Unseeded, it proposes deleting the whole blueprint.
 #   2. The commit is byte-reproducible, which is what lets a retry recognise its
@@ -152,28 +152,28 @@ fi
 # Runs git plumbing against a scratch fixture; no network. ~1.5s.
 if [ -f tests/a2bp-build/test.sh ]; then
   bash tests/a2bp-build/test.sh || {
-    echo "❌ tests/a2bp-build/test.sh failed (a2bp PR flow)."
+    echo "❌ tests/a2bp-build/test.sh failed (FEATURE-001)."
     echo "   A request must touch exactly the files it names and rebuild to the"
     echo "   same SHA on any machine."
     exit 1
   }
 fi
 
-# A2BP-PR §5.1/§8 — where a request is filed, and which bytes go into it. The
+# FEATURE-001 §5.1/§8 — where a request is filed, and which bytes go into it. The
 # contamination guard checks what the content SAYS; this checks that the content
 # came from the file the operator named (not a symlink to somewhere else, not a
 # path escaping the root) and that it is going to the repository they declared
 # (never a remote inferred from a local checkout). ~0.2s.
 if [ -f tests/a2bp-inputs/test.sh ]; then
   bash tests/a2bp-inputs/test.sh || {
-    echo "❌ tests/a2bp-inputs/test.sh failed (a2bp PR flow)."
+    echo "❌ tests/a2bp-inputs/test.sh failed (FEATURE-001)."
     echo "   a2bp must refuse symlinks, root-escaping paths, unmanaged files and"
     echo "   version 1 configs — before anything reaches a remote."
     exit 1
   }
 fi
 
-# A2BP-PR §3b — `drift` reports whether the LOCAL blueprint checkout is behind
+# FEATURE-001 §3b — `drift` reports whether the LOCAL blueprint checkout is behind
 # its remote, because otherwise "✓ all files match the blueprint HEAD" can mean
 # "you match a six-week-old copy". Two failure modes are worse than the staleness
 # it reports, and both are covered here: reporting "current" when the probe
@@ -188,21 +188,21 @@ fi
 # preference — see docs/doing/BUGS.md.
 if [ -f tests/staleness/drift-integration.sh ]; then
   bash tests/staleness/drift-integration.sh --fast || {
-    echo "❌ tests/staleness/drift-integration.sh failed (a2bp PR flow §3b)."
+    echo "❌ tests/staleness/drift-integration.sh failed (FEATURE-001 §3b)."
     echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
     echo "   checkout, or change its exit status because of staleness."
     exit 1
   }
 fi
 
-# A2BP-PR — the assembly. Layered suites prove each part; this proves the whole
+# FEATURE-001 — the assembly. Layered suites prove each part; this proves the whole
 # command, and carries the single most important assertion in the feature: the
 # blueprint's working tree and its main branch are never written to. a2bp used to
 # `cp` straight into that tree, which is how BUG-002 and A-09 fanned out to every
 # project. ~1.1s.
 if [ -f tests/a2bp-e2e/test.sh ]; then
   bash tests/a2bp-e2e/test.sh || {
-    echo "❌ tests/a2bp-e2e/test.sh failed (a2bp PR flow)."
+    echo "❌ tests/a2bp-e2e/test.sh failed (FEATURE-001)."
     echo "   a2bp must file a request and must not be able to write into the"
     echo "   blueprint, force-push a request branch, or file an empty one."
     exit 1

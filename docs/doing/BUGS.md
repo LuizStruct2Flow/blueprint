@@ -36,6 +36,10 @@ the residual risk explicitly.
 BUG-002's contamination in env-var-namespace form), in
 [BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md).
 
+**A2BP-PR** was implemented and pushed on 2026-07-30 and now sits in
+[`../waiting-acceptance/A2BP-PR/`](../waiting-acceptance/A2BP-PR/) with its plan
+and review trail. It is what A-38 and A-39 above came out of.
+
 Everything else delivered on 2026-07-29 is ACCEPTED and in
 [`../done/`](../done/) — eight items, verdicts and evidence in
 [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).

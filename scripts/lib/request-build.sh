@@ -115,11 +115,23 @@ bp_build_request() {
         printf '\n'
         for spec in "${specs[@]}"; do printf '%s\n' "${spec%%:*}"; done)
 
+  # The identity and dates are set INSIDE the scrub, via `env`, not outside it.
+  #
+  # bp_request_hermetic exists to unset ambient GIT_* variables, and
+  # GIT_AUTHOR_DATE / GIT_COMMITTER_DATE are two of the ones it unsets — so
+  # setting them on the wrapper's own command line got them stripped again, and
+  # commit-tree fell back to the WALL CLOCK. The build was therefore
+  # non-deterministic, and only across a one-second boundary: two runs inside the
+  # same second agreed, so the determinism cases passed locally and the flow
+  # broke under the pre-push gate, where the runs were slow enough to straddle a
+  # second. Setting them after the scrub is what makes the fixed date actually
+  # reach git.
   commit=$(printf '%s' "$msg" | \
-    GIT_AUTHOR_NAME=a2bp GIT_AUTHOR_EMAIL=a2bp@blueprint.invalid \
-    GIT_COMMITTER_NAME=a2bp GIT_COMMITTER_EMAIL=a2bp@blueprint.invalid \
-    GIT_AUTHOR_DATE="$basedate" GIT_COMMITTER_DATE="$basedate" \
-    bp_request_hermetic git -C "$bare" \
+    bp_request_hermetic env \
+      GIT_AUTHOR_NAME=a2bp GIT_AUTHOR_EMAIL=a2bp@blueprint.invalid \
+      GIT_COMMITTER_NAME=a2bp GIT_COMMITTER_EMAIL=a2bp@blueprint.invalid \
+      GIT_AUTHOR_DATE="$basedate" GIT_COMMITTER_DATE="$basedate" \
+    git -C "$bare" \
       -c core.hooksPath=/dev/null -c commit.gpgsign=false \
       -c core.autocrlf=false -c i18n.commitEncoding=UTF-8 \
       commit-tree "$tree" -p "$base") || return 1

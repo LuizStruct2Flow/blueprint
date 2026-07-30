@@ -148,6 +148,7 @@ jobs:
           bash tests/a2bp-contamination/test.sh
           bash tests/a2bp-request/test.sh
           bash tests/a2bp-build/test.sh
+          bash tests/a2bp-inputs/test.sh
           # Full, not --fast: these add the deliberate-hang cases, which spend a
           # real wall-clock timeout and so cannot fit the pre-push ceiling. They
           # are the ones that prove a black-holed remote cannot stall an agent

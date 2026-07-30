@@ -146,6 +146,14 @@ jobs:
           bash tests/bootstrap-contents/test.sh
           bash tests/pre-push-scanners/test.sh
           bash tests/a2bp-contamination/test.sh
+          bash tests/a2bp-request/test.sh
+          bash tests/a2bp-build/test.sh
+          # Full, not --fast: these add the deliberate-hang cases, which spend a
+          # real wall-clock timeout and so cannot fit the pre-push ceiling. They
+          # are the ones that prove a black-holed remote cannot stall an agent
+          # wake, so they must execute somewhere rather than nowhere.
+          bash tests/staleness/test.sh
+          bash tests/staleness/drift-integration.sh
           bash tests/pre-push-secrets/test.sh
           bash tests/signal-set/test.sh
           # CI only, deliberately: this one drives the real watcher through a

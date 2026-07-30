@@ -409,6 +409,108 @@ cmd_files() {
   echo "${C_DIM}Source of truth: scripts/blueprint MANAGED_FILES array.${C_RESET}"
 }
 
+# --- Is BLUEPRINT_ROOT itself behind its remote? ---
+# `drift` answers "does this project match the blueprint?" by comparing against
+# BLUEPRINT_ROOT — the operator's LOCAL checkout. So a green result can mean
+# "you match a copy of the blueprint that is six weeks old". While a2bp also
+# wrote to that same local copy the two commands at least agreed on what "the
+# blueprint" meant; once a2bp files against the remote, drift is the one command
+# that can be confidently wrong. Plan §3b.
+report_staleness() {
+  local root="$1" out status blocker offer remote count verified branch
+
+  local lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/staleness.sh"
+  if [ ! -r "$lib" ]; then
+    echo "  ${C_DIM}remote staleness: unknown (scripts/lib/staleness.sh missing)${C_RESET}"
+    return 0
+  fi
+  # shellcheck source=scripts/lib/staleness.sh
+  . "$lib"
+
+  # Under config v2 the branch is declared; under v1 there is nothing to read,
+  # so fall back to whatever the checkout is actually on. That is the right
+  # question anyway — "is YOUR checkout behind ITS remote?".
+  branch="${BLUEPRINT_BRANCH:-}"
+  if [ -z "$branch" ]; then
+    branch=$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || echo main)
+  fi
+
+  out=$(bp_staleness_assess "$root" "$branch") || return 0
+
+  # `|| true` is load-bearing under `set -e`, not defensive noise. Several of
+  # these keys are legitimately absent — `count` only appears on a verified
+  # behind-relation — and a grep that matches nothing exits 1, which aborts the
+  # whole CLI mid-report. That is exactly how the first version of this function
+  # produced no staleness line at all AND made `blueprint drift` exit 1 on a
+  # perfectly healthy project.
+  _f() { printf '%s\n' "$out" | grep "^$1=" | cut -d= -f2- || true; }
+  status=$(_f status)
+  blocker=$(_f blocker)
+  offer=$(_f offer)
+  remote=$(_f remote)
+  count=$(_f count)
+  verified=$(_f verified)
+
+  case "$status" in
+    current)
+      echo "  ${C_GREEN}✓ local checkout is level with $remote/$branch${C_RESET}"
+      return 0 ;;
+    unknown)
+      # Never silently imply "current". A failed probe is ignorance, and saying
+      # so is the entire point of the feature.
+      echo "  ${C_DIM}? staleness unknown ($blocker) — cannot confirm the checkout is current${C_RESET}"
+      return 0 ;;
+    ahead)
+      echo "  ${C_DIM}local checkout is ahead of $remote/$branch (unpushed commits)${C_RESET}"
+      return 0 ;;
+    diverged)
+      echo "  ${C_YELLOW}⚠ local checkout has DIVERGED from $remote/$branch${C_RESET}"
+      echo "  ${C_DIM}    resolve by hand — a merge or rebase is not a prompt${C_RESET}"
+      return 0 ;;
+  esac
+
+  # status=behind
+  if [ "$verified" = "yes" ] && [ -n "$count" ]; then
+    echo "  ${C_YELLOW}⚠ local checkout is $count commit(s) behind $remote/$branch${C_RESET}"
+  else
+    echo "  ${C_YELLOW}⚠ local checkout is behind $remote/$branch${C_RESET}"
+  fi
+
+  if [ "$offer" != "ff" ]; then
+    case "$blocker" in
+      dirty)        echo "  ${C_DIM}    not offering: uncommitted or untracked changes there${C_RESET}" ;;
+      detached)     echo "  ${C_DIM}    not offering: that checkout is on a detached HEAD${C_RESET}" ;;
+      wrong-branch) echo "  ${C_DIM}    not offering: that checkout is not on $branch${C_RESET}" ;;
+      *)            echo "  ${C_DIM}    not offering ($blocker)${C_RESET}" ;;
+    esac
+    return 0
+  fi
+
+  # `drift` runs at every agent wake, usually with no TTY. A blocking prompt
+  # there would hang the wake protocol — worse than the stale checkout it is
+  # reporting. So the WARNING is unconditional and the OFFER needs a human.
+  if [ "${BP_NO_PROMPT:-0}" = "1" ] || [ ! -t 0 ]; then
+    echo "  ${C_DIM}    fast-forward it with: git -C $root merge --ff-only${C_RESET}"
+    return 0
+  fi
+
+  local reply=""
+  printf '      fast-forward it now? [y/N] '
+  read -r reply || reply=""
+  case "$reply" in
+    y|Y)
+      if bp_staleness_fast_forward "$root" "$branch" "$remote"; then
+        echo "  ${C_GREEN}✓ fast-forwarded to $(git -C "$root" rev-parse --short HEAD)${C_RESET}"
+      else
+        # --ff-only re-checks against freshly fetched objects, so this is the
+        # normal, safe refusal when the remote moved since the probe.
+        echo "  ${C_YELLOW}fast-forward refused — the checkout is untouched${C_RESET}"
+      fi ;;
+    *)
+      echo "  ${C_DIM}    left alone${C_RESET}" ;;
+  esac
+}
+
 # --- Subcommand: drift ---
 cmd_drift() {
   # A-22: arm the pre-push gate here, BEFORE read_blueprint_source (which dies
@@ -429,6 +531,8 @@ cmd_drift() {
 
   CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
   echo "  blueprint HEAD: $CURRENT_SHA"
+
+  report_staleness "$BLUEPRINT_ROOT"
   echo
 
   if [ "$CURRENT_SHA" != "$BOOTSTRAP_SHA" ] && [ "$BOOTSTRAP_SHA" != "no-sha" ]; then

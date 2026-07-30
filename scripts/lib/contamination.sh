@@ -359,10 +359,24 @@ contamination_stage() {
 #                  production while the unit tests — which called this helper
 #                  directly with a real .md path — stayed green (Codex F2).
 #                  Defaults to CONTENT_FILE.
-#   ALIGN_FILE     contamination_stage's proven-provenance line list. See below.
+#   ALIGN_FILE     ACCEPTED AND IGNORED. It once carried contamination_stage's
+#                  proven-provenance line list, to exempt lines identical to the
+#                  blueprint's copy. A-07 R4-F2 removed the exemption: it was the
+#                  one path by which a misattributed line could wave
+#                  contamination through, so EVERY staged line is scanned.
+#                  The parameter and its old description survived the removal and
+#                  read as though the exemption still existed — which is how a
+#                  test came to assert a false-block that cannot happen (#7).
+#                  Kept only so existing 4-argument callers do not break.
+#
+#                  The cost is real and deliberate: a project whose name is a
+#                  common word blocks on its own generic prose and needs an
+#                  explicit `a2bp-allow`. That is the price of not having a
+#                  laundering path.
 contamination_scan() {
   local f="$1" proj_name="$2"
-  local logical="${3:-$1}" align_file="${4:-}"
+  local logical="${3:-$1}"
+  : "${4:-}"   # ALIGN_FILE — see above; deliberately unused
   local blocked=0
   local name_rx suppressed
   # `acme-flow` also appears as AcmeFlow / acme_flow / ACMEflow. Match any
@@ -386,8 +400,10 @@ contamination_scan() {
   case "$logical" in *.md) is_prose=1 ;; esac
 
   local ln text hit name
-  # Full lines by number, so the baseline exemption can be applied uniformly —
-  # the `grep -o` passes below only yield the matched token, not its line.
+  # Full lines by number — the `grep -o` passes below yield only the matched
+  # token, not its line, and a finding has to quote the line to be actionable.
+  # (This comment used to say "so the baseline exemption can be applied
+  # uniformly"; there is no baseline exemption — see ALIGN_FILE above.)
   local -a _lines
   mapfile -t _lines < "$f" 2>/dev/null || _lines=()
 

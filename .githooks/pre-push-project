@@ -115,19 +115,21 @@ fi
 # regressions local and move timeline/infrastructure behaviour to CI. The gate
 # had reached 27.6s of a hard 30s ceiling, which is not headroom.
 
-# A-07 — `blueprint a2bp` is the ONLY write path from a project into the generic
-# blueprint, and it is how BUG-002 and A-09 both got in. It must reverse-
-# substitute the project name and refuse to copy contaminated content. Unrun,
-# this regression would let the next literal-placeholder leak through the same
-# door that has already been used twice. ~0.2s.
-if [ -f tests/a2bp-contamination/test.sh ]; then
-  bash tests/a2bp-contamination/test.sh || {
-    echo "❌ tests/a2bp-contamination/test.sh failed (A-07)."
-    echo "   a2bp must restore {{PROJECT_NAME}} and block host paths / foreign"
-    echo "   state dirs, or one project's specifics fan out to every other."
-    exit 1
-  }
-fi
+# A-07 — tests/a2bp-contamination/ is now CI-ONLY, and that is a REDUCTION in
+# what blocks a push, recorded as A-39 in docs/doing/BUGS.md rather than left as
+# a quiet omission.
+#
+# It cost 2.3s while a2bp compared two files in place. Filing a request means 27
+# real transport runs against a local remote, which is 6.0s — and with A-38
+# (tests/agent-activity-bound/ alone consuming 18s of the 30s ceiling) there is
+# no 6s to give. What the gate keeps instead is tests/a2bp-e2e/, whose case #8
+# covers the leak-critical WIRING: a contaminated file blocks the whole request
+# and nothing is pushed. What moved to CI is the 41-assertion detection matrix —
+# which forms of the project name, which host paths, which suppression edge
+# cases. The door that BUG-002 and A-09 came through is still watched here; the
+# catalogue of what to watch for is watched in CI.
+#
+# This reverses the moment A-38 is resolved.
 
 # A2BP-PR — request identity. The branch name is derived from a length-framed
 # key, so a component's content can never be mistaken for a delimiter; without
@@ -189,6 +191,20 @@ if [ -f tests/staleness/drift-integration.sh ]; then
     echo "❌ tests/staleness/drift-integration.sh failed (a2bp PR flow §3b)."
     echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
     echo "   checkout, or change its exit status because of staleness."
+    exit 1
+  }
+fi
+
+# A2BP-PR — the assembly. Layered suites prove each part; this proves the whole
+# command, and carries the single most important assertion in the feature: the
+# blueprint's working tree and its main branch are never written to. a2bp used to
+# `cp` straight into that tree, which is how BUG-002 and A-09 fanned out to every
+# project. ~1.1s.
+if [ -f tests/a2bp-e2e/test.sh ]; then
+  bash tests/a2bp-e2e/test.sh || {
+    echo "❌ tests/a2bp-e2e/test.sh failed (a2bp PR flow)."
+    echo "   a2bp must file a request and must not be able to write into the"
+    echo "   blueprint, force-push a request branch, or file an empty one."
     exit 1
   }
 fi

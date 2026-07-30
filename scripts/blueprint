@@ -10,16 +10,24 @@
 #   blueprint pull [FILE...]    Pull blueprint-managed files forward into this
 #                               project. Interactive per file unless --yes.
 #                               With no FILE, pulls every file that's drifted.
-#   blueprint a2bp FILE [...]   Apply-to-blueprint: copy this project's version
-#                               of FILE(s) BACK to the blueprint working tree as
-#                               a staged change. You then review + commit + push
-#                               in the blueprint repo yourself.
+#   blueprint a2bp FILE [...]   Apply-to-blueprint: file a REQUEST that this
+#                               project's version of FILE(s) be adopted upstream
+#                               — a branch plus a pull request against the
+#                               blueprint's remote. It writes into no working
+#                               tree and cannot land anything. The blueprint
+#                               owner implements it: merging as-is, adapting, or
+#                               rewriting. Add --dry-run to see the diff without
+#                               filing.
+#   blueprint prs               List open a2bp requests, plus pushed branches
+#                               with no PR.
 #   blueprint files             List the blueprint-managed files (source of truth).
 #   blueprint help              This message.
 #
-# The "blueprint" location is read from .blueprint-source in the current
-# project (created by new-project.sh on bootstrap). All commands except
-# `files` and `help` must run from inside a struct2flow project.
+# `drift` and `pull` read the LOCAL blueprint checkout named by
+# blueprint_source in .blueprint-source. `a2bp` and `prs` talk to the REMOTE
+# named by blueprint_remote (config_version 2), because a request has to go
+# somewhere other people can see. All commands except `files` and `help` must
+# run from inside a struct2flow project.
 #
 # Add this directory to PATH so the command is callable as `blueprint`:
 #   export PATH="$HOME/sources/struct2flow/blueprint/scripts:$PATH"
@@ -696,102 +704,138 @@ cmd_pull() {
 }
 
 # --- Subcommand: a2bp ---
+#
+# Files a back-propagation REQUEST against the blueprint's remote: a branch plus
+# a pull request saying "this improvement proved itself downstream". It writes
+# into no working tree, and it cannot land anything.
+#
+# It used to `cp` straight into $BLUEPRINT_ROOT. That made every derived project
+# a writer to the generic blueprint, which is how BUG-002 and A-09 fanned out.
+# The guard that was bolted on afterwards (A-07) is still here and still runs,
+# but it is now advisory rather than the last line of defence: the last line is
+# that a request has to be read and implemented by the blueprint owner.
+#
+# Plan: docs/doing/PLAN-A2BP-PR.md.
 cmd_a2bp() {
-  read_blueprint_source
+  local libdir
+  libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 
-  # A-07: the contamination guard is REQUIRED, not best-effort. If the helper
-  # is missing we must refuse rather than silently degrade to the old bare
-  # `cp` — that is BUG-003's lesson applied here (a guard that cannot run is
-  # not a guard that passed).
-  local _bp_contam
-  _bp_contam="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/contamination.sh"
-  if [ ! -r "$_bp_contam" ]; then
-    die "scripts/lib/contamination.sh is missing — refusing to back-propagate unguarded (A-07)"
-  fi
-  # shellcheck source=scripts/lib/contamination.sh
-  . "$_bp_contam"
-
-  local force=0
-  local files=()
-  for arg in "$@"; do
-    case "$arg" in
-      --force) force=1 ;;
-      *)       files+=("$arg") ;;
-    esac
+  # Every one of these is REQUIRED, not best-effort. A missing helper must never
+  # degrade to a weaker path — that is BUG-003's lesson (a guard that cannot run
+  # is not a guard that passed), and here the weaker path is the direct write
+  # this command exists to remove.
+  local lib
+  for lib in contamination.sh request.sh request-build.sh request-config.sh \
+             request-inputs.sh request-file.sh; do
+    [ -r "$libdir/$lib" ] || die "scripts/lib/$lib is missing — refusing to file a request without it"
+    # shellcheck source=/dev/null
+    . "$libdir/$lib"
   done
 
-  if [ "${#files[@]}" -eq 0 ]; then
-    die "usage: blueprint a2bp [--force] FILE [FILE...]"
-  fi
+  local force=0 dry_run=0
+  local files=()
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --force)   force=1 ;;
+      --dry-run) dry_run=1 ;;
+      -*)        die "unknown option: $arg (usage: blueprint a2bp [--dry-run] [--force] FILE...)" ;;
+      *)         files+=("$arg") ;;
+    esac
+  done
+  [ "${#files[@]}" -gt 0 ] || die "usage: blueprint a2bp [--dry-run] [--force] FILE [FILE...]"
 
-  local proj_name
-  # ${PWD##*/}, not $(basename ...) — command substitution strips trailing
-  # newlines, so a directory legally named with one was silently seen as a
-  # different project (A-07 R6-F1). Parameter expansion preserves the bytes;
-  # bp_validate_project_name then refuses what sync cannot represent.
-  proj_name=${PWD##*/}
+  bp_request_check_git_version || return "$BP_RC_FAILED"
 
-  echo "${C_BOLD}Apply-to-blueprint${C_RESET}"
-  echo "  project:    $(pwd)  ${C_DIM}(name: $proj_name)${C_RESET}"
-  echo "  blueprint:  $BLUEPRINT_ROOT"
+  # --- configuration: WHERE this is filed (§8) ------------------------------
+  local cfg_out
+  cfg_out=$(bp_config_load ".blueprint-source") || return "$BP_RC_BLOCKED"
+  eval "$cfg_out"
+
+  # ${PWD##*/}, not $(basename): command substitution strips trailing newlines,
+  # so a directory legally named with one was silently seen as a different
+  # project (A-07 R6-F1).
+  local proj_name=${PWD##*/}
+  local root="$PWD"
+
+  echo "${C_BOLD}Apply-to-blueprint — filing a request${C_RESET}"
+  echo "  project:  $root  ${C_DIM}(name: $proj_name)${C_RESET}"
+  echo "  remote:   $BP_CFG_REMOTE"
+  echo "  branch:   $BP_CFG_BRANCH"
+  [ "$dry_run" -eq 1 ] && echo "  ${C_DIM}--dry-run: reads the remote, writes nothing${C_RESET}"
   [ "$force" -eq 1 ] && echo "  ${C_YELLOW}--force: contamination findings will NOT block${C_RESET}"
   echo
 
-  local copied=0
-  local blocked=0
-  local copied_files=()
-  for f in "${files[@]}"; do
-    # Validate that this file is blueprint-managed
-    local is_managed=0
-    for m in "${MANAGED_FILES[@]}"; do
-      if [ "$m" = "$f" ]; then is_managed=1; break; fi
-    done
-    if [ "$is_managed" -eq 0 ]; then
-      echo "  ${C_RED}reject${C_RESET}  $f"
-      echo "    ${C_DIM}not in the blueprint-managed list — see 'blueprint files'.${C_RESET}"
-      echo "    ${C_DIM}If this file SHOULD be blueprint-managed, add it to the MANAGED_FILES${C_RESET}"
-      echo "    ${C_DIM}array in scripts/blueprint first.${C_RESET}"
-      continue
-    fi
-    if [ ! -f "$f" ]; then
-      echo "  ${C_RED}skip${C_RESET}    $f  (not present in project)"
-      continue
-    fi
-    local bp="$BLUEPRINT_ROOT/$f"
-    if [ -f "$bp" ] && diff -q "$f" "$bp" >/dev/null 2>&1; then
-      echo "  ${C_DIM}same${C_RESET}    $f  (project version already matches blueprint)"
-      continue
-    fi
+  # --- input validation, before ANY remote contact (§5.1) -------------------
+  # So a mistyped argument cannot leave a branch pushed and the run aborted.
+  local managed_list
+  managed_list=$(mktemp)
+  printf '%s\n' "${MANAGED_FILES[@]}" > "$managed_list"
+  local validated
+  validated=$(bp_inputs_validate "$root" "$managed_list" "${files[@]}") || {
+    rm -f "$managed_list"
+    return "$BP_RC_BLOCKED"
+  }
+  rm -f "$managed_list"
 
-    # A-07 step 1 — reverse-substitute into a STAGING copy. The project's own
-    # file is never mutated: a2bp is a read of the project, not a rewrite of
-    # it. Files that implement the substitution carry the tokens as code, so
-    # they use the same _should_substitute exemption as the pull side —
-    # otherwise back-propagating the CLI would corrupt the CLI.
-    local staged
-    staged=$(mktemp)
-    if _should_substitute "$f"; then
-      # Provenance is positional: contamination_stage diffs the project file
-      # against a forward-substituted copy of $bp and restores placeholders
-      # only on lines the diff proves unchanged. See contamination.sh for why
-      # neither a global textual inverse nor a content-keyed lookup is sound.
-      # `|| stage_rc=$?`, never a bare call followed by `$?`: this script runs
-      # under `set -e`, which would abort the whole run on a staging failure
-      # before the rejection below could ever be printed.
+  # --- scratch, cleaned on EVERY exit path ---------------------------------
+  # BP_A2BP_SCRATCH is GLOBAL on purpose. As a `local` it is out of scope by the
+  # time the EXIT trap runs — the function has already returned — so the handler
+  # saw an empty value and silently cleaned nothing, leaking a bare clone per
+  # run. The trap fires long after the frame that would have owned the variable.
+  BP_A2BP_SCRATCH=$(bp_file_scratch) || return "$BP_RC_FAILED"
+  # shellcheck disable=SC2317
+  _a2bp_cleanup() {
+    [ -n "${BP_A2BP_SCRATCH:-}" ] || return 0
+    rm -rf "$BP_A2BP_SCRATCH" 2>/dev/null || \
+      echo "${C_YELLOW}could not remove $BP_A2BP_SCRATCH — clean it up by hand${C_RESET}" >&2
+    BP_A2BP_SCRATCH=""
+  }
+  trap _a2bp_cleanup EXIT INT TERM
+  local scratch="$BP_A2BP_SCRATCH"
+  local bare="$scratch/bare"
+
+  # --- fetch the base (transport) ------------------------------------------
+  local base
+  base=$(bp_file_fetch_base "$scratch" "$BP_CFG_REMOTE" "$BP_CFG_BRANCH") || return "$BP_RC_FAILED"
+  echo "  base:     $base"
+  echo
+
+  # --- base topology (§5.2) -------------------------------------------------
+  local paths=()
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] && paths+=("${line%%:*}")
+  done <<< "$validated"
+  bp_build_validate_base "$bare" "$base" "${paths[@]}" || return "$BP_RC_BLOCKED"
+
+  # --- stage + scan each file (A-07) ---------------------------------------
+  # The guard aligns the project's file against the BASE's version, fetched
+  # above — not against a local checkout, which may be arbitrarily stale. That
+  # is a real improvement the PR flow gets for free: staging is now computed
+  # against the bytes the request will actually be diffed against.
+  local specs=() blocked=0
+  local spec path mode staged basecopy
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    path=${spec%%:*}
+    mode=${spec#*:}
+
+    basecopy="$scratch/base.$(printf '%s' "$path" | tr '/' '_')"
+    bp_file_base_content "$bare" "$base" "$path" "$basecopy"
+
+    staged="$scratch/staged.$(printf '%s' "$path" | tr '/' '_')"
+    if _should_substitute "$path"; then
+      # `|| stage_rc=$?`, never a bare call: under `set -e` a staging failure
+      # would abort the run before the rejection below could be printed.
       local stage_rc=0
-      contamination_stage "$f" "$bp" "$proj_name" "$staged" || stage_rc=$?
+      contamination_stage "$root/$path" "$basecopy" "$proj_name" "$staged" || stage_rc=$?
       if [ "$stage_rc" -ne 0 ]; then
-        rm -f "$staged"
-        echo "  ${C_RED}reject${C_RESET}  $f  (staging failed — not copied)"
+        echo "  ${C_RED}reject${C_RESET}  $path  (staging failed)"
         if [ "$stage_rc" -eq 3 ]; then
-          # Round-trip verification failed: substituting the staged result no
-          # longer reproduces your file. Never copy in this state — it is the
-          # one condition under which staging could silently alter content.
           echo "    ${C_DIM}Round-trip check failed: substituting the staged result does not${C_RESET}"
           echo "    ${C_DIM}reproduce your file. Refusing rather than risk altering content.${C_RESET}"
         else
-          # e.g. `diff` lacks the GNU --*-line-format extensions, or failed
-          # outright. Refuse rather than fall through unrestored (R3-F3).
           echo "    ${C_DIM}'diff' must support --unchanged-line-format/--old-line-format/${C_RESET}"
           echo "    ${C_DIM}--new-line-format (GNU diffutils). Install GNU diffutils and re-run.${C_RESET}"
         fi
@@ -799,205 +843,245 @@ cmd_a2bp() {
         continue
       fi
     else
-      cp "$f" "$staged"
+      cp "$root/$path" "$staged"
     fi
 
-    # A-07 step 2 — scan the staged content, i.e. exactly the bytes that would
-    # land in the blueprint. Scanning the project's original would report the
-    # project name on every line and be useless.
-    #
-    # $f is the LOGICAL path: $staged is an extensionless mktemp name, and the
-    # prose-vs-script rule keys off the extension. Every staged line is
-    # scanned — there is no alignment-derived exemption, because that is the
-    # one path by which a misattributed line could wave contamination through
-    # (A-07 R4-F2).
-    local findings
-    findings=$(contamination_scan "$staged" "$proj_name" "$f") || true
-    local has_block=0
-    if printf '%s' "$findings" | grep -q '|BLOCK|'; then has_block=1; fi
-
+    # Scan the STAGED bytes — exactly what the request will carry. Scanning the
+    # project's original would report the project name on every line.
+    local findings has_block=0
+    findings=$(contamination_scan "$staged" "$proj_name" "$path") || true
+    printf '%s' "$findings" | grep -q '|BLOCK|' && has_block=1
     if [ -n "$findings" ]; then
       printf '%s\n' "$findings" | while IFS='|' read -r ln kind reason text; do
         local colour="$C_YELLOW"
         [ "$kind" = "BLOCK" ] && colour="$C_RED"
-        echo "    ${colour}${kind}${C_RESET}  $f:$ln — $reason"
+        echo "    ${colour}${kind}${C_RESET}  $path:$ln — $reason"
         echo "      ${C_DIM}${text}${C_RESET}"
       done
     fi
-
     if [ "$has_block" -eq 1 ] && [ "$force" -eq 0 ]; then
-      rm -f "$staged"
-      echo "  ${C_RED}reject${C_RESET}  $f  (contamination — not copied)"
+      echo "  ${C_RED}reject${C_RESET}  $path  (contamination)"
       echo "    ${C_DIM}Fix the lines above, or mark a known-benign one with an inline${C_RESET}"
-      echo "    ${C_DIM}'a2bp-allow: <why it is safe>' comment. Re-run with --force only when${C_RESET}"
-      echo "    ${C_DIM}you have read every finding — it waives the whole file.${C_RESET}"
+      echo "    ${C_DIM}'a2bp-allow: <why it is safe>' comment. --force waives the whole file.${C_RESET}"
       blocked=$((blocked+1))
       continue
     fi
+    [ "$has_block" -eq 1 ] && echo "  ${C_YELLOW}forced${C_RESET}  $path  ${C_YELLOW}(contamination waived)${C_RESET}"
 
-    mkdir -p "$(dirname "$bp")"
-    cp "$staged" "$bp"
-    rm -f "$staged"
-    if [ "$has_block" -eq 1 ]; then
-      echo "  ${C_YELLOW}forced${C_RESET}  $f → blueprint  ${C_YELLOW}(contamination waived by --force)${C_RESET}"
-    else
-      echo "  ${C_GREEN}copied${C_RESET}  $f → blueprint"
-    fi
-    copied=$((copied+1))
-    copied_files+=("$f")
-  done
+    specs+=("$path:$mode:$staged")
+  done <<< "$validated"
 
-  echo
-  if [ $copied -eq 0 ]; then
-    if [ "$blocked" -gt 0 ]; then
-      # Exit non-zero: a refused back-propagation must never read as success
-      # to a caller or to an agent parsing the exit code.
-      echo "${C_RED}✗ Nothing copied — $blocked file(s) blocked by the contamination guard.${C_RESET}"
-      return 1
-    fi
-    echo "${C_DIM}Nothing copied.${C_RESET}"
-    return 0
-  fi
+  # A partial request is not a smaller request — it is a different one, filed
+  # under a branch name that claims to describe what the operator asked for.
   if [ "$blocked" -gt 0 ]; then
-    echo "${C_RED}✗ $blocked file(s) blocked by the contamination guard (see above).${C_RESET}"
-  fi
-
-  echo "${C_GREEN}✓ Copied $copied file(s) into the blueprint working tree.${C_RESET}"
-  echo
-
-  # --- Strong "no context switch" header ---
-  echo "${C_BOLD}━━━ Back-propagation is NOT complete. ━━━${C_RESET}"
-  echo "${C_BOLD}Walk this from the CURRENT session (no new prompt in the blueprint repo):${C_RESET}"
-  echo "${C_DIM}  $BLUEPRINT_ROOT/docs/A2BP_PLAYBOOK.md${C_RESET}"
-  echo "${C_DIM}  The four §6.4 violations of the last week were all caused by deferring${C_RESET}"
-  echo "${C_DIM}  the doc-sync ripples to a 'next session in the blueprint'. Don't.${C_RESET}"
-  echo
-
-  # --- Per-file ripple hints (class-based; matches A2BP_PLAYBOOK.md Step A) ---
-  echo "${C_BOLD}Step A — Ripples to check (per file you just copied):${C_RESET}"
-  local touched_deck=0
-  local touched_recipe=0
-  local touched_principle=0
-  local touched_agent=0
-  local touched_sync=0
-  local touched_stack=0
-  local touched_gate=0
-  local touched_prepush=0
-  for f in "${copied_files[@]}"; do
-    case "$f" in
-      CLAUDE.md)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class A (Principle) or F (Agent layer) — also check:"
-        echo "        • docs/way-of-working.md intro slide + concern slides for any concern touched"
-        echo "        • the concern's recipe doc (OBSERVABILITY/SECURITY/INFRASTRUCTURE/DOCUMENTATION/etc.)"
-        echo "        • README.md hero concern table"
-        echo "        • CLAUDE.md §\"docs/way-of-working.md is the canonical pitch surface\" mirror list (10 items)"
-        touched_principle=1
-        touched_deck=1
-        ;;
-      docs/OBSERVABILITY.md|docs/SECURITY.md|docs/INFRASTRUCTURE.md|docs/DOCUMENTATION.md)
-        local concern
-        concern=$(basename "$f" .md)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class B (Recipe) — also check:"
-        echo "        • docs/way-of-working.md '<concern> — recipes per stack' slide"
-        echo "        • project_config_overview.md §\"$(echo $concern | tr A-Z a-z) stack\" if a new mechanism row was implied"
-        touched_recipe=1
-        touched_deck=1
-        ;;
-      docs/DoD.md)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class C (Gate) — also check:"
-        echo "        • docs/way-of-working.md Quality slides if §3 or §4 changed"
-        echo "        • project_config_dod.md if a new table row was implied"
-        echo "        • DoD §7 handoff checklist for cross-references"
-        touched_gate=1
-        ;;
-      .githooks/pre-push|Brewfile)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class D (Pre-push) — also check:"
-        echo "        • docs/DoD.md §4 (pre-push gate description)"
-        echo "        • CLAUDE.md §\"Before Every Push\""
-        echo "        • README.md \"What's in the blueprint\" tree if file list changed"
-        echo "        • project_config_dod.md §\"Pre-push gate — project commands\" table"
-        touched_prepush=1
-        ;;
-      scripts/blueprint|scripts/new-project.sh)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class E (Sync layer) — also check:"
-        echo "        • README.md §\"The sync model\""
-        echo "        • CLAUDE.md §\"Blueprint sync\""
-        echo "        • docs/A2BP_PLAYBOOK.md if the calling pattern changed"
-        touched_sync=1
-        ;;
-      AGENTS.md|AGENT_ROSTER.example.md|scripts/agent-activity.sh|scripts/start-codex-signal-watch.sh|scripts/start-gemini-signal-watch.sh|scripts/codex-signal-watch.sh|scripts/lib/state-dir.sh)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class F (Agent layer) — also check:"
-        echo "        • docs/way-of-working.md 'persona team — radio-over' slide"
-        echo "        • CLAUDE.md §\"docs/way-of-working.md is the canonical pitch surface\" item #9"
-        echo "        • README.md hero paragraph if framing changed"
-        touched_agent=1
-        touched_deck=1
-        ;;
-      STACK_DEFAULTS.md)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Class G (Stack default) — also check:"
-        echo "        • docs/way-of-working.md Architecture slide (slide 1 of the concern block)"
-        echo "        • CLAUDE.md §\"Architecture Principles\""
-        touched_stack=1
-        touched_deck=1
-        ;;
-      docs/way-of-working.md)
-        echo "  ${C_YELLOW}~${C_RESET} ${C_BOLD}$f${C_RESET}"
-        echo "      → Deck source changed — REBUILD the PDF (see Step C below)"
-        touched_deck=1
-        ;;
-      *)
-        echo "  ${C_DIM}~${C_RESET} ${C_DIM}$f${C_RESET}  (Class H cosmetic / unclassified — no ripples assumed; verify in playbook §A)"
-        ;;
-    esac
-  done
-
-  # --- Step C — Deck dance reminder if anything touched the deck ---
-  if [ "$touched_deck" -eq 1 ] || [ "$touched_principle" -eq 1 ]; then
     echo
-    echo "${C_BOLD}Step C — Deck dance:${C_RESET}"
-    echo "  1. Edit slide(s) in $BLUEPRINT_ROOT/docs/way-of-working.md"
-    echo "  2. Sweep count words: ${C_DIM}grep -niE '\\bsix\\b|\\bseven\\b|\\beight\\b' $BLUEPRINT_ROOT/{docs/way-of-working.md,README.md}${C_RESET}"
-    echo "  3. Rebuild PDF:        ${C_DIM}( cd $BLUEPRINT_ROOT && scripts/build-deck.sh )${C_RESET}"
-    echo "  4. Visual-check the changed slides (PNG render + Read tool)"
-    echo "  5. Stage the .md source AND the .pdf together"
+    echo "${C_RED}✗ $blocked file(s) blocked — nothing filed.${C_RESET}"
+    return "$BP_RC_BLOCKED"
   fi
 
-  # --- Step D — Commit + push from the originating session ---
-  echo
-  echo "${C_BOLD}Step D — Commit + push (run from THIS session):${C_RESET}"
-  echo "  ( cd $BLUEPRINT_ROOT &&"
-  echo "    git checkout .claude/settings.json &&    ${C_DIM}# revert any auto-allowlist pollution${C_RESET}"
-  echo "    git status &&"
-  echo "    git add <every-file-touched-including-PDF> &&"
-  echo "    git commit -m \"<conventional commit; list every ripple in the body>\" &&"
-  echo "    git push origin main"
-  echo "  )"
+  # --- drop no-ops (§5.1) ---------------------------------------------------
+  local kept drop_rc=0
+  kept=$(bp_inputs_drop_unchanged "$bare" "$base" "${specs[@]}") || drop_rc=$?
+  if [ "$drop_rc" -eq 2 ]; then
+    echo "${C_DIM}Nothing to request.${C_RESET}"
+    return "$BP_RC_NOTHING"
+  fi
+  [ "$drop_rc" -eq 0 ] || return "$BP_RC_FAILED"
+  specs=()
+  while IFS= read -r spec; do [ -n "$spec" ] && specs+=("$spec"); done <<< "$kept"
 
-  # --- Step E — Verify ---
-  echo
-  echo "${C_BOLD}Step E — Verify drift closed:${C_RESET}"
-  echo "  blueprint drift               ${C_DIM}# expect: '✓ All blueprint-managed files match the blueprint HEAD.'${C_RESET}"
-  echo "  blueprint pull --yes          ${C_DIM}# if any ripple files now drift forward${C_RESET}"
+  # --- identity + build ----------------------------------------------------
+  local key ref commit
+  key=$(bp_request_key "$BP_CFG_REMOTE" "$BP_CFG_BRANCH" "$base" "$proj_name" "${specs[@]}") \
+    || return "$BP_RC_FAILED"
+  ref=$(bp_request_ref "$proj_name" "$key") || return "$BP_RC_BLOCKED"
+  commit=$(bp_build_request "$bare" "$base" "$ref" "$proj_name" "${specs[@]}") \
+    || return "$BP_RC_FAILED"
 
   echo
-  echo "${C_DIM}Full playbook: $BLUEPRINT_ROOT/docs/A2BP_PLAYBOOK.md${C_RESET}"
+  echo "${C_BOLD}Request${C_RESET}"
+  echo "  branch:   $ref"
+  echo "  commit:   $commit"
+  echo "  files:    ${#specs[@]}"
+  echo
+  bp_request_hermetic git -C "$bare" --no-pager diff --stat "$base" "$commit" | sed 's/^/  /'
+  echo
 
-  # A-07: a partial run — some files copied, others refused — must still exit
-  # non-zero. An agent that only reads the exit code has to see the refusal.
-  [ "$blocked" -gt 0 ] && return 1
-  return 0
+  if [ "$dry_run" -eq 1 ]; then
+    echo "${C_DIM}--dry-run: nothing pushed. Full diff:${C_RESET}"
+    echo "  ${C_DIM}git -C $bare diff $base $commit${C_RESET}"
+    echo "${C_YELLOW}(the scratch clone is removed on exit; re-run without --dry-run to file)${C_RESET}"
+    return "$BP_RC_OK"
+  fi
+
+  # --- re-check the base, then push (§6.4 step 10) -------------------------
+  # Checking one ref and pushing another are not atomic. This closes the wide
+  # window and leaves one of round-trip size; the residual is surfaced by
+  # recording the base SHA in the PR body.
+  local tip
+  tip=$(bp_file_remote_tip "$BP_CFG_REMOTE" "$BP_CFG_BRANCH")
+  if [ -n "$tip" ] && [ "$tip" != "$base" ]; then
+    echo "${C_YELLOW}The blueprint moved while this request was being built — rebuilding once.${C_RESET}"
+    echo "  ${C_DIM}was $base, now $tip${C_RESET}"
+    base=$(bp_file_fetch_base "$scratch" "$BP_CFG_REMOTE" "$BP_CFG_BRANCH") || return "$BP_RC_FAILED"
+    bp_build_validate_base "$bare" "$base" "${paths[@]}" || return "$BP_RC_BLOCKED"
+    kept=$(bp_inputs_drop_unchanged "$bare" "$base" "${specs[@]}") || drop_rc=$?
+    if [ "$drop_rc" -eq 2 ]; then
+      echo "${C_DIM}Nothing to request against the new base.${C_RESET}"
+      return "$BP_RC_NOTHING"
+    fi
+    specs=()
+    while IFS= read -r spec; do [ -n "$spec" ] && specs+=("$spec"); done <<< "$kept"
+    key=$(bp_request_key "$BP_CFG_REMOTE" "$BP_CFG_BRANCH" "$base" "$proj_name" "${specs[@]}")
+    ref=$(bp_request_ref "$proj_name" "$key") || return "$BP_RC_BLOCKED"
+    commit=$(bp_build_request "$bare" "$base" "$ref" "$proj_name" "${specs[@]}") || return "$BP_RC_FAILED"
+
+    # Once. A second move means the blueprint is being actively pushed to, and
+    # looping would spin until it happened to be quiet.
+    tip=$(bp_file_remote_tip "$BP_CFG_REMOTE" "$BP_CFG_BRANCH")
+    if [ -n "$tip" ] && [ "$tip" != "$base" ]; then
+      echo "${C_RED}✗ The blueprint moved again. Re-run when it settles.${C_RESET}"
+      return "$BP_RC_FAILED"
+    fi
+  fi
+
+  bp_file_push "$bare" "$BP_CFG_REMOTE" "$ref" "$commit" || return "$BP_RC_FAILED"
+  echo "${C_GREEN}✓ pushed $ref${C_RESET}"
+
+  # --- the pull request ----------------------------------------------------
+  local slug
+  slug=$(printf '%s' "$BP_CFG_REMOTE" | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##')
+
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "${C_YELLOW}gh is not installed — the branch is pushed but no PR was opened.${C_RESET}"
+    echo "  ${C_DIM}Open one from $ref against $BP_CFG_BRANCH.${C_RESET}"
+    return "$BP_RC_PENDING"
+  fi
+
+  # Query for an existing PR in ANY state first. Re-filing a request the owner
+  # already closed is worse than failing: it re-spends the reviewer attention
+  # this whole design protects, and reads as though the decision was not seen.
+  local existing state url
+  existing=$(bp_file_existing_pr "$slug" "$ref") || true
+  if [ -n "$existing" ] && [ "$existing" != "	" ]; then
+    state=${existing%%	*}
+    url=${existing#*	}
+    case "$state" in
+      CLOSED|MERGED)
+        echo "${C_YELLOW}A PR for this exact request already exists and is $state:${C_RESET}"
+        echo "  $url"
+        echo "  ${C_DIM}Not re-filing. If the decision should be revisited, say so there.${C_RESET}"
+        return "$BP_RC_PENDING" ;;
+      *)
+        echo "${C_GREEN}✓ request already open:${C_RESET} $url"
+        return "$BP_RC_PENDING" ;;
+    esac
+  fi
+
+  local body
+  body=$(bp_file_pr_body "$proj_name" "$base" "$BP_CFG_REMOTE" "$BP_CFG_BRANCH" "${specs[@]}")
+  url=$(bp_request_transport_env gh pr create --repo "$slug" \
+          --base "$BP_CFG_BRANCH" --head "$ref" \
+          --title "a2bp: ${#specs[@]} file(s) from $proj_name" \
+          --body "$body" 2>&1) || {
+    echo "${C_YELLOW}The branch is pushed, but opening the PR failed:${C_RESET}"
+    printf '%s\n' "$url" | sed 's/^/  /'
+    echo "  ${C_DIM}Open one by hand from $ref, or re-run — the branch will be adopted.${C_RESET}"
+    return "$BP_RC_PENDING"
+  }
+
+  echo "${C_GREEN}✓ request filed:${C_RESET} $url"
+  echo
+  echo "${C_BOLD}This is a REQUEST, not a delivery.${C_RESET}"
+  echo "${C_DIM}  The blueprint owner implements it upstream — merging as-is, adapting,${C_RESET}"
+  echo "${C_DIM}  or rewriting — and decides which ripples travel with it. Merging as-is${C_RESET}"
+  echo "${C_DIM}  is legitimate BECAUSE someone judged it trivial; that judgement is the${C_RESET}"
+  echo "${C_DIM}  step that must not be skipped. See docs/A2BP_PLAYBOOK.md.${C_RESET}"
+
+  # Non-zero on purpose: filed is not landed, and a script must not be able to
+  # read "request opened" as "the blueprint now has this".
+  return "$BP_RC_PENDING"
+}
+
+# --- Subcommand: prs ---
+# What is currently asked of the blueprint owner.
+cmd_prs() {
+  local libdir
+  libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+  [ -r "$libdir/request-config.sh" ] || die "scripts/lib/request-config.sh is missing"
+  # shellcheck source=scripts/lib/request-config.sh
+  . "$libdir/request-config.sh"
+
+  local cfg_out
+  cfg_out=$(bp_config_load ".blueprint-source") || return 1
+  eval "$cfg_out"
+
+  local slug
+  slug=$(printf '%s' "$BP_CFG_REMOTE" | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##')
+
+  command -v gh >/dev/null 2>&1 || die "gh is not installed — cannot list requests"
+
+  echo "${C_BOLD}Open a2bp requests on $slug${C_RESET}"
+  echo
+
+  local prs rc=0
+  prs=$(gh pr list --repo "$slug" --state open --limit 100 \
+        --json number,headRefName,title,createdAt,isDraft,url \
+        --jq '.[] | select(.headRefName | startswith("a2bp/")) |
+              "\(.number)\t\(.headRefName)\t\(.createdAt)\t\(.isDraft)\t\(.url)"' 2>/dev/null) || rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    # An API failure must never print an empty list. "No open requests" and
+    # "I could not find out" are different answers, and only one of them means
+    # there is nothing to do.
+    echo "${C_RED}✗ Could not query GitHub — this list is INCOMPLETE, not empty.${C_RESET}"
+    return 1
+  fi
+
+  if [ -z "$prs" ]; then
+    echo "${C_DIM}No open a2bp requests.${C_RESET}"
+  else
+    local num ref created draft url project
+    while IFS=$'\t' read -r num ref created draft url; do
+      [ -n "$num" ] || continue
+      # a2bp/<project>/<digest> — project is at a fixed position, which is why
+      # bp_request_ref refuses a project name containing '/'.
+      project=$(printf '%s' "$ref" | cut -d/ -f2)
+      printf '  #%-5s %-20s %s' "$num" "$project" "${created%%T*}"
+      [ "$draft" = "true" ] && printf '  %s[draft]%s' "$C_YELLOW" "$C_RESET"
+      printf '\n    %s%s%s\n' "$C_DIM" "$url" "$C_RESET"
+    done <<< "$prs"
+  fi
+
+  # Branches pushed with no PR — the recoverable half of a failed filing, and
+  # invisible in any PR listing.
+  echo
+  local orphans
+  orphans=$(bp_request_transport_env git ls-remote --heads "$BP_CFG_REMOTE" 'refs/heads/a2bp/*' 2>/dev/null \
+            | awk '{print $2}' | sed 's#^refs/heads/##') || true
+  if [ -n "$orphans" ]; then
+    local open_refs
+    open_refs=$(printf '%s\n' "$prs" | cut -f2)
+    local o found=0
+    while IFS= read -r o; do
+      [ -n "$o" ] || continue
+      printf '%s\n' "$open_refs" | grep -qxF -- "$o" && continue
+      [ "$found" -eq 0 ] && echo "${C_YELLOW}Pushed branches with no open PR:${C_RESET}"
+      found=1
+      echo "  ${C_DIM}$o${C_RESET}"
+    done <<< "$orphans"
+    [ "$found" -eq 1 ] && echo "  ${C_DIM}(a closed PR, or a filing that failed after the push)${C_RESET}"
+  fi
 }
 
 # --- Subcommand: help ---
 cmd_help() {
-  sed -n '2,28p' "$0" | sed 's/^# //; s/^#//'
+  # The range must cover the header block above, which grew when a2bp became a
+  # request. A hardcoded end line silently truncates help the moment the header
+  # changes length, so it is derived from the last header line instead.
+  local last
+  last=$(grep -n '^# Or symlink it:' "$0" | head -1 | cut -d: -f1)
+  sed -n "2,$((last + 1))p" "$0" | sed 's/^# //; s/^#//'
 }
 
 # --- Dispatch ---
@@ -1006,7 +1090,13 @@ shift || true
 case "$SUBCMD" in
   drift)  cmd_drift "$@" ;;
   pull)   cmd_pull "$@" ;;
-  a2bp|push) cmd_a2bp "$@" ;;
+  # No `push` alias any more. It described what the command used to do — write
+  # into the blueprint — and the whole point of this change is that it no longer
+  # can. Left as an explicit refusal rather than removed silently, so anyone
+  # with it in a script or in muscle memory is told what replaced it.
+  a2bp)   cmd_a2bp "$@" ;;
+  push)   die "'blueprint push' is gone: a2bp files a REQUEST against the blueprint remote, it does not push into the blueprint. Use 'blueprint a2bp FILE...'" ;;
+  prs)    cmd_prs "$@" ;;
   files|list) cmd_files "$@" ;;
   help|--help|-h) cmd_help ;;
   *) die "unknown subcommand: $SUBCMD (try 'blueprint help')" ;;

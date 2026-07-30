@@ -50,26 +50,133 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 # has to be a real name rather than mktemp's random one.
 PROJ="$WORK/acme-flow"
 FAKE_BP="$WORK/blueprint"
+FAKE_REMOTE="$WORK/blueprint-remote.git"
 
-# Build a project + a stand-in blueprint. The stand-in only needs the target
-# path to exist — a2bp writes into $BLUEPRINT_ROOT/$f — so this stays cheap
-# (no `git archive` of the real tree).
+# Build a project + a stand-in blueprint, now with the remote a2bp files
+# against.
+#
+# a2bp used to `cp` into $BLUEPRINT_ROOT/$f, so "what did a2bp produce?" was
+# simply "read that file". It now pushes a request branch to a remote and never
+# writes into the blueprint at all, so the same question is answered by reading
+# the pushed branch — and "the blueprint is untouched" became an assertion worth
+# making rather than a precondition. The guard's behaviour is unchanged; only
+# where its output lands has moved, which is why every case below still reads
+# the same.
 setup() {
-  rm -rf "$PROJ" "$FAKE_BP"
+  rm -rf "$PROJ"
   mkdir -p "$PROJ/$(dirname "$CARRIER")" "$FAKE_BP/$(dirname "$CARRIER")"
+
+  # The git repositories are created ONCE and then reused. Re-initialising them
+  # per case cost ~0.35s each across ~15 calls and took this suite from 2.3s to
+  # 6.0s — a third of the whole 30s pre-push budget, spent re-creating fixtures
+  # that only ever needed their contents reset. What each case actually needs is
+  # a clean project, a known blueprint file, and no leftover request branches.
+  if [ ! -d "$FAKE_REMOTE" ]; then
+    git init -q --bare -b main "$FAKE_REMOTE"
+    (
+      cd "$FAKE_BP"
+      git init -q -b main .
+      git config user.email t@local
+      git config user.name t
+      git remote add origin "$FAKE_REMOTE"
+    ) 2>/dev/null
+  else
+    # Drop request branches from previous cases so a stale one cannot be
+    # mistaken for this case's output.
+    git -C "$FAKE_REMOTE" for-each-ref --format='%(refname)' 'refs/heads/a2bp/**' \
+      | while IFS= read -r r; do [ -n "$r" ] && git -C "$FAKE_REMOTE" update-ref -d "$r"; done
+    rm -rf "${FAKE_BP:?}/docs" "${FAKE_BP:?}/scripts"
+    mkdir -p "$FAKE_BP/$(dirname "$CARRIER")"
+  fi
   printf 'SENTINEL — blueprint copy untouched\n' > "$FAKE_BP/$CARRIER"
+
   cat >"$PROJ/.blueprint-source" <<EOF
+config_version   = 2
 blueprint_source = $FAKE_BP
+blueprint_remote = $FAKE_REMOTE
+blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
 }
 
-# Run a2bp inside the project; capture combined output and exit code.
-run_a2bp() {
-  ( cd "$PROJ" && "$BLUEPRINT_BIN" a2bp "$@" ) >"$WORK/out" 2>&1
-  echo $?
+# `**`, not `*`: for-each-ref matches with WM_PATHNAME, so a single `*` does not
+# cross '/' and would silently match nothing against a2bp/<project>/<digest>.
+req_ref() {
+  git -C "$FAKE_REMOTE" for-each-ref --format='%(refname:short)' 'refs/heads/a2bp/**' | head -1
 }
+
+# Run a2bp in DIR; capture combined output and exit code.
+#
+# Three things happen around the call, and they are what let all 27 cases below
+# stay written the way they were:
+#
+#   BEFORE — whatever the case wrote into $FAKE_BP/$CARRIER is committed and
+#   pushed as the base. Cases author the blueprint's side by writing that file,
+#   and that is still how they express it; it just has to reach the remote now,
+#   because the guard aligns against the FETCHED base rather than a local
+#   checkout.
+#
+#   AFTER — main is checked. Nothing a2bp does may move the branch every project
+#   pulls from. This used to be a precondition of the design ("it writes into
+#   the blueprint, so make sure it wrote the right thing"); it is now the
+#   headline invariant, so it is asserted on every single run rather than in the
+#   cases that happened to think of it.
+#
+#   THEN — the request branch's content is materialised back into
+#   $FAKE_BP/$CARRIER. After that file means "what this request PROPOSES the
+#   blueprint should become", which is exactly what every assertion below was
+#   already asking of it. A blocked run pushes no branch, so the SENTINEL
+#   survives and the "blueprint copy untouched" checks keep working unchanged.
+run_a2bp_in() {
+  local dir="$1"; shift
+  (
+    cd "$FAKE_BP" || exit 1
+    git add -A
+    git -c commit.gpgsign=false commit -q -m base --allow-empty
+    git push -q -f origin main
+  ) 2>/dev/null
+
+  local main_before refs_before
+  main_before=$(git -C "$FAKE_REMOTE" rev-parse main)
+  # Branches from earlier cases persist on the remote (not every case calls
+  # setup). Materialising "the first a2bp/* branch" therefore replayed a STALE
+  # request's content into $FAKE_BP and made unrelated cases fail on a diff they
+  # never produced. Only a branch this run created counts.
+  refs_before=$(git -C "$FAKE_REMOTE" for-each-ref --format='%(refname)' 'refs/heads/a2bp/**' | LC_ALL=C sort)
+
+  ( cd "$dir" && "$BLUEPRINT_BIN" a2bp "$@" ) >"$WORK/out" 2>&1
+  local rc=$?
+  # a2bp returns 3 (decision-pending) when a request IS filed — non-zero on
+  # purpose, so no script can read "filed" as "landed". Every case here asks a
+  # different question: did the contamination guard let this content through?
+  # Mapping the filed status onto 0 keeps each case expressing that question
+  # instead of restating a2bp's status table 27 times.
+  [ "$rc" -eq 3 ] && rc=0
+
+  if [ "$(git -C "$FAKE_REMOTE" rev-parse main)" != "$main_before" ]; then
+    fail "a2bp MOVED THE BLUEPRINT'S MAIN BRANCH — a request must never land"
+  fi
+
+  local refs_after new_ref
+  refs_after=$(git -C "$FAKE_REMOTE" for-each-ref --format='%(refname)' 'refs/heads/a2bp/**' | LC_ALL=C sort)
+  new_ref=$(comm -13 <(printf '%s\n' "$refs_before") <(printf '%s\n' "$refs_after") | head -1)
+
+  if [ -n "$new_ref" ]; then
+    # Materialise EVERY path the request proposes, not just $CARRIER — some
+    # cases file other files (scripts/new-project.sh) and would otherwise assert
+    # against a copy that was never updated.
+    local p
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      mkdir -p "$FAKE_BP/$(dirname "$p")"
+      git -C "$FAKE_REMOTE" show "$new_ref:$p" > "$FAKE_BP/$p" 2>/dev/null || true
+    done < <(git -C "$FAKE_REMOTE" diff --name-only main "$new_ref" 2>/dev/null)
+  fi
+  echo $rc
+}
+
+run_a2bp() { run_a2bp_in "$PROJ" "$@"; }
 
 bp_copy() { cat "$FAKE_BP/$CARRIER"; }
 bp_untouched() { grep -q '^SENTINEL' "$FAKE_BP/$CARRIER"; }
@@ -90,10 +197,16 @@ cat >"$FAKE_BP/$CARRIER" <<'EOF'
 Generic guidance for the {{PROJECT_NAME}} project.
 Environment override: {{PROJECT_NAME_UPPER}}_HOME
 EOF
+# The last line is load-bearing. Reverse-substitution with NO other change
+# produces content byte-identical to the base — which is a no-op request, and
+# a2bp now correctly refuses to file one. Without a genuine change alongside,
+# no branch is pushed and the restored bytes are unobservable, so this case
+# would assert nothing at all.
 cat >"$PROJ/$CARRIER" <<'EOF'
 # Mocks
 Generic guidance for the acme-flow project.
 Environment override: ACME_FLOW_HOME
+A genuinely new generic line.
 EOF
 rc=$(run_a2bp "$CARRIER")
 if [ "$rc" -ne 0 ]; then
@@ -239,15 +352,35 @@ else
 fi
 
 # ===========================================================================
-# 7. F1 (Codex four-eyes) — a one-word project name must not corrupt prose.
+# 7. F1 (Codex four-eyes) — a one-word project name must not CORRUPT prose.
 #    The first implementation ran a global `sed s/${proj_name}/{{PROJECT_NAME}}/g`
 #    and called it "the exact inverse". For a project legitimately named
 #    `blueprint`, every occurrence of the word "blueprint" in generic prose was
-#    silently rewritten — and copied through with no finding at all.
-#    Provenance-based reversal + the baseline exemption is the fix; this case
-#    pins both halves.
+#    silently rewritten — and copied through with no finding at all. Silent
+#    corruption is the defect; that is what this case exists to pin.
+#
+#    IT ALSO USED TO CLAIM the line was not false-blocked, and that half was
+#    passing vacuously. $WORD_PROJ was $WORK/blueprint, which is also $FAKE_BP —
+#    the project and the stand-in blueprint were the SAME DIRECTORY, so the
+#    second write clobbered the first, a2bp saw identical files, exited early as
+#    "same", and never ran the guard at all. The assertion then inspected the
+#    project's own file and found what the project had written.
+#
+#    Separated, the real behaviour appears: the line DOES block. A-07 R4-F2
+#    deliberately removed the alignment-derived exemption, because that was the
+#    one path by which a misattributed line could wave contamination through —
+#    so every staged line is scanned, including lines identical to the base.
+#    For a project whose name is a common word, generic prose containing that
+#    word therefore blocks and needs an explicit `a2bp-allow`. That is a real
+#    ergonomic cost of the R4-F2 decision, now visible instead of hidden.
+#
+#    So this case pins both halves as they actually are: it BLOCKS rather than
+#    corrupting, and under --force the prose survives verbatim.
 # ===========================================================================
-WORD_PROJ="$WORK/blueprint"
+setup
+mkdir -p "$WORK/w"
+WORD_PROJ="$WORK/w/blueprint"
+rm -rf "$WORD_PROJ"
 mkdir -p "$WORD_PROJ/docs/mocks" "$FAKE_BP/docs/mocks"
 cat >"$FAKE_BP/$CARRIER" <<'EOF'
 # Mocks
@@ -259,22 +392,44 @@ The blueprint documentation explains blueprint sync.
 A new generic line about mockups.
 EOF
 cat >"$WORD_PROJ/.blueprint-source" <<EOF
+config_version   = 2
 blueprint_source = $FAKE_BP
+blueprint_remote = $FAKE_REMOTE
+blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-( cd "$WORD_PROJ" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  fail "#7 a2bp rejected a one-word-named project's generic prose (exit $rc) — F1 came back as a false BLOCK; see $WORK/out"
-elif grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
-  fail "#7 CORRUPTION: the word 'blueprint' in generic prose was rewritten to {{PROJECT_NAME}} — this is Codex F1, the global-sed inverse"
-elif ! grep -q 'The blueprint documentation explains blueprint sync.' "$FAKE_BP/$CARRIER"; then
-  fail "#7 the unchanged prose line did not survive intact: $(cat "$FAKE_BP/$CARRIER")"
-elif ! grep -q 'A new generic line' "$FAKE_BP/$CARRIER"; then
-  fail "#7 the newly added generic line was not copied"
+rc=$(run_a2bp_in "$WORD_PROJ" "$CARRIER")
+if [ "$rc" -eq 0 ]; then
+  fail "#7 expected a BLOCK for a project named after a common word; a2bp filed the request instead"
+elif ! grep -q 'project name survived reverse-substitution' "$WORK/out"; then
+  fail "#7 blocked, but not for the name-collision reason: $(head -5 "$WORK/out")"
+elif grep -q 'A new generic line' "$FAKE_BP/$CARRIER"; then
+  # bp_untouched looks for the SENTINEL, which this case deliberately replaced
+  # with prose — so the leak has to be detected by the request's own new line
+  # arriving, not by the sentinel's absence.
+  fail "#7 the blocked content reached the blueprint anyway"
 else
-  pass "#7 a one-word project name does not corrupt prose, and does not false-block it either (F1)"
+  pass "#7 a common-word project name blocks its own generic prose, naming the line (R4-F2's cost, made visible)"
+fi
+
+# --- 7b. THE HALF THAT MATTERS: no silent corruption. -----------------------
+# Under --force the request is filed, so the staged bytes become observable —
+# and the prose must be verbatim. A global-sed inverse would have rewritten
+# every "blueprint" to {{PROJECT_NAME}} here and shipped it with no finding at
+# all, which is the F1 defect. Blocking is an inconvenience; this would be
+# corruption.
+rc=$(run_a2bp_in "$WORD_PROJ" --force "$CARRIER")
+if [ "$rc" -ne 0 ]; then
+  fail "#7b --force did not file the request (exit $rc) — see $WORK/out"
+elif grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
+  fail "#7b CORRUPTION: the word 'blueprint' in generic prose was rewritten to {{PROJECT_NAME}} — this is Codex F1, the global-sed inverse"
+elif ! grep -q 'The blueprint documentation explains blueprint sync.' "$FAKE_BP/$CARRIER"; then
+  fail "#7b the unchanged prose line did not survive intact: $(cat "$FAKE_BP/$CARRIER")"
+elif ! grep -q 'A new generic line' "$FAKE_BP/$CARRIER"; then
+  fail "#7b the newly added generic line was not filed"
+else
+  pass "#7b under --force the prose survives verbatim — no global-sed corruption (F1)"
 fi
 
 # ===========================================================================
@@ -306,12 +461,14 @@ mkdir -p "$RX_PROJ/docs/mocks"
 printf '# Mocks\nGeneric line mentioning acmeXflow which is unrelated.\n' > "$FAKE_BP/$CARRIER"
 printf '# Mocks\nGeneric line mentioning acmeXflow which is unrelated.\n' > "$RX_PROJ/$CARRIER"
 cat >"$RX_PROJ/.blueprint-source" <<EOF
+config_version   = 2
 blueprint_source = $FAKE_BP
+blueprint_remote = $FAKE_REMOTE
+blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-( cd "$RX_PROJ" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
-rc=$?
+rc=$(run_a2bp_in "$RX_PROJ" "$CARRIER")
 if grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
   fail "#9 'acmeXflow' was treated as a match for project 'acme.flow' — the name is being compiled as a regex"
 elif [ "$rc" -ne 0 ] && grep -q 'acmeXflow' "$WORK/out"; then
@@ -357,8 +514,21 @@ else
 fi
 
 # ===========================================================================
-# 12. F3 — multi-file partial failure: the clean file copies, the dirty one is
-#     refused, and the overall exit code still reports the refusal.
+# 12. F3 — multi-file with one contaminated file: NOTHING is filed.
+#
+#     THIS EXPECTATION IS INVERTED FROM WHAT IT USED TO BE, deliberately. While
+#     a2bp copied into a working tree, letting the clean file through and
+#     refusing the dirty one was strictly better than refusing both — the
+#     operator kept half the work and the blueprint stayed clean.
+#
+#     A request is not a copy. It is filed as ONE unit, under one branch, with
+#     one PR title naming what the operator asked for. Filing the clean subset
+#     would file something they did not ask for, described by a title that says
+#     they did, and a reviewer would have no way to see what was dropped. So the
+#     whole request is refused and nothing is pushed.
+#
+#     What survives unchanged is the part that always mattered: the contaminated
+#     file never reaches the blueprint, and the exit code reports the refusal.
 # ===========================================================================
 setup
 mkdir -p "$PROJ/docs/config" "$FAKE_BP/docs/config"
@@ -366,14 +536,16 @@ printf 'SENTINEL2\n' > "$FAKE_BP/docs/config/README.md"
 printf '# Mocks\nPerfectly generic guidance.\n' > "$PROJ/$CARRIER"
 printf '# Config\nSee /home/someuser/notes for details.\n' > "$PROJ/docs/config/README.md"
 rc=$(run_a2bp "$CARRIER" docs/config/README.md)
-if bp_untouched; then
-  fail "#12 the CLEAN file was not copied — one bad file aborted the whole run"
+if [ "$rc" -eq 0 ]; then
+  fail "#12 a request containing a contaminated file was FILED — an agent reading only the exit code would never see the refusal"
 elif ! grep -q '^SENTINEL2' "$FAKE_BP/docs/config/README.md"; then
-  fail "#12 the CONTAMINATED file was copied"
-elif [ "$rc" -eq 0 ]; then
-  fail "#12 partial run exited 0 — an agent reading only the exit code would never see the refusal"
+  fail "#12 the CONTAMINATED file reached the blueprint"
+elif ! bp_untouched; then
+  fail "#12 the clean file was filed anyway — a partial request is a DIFFERENT request, filed under a title claiming otherwise"
+elif ! grep -q 'someuser/notes' "$WORK/out"; then
+  fail "#12 the finding that caused the refusal was not reported"
 else
-  pass "#12 partial multi-file run: clean copies, dirty refused, exit code reports it (F3)"
+  pass "#12 one contaminated file refuses the WHOLE request; nothing is filed (F3)"
 fi
 
 # ===========================================================================
@@ -595,12 +767,16 @@ fi
 #     an unchanged line; this proves restoration on an incomplete final line.
 # ===========================================================================
 setup
-printf '{{PROJECT_NAME}}' > "$FAKE_BP/$CARRIER"
-printf 'acme-flow' > "$PROJ/$CARRIER"
+# A preceding line that genuinely CHANGES, so this is a real request rather than
+# a no-op — restoration alone produces content identical to the base, which a2bp
+# now refuses to file, leaving nothing to inspect. The property under test is
+# unaffected: the last line is still incomplete and still carries the name.
+printf 'first line\n{{PROJECT_NAME}}' > "$FAKE_BP/$CARRIER"
+printf 'first line, edited\nacme-flow'  > "$PROJ/$CARRIER"
 rc=$(run_a2bp "$CARRIER")
 if [ "$rc" -ne 0 ]; then
   fail "#20 an incomplete final line blocked (exit $rc) — the record protocol is inheriting the input's line endings (Codex R3-F2); see $WORK/out"
-elif [ "$(cat "$FAKE_BP/$CARRIER")" != '{{PROJECT_NAME}}' ]; then
+elif [ "$(tail -1 "$FAKE_BP/$CARRIER")" != '{{PROJECT_NAME}}' ]; then
   fail "#20 the placeholder was not restored on an incomplete final line: '$(cat "$FAKE_BP/$CARRIER")'"
 elif [ "$(tail -c1 "$FAKE_BP/$CARRIER" | wc -l)" -ne 0 ]; then
   fail "#20 a trailing newline was added that the operator never wrote"
@@ -646,19 +822,35 @@ fi
 #     Drives the real CLI: a2bp must restore the placeholder, and the staged
 #     bytes must round-trip through THE primitive back to the project's file.
 # ===========================================================================
-for META in 'foo\bar' 'a&b'; do
+#     THE SET IS SPLIT, and the split is a real constraint the request flow
+#     introduces rather than a test convenience. The branch name carries the
+#     project name so a reviewer can see whose request it is, and the plan
+#     forbids slugging it into something valid — a slug that differs from the
+#     real name destroys exactly the provenance the ref exists to carry. So a
+#     project whose basename cannot be a git ref component can file no request
+#     at all. `foo\bar` and `x*y` are legal directory names and legal project
+#     names for pull, and are NOT legal refs. They must be refused explicitly,
+#     naming the reason — which is #22b. Only ref-legal names can round-trip.
+for META in 'a&b' 'p.q'; do
   MP="$WORK/$META"
   rm -rf "$MP"
   mkdir -p "$MP/docs/mocks" "$FAKE_BP/docs/mocks"
   printf '# Mocks\nName={{PROJECT_NAME}}\n' > "$FAKE_BP/$CARRIER"
-  printf '# Mocks\nName=%s\n' "$META" > "$MP/$CARRIER"
+  # The added line is load-bearing. With ONLY the name line, restoring the
+  # placeholder makes the staged content byte-identical to the base, a2bp
+  # correctly reports "nothing to request", and no branch is pushed — leaving
+  # the staged bytes unobservable and this case asserting nothing. A genuine
+  # change alongside keeps the restoration visible in a real request.
+  printf '# Mocks\nName=%s\nA new generic line.\n' "$META" > "$MP/$CARRIER"
   cat >"$MP/.blueprint-source" <<EOF
+config_version   = 2
 blueprint_source = $FAKE_BP
+blueprint_remote = $FAKE_REMOTE
+blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-  ( cd "$MP" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
-  rc=$?
+  rc=$(run_a2bp_in "$MP" "$CARRIER")
   if [ "$rc" -ne 0 ]; then
     fail "#22[$META] a2bp exited $rc for a legal basename containing a substitution metacharacter — see $WORK/out"
   elif grep -qF "$META" "$FAKE_BP/$CARRIER"; then
@@ -666,7 +858,37 @@ EOF
   elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
     fail "#22[$META] placeholder not restored: $(cat "$FAKE_BP/$CARRIER")"
   else
-    pass "#22[$META] a metacharacter-bearing project name round-trips through one substitution semantics (R5-F1)"
+    pass "#22[$META] a ref-legal metacharacter name round-trips through one substitution semantics (R5-F1)"
+  fi
+done
+
+# --- 22b. A name that cannot be a ref refuses EXPLICITLY. -------------------
+# The failure mode being excluded is silence: mangling the name into something
+# ref-legal, or failing with a raw git error that names neither the project nor
+# the reason. Either would leave the operator guessing why their project alone
+# cannot file requests.
+for META in 'foo\bar' 'x*y'; do
+  MP="$WORK/nr-$RANDOM"
+  rm -rf "$MP"; mkdir -p "$MP/$META/docs/mocks"
+  printf '# Mocks\nName={{PROJECT_NAME}}\n' > "$FAKE_BP/$CARRIER"
+  printf '# Mocks\nName=%s\nA new generic line.\n' "$META" > "$MP/$META/$CARRIER"
+  cat >"$MP/$META/.blueprint-source" <<EOF
+config_version   = 2
+blueprint_source = $FAKE_BP
+blueprint_remote = $FAKE_REMOTE
+blueprint_branch = main
+bootstrap_sha    = test-fixture
+bootstrap_date   = test-fixture
+EOF
+  rc=$(run_a2bp_in "$MP/$META" "$CARRIER")
+  if [ "$rc" -eq 0 ]; then
+    fail "#22b[$META] a project name that cannot be a ref component filed a request anyway — the name must have been mangled"
+  elif ! grep -q "not a valid branch name" "$WORK/out"; then
+    fail "#22b[$META] refused without naming the ref reason: $(head -3 "$WORK/out")"
+  elif ! grep -qF "$META" "$WORK/out"; then
+    fail "#22b[$META] the refusal does not name the project"
+  else
+    pass "#22b[$META] a name that cannot be a ref component is refused, naming both the name and the reason"
   fi
 done
 
@@ -700,7 +922,11 @@ done
 #     expects `foo\bar` — the placeholder cannot be restored and the literal
 #     is left behind.
 # ===========================================================================
-for META in 'foo\bar' 'a&b'; do
+# Ref-legal names only, for the reason given at #22: a name that cannot be a
+# ref component never reaches the round-trip, so testing one here would only
+# re-assert #22b at the wrong layer. `a&b` still crosses the boundary this case
+# exists for — pull's substitution against a2bp's verifier.
+for META in 'a&b' 'p.q'; do
   RP="$WORK/rt-$$"
   rm -rf "$RP"
   mkdir -p "$RP"
@@ -709,7 +935,10 @@ for META in 'foo\bar' 'a&b'; do
   printf '# Mocks\nName={{PROJECT_NAME}}\nUpper={{PROJECT_NAME_UPPER}}\n' > "$FAKE_BP/$CARRIER"
   cp "$FAKE_BP/$CARRIER" "$WORK/bp-original"
   cat >"$MP/.blueprint-source" <<EOF
+config_version   = 2
 blueprint_source = $FAKE_BP
+blueprint_remote = $FAKE_REMOTE
+blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
@@ -718,14 +947,20 @@ EOF
     fail "#24[$META] pull did not substitute the name literally: $(sed -n '2p' "$MP/$CARRIER" 2>/dev/null)"
     continue
   fi
-  ( cd "$MP" && "$BLUEPRINT_BIN" a2bp "$CARRIER" ) >"$WORK/out" 2>&1
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    fail "#24[$META] a2bp refused an untouched pull→a2bp round-trip (exit $rc) — pull and the verifier disagree on this name (R5-F1); see $WORK/out"
+  # Under the request flow, agreement between pull and a2bp shows up as a
+  # distinct, stronger signal than it used to: the round-trip is DETECTED as a
+  # no-op and refused with "nothing to request" (6), instead of quietly filing a
+  # request whose diff happens to be empty. Disagreement would show up as a
+  # block (4) or as a filed request that changes the file — both caught below.
+  rc=$(run_a2bp_in "$MP" "$CARRIER")
+  if [ "$rc" -eq 4 ]; then
+    fail "#24[$META] a2bp BLOCKED an untouched pull→a2bp round-trip — pull and the verifier disagree on this name (R5-F1); see $WORK/out"
+  elif [ "$rc" -ne 6 ]; then
+    fail "#24[$META] expected 'nothing to request' (6) for an untouched round-trip, got $rc; see $WORK/out"
   elif ! diff -q "$WORK/bp-original" "$FAKE_BP/$CARRIER" >/dev/null 2>&1; then
     fail "#24[$META] pull→a2bp was not a no-op: $(diff "$WORK/bp-original" "$FAKE_BP/$CARRIER" | head -4)"
   else
-    pass "#24[$META] pull→a2bp round-trips byte-identically (R5-F1, the cross-boundary case)"
+    pass "#24[$META] pull→a2bp round-trips byte-identically and is recognised as a no-op (R5-F1)"
   fi
 done
 

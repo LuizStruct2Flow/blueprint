@@ -793,10 +793,41 @@ If yes:
 blueprint a2bp docs/DoD.md
 ```
 
-`a2bp` copies the project's version into the blueprint working tree
-(staged, not committed). It also prints a class-based ripple checklist
-naming every file that has to be touched in the same commit and a
-strong reminder pointing at the playbook below.
+`a2bp` pushes a branch to the blueprint's remote and opens a pull request
+against it. It writes into no working tree — not yours, not the blueprint's —
+and it cannot land anything.
+
+It used to `cp` the file straight into the blueprint working tree, which made
+every derived project a writer to the generic blueprint. That is the mechanism
+by which **BUG-002** and **A-09** fanned out to every project on their next
+pull, and it is why the write path is gone rather than merely guarded.
+
+The command needs `config_version = 2` in `.blueprint-source`:
+
+```
+config_version   = 2
+blueprint_remote = git@github.com:<owner>/<blueprint>.git
+blueprint_branch = main
+```
+
+A version 1 config (no `config_version`) refuses and prints those lines. The
+remote is **never inferred** from the local checkout's `origin`: that would be
+right often enough to be trusted and silently wrong for anyone whose checkout
+tracks a fork, and pushing a request to the wrong repository is not a
+recoverable mistake.
+
+Useful shapes:
+
+```bash
+blueprint a2bp --dry-run docs/DoD.md   # resolve the base, show the diff, push nothing
+blueprint a2bp docs/DoD.md             # file the request
+blueprint prs                          # what is currently asked of the owner
+```
+
+**Exit statuses are distinct, and filing is deliberately non-zero** — filed is
+not landed, and no script may read "PR opened" as "the blueprint has this":
+`0` dry-run clean, `3` filed and awaiting a decision, `4` a guard refused
+(nothing filed), `5` operational failure, `6` nothing to request.
 
 **A back-propagation is a REQUEST, not a delivery.** What travels upstream is a
 proposal that an improvement proved itself downstream; the blueprint owner then
@@ -818,18 +849,33 @@ quietly:
 - **Merging as-is is legitimate *because someone judged it trivial*.** That
   judgement is the step that must not be skipped.
 
-**It is guarded (A-07).** Before anything lands, `a2bp` restores
-`{{PROJECT_NAME}}` on the lines a positional diff against the blueprint's own
-copy proves unchanged, then scans **every** staged line for host home paths,
-literal per-project state dirs, and any project name that survived. Findings
-block the copy and exit non-zero.
+**It is guarded (A-07), and the guard is now advisory.** Before a request is
+filed, `a2bp` restores `{{PROJECT_NAME}}` on the lines a positional diff against
+the **fetched base** proves unchanged, then scans **every** staged line for host
+home paths, literal per-project state dirs, and any project name that survived.
+Findings stop the request and exit non-zero.
 
-The promise is deliberately narrow: on the **default path** a recognized
-finding cannot land, and every override — `--force`, or a justified inline
-`a2bp-allow` — is loud and auditable. It is *not* a claim that contamination
-is impossible; the scan is heuristic and the overrides are intentional. One
-property does hold unconditionally: staging never changes the file's meaning
-under substitution, and that is asserted rather than assumed.
+Advisory *with respect to the blueprint*, not toothless with respect to you: it
+no longer decides what reaches the blueprint, because a person does. That is why
+**there is no `--force`**. It existed to waive the guard and copy anyway, which
+was coherent while a2bp landed bytes; now the reviewer is the override. A finding
+has exactly two answers — fix it, or mark the line with a justified
+`a2bp-allow: <why it is safe>`. If the guard is wrong, that is a bug in
+`contamination.sh` and gets fixed as one. Passing `--force` is refused loudly
+rather than ignored.
+
+The promise is deliberately narrow: on the **default path** a recognized finding
+cannot be filed. It is *not* a claim that contamination is impossible — the scan
+is heuristic, and `a2bp-allow` plus the NOTICE class let things through by
+design. One property holds unconditionally: staging never changes the file's
+meaning under substitution, and that is asserted rather than assumed.
+
+**A known cost, stated because it is deliberate:** every staged line is scanned,
+including lines identical to the base. The alignment-derived exemption was
+removed (A-07 R4-F2) because it was the one path by which a misattributed line
+could wave contamination through. So a project named after a common word blocks
+on its own generic prose and needs an explicit `a2bp-allow`. That is the price
+of having no laundering path.
 
 The restore is **alignment-based, not a search-and-replace** — there is no
 general textual inverse of the substitution, and no content-based shortcut
@@ -838,25 +884,31 @@ word that also occurs in prose (for a project named `blueprint`, every
 occurrence). Matching on line content fails the same way one level up. So
 lines you edited are left alone, and if one still carries the project name the
 guard blocks and you write the placeholder explicitly. Mark a known-benign
-line with an inline `a2bp-allow: <why it is safe>` comment (the justification
-is required); `--force` waives the whole file and prints everything it waved
-through. This guard exists because `a2bp` is how **BUG-002** and **A-09** got
+line with an inline `a2bp-allow: <why it is safe>` comment — the justification
+is required. This guard exists because `a2bp` is how **BUG-002** and **A-09** got
 into the blueprint — an unguarded upstream door means one project's specifics
 fan out to every other project on their next pull.
 
-> **Do NOT open a new prompt in the blueprint repo to "do the docs".**
-> The agent doing `a2bp` is the agent who completes the
-> back-propagation, from the same session. You already have
-> `$BLUEPRINT_ROOT` from `.blueprint-source`; you can `cat`, `edit`,
-> and `git -C $BLUEPRINT_ROOT ...` from here. Splitting the work
-> across two prompts is exactly how doc-sync slips (the §6.4 rule
-> self-violated four times in a single week from this habit).
+**One constraint the request flow adds.** The branch carries your project's name
+so a reviewer can see whose request it is, and the name is never slugged into
+something valid — a slug that differs from the real name destroys exactly the
+provenance the branch exists to carry. So a project whose directory basename
+cannot be a git ref component (`foo\bar`, `x*y`) can file no request at all, and
+is told so explicitly. Rename the directory, or make the change in the blueprint
+directly.
 
-The full post-`a2bp` procedure — classify the change, walk the
-ripples, do the deck dance, commit + push from `$BLUEPRINT_ROOT`,
-verify drift closed — lives in [`docs/A2BP_PLAYBOOK.md`](docs/A2BP_PLAYBOOK.md).
-The `blueprint a2bp` output points at it and includes class hints for
-every file you copied. Read both before touching `git commit`.
+**The ripples are the implementer's, not the requester's.** Deciding which deck
+slides, recipe docs and README rows travel with a change is part of implementing
+it in the blueprint — so it belongs to whoever does that, in that session, with
+the blueprint's whole tree in front of them. Filing a request does not put you on
+the hook for the blueprint's doc-sync, and it does not let the implementer skip
+it: [`docs/A2BP_PLAYBOOK.md`](docs/A2BP_PLAYBOOK.md) addresses them, and its
+"same session, no context switch" rule applies to the implementation session.
+
+See what is currently asked of the blueprint owner with `blueprint prs`. It
+reports drafts and closed-but-branch-present distinctly, and on a `gh` API
+failure says the list is **incomplete** rather than printing an empty one that
+reads as "nothing pending".
 
 **A change is generic** if it would benefit every struct2flow project
 (tighter rule, better wording, missing capability). **A change is

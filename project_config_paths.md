@@ -74,3 +74,32 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 Arm it with a `Monitor` whose command emits only on change, e.g. compare
 `cksum` and echo the newest `### ` header when it moves. Emit on *change*,
 never a raw tail — an unfiltered board is noise and gets muted.
+
+## Back-propagation trust boundary (a2bp)
+
+`blueprint a2bp` pushes a branch and opens a pull request against the blueprint's
+remote (`blueprint_remote` in `.blueprint-source`). **That is sound only while
+every derived project belongs to the same owner as the blueprint.**
+
+The property being relied on is not the push permission — it is that the person
+who filed the request and the person who reviews it are accountable to the same
+standard. `a2bp` establishes **no trusted source-project identity**. The branch
+name carries the project's directory basename, and a directory basename is a
+claim, not a credential: nothing prevents a project from naming itself anything,
+and nothing verifies that the content came from where the branch says.
+
+Today that does not matter, because everything filing requests is ours. The first
+externally-owned project changes it, and these are the things that break:
+
+| Assumption | What breaks when a project is externally owned |
+|---|---|
+| Push access to the blueprint remote is fine to grant | Direct branch-push to a shared repo is no longer acceptable — this becomes a fork-and-PR flow. |
+| The branch's project name is trustworthy | It never was verifiable; it just did not need to be. Provenance has to come from the PR author, not the ref. |
+| The contamination guard ran | It runs on the **requester's** machine. An external requester can simply not run it, or run a patched copy. Receiver-side enforcement (required checks on the request branch) becomes necessary rather than optional. |
+| A reviewer's judgement can be taken on trust | The review is the only gate that decides what lands. Whose review counts becomes an explicit policy question. |
+
+**Do not treat the current model as a security boundary.** It is a
+same-owner convenience with a human review step, which is strictly better than
+the unreviewed direct write it replaced, and strictly weaker than a machine gate.
+Receiver-enforced guarding is designed but deliberately unbuilt — build it when a
+derived project is owned by someone whose review would not be taken on trust.

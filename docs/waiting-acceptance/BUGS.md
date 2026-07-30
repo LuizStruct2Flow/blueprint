@@ -12,4 +12,4 @@ See [README.md](README.md) for the lifecycle.
 _Empty._ The 2026-07-29 QA pass dispositioned every bug: BUG-001, BUG-002 and
 BUG-003 are all ACCEPTED and live in [`../done/BUGS.md`](../done/BUGS.md) with
 their review trails. See [INDEX.md](INDEX.md) for the full disposition,
-including the one rejection (A-22, reopened into `doing/`).
+including the one rejection (A-22, reopened into `doing/` as **BUG-004**).

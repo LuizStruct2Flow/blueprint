@@ -13,7 +13,7 @@
 # is repo-LOCAL config a fresh clone does not have. This header used to claim a
 # `postinstall` wires it up; there is no root package.json, so nothing did, and
 # a 12-commit push went out ungated while this gate was run by hand and reported
-# green (A-22).
+# green (BUG-004).
 #
 # `arm_gate` (scripts/lib/gate.sh) now sets it from paths that already run on
 # every wake — the activity feed and `blueprint drift`. Verify with

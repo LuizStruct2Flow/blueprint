@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/lib/gate.sh — shared gate-arming helper. Sourced, not executed.
 #
-# A-22: `core.hooksPath` is repo-LOCAL config. `scripts/new-project.sh` sets it
+# BUG-004: `core.hooksPath` is repo-LOCAL config. `scripts/new-project.sh` sets it
 # at bootstrap, so a bootstrapped project is gated — but a CLONE never runs
 # bootstrap, so `.githooks/pre-push` sits there correct, tested, and completely
 # inert. CLAUDE.md and the hook header itself claimed a `postinstall` auto-wires
@@ -30,7 +30,7 @@ arm_gate() {
   [ -n "$_ag_root" ] || _ag_root="$(git rev-parse --show-toplevel 2>/dev/null)" || _ag_root=""
   # One guard, and it SPEAKS. "Reports the gate state ALWAYS" (above) has to hold
   # on the failure paths too, or a call that could not arm is indistinguishable
-  # from a call that never happened — which is the A-22 injury itself. This also
+  # from a call that never happened — which is the BUG-004 injury itself. This also
   # covers rev-parse exiting 0 with empty output: unlikely, but it must not reach
   # the path concatenation below.
   if [ -z "$_ag_root" ]; then
@@ -62,7 +62,7 @@ arm_gate() {
   fi
 
   if git -C "$_ag_root" config --local core.hooksPath .githooks 2>/dev/null; then
-    echo "  ✓ gate: ARMED core.hooksPath=.githooks (was unset — a clone is ungated by default, A-22)"
+    echo "  ✓ gate: ARMED core.hooksPath=.githooks (was unset — a clone is ungated by default, BUG-004)"
   else
     echo "  ⚠ gate: could not set core.hooksPath (read-only config?) — gate NOT active"
   fi

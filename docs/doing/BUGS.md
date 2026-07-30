@@ -9,36 +9,47 @@ paragraph belongs in a `PLAN-*.md` or a work-item folder — a table cell
 holding half a page is unreadable, which is how this file stopped being
 useful once already.
 
+## Two namespaces, and only one of them is a work item
+
+**`BUG-XXX` / `FEATURE-XXX` are the only lifecycle IDs.** They are what the
+commit convention, the regression-test naming rule and these lifecycle folders
+key off (CLAUDE.md §"Bug Management", §"Team Workflow").
+
+**`A-NN` is not a work item.** Those are findings from one audit — the
+2026-07-23 contamination sweep in
+[BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md) — in the same
+category as a Codex finding ID. A finding is a *claim that something is wrong*;
+it becomes work when it gets a `BUG-`/`FEATURE-` number and a row here.
+
+They were being used as though they were work items — folder names, rows in this
+table, gate comments — and then extended with new numbers (A-38, A-39) for
+findings that had nothing to do with that audit. Live items were renumbered on
+2026-07-30. The audit document and everything in `done/` keep their `A-NN` IDs as
+historical provenance, because the Codex review documents argue about findings by
+those names and renaming them would break the trail they exist to be.
+
+**Rule going forward:** an `A-NN` reference is a citation of history. If you are
+about to work on something, give it a `BUG-`/`FEATURE-` number first.
+
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
+| **BUG-004** | A fresh clone is ungated: `core.hooksPath` is repo-local, so cloning and pushing never invokes the gate | S1 | **NEEDS A FOUNDER DECISION** — not code | Reopened 2026-07-29 after QA-2 rejected it with a live reproduction: a fresh clone, a real high-entropy token committed, `origin` redirected to a throwaway bare repo, and a real push executed without ever running the feed or drift — `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`. `arm_gate` works; the acceptance boundary was never "the arming paths work" but "a human cannot clone and push without invoking them". **Not closable by another local hook** — a pre-push hook is repo-local, absent on a clone, and defeated by `--no-verify`. The open trade is server-side enforcement: required checks do block direct pushes to a protected branch, but a SHA must exist on some ref for checks to run, and this repo is trunk-based with no branches. Folder: [BUG-004-gate-arming/](BUG-004-gate-arming/). Was `A-22`; the server-side option was `A-37`. |
+| **BUG-005** | The pre-push gate is at its 30 s ceiling, and coverage is now being decided by the clock | S2 | **NEEDS A FOUNDER DECISION** — the obvious fix does not work | Measured 2026-07-30: the gate runs **~29 s against a hard 30 s ceiling**, and **`tests/agent-activity-bound/test.sh --fast` alone is 18.1 s of it** — more than every other suite combined (11 s). Consequences are already visible: `tests/staleness/test.sh` is CI-only, `drift-integration.sh --fast` is cut to 2 of 5 cases, and `tests/a2bp-contamination/` (41 assertions, the guard protecting the door BUG-002 and A-09 came through) went **entirely CI-only** when it grew from 2.3 s to 6.0 s driving real transport. The gate keeps `tests/a2bp-e2e/`, which covers the leak-critical wiring but not the detection matrix. That is a real reduction in what blocks a push, made for budget rather than risk, and it reverses when this is fixed. **Why it is not an afternoon's refactor:** those 18 s are not lazy polling. They are NEGATIVE assertions ("an incomplete record was NOT emitted", "an unchanged signal file emitted nothing further"), and you cannot poll for the absence of an event; they are already small multiples of `AGENT_FEED_TICK`, which the suite already sets to 0.25 s. The levers are shortening the multiples (weakens the assertions) or moving whole cases to CI — both coverage judgements. Not started; no code touched, because that suite protects BUG-001 (load 175 for 2.7 days). Was `A-38`, with `A-39` as its symptom. |
+| **BUG-006** | `LWA_FEED_*` env-var namespace in `scripts/log-activity.sh` — BUG-002's contamination in env-var form | S3 | NEXT UP, not started | Same class as BUG-002: a name specific to one project baked into a generic script. Detail in [BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md). Was `A-08`. |
 
-_No active bugs._ BUG-002 moved to `waiting-acceptance/` on 2026-07-27: its
-blocker (A-09) is fixed and pushed, so it is no longer being implemented.
+BUG-002 moved to `waiting-acceptance/` on 2026-07-27; its blocker (audit finding
+A-09) is fixed and pushed.
 
-## Active non-bug work
+**BUG-004 and BUG-005 both need a decision before they need code.** For BUG-004,
+do not attempt another local mechanism — that is exactly what the rejection ruled
+out.
 
-Audit findings live in
-[BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md), not here.
-What is genuinely in flight right now:
+## Waiting acceptance
 
-| Item | State |
-|---|---|
-| **A-38 — the pre-push gate is at its ceiling** | Measured 2026-07-30: the gate runs **~29s against a hard 30s ceiling**, and **`tests/agent-activity-bound/test.sh --fast` alone is 18.1s of it** — more than every other suite combined (11s). It is 18s of *fixed sleeps* driving a real watcher, not work. The immediate consequence is already visible: `tests/staleness/test.sh` had to be pushed to CI-only, and `drift-integration.sh --fast` cut to 2 of 5 cases, purely for budget — coverage decided by the clock instead of by risk. CLAUDE.md §"Pre-push tolerance" says move work OUT rather than weaken the ceiling, and the next suite to be added has nowhere to go. **The obvious fix does not work, and that is the finding.** Those sleeps are not lazy polling — they are NEGATIVE assertions ("an incomplete record was NOT emitted", "an unchanged signal file emitted nothing further"), and you cannot poll for the absence of an event. They are already sized as small multiples of `AGENT_FEED_TICK`, which the suite already sets to 0.25s. So the levers are: shorten the multiples (weakens the negative assertions), or move whole cases to CI. Both are judgement calls about coverage, not refactors, which is why this needs a founder decision rather than an afternoon. Not started; no code touched — the suite protects BUG-001 (load 175 for 2.7 days). |
-| **A-39 — A-07's guard suite was pushed out of the gate by A-38** | The a2bp contamination suite went 2.3s → 6.0s when it started driving real transport (27 CLI runs against a local remote instead of two files in place). With A-38 eating 18s of the 30s ceiling there was no room, so the full 41-assertion suite moved to CI and the gate keeps `tests/a2bp-e2e` instead — which covers the leak-critical WIRING (contamination blocks the whole request, nothing is pushed) but not the detection matrix. This is a real reduction in what blocks a push, made for budget rather than risk. It reverses the moment A-38 is resolved. |
-| **A-22 — REOPENED 2026-07-29** | QA-2 rejected it with a live reproduction: a fresh clone, a real high-entropy token committed, `origin` redirected to a throwaway bare repo, and a real push executed without ever running the feed or drift — `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`. `arm_gate` works; the acceptance boundary was never "the arming paths work" but "a human cannot clone and push without invoking them". **Not closable by another local hook** — a pre-push hook is repo-local, absent on a clone, and defeated by `--no-verify`. Needs a founder trade on server-side enforcement (**A-37**): required checks do block direct pushes to a protected branch, but a SHA must exist on some ref for checks to run, and this repo is trunk-based with no branches. Folder: [A-22-gate-arming/](A-22-gate-arming/). |
-
-**A-22 needs a decision before it needs code.** Do not attempt another local
-mechanism — that is what the rejection rules out. The open question is whether
-the founder accepts branch-based or protected-branch enforcement, or accepts
-the residual risk explicitly.
-
-**NEXT after that: A-08** (`LWA_FEED_*` env vars in `scripts/log-activity.sh` —
-BUG-002's contamination in env-var-namespace form), in
-[BLUEPRINT-AUDIT-2026-07-23.md](BLUEPRINT-AUDIT-2026-07-23.md).
-
-**A2BP-PR** was implemented and pushed on 2026-07-30 and now sits in
-[`../waiting-acceptance/A2BP-PR/`](../waiting-acceptance/A2BP-PR/) with its plan
-and review trail. It is what A-38 and A-39 above came out of.
+**FEATURE-001** — back-propagation becomes a request, not a write — was pushed on
+2026-07-30 and sits in
+[`../waiting-acceptance/FEATURE-001-a2bp-pr/`](../waiting-acceptance/FEATURE-001-a2bp-pr/)
+with its plan and review trail. BUG-005 came out of building it.
 
 Everything else delivered on 2026-07-29 is ACCEPTED and in
 [`../done/`](../done/) — eight items, verdicts and evidence in

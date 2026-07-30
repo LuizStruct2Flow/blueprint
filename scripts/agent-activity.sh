@@ -429,7 +429,7 @@ supervise_body(){
   return 0
 }
 
-# A-22: arm the pre-push gate from a path that already runs on every wake.
+# BUG-004: arm the pre-push gate from a path that already runs on every wake.
 # Only for the modes an agent actually invokes to START the feed — arming as a
 # side effect of `--status` ("is it running?") or `--stop` would be a surprising
 # config change in answer to a question.

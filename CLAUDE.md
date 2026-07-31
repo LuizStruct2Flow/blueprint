@@ -73,6 +73,39 @@ A **spawned, non-primary** Claude session does the opposite: it adopts the perso
 it was assigned, and does NOT re-run these orchestrator steps (the feed is already
 up; it just participates).
 
+## Running commands — one per call, chains only when dependent
+
+**Every command goes in its own call. Do not join independent commands with
+`;`, `&&`, or `||`.** Chain only when the commands are *fully dependent* — when
+the later one operates on what the earlier one produced and is meaningless
+without it (`mktemp` and then writing to that path; `fetch` and then reading the
+fetched ref). A pipeline passes that test by construction: a filter cannot run
+without its producer.
+
+Commands that merely happen to run one after another are not a chain. Issue them
+as separate calls — in parallel when none depends on another, which is faster
+than sequencing them anyway.
+
+**This is a permission rule, not a style preference.** `.claude/settings.json`
+grants permission per command *pattern*. A compound string is matched as a single
+unit, so a permissive early pattern silently carries everything joined to it: a
+`cd` followed by four unrelated commands is reviewed as a `cd`. That collapses
+one decision per command into one decision per blob, and it defeats the `deny`
+list by the same mechanism. An allowlist is only worth the granularity it is
+actually consulted at.
+
+**The dependency test does not license wrapping.** A pipeline whose filter is
+genuinely dependent still must not be built around a command in a way that stops
+it matching its own allowlist entry — run the command, then filter its output.
+Wrapping a command until its permission pattern no longer applies is *routing
+around the prompt rather than asking*.
+
+If a command is not on the allowlist, ask for it to be added, or run it plainly
+and let the prompt happen. Both are correct; disguising it is not.
+
+The concrete instance of this rule for `blueprint drift` is in §"Wake-time drift
+check (mandatory on every fresh session)".
+
 ## Before Every Push
 
 A shared pre-push hook at `.githooks/pre-push` enforces the generic gate
@@ -484,7 +517,7 @@ The **capabilities** are non-negotiable. The mechanism row goes in
 billable path declares its choice (model + cap + monitoring path +
 backlog-replay flag).
 
-A real incident shows the shape: the linkedin-watcher-agent took a
+A real incident shows the shape: the linkedin-watcher-agent took a <!-- a2bp-allow: historical incident record; the blueprint names this project deliberately as the worked example and already carries this line verbatim — substituting the placeholder here would make every project claim the incident -->
 single $10 hit when a fetcher bug fix (BUG-001) unblocked a 374-post
 backlog and the freshness gate didn't exist yet (BUG-003). BUG-003
 became the canonical capability-#4 instance (explicit opt-in needed

@@ -4,7 +4,7 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-30 (end of session).** `origin/main` is at **`271e0bd`**.
+> **Last updated: 2026-07-31.** `origin/main` is at **`af7ab47`**.
 >
 > **Read this first: there are two ID namespaces and only one is a work item.**
 > `BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs — what the commit convention,
@@ -29,6 +29,25 @@
 > **FEATURE-001 is in `waiting-acceptance/`** awaiting your testing. Next after
 > the decisions: **BUG-006**.
 
+## 0. STATUS
+
+- **`origin/main` = `af7ab47`.** Working tree clean, nothing unpushed.
+- **Branch protection is LIVE on `main`** (applied 2026-07-30 with founder
+  approval): four required checks, PR required for non-admins, no force-push, no
+  deletion, and `enforce_admins: false` — the last line is what keeps trunk-based
+  development for the owner. Verified by probe, not assumed. Undo:
+  `gh api -X DELETE repos/LuizStruct2Flow/blueprint/branches/main/protection`.
+- **Claude Code trust is set** for all six project dirs (backup:
+  `~/.claude.json.bak-trust`). Caveat: a *running* session may rewrite
+  `~/.claude.json` on exit, so if a project reverts to untrusted, re-apply after
+  closing that session.
+- **Acceptance authority is DELEGATED to QA-2** for agent-protocol and
+  repo-infrastructure work (founder decision 2026-07-29). Scope, conditions and
+  the stated independence limitation: `project_config_dod.md` §"Acceptance
+  authority". **User-surface work is excluded** and needs the founder's own eye.
+- **Register of audit findings:** `BLUEPRINT-AUDIT-2026-07-23.md` — `A-01`…`A-37`.
+  Remember these are FINDINGS, not work items (see the header table).
+
 ## 0b. This stream's own wake-time monitors
 
 > Declared HERE, not in `project_config_paths.md`, and that is deliberate.
@@ -46,162 +65,92 @@
 This applies to *this* stream because it has a peer. A project with no peer
 stream should not arm it — a monitor on a file nobody writes is pure overhead.
 
-## 0. STATUS
-
-- **Blueprint self-audit + BUG-001: PUSHED and ACCEPTED.** (That batch ended at
-  `b89e7a4`; `origin/main` is now `271e0bd`.) Delivered: **BUG-001** (fork-bomb process leak in the activity
-  feed — a host was pegged at load 175 for 2.7 days by ~17,400 leaked processes),
-  **BUG-002** (linkedin-watcher contamination in a generic file), **BUG-003**
-  (the security gate could not tell a scanner *failure* from a scanner
-  *finding*), plus audit findings **A-01, A-05, A-09 (BOTH halves), A-12, A-14,
-  A-15, A-22, A-27, A-36**. A-09 was the live cross-project log contamination (a
-  redcare Codex verdict bled into this feed) — dispatcher/state-dir half fixed via
-  the shared `scripts/lib/state-dir.sh`, SonarQube-key half fixed by adding
-  `sonar-project.properties` to bootstrap TARGETS. All pushed, four-eyes CLEAN.
-- **`205f6f7` (R12a) is PUSHED** — it went out in the A-07 batch and four-eyes
-  found no regression in it. Its lesson (a fixture must copy the whole
-  `scripts/lib/`, never a named file) proved itself immediately: it is what made
-  `tests/gate-arming` catch an `exit 1` that would have silently re-opened A-22.
-- **ACCEPTED and delivered:** eight items in [`../done/`](../done/), each with
-  its review trail in a per-item folder. Verdicts and executed evidence:
-  [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).
-- **`waiting-acceptance/` holds FEATURE-001** (pushed 2026-07-30, `271e0bd`):
-  `blueprint a2bp` no longer writes into the blueprint — it files a branch + PR
-  against the blueprint's remote and cannot land anything. That closes the door
-  BUG-002 and A-09 both came through, rather than guarding it. Also `blueprint
-  prs`, a `drift` staleness warning, `--force` removed, `config_version = 2`.
-  Test list, accepted costs and the trust boundary:
-  [`../waiting-acceptance/FEATURE-001-a2bp-pr/README.md`](../waiting-acceptance/FEATURE-001-a2bp-pr/README.md).
-- **Acceptance authority is DELEGATED to QA-2** for agent-protocol and
-  repo-infrastructure work (founder decision 2026-07-29 — "these bugs are hard
-  to do the manual validation, I delegate these ones to the machine"). Scope,
-  conditions and the stated independence limitation live in
-  `project_config_dod.md` §"Acceptance authority". **User-surface work is
-  explicitly excluded** and still needs the founder's own eye.
-- **Register of everything found:** `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`
-  — findings `A-01`…`A-37`, ranked by severity. It stays in `doing/` until the
-  open ones are closed. (The count is stated as a range rather than a number on
-  purpose: a hand-maintained total is one more thing to drift, and it had
-  already drifted to "35".)
-
 ## 1. RESUME — live state + immediate action
 
-- **A-07 DELIVERED, pushed `e605476`.** `blueprint a2bp` was a bare `cp` — the
-  vector that put BUG-002 and A-09 into the blueprint. Now: placeholder
-  restoration by positional diff against the blueprint's own copy; **every**
-  staged line scanned with no alignment-derived exemption (explicit
-  `a2bp-allow` and `--force` operator overrides remain); staging round-trip
-  verified after forward substitution of both sides; and ONE shared
-  substitution primitive (`scripts/lib/placeholders.sh`) used by pull, drift
-  and the verifier. 41 assertions in `tests/a2bp-contamination/`, gate-wired.
-  **Codex CLEAN on round 7 after six rejections** — full trail in
-  `docs/done/A-07-a2bp-guard/CODEX-REVIEW-A07.md`.
+### 1a. Blocked on the founder
 
-  Worth carrying forward: R1–R4 were four escalating attempts to *infer* which
-  bytes came from a placeholder, all defeated by the same fact — substitution
-  destroys that information. The fix was to stop inferring and make safety not
-  depend on the guess. Two of the defects along the way were mine, introduced
-  while fixing Codex's; one would have silently reintroduced A-22.
-- **A pre-existing `pull` defect fell out of R5:** project names containing `&`
-  or `\` were silently mangled by the interpolated `sed` (`&` means "the whole
-  match" in a replacement, and bash 5.2 gave `${//}` the same rule). Fixed by
-  the shared literal primitive. Unrelated to a2bp; it had been there all along.
-- **`205f6f7` (R12a) is pushed** — it went out in the A-07 batch and Codex found
-  no regression in it.
-- **A-03 DELIVERED, pushed `b89e7a4`, four-eyes CLEAN on round 11.** The secret
-  gate had never run: `gitleaks protect --staged` scans an index that is empty
-  at pre-push time. Measured with a real secret in the outgoing commit — 0
-  commits scanned vs 1 commit and a caught leak. Now scans `remote..local` per
-  ref; a **new ref is scanned in full** because nothing local is trustworthy
-  enough to subtract (`--not --remotes` and `--not --remotes=<dest>` were both
-  tried and rejected in review), bounded by **one per-push deadline** with a
-  required `timeout`/`gtimeout` provider, and an unfinished scan blocks as
-  INCOMPLETE. Trail:
-  `docs/done/A-03-secret-gate/CODEX-REVIEW-A03.md`.
+| Item | What is needed |
+|---|---|
+| **BUG-004 Half B** | A fresh clone still pushes ungated (Half A does not close it — the admin bypass is what preserves trunk-based). Three levers: accept explicitly; rely on CI detection (already runs on push to `main` — fine for tests, **weak for secrets: this repo is PUBLIC, so a pushed secret is world-readable before gitleaks starts**); or drop the bypass, which ends trunk-based. |
+| **BUG-005** | Gate at ~29 s of a hard 30 s ceiling; `tests/agent-activity-bound --fast` alone is 18.1 s. It has already displaced real coverage — `tests/a2bp-contamination/` (41 assertions) is CI-only. The obvious fix does NOT work: those sleeps are negative assertions and cannot be polled for. Shorten the multiples, move cases to CI, or change the ceiling. |
+| **FEATURE-001 acceptance** | Cannot be accepted from here — every meaningful test runs FROM a derived project. Pairs with the derived-project work below; same session. |
 
-  **The first fix reached `origin` as `1c4dd4c` BEFORE four-eyes, and the
-  review then found a real hole in it.** That is the cost of pushing ahead of
-  the gate, recorded so it is not repeated.
-- **Shipped in the same range:** atomic baton publication
-  (`scripts/signal-set.sh`) + the dispatch settle window, and the README
-  contract narrowing that had been reported fixed but never committed.
-- **FEATURE-001 DELIVERED, pushed `271e0bd` (9 commits).** `blueprint a2bp` filed
-  requests instead of writing. Six defects surfaced in implementation that 17
-  rounds of plan review had not — including a commit dated from the **wall clock**
-  (so retry adoption silently became "always refuse", invisible to any test whose
-  two builds finished inside one second — the pre-push gate caught it), a cleanup
-  trap reading an out-of-scope `local`, and a contamination case that had been
-  passing **vacuously** since it was written. Full list in the folder README.
+### 1b. Derived projects — the big change this session
 
-- **IMMEDIATE NEXT ACTION — TWO DECISIONS, NEITHER NEEDS CODE.**
+The founder could not wake linkedin-watcher-agent. Diagnosis went well past the
+error message: **three of the four derived projects had never been registered
+with blueprint sync at all**, and the fourth pointed at a path from another
+machine. So `drift` and `pull` had never done anything in any of them, and every
+one was pushing with `core.hooksPath` UNSET — BUG-004 live in production, ×4.
 
-  **BUG-004 — a fresh clone is ungated.** QA-2 rejected it on 2026-07-29 by
-  reproducing the gap rather than restating it: fresh clone, real high-entropy
-  token committed, `origin` redirected to a throwaway bare repo, real push
-  executed without ever running the feed or drift —
-  `real_ungated_push_rc=0`, `secret_commit_reached_destination=yes`.
+| Project | State now | What is left |
+|---|---|---|
+| **linkedin-watcher-agent** | **WOKEN.** v2 config, 31 managed files pulled, 5 `project_config_*` seeded, drift CLEAN, gate armed, feed runs. | **23 files uncommitted** — review + commit. **Its gate BLOCKS pushes**: `osv-scanner` finds 7 dev-dependency CVEs (pre-existing; arming the gate is what made them visible). |
+| **storm2flow** | v2 config written (its `blueprint_source` was a `/Users/…` path from another machine — every command died on it). Gate armed. | **173 blueprint commits behind.** Not pulled. Missing `STACK_DEFAULTS.md`, `scripts/blueprint`. 2 files dirty. |
+| **struct2flow-www** | v2 config written, gate armed. | 7 drifted + **38 files missing**. Not pulled. 1 file dirty. |
+| **ai-server-blueprint** | **Untouched — needs a founder decision.** | It has **zero** struct2flow marker files. Adopting it would be a full bootstrap, not a repair. Is it a struct2flow project at all? |
 
-  **Do not attempt another local mechanism.** That is precisely what the
-  rejection rules out: a pre-push hook is repo-local, absent on a clone, and
-  defeated by `--no-verify`, so no local hook can make the gate a property of a
-  clone. The trade is the founder's — protected-branch required checks (available,
-  but a SHA must exist on some ref before it reaches `main`, which conflicts with
-  the no-branches rule; costed as **A-37** §4c), or explicit acceptance of the
-  residual risk. Options laid out in
-  [BUG-004-gate-arming/README.md](BUG-004-gate-arming/README.md).
+**The checklist, derived from doing linkedin-watcher-agent** (still owed as a
+written doc):
 
-  **BUG-005 — the gate is at its 30 s ceiling and coverage is being decided by the
-  clock.** ~29 s of 30, and `tests/agent-activity-bound --fast` alone is 18.1 s —
-  more than every other suite combined. It has already displaced real coverage:
-  `tests/a2bp-contamination/` (41 assertions, the A-07 guard) went entirely
-  CI-only, `tests/staleness/` is CI-only, `drift-integration --fast` is 2 of 5
-  cases. **The obvious fix does not work** — those 18 s are negative assertions
-  ("nothing was emitted"), which cannot be polled for, and are already small
-  multiples of a 0.25 s tick. The levers are shortening the multiples (weakens the
-  assertions) or moving cases to CI; both are coverage judgements. Untouched
-  because that suite protects BUG-001 (load 175 for 2.7 days).
-- ~~LOOSE END — agent-exchange timestamp switch~~ **DONE.** All 16 headers on
-  Berlin local, README format spec updated, committed in `../../agent-exchange`.
-- **`docs/way-of-working.pdf` — DEFERRED by founder decision (2026-07-29), not
-  a gap to chase.** The PDF is ~6 weeks behind the `.md` (`.md` 2026-07-23,
-  `.pdf` 2026-06-15) and `scripts/build-deck.sh` cannot run here — marp-cli
-  needs chrome/edge/firefox and none is installed. **The founder will generate
-  it from their Mac once the bug work is finished**, deliberately, so it is
-  rebuilt once against a settled deck rather than repeatedly against a moving
-  one. Do NOT treat the staleness as a doc-sync violation to fix in the
-  meantime, and do not re-raise it each session.
-- **BUG-004 background** (was audit finding `A-22`; REJECTED 2026-07-29 — see the
-  immediate-next-action entry above for current state; this is the history).
-  `core.hooksPath` is repo-local config, so it was UNSET in this checkout and
-  the gate never ran — including on the push of the first 12 commits, which
-  went out **ungated**. The docs blamed a `postinstall` auto-wire that never
-  existed (there is no root `package.json`); that claim lived in `CLAUDE.md`
-  and the hook header, **not** in `AGENTS.md`. Fixed by `arm_gate`
-  (`scripts/lib/gate.sh`) called from the two paths that already run at wake —
-  the activity feed and `blueprint drift` — so arming is code on an existing
-  path, not an instruction someone must remember. `tests/gate-arming/` (plus
-  R11's `osv-scanner` isolation control in `tests/pre-push-scanners`), wired
-  into pre-push and CI. **Residual gap:** a human
-  who clones and pushes without starting the feed or running drift is still
-  ungated; git has no clone hook. Not closable by another LOCAL hook — a pre-push hook is
-  advisory by construction. Note the model difference: redcare's "CI = the
-  gate" reframe assumes **PR-based** collaboration (required checks gate the
-  merge); this repo is **trunk-based**. Note (Slava, R6): required checks DO
-  block direct pushes to a protected branch, so enforcement is available here —
-  what conflicts is the no-branches rule, since a SHA must exist on some ref for
-  checks to run before it reaches `main`. That is a founder trade, not an
-  impossibility. **A-37** is the part that holds either way: `security.yml` has
-  no configured shared/team failure route — no `if: failure()`, no webhook, no
-  declared destination (GitHub's per-user run notifications aside).
-- **The founder-agreed "guard the pipe" order, current state:**
-  - **A-07** — DONE, pushed, four-eyes CLEAN on round 7.
-  - **A-03** — DONE, pushed `b89e7a4`, four-eyes CLEAN on round 11. See §1
-    above for the full state; it is not repeated here so this list cannot drift
-    away from it again.
-  - **BUG-006** (was A-08) — **NEXT.** `LWA_FEED_*` env vars in `scripts/log-activity.sh`:
-    BUG-002's contamination in env-var-namespace form, still present.
-  - **A-09** — DONE. Dispatcher/state-dir half pushed `1a876c8`; sonar-key half
-    fixed and four-eyes clean (both halves closed).
+1. `.blueprint-source` v2 — `config_version`, `blueprint_source` (this machine),
+   `blueprint_remote`, `blueprint_branch`, `bootstrap_sha`, `bootstrap_date`.
+2. Commit any uncommitted work FIRST — `pull` overwrites managed files, and a
+   local change must be preserved in history rather than silently lost.
+3. `blueprint pull --yes`, then **check `.githooks/pre-push` is executable**
+   (BUG-008 stripped it; fixed here, but existing projects may already be at 600).
+4. Seed `project_config_*.md` (TEMPLATE_FILES — `pull` deliberately skips them)
+   with placeholder substitution.
+5. `blueprint drift` → expect clean; it arms the gate as a side effect.
+6. `bash scripts/agent-activity.sh --daemon` → expect the gate line to say armed.
+7. **Run the gate before declaring victory** — it is newly armed and has never
+   run in these repos, so it will surface real pre-existing findings.
+
+### 1c. Ready to work on without the founder
+
+- **BUG-008 regression test** — the fix is pushed but has no test. It must assert
+  a pulled marker-bearing executable stays executable.
+- **BUG-006** — `LWA_FEED_*` env-var contamination in `scripts/log-activity.sh`.
+  Same class as BUG-002. Not started.
+- **BUG-009 structural fix** — `project_config_*.md` is both this repo's config
+  and the seed template. Mitigated, not fixed; the next concrete thing written
+  there propagates again. Real fix: a separate `templates/` source.
+
+### 1d. Waiting on redcare
+
+Posted to the exchange board 2026-07-30 (`b631560`): FEATURE-001, and a request
+for their **temp/scratch-folder discipline** and **derived-project permissions**
+patterns, which the founder says exist there but are on neither the board nor
+`LEARNINGS.md`. Monitor `bysbittjc` is armed on the board and emits only on change.
+
+### 1e. Standing instructions
+
+- **`docs/way-of-working.pdf` — DEFERRED by founder decision (2026-07-29).** The
+  PDF is ~6 weeks behind the `.md`, and `scripts/build-deck.sh` cannot run here
+  (marp-cli needs a browser; none installed). The founder regenerates it from
+  their Mac once the bug work settles. **Do not treat this as a doc-sync
+  violation, and do not re-raise it each session.**
+- **The other machine does not matter.** Founder, 2026-07-30: "don't care about
+  the other machine … I can clone all projects again there." Do not spend effort
+  keeping host paths portable.
+- **Never wrap a command to avoid a permission prompt.** `blueprint drift` is run
+  as one plain command; `(command -v blueprint && … || …) | tail -40` does not
+  match the `Bash(blueprint *)` allowlist and routes around the prompt.
+
+### 1f. History worth carrying (not action items)
+
+- **FEATURE-001** (a2bp files a request, cannot write into the blueprint) —
+  17 plan-review rounds, then **six defects that only implementation found**,
+  including a commit dated from the wall clock and a contamination test that had
+  been passing vacuously since it was written. Full list in the folder README.
+  That ratio is the useful input when judging how much to trust a plan alone.
+- **A-07's real lesson:** four escalating attempts to *infer* which bytes came
+  from a placeholder, all defeated by the same fact — substitution destroys that
+  information. It closed only when inference was abandoned. Then FEATURE-001
+  showed the guard was hardening a door that should not have existed.
+- **BUG-004's real lesson:** a tracked hook is not an active hook, and an *armed*
+  hook is not an executable one (BUG-008). Every layer of that check has now
+  failed silently at least once.
 
 ## 2. Project-specific config
 
@@ -234,8 +183,9 @@ stream should not arm it — a monitor on a file nobody writes is pure overhead.
   (CLAUDE.md §"On wake" step 3):
   1. **Mic** — `AGENT_SIGNAL.md` `Holder`/`State`, 5s poll, emits on change.
   2. **Exchange board** — `../../agent-exchange/EXCHANGE.md`, 10s poll, emits
-     the newest `### ` header on change (`project_config_paths.md` §"Wake-time
-     Monitors").
+     the newest `### ` header on change. Declared in **§0b of this file**, not in
+     `project_config_paths.md` — that file is also the seed template, so a
+     concrete row there propagates to every new project (BUG-009).
 
   Added 2026-07-29 after the founder asked "is your monitor working? are you
   also monitoring agent-exchange?" — the answer was no to both. Six Codex
@@ -291,11 +241,18 @@ stream should not arm it — a monitor on a file nobody writes is pure overhead.
 - **`backlog/` is empty** — no parked items, so no re-open triggers are owed.
 - **Founder-gated:** `waiting-acceptance/` → `done/` needs an explicit
   acceptance signal. Nothing is auto-promoted.
-- **Derived-repo sweep not started.** `greenwashing-detection-agent`,
-  `storm2flow`, `linkedin-watcher-agent` have drifted (33/120/112 lines) and
-  carry the same defects. `rdc-agenticcoding-blueprint` has a verified
-  inherited-audit report at its `docs/doing/INHERITED-AUDIT-2026-07-23.md`, and
-  already held the better `AGENT_STATE_HOME` pattern that BUG-002 adopted.
+- **Derived-repo sweep — STARTED 2026-07-30, see §1b for live state.** It is no
+  longer "these projects have drifted by N lines": the measurement that produced
+  those numbers was taken by hand, because three of the four had no
+  `.blueprint-source` and `drift` had never run in them at all. linkedin-watcher-
+  agent is done; storm2flow and struct2flow-www are registered but not pulled;
+  ai-server-blueprint needs a founder decision on whether it is a struct2flow
+  project at all.
+- **redcare's tree is a separate stream, not part of this sweep.**
+  `rdc-agenticcoding-blueprint` has a verified inherited-audit report at its
+  `docs/doing/INHERITED-AUDIT-2026-07-23.md`, and already held the better
+  `AGENT_STATE_HOME` pattern that BUG-002 adopted. Coordinate through the
+  exchange board, not by editing their tree.
 
 ## 5. Pointers
 

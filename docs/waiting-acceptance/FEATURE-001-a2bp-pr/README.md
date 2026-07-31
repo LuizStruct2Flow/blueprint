@@ -17,6 +17,26 @@ on one shared state dir) reached the blueprint and fanned out to every project o
 their next pull. The A-07 contamination guard was bolted onto that door
 afterwards; this removes the door.
 
+## Acceptance needs a derived project, and that is a real constraint
+
+**Founder, 2026-07-30: "I can only accept FEATURE-001 when I do a `blueprint
+drift`, I won't have this time today."** Correct, and worth stating as a property
+of the change rather than a scheduling note.
+
+Every meaningful test below runs *from a derived project* — `a2bp` refuses to run
+anywhere else, and `drift`'s new staleness warning only means something when
+there is a local checkout that can fall behind. The blueprint cannot accept this
+feature by looking at itself. So acceptance is gated on the next session in a real
+derived project (`storm2flow`, `linkedin-watcher-agent`,
+`greenwashing-detection-agent`), not on reading this document.
+
+Two consequences:
+
+- **It stays in `waiting-acceptance/` until then.** No part of it is promoted on
+  inspection.
+- **It pairs naturally with the derived-repo sweep** (HANDOVER §4), which is
+  unstarted and needs a derived project anyway. Those two want the same session.
+
 ## What to test
 
 The founder question is behavioural, not mechanical: **does filing a request

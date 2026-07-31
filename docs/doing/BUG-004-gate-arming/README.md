@@ -48,17 +48,64 @@ feedback, not enforcement.
 
 ## The decision that is actually open
 
-Server-side enforcement is available at a policy cost. Required checks do block
-direct pushes to a protected branch — but a SHA has to exist on some ref for
-checks to run, and this repo is trunk-based with no branches (CLAUDE.md
-§"Team Workflow"). So the options are roughly:
+**This was previously written as one all-or-nothing choice — "protected `main`,
+and trunk-based development does not survive it". That framing was wrong, and
+the founder corrected it on 2026-07-30:**
 
-1. **Accept branch-based flow for the blueprint** — protected `main`, changes
-   arrive by PR, required checks run the gate server-side. Enforcement becomes
-   real; trunk-based development for this repo does not survive it.
-2. **Accept the residual risk explicitly** — local arming is fast feedback, and a
-   human who clones and pushes without a wake is trusted. Written down rather
-   than implied.
-3. Something else you have in mind that neither of the above captures.
+> *"I don't agree with your statement that it kills trunk based development, it
+> should avoid that systems outside do any changes without PR, but inside the
+> blueprint we should keep trunk based development."*
 
-Costing for option 1 is in the review documents here (raised as **A-37** §4c).
+That is correct, and it splits the problem in two. The two halves have very
+different costs, and only one of them trades against trunk-based development.
+
+### Half A — outside systems must not write without a PR
+
+**Closable now, at zero cost to trunk-based development.** GitHub rulesets take
+**bypass actors**: require a PR + passing checks on `main`, and list the repo
+owner as a bypass actor. Everyone else must open a PR; the owner keeps pushing
+straight to `main`, so trunk-based development inside the blueprint is untouched.
+
+Measured 2026-07-30: **no ruleset and no branch protection exist on this repo
+today** (`gh api repos/…/rulesets` → empty, `…/branches/main/protection` → 404).
+So nothing server-side is stopping an outside push right now.
+
+This half is worth more than it first looks, because it also repairs a hole in
+FEATURE-001's trust boundary. a2bp runs the contamination guard on the
+**requester's** machine, so an external requester can simply not run it — stated
+as a known limitation in `project_config_paths.md`. Required checks on the
+request PR would run that scan **server-side, on the request**, where the
+requester cannot skip it. Half A therefore turns a documented weakness into an
+enforced one.
+
+CI is already wired for this: `.github/workflows/security.yml` runs on both
+`push: [main]` and `pull_request: [main]`, so the checks a ruleset would require
+already exist and already run on PRs.
+
+### Half B — the owner's own fresh clone still pushes ungated
+
+**This is BUG-004 as actually reproduced**, and Half A does *not* close it —
+by construction, since the bypass actor is what preserves trunk-based
+development. A human who clones and pushes without ever triggering a wake path
+is still ungated.
+
+The levers here are genuinely small:
+
+1. **Accept it explicitly.** `arm_gate` covers the wake paths, work here happens
+   through agent sessions, and the residual is "the owner clones fresh and pushes
+   by hand before any wake". Written down rather than implied.
+2. **Detect rather than prevent.** CI already runs on push to `main`, so an
+   ungated push is *caught* even when it cannot be *blocked*. That is adequate
+   for lint and tests. It is weak for secrets specifically — CLAUDE.md §Security
+   says a leaked credential is compromised the moment it lands on `origin`, so
+   detection means "rotate", not "prevented".
+3. **Drop the bypass**, which closes Half B and ends trunk-based for the owner.
+   This is the option that carries the cost my earlier framing wrongly attached
+   to the whole decision.
+
+**The useful consequence of splitting it:** Half A can be done now without
+touching how you work, and what remains is a much smaller question about your own
+clone rather than a referendum on trunk-based development.
+
+Costing for the server-side option is in the review documents here (raised as
+**A-37** §4c).

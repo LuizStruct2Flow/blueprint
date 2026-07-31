@@ -69,11 +69,38 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 
 | What | Path | Poll | Why |
 |---|---|---|---|
-| Cross-stream exchange board | `../../agent-exchange/EXCHANGE.md` | 10s | A second working stream posts here. Nothing notifies this session otherwise, so without a monitor the board is only read when someone remembers to look — which is how the half-finished timestamp switch sat uncommitted for days. |
+| _(none by default — add this project's own)_ | | | |
 
-Arm it with a `Monitor` whose command emits only on change, e.g. compare
-`cksum` and echo the newest `### ` header when it moves. Emit on *change*,
-never a raw tail — an unfiltered board is noise and gets muted.
+**This table ships EMPTY on purpose.** It is seeded into every new project, so
+anything concrete written here becomes a monitor that every unrelated project
+arms for a file it has no reason to care about. A row belonging to one stream had
+been sitting here hard-coded — including a rationale describing an incident that
+happened in *that* stream — and it propagated verbatim on the next bootstrap.
+Same class as BUG-002: one project's specifics baked into a file that travels.
+
+Arm each row with a `Monitor` whose command emits **only on change** — e.g.
+compare `cksum` and echo the newest header when it moves. Never a raw tail: an
+unfiltered feed is noise, gets muted, and then you have no monitor at all.
+
+### Optional: a cross-stream board
+
+*Only relevant when this project has a peer stream solving similar problems on an
+offset schedule.* Two blueprint streams fixing the same bug classes will each
+reinvent what the other proved; a shared board is how that stops. **A project
+without a peer stream should not have this row** — there is nothing to watch, and
+a monitor on a file nobody writes is pure overhead.
+
+If that applies, add something like:
+
+```
+| Cross-stream board | <path to the shared board> | 10s | A peer stream posts
+  here. Nothing else notifies this session, so without a monitor the board is
+  only read when someone remembers to look. |
+```
+
+The board itself is deliberately neutral: it belongs to no repository and is
+referenced from **no blueprint-managed file**, so streams find it by being told
+once, not by inheriting a path.
 
 ## Back-propagation trust boundary (a2bp)
 

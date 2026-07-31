@@ -29,6 +29,23 @@
 > **FEATURE-001 is in `waiting-acceptance/`** awaiting your testing. Next after
 > the decisions: **BUG-006**.
 
+## 0b. This stream's own wake-time monitors
+
+> Declared HERE, not in `project_config_paths.md`, and that is deliberate.
+> That file is simultaneously this repo's project config **and** the template
+> seeded into every new project, so anything concrete written there propagates.
+> A hard-coded row for the board below did exactly that on 2026-07-30 — it landed
+> in linkedin-watcher-agent complete with a rationale describing an incident that
+> happened *here*. `HANDOVER.md` is project-owned and never synced, so it is the
+> right home until that structural overlap is fixed (**BUG-009**).
+
+| What | Path | Poll | Why |
+|---|---|---|---|
+| Cross-stream exchange board | `../../agent-exchange/EXCHANGE.md` | 10s | redcare runs a peer blueprint stream on an offset schedule. Nothing else notifies this session when they post, so without a monitor the board is read only when someone remembers to. Emit **only on change**. |
+
+This applies to *this* stream because it has a peer. A project with no peer
+stream should not arm it — a monitor on a file nobody writes is pure overhead.
+
 ## 0. STATUS
 
 - **Blueprint self-audit + BUG-001: PUSHED and ACCEPTED.** (That batch ended at

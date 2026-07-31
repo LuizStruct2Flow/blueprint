@@ -241,6 +241,7 @@ A configurable team of **named personas** (Sylvia · Klaus · Kathrin · …), e
 - **Read-only + out-of-scope work** allowed in parallel
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
 - **Codex / Gemini dispatched by flipping the signal**, not by direct CLI call
+- **One command per call** — permission is granted per command *pattern*, so agents never join independent commands with `;` / `&&`. A compound string is matched as one unit, which turns one decision per command into one decision per blob and defeats the `deny` list by the same mechanism. Chaining is for genuinely dependent commands only
 - **`HANDOVER.md`** lets a fresh prompt resume cold
 - **Live feed:** `scripts/agent-activity.sh --daemon` — every persona's mic moves *and* tool-by-tool work (orchestrator + subagents + Codex/Gemini) stream in one tail; self-heals across restarts. **One resident process** tracking a byte offset per file — no follow-by-name tails, no inotify pressure (BUG-001). `--stop` / `--status` complete the lifecycle.
 

@@ -59,28 +59,46 @@ the founder corrected it on 2026-07-30:**
 That is correct, and it splits the problem in two. The two halves have very
 different costs, and only one of them trades against trunk-based development.
 
-### Half A — outside systems must not write without a PR
+### Half A — DONE 2026-07-30
 
-**Closable now, at zero cost to trunk-based development.** GitHub rulesets take
-**bypass actors**: require a PR + passing checks on `main`, and list the repo
-owner as a bypass actor. Everyone else must open a PR; the owner keeps pushing
-straight to `main`, so trunk-based development inside the blueprint is untouched.
+Branch protection on `main`, applied with founder approval:
 
-Measured 2026-07-30: **no ruleset and no branch protection exist on this repo
-today** (`gh api repos/…/rulesets` → empty, `…/branches/main/protection` → 404).
-So nothing server-side is stopping an outside push right now.
+```
+required_status_checks  secret-scan (gitleaks) · SAST (semgrep p/owasp-top-ten)
+                        SCA (osv-scanner) · shell regression suites (full)
+enforce_admins          false      ← this is what preserves trunk-based
+required_pull_request_reviews  0 approvals (a PR is required; an approval is not)
+allow_force_pushes      false
+allow_deletions         false
+```
 
-This half is worth more than it first looks, because it also repairs a hole in
-FEATURE-001's trust boundary. a2bp runs the contamination guard on the
-**requester's** machine, so an external requester can simply not run it — stated
-as a known limitation in `project_config_paths.md`. Required checks on the
-request PR would run that scan **server-side, on the request**, where the
-requester cannot skip it. Half A therefore turns a documented weakness into an
-enforced one.
+**Verified rather than assumed:** a probe commit was pushed directly to `main`
+after applying it, and succeeded. Trunk-based development for the owner is
+untouched.
 
-CI is already wired for this: `.github/workflows/security.yml` runs on both
-`push: [main]` and `pull_request: [main]`, so the checks a ruleset would require
-already exist and already run on PRs.
+Check names were taken from what actually reports on `main`
+(`gh api repos/…/commits/main/check-runs`), not from the workflow file. A required
+check whose name never reports leaves every PR waiting forever, and the two are
+easy to get out of step.
+
+**Its value is narrower than first claimed, and the narrower claim is the honest
+one.** This repo is **public and user-owned**, so an outsider already could not
+push — they have no write access and GitHub forces fork + PR. The earlier wording
+here ("nothing server-side is stopping an outside push") was true of rulesets and
+misleading about the permission model. What Half A actually buys:
+
+1. **A PR cannot merge red.** This is the one that matters. It puts FEATURE-001's
+   contamination scan **server-side, on the request PR**, where a requester cannot
+   skip it — repairing a hole documented as unavoidable in
+   `project_config_paths.md` §"Back-propagation trust boundary" (the guard runs on
+   the *requester's* machine, so an external requester can simply not run it).
+2. **Any future write grant is constrained** — a collaborator, or a derived
+   project's token, cannot push straight to `main` later.
+
+CI was already wired for this: `.github/workflows/security.yml` runs on both
+`push: [main]` and `pull_request: [main]`.
+
+**To undo:** `gh api -X DELETE repos/LuizStruct2Flow/blueprint/branches/main/protection`.
 
 ### Half B — the owner's own fresh clone still pushes ungated
 
@@ -95,10 +113,19 @@ The levers here are genuinely small:
    through agent sessions, and the residual is "the owner clones fresh and pushes
    by hand before any wake". Written down rather than implied.
 2. **Detect rather than prevent.** CI already runs on push to `main`, so an
-   ungated push is *caught* even when it cannot be *blocked*. That is adequate
-   for lint and tests. It is weak for secrets specifically — CLAUDE.md §Security
-   says a leaked credential is compromised the moment it lands on `origin`, so
-   detection means "rotate", not "prevented".
+   ungated push is *caught* even when it cannot be *blocked*. Adequate for lint
+   and tests.
+
+   **Weak for secrets, and it is worth being precise about why, because the
+   obvious objection is "but we run gitleaks in CI".** We do, and it finds the
+   secret. The problem is timing, not coverage. The pre-push hook blocks, so the
+   secret never leaves the machine. CI runs *after the push succeeded* — and
+   **this repository is public**, so the commit is world-readable before gitleaks
+   starts, and bots scrape the public events firehose for exactly this. Force-
+   pushing it away does not help: the commit stays reachable through the events
+   API, forks and cached views. So CI's answer is always "rotate that credential
+   now", never "that did not happen". CLAUDE.md §Security says the same thing from
+   the other direction — rotate *before* investigating.
 3. **Drop the bypass**, which closes Half B and ends trunk-based for the owner.
    This is the option that carries the cost my earlier framing wrongly attached
    to the whole decision.

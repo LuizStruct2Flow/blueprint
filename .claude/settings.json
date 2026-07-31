@@ -202,7 +202,8 @@
     ],
     "additionalDirectories": [
       "/private/tmp",
-      "../../agent-exchange"
+      "../../agent-exchange",
+      "../blueprint"
     ]
   },
   "hooks": {

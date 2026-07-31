@@ -54,3 +54,4 @@ with its plan and review trail. BUG-005 came out of building it.
 Everything else delivered on 2026-07-29 is ACCEPTED and in
 [`../done/`](../done/) — eight items, verdicts and evidence in
 [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).
+protection-smoke

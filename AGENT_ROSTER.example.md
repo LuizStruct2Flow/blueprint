@@ -64,11 +64,23 @@ those are free-tier accounts with limited credits (Gemini throttles on quota;
 GitHub Copilot may have no headless CLI to dispatch). If you have paid Gemini /
 Copilot, give them personas.
 
-**Sylvia (Orchestrator) is the operator's primary, human-facing session** — the
-Claude Code prompt the founder talks to and wakes. Sylvia is always the
-orchestrator: she dispatches the Codex (and Gemini) personas, hands off to / spawns
-the other Claude personas, integrates their work, and owns coordination. The other
-personas are launched by Sylvia or by the founder as needed.
+**The Orchestrator is the operator's primary, human-facing session** — the Claude
+Code prompt the founder talks to and wakes. Whoever holds that row dispatches the
+Codex (and Gemini) personas, hands off to / spawns the other Claude personas,
+integrates their work, and owns coordination. The other personas are launched by
+the Orchestrator or by the founder as needed.
+
+> **Renaming a persona means editing ONE cell — the Name column above.**
+> Everything else refers to the **role**, never the shipped example name, so a
+> rename cannot leave half the file describing someone who no longer exists.
+> This paragraph used to name the default Orchestrator four times; renaming the
+> row then left the prose contradicting the table, which is what made the rename
+> look like it had not worked.
+>
+> The same rule holds outside this file: `CLAUDE.md`, `AGENTS.md` and the scripts
+> resolve the Orchestrator **from this table**, and cite the default name only as
+> an example. If you find a name hard-coded anywhere that a role would do, that is
+> a bug — the roster is per-engineer, and no two fleets share names.
 
 ## How identity works on the signal
 

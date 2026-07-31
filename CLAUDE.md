@@ -752,6 +752,18 @@ directly; do not hand-roll `diff -ru` invocations.
 blueprint drift
 ```
 
+**Run it exactly like that — one plain command, not wrapped.** Do not build
+`(command -v blueprint >/dev/null && blueprint drift || bash scripts/blueprint
+drift) | tail -40` or any variant. The allowlist grants `Bash(blueprint *)`; a
+compound wrapper does not match that pattern, so wrapping it is *routing around
+the permission prompt rather than asking* — which is the founder's standing rule,
+not a style preference. If `blueprint` is not on PATH, run
+`bash scripts/blueprint drift` as its own command and fix the PATH afterwards.
+
+In the blueprint repo itself there is no `.blueprint-source` — it is the source —
+and `drift` reports exactly that and exits 0 (BUG-007). It still arms the gate,
+and it still reports whether the checkout is behind its own remote.
+
 Output: which managed files differ from the blueprint HEAD, plus the
 commit log in the blueprint since this project's `.blueprint-source`
 bootstrap_sha. Three cases:

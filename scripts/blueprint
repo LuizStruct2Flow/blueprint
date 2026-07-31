@@ -355,6 +355,7 @@ pull_file() {
     tmp=$(mktemp)
     if marker_aware_merge "$bp" "$f" "$tmp"; then
       mv "$tmp" "$f"
+      _bp_sync_exec_bit "$bp" "$f"
       substitute_placeholders "$f"
       echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}"
       return 0
@@ -363,6 +364,7 @@ pull_file() {
       echo "  ${C_YELLOW}    warn: marker structure mismatch — backing up + whole-file copy${C_RESET}"
       cp "$f" "$f.bp-bak"
       cp "$bp" "$f"
+      _bp_sync_exec_bit "$bp" "$f"
       substitute_placeholders "$f"
       echo "  ${C_DIM}    backup at $f.bp-bak — reconcile manually${C_RESET}"
       return 0
@@ -373,6 +375,7 @@ pull_file() {
     echo "  ${C_YELLOW}    warn: blueprint uses markers, project doesn't — backing up + whole-file copy${C_RESET}"
     cp "$f" "$f.bp-bak"
     cp "$bp" "$f"
+    _bp_sync_exec_bit "$bp" "$f"
     substitute_placeholders "$f"
     echo "  ${C_DIM}    backup at $f.bp-bak — add markers in the project to preserve content next pull${C_RESET}"
     return 0
@@ -387,19 +390,116 @@ pull_file() {
 
   # Neither has markers — legacy whole-file copy.
   cp "$bp" "$f"
+  _bp_sync_exec_bit "$bp" "$f"
   substitute_placeholders "$f"
+}
+
+# Where is the blueprint checkout on THIS machine?
+#
+# `blueprint_source` is an absolute host path, which makes it the one field in
+# `.blueprint-source` that cannot be correct on two machines at once. storm2flow
+# carried `/Users/luizscheidegger/...` and every command died on the Linux box;
+# writing the Linux path would have broken the Mac instead. Picking a machine to
+# break is not a fix, so the value is now RESOLVED rather than read (BUG-007):
+#
+#   1. $BLUEPRINT_ROOT, if exported and real — an explicit per-shell override.
+#   2. `blueprint_source` from the file, if it exists on this machine.
+#   3. The repo the RUNNING CLI lives in, if that looks like a blueprint.
+#
+# Step 3 is what makes it machine-independent, and it is not a guess: if you are
+# executing `…/blueprint/scripts/blueprint`, then `…/blueprint` is a blueprint
+# checkout by construction. It is verified (MANAGED_FILES must be present) and
+# announced, never silent — a silently-substituted comparison base would make
+# every drift report untrustworthy.
+_bp_resolve_blueprint_root() {
+  local from_file="$1" cli_root self
+
+  if [ -n "${BLUEPRINT_ROOT:-}" ] && [ -d "$BLUEPRINT_ROOT" ]; then
+    printf '%s' "$BLUEPRINT_ROOT"; return 0
+  fi
+  if [ -n "$from_file" ] && [ -d "$from_file" ]; then
+    printf '%s' "$from_file"; return 0
+  fi
+
+  # Resolve through a symlink: CLAUDE.md documents `ln -s .../scripts/blueprint`
+  # as an install method, and dirname of the symlink is /usr/local/bin.
+  self="${BASH_SOURCE[0]}"
+  if command -v readlink >/dev/null 2>&1; then
+    local resolved
+    resolved=$(readlink -f "$self" 2>/dev/null) && [ -n "$resolved" ] && self="$resolved"
+  fi
+  cli_root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P) || return 1
+
+  # Verified, not assumed — a directory containing scripts/blueprint is not
+  # necessarily a blueprint.
+  if [ -n "$cli_root" ] && [ -f "$cli_root/CLAUDE.md" ] && [ -f "$cli_root/docs/DoD.md" ]; then
+    echo "${C_YELLOW}⚠ .blueprint-source names '${from_file:-<empty>}', which does not exist here.${C_RESET}" >&2
+    echo "${C_DIM}  Falling back to the blueprint this CLI runs from: $cli_root${C_RESET}" >&2
+    echo "${C_DIM}  (that field is an absolute host path, so it cannot be right on two${C_RESET}" >&2
+    echo "${C_DIM}   machines at once — export BLUEPRINT_ROOT to pin it explicitly)${C_RESET}" >&2
+    printf '%s' "$cli_root"; return 0
+  fi
+  return 1
+}
+
+# --- BUG-008: a pulled file must keep the blueprint's executable bit ----------
+# The marker-aware merge writes to a `mktemp` (mode 600) and then `mv`s it into
+# place, and `mv` carries the TEMP's mode onto the destination. So pulling
+# `.githooks/pre-push` — a marker-bearing file — landed it at 600.
+#
+# That is silent and it is severe: `core.hooksPath` is set, so the gate LOOKS
+# armed, but git skips a non-executable hook without a word. The project is
+# ungated while every indicator says otherwise — BUG-004's failure mode arriving
+# through a different door. Found in linkedin-watcher-agent on 2026-07-30, where
+# the feed's own arming check was the only thing that noticed.
+#
+# Only the exec bit is mirrored, not the whole mode: the blueprint is the source
+# of truth for "is this a program", while read/write bits are the operator's
+# business (umask, group setups).
+_bp_sync_exec_bit() {
+  local src="$1" dst="$2"
+  [ -e "$src" ] && [ -e "$dst" ] || return 0
+  if [ -x "$src" ]; then chmod +x "$dst" 2>/dev/null || true
+  else chmod -x "$dst" 2>/dev/null || true; fi
 }
 
 read_blueprint_source() {
   if [ ! -f .blueprint-source ]; then
+    # Three different situations reach here and they need three different
+    # answers. Telling a derived project "not a struct2flow project" — which is
+    # what this used to do — is both false and useless, because the operator IS
+    # standing in the project root and will go looking for a bug in their cwd.
+    local markers=0 m
+    for m in AGENT_SIGNAL.md AGENTS.md CLAUDE.md STACK_DEFAULTS.md Brewfile \
+             .githooks/pre-push scripts/blueprint scripts/agent-activity.sh docs/DoD.md; do
+      [ -e "$m" ] && markers=$((markers+1))
+    done
+
+    if [ "$markers" -ge 3 ]; then
+      echo "${C_YELLOW}This looks like a struct2flow project ($markers marker files), but it was${C_RESET}" >&2
+      echo "${C_YELLOW}NEVER REGISTERED with blueprint sync — there is no .blueprint-source.${C_RESET}" >&2
+      echo >&2
+      echo "So 'drift' and 'pull' have never done anything here. Adopt it by creating" >&2
+      echo "$(pwd)/.blueprint-source with:" >&2
+      echo >&2
+      echo "  config_version   = 2" >&2
+      echo "  blueprint_source = <path to your local blueprint checkout>" >&2
+      echo "  blueprint_remote = git@github.com:<owner>/<blueprint>.git" >&2
+      echo "  blueprint_branch = main" >&2
+      echo "  bootstrap_sha    = <blueprint commit you are adopting against>" >&2
+      echo "  bootstrap_date   = $(date '+%Y-%m-%d')" >&2
+      die "unregistered struct2flow project — see the lines above"
+    fi
     die "no .blueprint-source in $(pwd) — not a struct2flow project (run from project root)"
   fi
-  BLUEPRINT_ROOT=$(grep '^blueprint_source' .blueprint-source | cut -d= -f2- | xargs)
+
+  local from_file
+  from_file=$(grep '^blueprint_source' .blueprint-source | cut -d= -f2- | xargs)
   BOOTSTRAP_SHA=$(grep '^bootstrap_sha' .blueprint-source | cut -d= -f2- | xargs)
   BOOTSTRAP_DATE=$(grep '^bootstrap_date' .blueprint-source | cut -d= -f2- | xargs)
-  if [ -z "$BLUEPRINT_ROOT" ] || [ ! -d "$BLUEPRINT_ROOT" ]; then
-    die ".blueprint-source points at '$BLUEPRINT_ROOT' which does not exist"
-  fi
+
+  BLUEPRINT_ROOT=$(_bp_resolve_blueprint_root "$from_file") || \
+    die ".blueprint-source points at '$from_file' which does not exist, and no blueprint checkout could be resolved (export BLUEPRINT_ROOT=<path>)"
 }
 
 # --- Subcommand: files ---
@@ -519,6 +619,29 @@ report_staleness() {
   esac
 }
 
+# --- Are we standing in the blueprint itself? ---
+# Positive identification, not "there is no .blueprint-source" — a derived
+# project that lost its config has no .blueprint-source either, and calling that
+# one "the blueprint" would silently skip every comparison it needs.
+#
+# The signal: the CLI you are running belongs to the repo you are standing in.
+# That is not a guess — if you are executing `…/blueprint/scripts/blueprint`,
+# then `…/blueprint` IS a blueprint checkout. Verified against real files, and
+# resolved through symlinks because CLAUDE.md documents `ln -s` as an install.
+_bp_is_blueprint_itself() {
+  local self cli_root here
+  self="${BASH_SOURCE[0]}"
+  if command -v readlink >/dev/null 2>&1; then
+    local r; r=$(readlink -f "$self" 2>/dev/null) && [ -n "$r" ] && self="$r"
+  fi
+  cli_root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P) || return 1
+  here=$(git rev-parse --show-toplevel 2>/dev/null) || here="$PWD"
+  here=$(cd "$here" 2>/dev/null && pwd -P) || return 1
+
+  [ "$cli_root" = "$here" ] || return 1
+  [ -f "$here/CLAUDE.md" ] && [ -f "$here/docs/DoD.md" ] && [ -f "$here/scripts/blueprint" ]
+}
+
 # --- Subcommand: drift ---
 cmd_drift() {
   # A-22: arm the pre-push gate here, BEFORE read_blueprint_source (which dies
@@ -529,6 +652,28 @@ cmd_drift() {
   _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
   # shellcheck source=scripts/lib/gate.sh
   [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  # BUG-007: the wake ritual runs `blueprint drift` in EVERY struct2flow repo,
+  # and this one has no `.blueprint-source` because it is the source. It used to
+  # die here with "not a struct2flow project" — false, useless, and it stopped
+  # the mandated wake check dead in the blueprint itself.
+  #
+  # There is still something worth reporting here: whether this checkout is
+  # behind its own remote. That is the same question `report_staleness` answers
+  # for a derived project's blueprint, and it is the one thing that can be stale
+  # about the source of truth.
+  if _bp_is_blueprint_itself; then
+    echo "${C_BOLD}Blueprint drift check${C_RESET}"
+    echo "  project:    $(pwd)"
+    echo "  ${C_GREEN}✓ This IS the blueprint — it is the source of truth, so there is${C_RESET}"
+    echo "  ${C_GREEN}  nothing to sync against and no drift to report.${C_RESET}"
+    BLUEPRINT_BRANCH=""
+    report_staleness "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    echo
+    echo "${C_DIM}Derived projects run this to compare themselves against here.${C_RESET}"
+    echo "${C_DIM}To see what they would sync: blueprint files${C_RESET}"
+    return 0
+  fi
 
   read_blueprint_source
 

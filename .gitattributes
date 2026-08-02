@@ -35,3 +35,9 @@ docs/backlog/**                    export-ignore
 docs/backlog/README.md            -export-ignore
 docs/backlog/BACKLOG.md           -export-ignore
 docs/backlog/BUGS.md              -export-ignore
+
+# BUG-013 — the blueprint's self-identification marker must never reach a derived
+# project. `drift` uses its presence as positive proof of "this IS the blueprint";
+# if it shipped, every derived project would claim to be the source of truth and
+# compare nothing. Belt and braces with its absence from MANAGED_FILES.
+.blueprint-root                    export-ignore

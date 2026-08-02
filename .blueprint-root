@@ -1,0 +1,12 @@
+# This file marks THE struct2flow blueprint itself.
+#
+# It exists so `blueprint drift` can tell "I am the source of truth" from "I am a
+# derived project", positively and without guessing (BUG-013).
+#
+# It must NEVER reach a derived project, and two independent mechanisms ensure
+# that: it is `export-ignore` in .gitattributes (so `git archive` — which
+# new-project.sh bootstraps from — omits it), and it is absent from MANAGED_FILES
+# (so `blueprint pull` never copies it). A derived project therefore cannot have
+# this file, even one whose .blueprint-source was deleted.
+#
+# Do not add it to MANAGED_FILES. Do not remove the export-ignore line.

@@ -87,6 +87,7 @@ pipe_init(){
   _PIPE_SUB="${2:-}"
   _PIPE_T0="$(_pipe_now)"
   _PIPE_N=0; _PIPE_OK=0; _PIPE_BAD=0; _PIPE_SKIP=0
+  _PIPE_SLOW_MS=0; _PIPE_SLOW_LABEL=""
 
   # Buffering needs a scratch dir. If we cannot get one — /tmp full, mounted
   # noexec, coreutils not on PATH — the gate must still RUN and still fail
@@ -190,6 +191,15 @@ _pipe_run(){
   _note=""
   [ "$_PIPE_BUF" = "1" ] && _note="$(cat "$_PIPE_DIR/note.$_PIPE_N" 2>/dev/null || true)"
 
+  # Track the slowest stage. With no hard time ceiling (founder decision,
+  # BUG-005) the gate has to stay HONEST about its cost instead of enforcing it:
+  # naming the single biggest contributor is what turns "the gate feels slow"
+  # into a specific, arguable target. The old rule silently spent the budget by
+  # demoting coverage to CI; this reports it and demotes nothing.
+  if [ "$_ms" -gt "${_PIPE_SLOW_MS:-0}" ]; then
+    _PIPE_SLOW_MS="$_ms"; _PIPE_SLOW_LABEL="$_label"
+  fi
+
   if [ "$_rc" -eq 0 ]; then
     _pipe_line ok "$_label" "$(_pipe_dur "$_ms")${_note:+ · $_note}"
     _pipe_record ok
@@ -240,9 +250,12 @@ pipe_finish(){
     return 1
   fi
 
-  printf '%s╰─ PASSED%s · %s stages · %s skipped · %s\n\n' \
-    "$_C_OK" "$_C_OFF" "$_ok" "$_skip" "$(_pipe_dur "$_total")"
-  _pipe_feed "PASSED · $_ok stages · $_skip skipped · $(_pipe_dur "$_total")"
+  _slow=""
+  [ -n "${_PIPE_SLOW_LABEL:-}" ] && \
+    _slow=" · slowest: $_PIPE_SLOW_LABEL $(_pipe_dur "${_PIPE_SLOW_MS:-0}")"
+  printf '%s╰─ PASSED%s · %s stages · %s skipped · %s%s%s%s\n\n' \
+    "$_C_OK" "$_C_OFF" "$_ok" "$_skip" "$(_pipe_dur "$_total")" "$_C_DIM" "$_slow" "$_C_OFF"
+  _pipe_feed "PASSED · $_ok stages · $_skip skipped · $(_pipe_dur "$_total")$_slow"
   _pipe_cleanup; trap - EXIT INT TERM
   return 0
 }

@@ -97,8 +97,10 @@ fi
 # column padding. The second is the dangerous one — a lookup miss used to be
 # indistinguishable from "no roster", so it failed silently. Pure text parsing,
 # no sleeps: ~0.2s, which the 30s ceiling (BUG-005) can afford.
+# --fast: case #12 drives a real supervisor for ~2s to prove a RUNNING feed
+# follows a roster rename. CI runs it; the ceiling has no room here.
 if [ -f tests/roster/test.sh ]; then
-  bash tests/roster/test.sh || {
+  bash tests/roster/test.sh --fast || {
     echo "❌ tests/roster/test.sh failed (BUG-010)."
     echo "   Persona identity must resolve from AGENT_ROSTER.md by ROLE, via"
     echo "   scripts/lib/roster.sh — never from a name baked into a managed script."

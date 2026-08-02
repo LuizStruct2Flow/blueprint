@@ -69,14 +69,34 @@ state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
 # project (same class as BUG-002).
 . "$repo_root/scripts/lib/roster.sh"
 
-persona="${AGENT_PERSONA:-}"
-if [ -z "$persona" ]; then
-  persona="$(bp_roster_name_for_role "$repo_root" Orchestrator)"
-  # Fail visibly, and fall back to the ROLE rather than to somebody's name: a
-  # feed labelled [Orchestrator] is obviously unresolved, where a feed labelled
-  # with a plausible name is indistinguishable from a correct one.
-  [ -n "$persona" ] || persona="Orchestrator"
-fi
+#
+# Re-resolvable ON PURPOSE. The supervisor is long-lived and the roster is a
+# live config file, so resolving identity once at startup makes the feed report
+# whatever the roster said when the daemon booted — a rename then does nothing
+# until someone restarts it, and nothing says so. That was the first fix's gap:
+# it moved the truth from a literal in the source to a snapshot taken at boot,
+# which is closer but still not the roster. `resolve_identity` is called at
+# startup and again whenever the roster file changes underneath us.
+resolve_identity(){
+  persona="${AGENT_PERSONA:-}"
+  if [ -z "$persona" ]; then
+    persona="$(bp_roster_name_for_role "$repo_root" Orchestrator)"
+    # Fail visibly, and fall back to the ROLE rather than to somebody's name: a
+    # feed labelled [Orchestrator] is obviously unresolved, where a feed labelled
+    # with a plausible name is indistinguishable from a correct one.
+    [ -n "$persona" ] || persona="Orchestrator"
+  fi
+  backing="${AGENT_BACKING:-$(bp_roster_backing_for_name "$repo_root" "$persona")}"
+  self_label="$persona${backing:+ - $backing}"
+}
+
+# Cheap change token for the roster: which file, how big, when touched. Same
+# shape as the signal file's size+inode token — an unchanged roster costs one
+# stat per tick and emits nothing.
+roster_token(){
+  local f; f="$(bp_roster_file "$repo_root" 2>/dev/null)" || { printf 'none'; return; }
+  printf '%s:%s:%s' "$f" "$(f_size "$f")" "$(f_mtime "$f")"
+}
 
 TICK="${AGENT_FEED_TICK:-2}"
 MAX_FRAGMENT="${AGENT_FEED_MAX_FRAGMENT:-1048576}"   # 1 MiB force-flush bound
@@ -92,9 +112,11 @@ SUBAGENT_MAX_AGE_MIN="${AGENT_FEED_SUBAGENT_AGE:-180}"
 if stat -c %Y . >/dev/null 2>&1; then
   f_size(){  stat -c %s "$1" 2>/dev/null; }
   f_inode(){ stat -c %i "$1" 2>/dev/null; }
+  f_mtime(){ stat -c %Y "$1" 2>/dev/null; }
 else
   f_size(){  stat -f %z "$1" 2>/dev/null; }
   f_inode(){ stat -f %i "$1" 2>/dev/null; }
+  f_mtime(){ stat -f %m "$1" 2>/dev/null; }
 fi
 
 ts(){ date +%H:%M:%S; }
@@ -111,9 +133,8 @@ persona_label(){
   printf '%s%s' "$name" "${b:+ - $b}"
 }
 
-# This session's own backing agent, resolved the same way as everyone else's.
-backing="${AGENT_BACKING:-$(bp_roster_backing_for_name "$repo_root" "$persona")}"
-self_label="$persona${backing:+ - $backing}"
+# Resolve once now; the supervisor re-resolves whenever the roster changes.
+resolve_identity
 field(){ grep "^| $1 " "$signal_file" 2>/dev/null | head -1 | sed "s/^| $1 *| //; s/ *|\$//"; }
 
 # ===========================================================================
@@ -403,16 +424,31 @@ supervise_body(){
   : >"$out"
   emit "$(ts) [agent-activity] feed started → $out"
 
-  local sig_last="" sig_now proj newest
+  local sig_last="" sig_now proj newest ros_last ros_now prev_label
   proj="$HOME/.claude/projects/$(printf '%s' "$repo_root" | sed 's#/#-#g')"
 
   signal_line   # current baton, once
   sig_last="$(signal_token)"
+  ros_last="$(roster_token)"
 
   seed_offset "$state_dir/codex-runs.log"
   seed_offset "$state_dir/gemini-runs.log"
 
   while [ "$stop" -eq 0 ]; do
+    # Roster: re-resolve WHO WE ARE when it changes. Emits only when the label
+    # actually moves, so re-saving the file without renaming anyone is silent.
+    # The line is worth emitting: a rename is otherwise invisible in the very
+    # stream whose labels it changes, which is how "you are still logging as
+    # anna" happened.
+    ros_now="$(roster_token)"
+    if [ "$ros_now" != "$ros_last" ]; then
+      ros_last="$ros_now"
+      prev_label="$self_label"
+      resolve_identity
+      [ "$self_label" != "$prev_label" ] \
+        && emit "$(ts) [$self_label] identity follows the roster: was '$prev_label'"
+    fi
+
     # Signal file: size+inode identity, so an unchanged file emits nothing.
     if [ -f "$signal_file" ]; then
       sig_now="$(signal_token)"

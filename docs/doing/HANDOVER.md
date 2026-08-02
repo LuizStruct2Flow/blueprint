@@ -147,21 +147,19 @@ silent half (a roster miss was indistinguishable from "no roster") is what let i
 survive, and `--whoami` exists now because identity had been observable only by
 reading log lines.
 
-### 1c-bis. Host / connectivity (2026-08-02, diagnosed not fixed)
+### 1c-bis. Host / connectivity
 
-The founder's Mac→evo-x2 connection drops repeatedly. It is **not** the Wi-Fi or
-the cable (12 kernel NIC events in 2 days). **evo-x2 is dual-homed on two
-different routers with two default routes** — `eno1` 192.168.0.97 via
-192.168.0.1 (metric 100) and `wlp195s0` 192.168.178.130 via 192.168.178.1
-(metric 600). Tailscale logs `portmap: monitor: gateway and self IP changed`
-live during a single `netcheck`; 22,194 magicsock events in 3 days, 63
-"endpoints changed" per day, and `macbook-air-2` is pinned to the Frankfurt DERP
-relay while `imac` gets a direct LAN path. evo-x2's own NAT is friendly
-(`UDP: true`, `MappingVariesByDestIP: false`), so the churn — not the NAT — is
-what prevents hole-punching. **Fix: drop the second default route**
-(netplan + systemd-networkd; `dhcp4-overrides: {use-routes: false}` on
-`wlp195s0`, or turn the radio off). Not applied — it needs sudo and it changes
-networking underneath a remote session.
+The founder's remote connection to this dev host drops when working away from
+the host's own LAN. Diagnosed 2026-08-02; same-LAN is resolved, remote is not.
+Full diagnosis, evidence and the ordered fixes live in
+[RUNBOOK-HOST-CONNECTIVITY.md](RUNBOOK-HOST-CONNECTIVITY.md).
+
+**That runbook is host-specific and stays in `docs/doing/`**, which
+`.gitattributes` marks `export-ignore`. **This file is `-export-ignore` — it
+ships into every bootstrapped project** — so concrete hosts, addresses and
+routers must not be written here. An earlier revision of this section carried
+them and would have seeded one machine's network topology into every new
+project: BUG-009's exact failure mode, in the file that documents BUG-009.
 
 ### 1d. Waiting on redcare
 

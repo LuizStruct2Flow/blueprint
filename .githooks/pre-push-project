@@ -234,6 +234,25 @@ else
   pipe_skip "manifest · BUG-005" "suite absent"
 fi
 
+# BUG-014 — a test suite must never write into the repo it runs from. Git exports
+# GIT_DIR to every hook, so the fixtures below inherited it and their `git init`
+# landed in the REAL repository. That is what wiped core.hooksPath on 2026-08-02
+# and sent a push out ungated. The suite that proves the gate arms was disarming
+# it. Cheap (~1 s) and guards the gate's own integrity.
+if [ -f tests/git-isolation/test.sh ]; then
+  _st_git_isolation(){
+    bash tests/git-isolation/test.sh || {
+      echo "❌ tests/git-isolation/test.sh failed (BUG-014)."
+      echo "   A suite is writing into the repository GIT_DIR points at. Fixtures"
+      echo "   must unset GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE before git init."
+      return 1
+    }
+  }
+  pipe_stage "git-isolation · BUG-014" _st_git_isolation
+else
+  pipe_skip "git-isolation · BUG-014" "suite absent"
+fi
+
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
 # (founder decision, BUG-005), and the reasoning is kept because it is a clean

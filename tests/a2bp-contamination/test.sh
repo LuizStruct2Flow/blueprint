@@ -30,6 +30,14 @@
 
 set -u
 
+# BUG-014 — never inherit git's repo pointers. Git exports GIT_DIR to every hook,
+# the pre-push gate runs this suite, and the fixtures below use `git init` inside
+# a `cd`ed subshell. With GIT_DIR set, `cd` protects nothing: the fixture's
+# commits and config writes land in the REAL repository. This suite must be safe
+# run from anywhere, so it strips them itself rather than trusting its caller.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BLUEPRINT_BIN="$ROOT/scripts/blueprint"
 CARRIER="docs/mocks/README.md"   # a real MANAGED_FILES entry, low-stakes content

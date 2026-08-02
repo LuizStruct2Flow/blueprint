@@ -300,8 +300,14 @@ all eight concerns below, plus the agent infra, live in one git repo.
   it a boundary needs a separate credential or a fork. Claiming more than that
   would be the kind of drift this deck exists to prevent.
 
+- **One door, and it is a pull request** — nothing reaches the blueprint's
+  `main` any other way. Not a founder-authorized edit, not a one-line typo
+  fix, not "it's only committed locally". Our own trunk-based rule stops at
+  the blueprint's edge, because a commit here is a commit in *every* project.
+
 > A rule tightened once in any project benefits every project. The blueprint is the multiplier.
 > Which is exactly why the upstream door is the one that has to be guarded.
+> A multiplier you can push to directly is a multiplier nobody reviews.
 
 ---
 

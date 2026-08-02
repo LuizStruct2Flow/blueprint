@@ -25,6 +25,26 @@
 
 set -e
 
+# BUG-014 — strip git's exported repo pointers before running ANYTHING.
+#
+# Git exports GIT_DIR (and may export GIT_WORK_TREE / GIT_INDEX_FILE) to every
+# hook. The suites below build fixtures with `( cd "$WORK" && git init && … )`,
+# and `cd` does not protect them: with GIT_DIR set, git ignores the working
+# directory and operates on the directory that variable names. A fixture's
+# commit then lands in the REAL repository.
+#
+# That is not a hypothetical. On 2026-08-02 this repo's .git/config was rewritten
+# at 12:40:15 — core.bare=true, core.hooksPath wiped — which BUG-004 recorded as
+# done by an unidentified process. It was the gate's own test suites. The suite
+# that proves the gate arms is what disarmed it, and the next push went out
+# ungated and looked identical to a gated one.
+#
+# Unsetting here is safe: git runs hooks from the repository top level, so every
+# git command below discovers the same repository from the working directory.
+# The suites also unset these individually, because a suite can be run from any
+# other hook context and must not depend on its caller.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
 # FEATURE-002 — render the gate as a pipeline. The banner is not decoration: a
 # gate that does not run prints NOTHING, which looks exactly like a gate that
 # passed. On 2026-08-02 something wiped core.hooksPath and a push went out

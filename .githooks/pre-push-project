@@ -175,6 +175,65 @@ else
   pipe_skip "pre-push-secrets · A-03" "suite absent"
 fi
 
+# RESTORED 2026-08-02 after Codex F2. This suite guards the autonomous handoff
+# path: a regression here silently dispatches an agent against work that is
+# already finished, which happened twice in one session and is what the suite
+# exists to prevent. It was CI-only at 125.4 s, and I defended that as a risk
+# call — Codex showed the cost was scaffolding, not signal (the watcher ran to a
+# fixed timeout regardless of when each assertion became decidable). Re-clocked
+# to 75.0 s with every assertion intact, so the tier question answers itself.
+# (37.5 s was measured first, at SETTLE=1 — an unsound clock; see the suite.)
+if [ -f tests/signal-dispatch/test.sh ]; then
+  _st_signal_dispatch(){
+    bash tests/signal-dispatch/test.sh || {
+      echo "❌ tests/signal-dispatch/test.sh failed."
+      echo "   The watcher must not dispatch on a Task nobody updated — a"
+      echo "   State-first edit publishes a torn baton and sends an agent"
+      echo "   against the previous round's work."
+      return 1
+    }
+  }
+  pipe_stage "signal-dispatch" _st_signal_dispatch
+else
+  pipe_skip "signal-dispatch" "suite absent"
+fi
+
+# ADDED 2026-08-02. Found by tests/manifest on its FIRST run: this suite was in
+# neither the gate nor CI — it ran nowhere at all, which is audit finding A-15
+# exactly ("a suite nothing executes"). It guards BUG-007: `blueprint drift`
+# dying inside the blueprint itself, which is the command every agent runs on
+# every wake. 1.7 s.
+if [ -f tests/drift-in-blueprint/test.sh ]; then
+  _st_drift_in_blueprint(){
+    bash tests/drift-in-blueprint/test.sh || {
+      echo "❌ tests/drift-in-blueprint/test.sh failed (BUG-007)."
+      echo "   drift must report 'this IS the blueprint' and exit 0, not die."
+      return 1
+    }
+  }
+  pipe_stage "drift-in-blueprint · BUG-007" _st_drift_in_blueprint
+else
+  pipe_skip "drift-in-blueprint · BUG-007" "suite absent"
+fi
+
+# The manifest is the control that makes every tier above checkable (BUG-005 /
+# Codex F1). Without it, omitting a pipe_stage block is a silent, one-line
+# coverage cut — which is how signal-dispatch and drift-in-blueprint went
+# unnoticed. ~0.1 s.
+if [ -f tests/manifest/test.sh ]; then
+  _st_manifest(){
+    bash tests/manifest/test.sh || {
+      echo "❌ tests/manifest/test.sh failed (BUG-005)."
+      echo "   Every suite must be classified in tests/SUITES.md, every blocking"
+      echo "   suite actually invoked, and no tier justified by the clock."
+      return 1
+    }
+  }
+  pipe_stage "manifest · BUG-005" _st_manifest
+else
+  pipe_skip "manifest · BUG-005" "suite absent"
+fi
+
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
 # (founder decision, BUG-005), and the reasoning is kept because it is a clean

@@ -143,6 +143,12 @@ jobs:
           bash tests/state-dir/test.sh
           bash tests/roster/test.sh
           bash tests/pipeline/test.sh
+          # Added 2026-08-02 — tests/manifest found these running NOWHERE.
+          # drift-in-blueprint was in neither the gate nor CI (A-15 exactly);
+          # a2bp-e2e was gate-only, so CI carried no backstop for it.
+          bash tests/manifest/test.sh
+          bash tests/drift-in-blueprint/test.sh
+          bash tests/a2bp-e2e/test.sh
           bash tests/marker-merge/test.sh
           bash tests/bootstrap-identity/test.sh
           bash tests/bootstrap-contents/test.sh
@@ -160,8 +166,11 @@ jobs:
           bash tests/pre-push-secrets/test.sh
           bash tests/signal-set/test.sh
           # CI only, deliberately: this one drives the real watcher through a
-          # multi-round timeline with real sleeps (~24s), which does not fit the
-          # 30s pre-push ceiling. The rule is to move work OUT of pre-push, not
-          # to weaken the ceiling (CLAUDE.md §"Pre-push tolerance").
-          bash tests/signal-dispatch/test.sh
+          # Also runs in the pre-push gate as of 2026-08-02. It is kept here so
+          # both halves run on every push — a suite nothing executes is the A-15
+          # defect this repo already had once. CI additionally runs it at the
+          # ORIGINAL pacing (SIGNAL_TEST_SETTLE=3), because the local run uses a
+          # 1s settle unit and a slower unit is the only thing that would catch
+          # a timing assumption baked into the fast clock.
+          SIGNAL_TEST_SETTLE=3 bash tests/signal-dispatch/test.sh
           bash tests/agent-activity-bound/test.sh

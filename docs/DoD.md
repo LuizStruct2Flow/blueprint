@@ -146,12 +146,15 @@ The shipped code is only as good as the tests that gate it.
 7. **Pre-push coverage is decided on risk, never on the clock.** There is
    no wall-clock ceiling. A suite worth blocking a push stays in the gate
    however long it takes; move one to CI only when *risk* justifies it —
-   slow **and** guarding something off the push path — and name the number
-   and the reason where you exclude it. The gate reports its total and its
-   slowest stage every run, so cost stays visible instead of being paid
-   silently in coverage. A ≤30 s ceiling was removed on 2026-08-02
-   (BUG-005) after it demoted a 41-assertion contamination suite to
-   CI-only for growing by 3.7 s.
+   it guards something off the push path, where a regression cannot reach
+   a commit. **This is enforced, not merely stated:** `tests/SUITES.md`
+   classifies every suite and `tests/manifest/` fails the push on an
+   unclassified suite, a `pre-push` suite the gate never invokes, or a
+   rationale that argues from cost. A non-blocking SLO warns past 120 s
+   total / 45 s per stage and can demote nothing. A ≤30 s ceiling was
+   removed on 2026-08-02 (BUG-005) after it demoted a 41-assertion
+   contamination suite to CI-only for growing by 3.7 s; the first version
+   of its replacement was a rule with no control, which Codex rejected.
 
 ## §4 Pre-push gate (fail-fast)
 

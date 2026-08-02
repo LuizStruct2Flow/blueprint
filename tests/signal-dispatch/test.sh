@@ -44,17 +44,95 @@ echo "$AGENT_SIGNAL_TASK" >> "$HITS_FILE"
 EOF
 chmod +x "$CMD"
 
-# Drive the watcher for a bounded number of polls, then stop it.
+# ---------------------------------------------------------------------------
+# TEST CLOCK (BUG-005 / Codex F2).
+#
+# This suite cost 125.4 s and was excluded from the pre-push gate for it. That
+# cost was scaffolding, not signal: `run_watch` started an infinite watcher
+# under `timeout N` and threw the timeout status away, so every case burned its
+# whole bound no matter when its assertion became decidable. The six bounds
+# summed to exactly 125 (22+18+26+13+26+20).
+#
+# Two changes remove it without weakening a single assertion:
+#
+#   1. Everything is expressed in SETTLE UNITS instead of wall-clock seconds.
+#      The watcher's settle window is the only real timescale here — every sleep
+#      existed to be "shorter than settle" or "longer than settle". Shrinking
+#      the unit shrinks the suite proportionally.
+#   2. A case stops its watcher as soon as the assertion is DECIDABLE, rather
+#      than waiting out a fixed bound.
+#
+# SETTLE stays an INTEGER second, deliberately. The watcher compares
+# `date +%s` (scripts/codex-signal-watch.sh:178), so sub-second settle would
+# mean changing the dispatch timing of production code for test convenience —
+# in the file whose timing bugs are the reason this suite exists. The poll
+# interval has no such constraint and goes sub-second freely.
+#
+# Override for debugging: SIGNAL_TEST_SETTLE=3 reproduces the original pacing.
+# ---------------------------------------------------------------------------
+# SETTLE=2 is a FLOOR, not a preference. The watcher compares `date +%s`, which
+# truncates to whole seconds, and the wrong-order cases depend on a pause the
+# watcher must read as SHORTER than settle. A sub-second pause can straddle a
+# second boundary, so two observations 0.4 s apart can read as 1 s elapsed. At
+# SETTLE=1 that makes `elapsed < settle` false and the stale Task dispatches —
+# an alignment race, roughly 40% of runs, independent of machine load.
+#
+# I shipped SETTLE=1 and measured 37.5 s from it. The gate caught it on the very
+# next push: passed three times standalone, failed inside the gate, and stayed
+# green under artificial CPU load — which is what ruled load out and pointed at
+# clock granularity. Any sub-settle pause needs to survive ONE boundary
+# crossing, so the smallest sound integer settle is 2.
+SETTLE="${SIGNAL_TEST_SETTLE:-2}"     # watcher settle window, whole seconds (min 2)
+POLL="${SIGNAL_TEST_POLL:-0.2}"       # watcher poll interval, may be fractional
+WATCH_MAX="${SIGNAL_TEST_WATCH_MAX:-60}"   # safety net only; never the pacing
+
+# u N — N whole settle units, as a sleep argument.
+u(){ echo $(( $1 * SETTLE )); }
+
+# fu X — a FRACTION of a settle unit. The wrong-order cases depend on a pause
+# strictly SHORTER than settle (that is what makes the two edits coalesce into
+# one publication), so they cannot be expressed in whole units once the unit IS
+# the settle window. Only SETTLE itself must stay an integer; sleep takes
+# fractions happily.
+fu(){ awk -v s="$SETTLE" -v f="$1" 'BEGIN{ printf "%.2f", s*f }'; }
+
 # Flags are `--file` and a command after `--` (not `--signal`/`--command`) —
 # an earlier draft guessed and the watcher just printed its usage, which made
 # every case fail for a reason that had nothing to do with the guard.
-run_watch(){ # seconds
+start_watch(){
   : > "$HITS"
-  HITS_FILE="$HITS" AGENT_SIGNAL_SETTLE=3 timeout "$1" bash "$WATCHER" \
-    --file "$SIG" --poll 1 --log "$WORK/signal.log" -- "$CMD" >"$WORK/wlog" 2>&1
+  HITS_FILE="$HITS" AGENT_SIGNAL_SETTLE="$SETTLE" timeout "$WATCH_MAX" bash "$WATCHER" \
+    --file "$SIG" --poll "$POLL" --log "$WORK/signal.log" -- "$CMD" >"$WORK/wlog" 2>&1 &
+  WATCH_PID=$!
+}
+
+stop_watch(){
+  [ -n "${WATCH_PID:-}" ] || return 0
+  kill "$WATCH_PID" 2>/dev/null
+  wait "$WATCH_PID" 2>/dev/null
+  WATCH_PID=""
+}
+
+hits(){ [ -s "$HITS" ] && grep -c . "$HITS" || echo 0; }
+
+# await_hits N [max_units] — return as soon as N dispatches have landed.
+# This is the positive half, and it is pollable: a dispatch is an event that
+# appears. Bounded so a broken watcher fails the case instead of hanging it.
+await_hits(){
+  local want="$1" max_u="${2:-8}" deadline
+  deadline=$(( $(date +%s) + max_u * SETTLE + 2 ))
+  while [ "$(hits)" -lt "$want" ]; do
+    [ "$(date +%s)" -lt "$deadline" ] || return 1
+    sleep "$POLL"
+  done
   return 0
 }
-hits(){ [ -s "$HITS" ] && grep -c . "$HITS" || echo 0; }
+
+# quiet [units] — the NEGATIVE half, which is not pollable. "No further
+# dispatch happened" can only be established by waiting, so this is the one
+# place real time is spent on purpose. Two settle windows: long enough that a
+# pending dispatch would have fired.
+quiet(){ sleep "$(u "${1:-2}")"; }
 
 # ===========================================================================
 # 1. THE REPRODUCER — the mic is flipped BEFORE the Task is written.
@@ -64,19 +142,22 @@ hits(){ [ -s "$HITS" ] && grep -c . "$HITS" || echo 0; }
 #    stale text it briefly saw mid-write.
 # ===========================================================================
 write_signal ACTIVE "task-one"
+start_watch
 (
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "task-one"      # round 1 — legitimate
-  sleep 6
+  sleep "$(u 2)"
   write_signal ACTIVE "task-one"             # agent hands back
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "task-one"      # WRONG ORDER: mic flipped first…
-  sleep 2
-  write_signal OVER_TO_CODEX "task-two"      # …real Task lands 2s later
-  sleep 6
+  sleep "$(fu 0.4)"                          # SHORTER than settle, so the two
+  write_signal OVER_TO_CODEX "task-two"      # …edits coalesce into one publication
 ) &
-run_watch 22
-wait 2>/dev/null
+WRITER_PID=$!
+wait "$WRITER_PID" 2>/dev/null
+await_hits 2 || true
+quiet 2                                       # nothing further may arrive
+stop_watch
 
 if grep -qx 'task-one' "$HITS" 2>/dev/null && [ "$(grep -cx 'task-one' "$HITS")" -gt 1 ]; then
   fail "#1 dispatched the stale 'task-one' twice — the mid-write state was taken as a real instruction"
@@ -92,17 +173,19 @@ fi
 # 2. A genuinely new Task after a hand-back is the normal case and must fire.
 # ===========================================================================
 write_signal ACTIVE "task-one"
+start_watch
 (
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "task-one"
-  sleep 6
+  sleep "$(u 2)"
   write_signal ACTIVE "task-one"
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "task-TWO"      # a genuinely new instruction
-  sleep 6
 ) &
-run_watch 18
-wait 2>/dev/null
+WRITER_PID=$!
+wait "$WRITER_PID" 2>/dev/null
+await_hits 2 || true
+stop_watch
 
 if ! grep -q 'task-one' "$HITS" 2>/dev/null; then
   fail "#2 the first round never dispatched"
@@ -122,17 +205,19 @@ fi
 #    exercised the identical case at all.
 # ===========================================================================
 write_signal ACTIVE "same-task"
+start_watch
 (
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "same-task"     # round 1
-  sleep 9
+  sleep "$(u 3)"
   write_signal ACTIVE "same-task"            # hand back
-  sleep 3
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "same-task"     # round 2 — deliberately identical
-  sleep 9
 ) &
-run_watch 26
-wait 2>/dev/null
+WRITER_PID=$!
+wait "$WRITER_PID" 2>/dev/null
+await_hits 2 || true
+stop_watch
 
 n=$(hits)
 if [ "$n" -lt 2 ]; then
@@ -146,13 +231,15 @@ fi
 #    quiesces, the watcher is still able to dispatch a later round.
 # ===========================================================================
 write_signal ACTIVE "later-task"
+start_watch
 (
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "later-task"
-  sleep 9
 ) &
-run_watch 13
-wait 2>/dev/null
+WRITER_PID=$!
+wait "$WRITER_PID" 2>/dev/null
+await_hits 1 || true
+stop_watch
 
 if [ "$(hits)" -lt 1 ]; then
   fail "#4 nothing dispatched after a settle — the watcher has wedged"
@@ -169,19 +256,22 @@ fi
 #    demonstrated rather than described.
 # ===========================================================================
 write_signal ACTIVE "old-task"
+start_watch
 (
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "old-task"      # round 1
-  sleep 6
+  sleep "$(u 2)"
   write_signal ACTIVE "old-task"
-  sleep 2
+  sleep "$(u 1)"
   write_signal OVER_TO_CODEX "old-task"      # State first…
-  sleep 8                                    # …a pause LONGER than settle (3)
+  sleep "$(u 3)"                             # …a pause LONGER than settle
   write_signal OVER_TO_CODEX "new-task"
-  sleep 5
 ) &
-run_watch 26
-wait 2>/dev/null
+WRITER_PID=$!
+wait "$WRITER_PID" 2>/dev/null
+await_hits 3 || true
+quiet 2                                       # the trace must be exactly three
+stop_watch
 
 # CHARACTERIZATION, asserted exactly. An earlier version of this case passed
 # for almost every outcome — no dispatches, extra dispatches, a missing final
@@ -208,19 +298,22 @@ if [ ! -x "$SETTER" ]; then
   fail "#6 scripts/signal-set.sh is missing — the atomic publication path does not exist"
 else
   write_signal ACTIVE "old-task"
+  start_watch
   (
-    sleep 2
+    sleep "$(u 1)"
     bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-one" >/dev/null
-    sleep 6
-    bash "$SETTER" --file "$SIG" --holder Sylvia --state ACTIVE --task "round-one" >/dev/null
-    sleep 2
+    sleep "$(u 2)"
+    bash "$SETTER" --file "$SIG" --holder Eto --state ACTIVE --task "round-one" >/dev/null
+    sleep "$(u 1)"
     # One indivisible publication: State and Task change together. There is no
     # window in which the new State sits beside the old Task, at ANY pause.
     bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-two" >/dev/null
-    sleep 6
   ) &
-  run_watch 20
-  wait 2>/dev/null
+  WRITER_PID=$!
+  wait "$WRITER_PID" 2>/dev/null
+  await_hits 2 || true
+  quiet 2                                     # exactly two, no torn extra
+  stop_watch
 
   if grep -qx 'old-task' "$HITS" 2>/dev/null; then
     fail "#6 a stale Task was dispatched despite atomic publication: $(tr '\n' '|' <"$HITS")"

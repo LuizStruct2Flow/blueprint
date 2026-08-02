@@ -445,9 +445,11 @@ said, a passing one stays quiet. That is not decoration:
   is the signal.
 - **Per-stage timings make cost arguable instead of guessed.** There is no
   wall-clock ceiling — the old 30 s one started *deciding what was tested*, and
-  a 41-assertion contamination suite left the gate for growing by 3.7 s. The
-  render names the total and the slowest stage every run, so cost is visible
-  rather than silently paid in coverage.
+  a 41-assertion contamination suite left the gate for growing by 3.7 s. Now
+  every suite is classified in a manifest the gate **enforces**, a non-blocking
+  SLO warns instead of demoting, and a slow suite gets optimised: one went
+  **125 s → 75 s** with every assertion intact. Coverage is decided on risk,
+  never on the clock.
 - **It fails closed by construction** — a stage exits non-zero and the runner
   exits, rather than returning a status one of ~18 call sites could drop. Tested
   against non-zero exits, signals, missing binaries and a missing scratch dir.

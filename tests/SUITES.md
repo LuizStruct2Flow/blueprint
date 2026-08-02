@@ -5,6 +5,15 @@ exists but is not listed here, if a listed suite does not exist, if a suite
 declared `pre-push` is not actually invoked by the gate, or if a rationale is
 empty or **argues from the clock**.
 
+*Enforced* is meant literally, and it took two rounds to become true. Codex found
+the first version proved only that **strings existed**: membership was an
+unanchored `grep`, so commenting out an invocation kept the control green while
+the suite stopped running; and discovery recognised only `tests/*/test.sh`, so
+renaming a runner made a suite invisible. Neither bypass required lying in this
+file — ordinary refactoring was enough. Now comments are stripped and an
+anchored `bash tests/<suite>/<file>.sh` command is required, and **every** shell
+file under `tests/` must belong to a declared suite.
+
 ## Why it exists (BUG-005, Codex F1)
 
 The pre-push gate used to have a 30 s ceiling. It was removed because it had

@@ -314,6 +314,17 @@ grep -qiE 'do not (move|demote)|optimise' "$TMP/out" \
   && pass "#20 the SLO warning points at optimising, not at demoting" \
   || fail "#20 the SLO warning does not steer away from demotion"
 
+# Codex R2-F2: a threshold at or below the accepted baseline warns on EVERY
+# ordinary run, which cannot distinguish a regression from normal operation and
+# gets trained out. The defaults must therefore sit ABOVE the current baseline,
+# so a healthy gate is silent.
+out_default="$(run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage 'a' true; pipe_finish" >/dev/null; cat "$TMP/out")"
+if printf '%s' "$out_default" | grep -q "SLO"; then
+  fail "#20 the DEFAULT thresholds warn on a trivial passing gate — the signal is noise from day one"
+else
+  pass "#20 a healthy gate is silent: default thresholds sit above the baseline"
+fi
+
 # A failing gate must still fail even when the SLO also trips — the warning
 # must never mask or override the verdict.
 rc=$(AGENT_GATE_SLO_TOTAL_MS=1 run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage 'boom' false; pipe_finish")

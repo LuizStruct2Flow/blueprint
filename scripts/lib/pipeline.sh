@@ -267,8 +267,20 @@ pipe_finish(){
   # with every assertion intact.
   #
   # Deliberately never affects the exit status. Overridable per project.
-  _slo_total="${AGENT_GATE_SLO_TOTAL_MS:-120000}"   # 120 s whole gate
-  _slo_stage="${AGENT_GATE_SLO_STAGE_MS:-45000}"    #  45 s single stage
+  #
+  # THRESHOLDS MUST SIT ABOVE THE ACCEPTED BASELINE (Codex R2-F2). The first
+  # values were 120 s / 45 s against a measured baseline of 142.3 s total and a
+  # 75 s slowest stage — so every ordinary successful gate warned. A warning that
+  # fires at introduction cannot distinguish a regression from normal operation,
+  # and gets trained out; it would have become noise within a week and then
+  # meant nothing when something genuinely regressed.
+  #
+  # Set ~25% above the measured baseline, and RATCHET DOWN when optimisation
+  # lands — the same discipline as the lint --max-warnings ratchet. These are a
+  # regression signal, not an aspiration.
+  #   baseline 2026-08-02: gate 142.3 s, slowest stage signal-dispatch ~75 s.
+  _slo_total="${AGENT_GATE_SLO_TOTAL_MS:-180000}"   # 180 s whole gate  (~26% headroom)
+  _slo_stage="${AGENT_GATE_SLO_STAGE_MS:-95000}"    #  95 s single stage (~27% headroom)
   if [ "$_total" -gt "$_slo_total" ] 2>/dev/null; then
     printf '%s   ⚠ gate SLO: %s total exceeds %s. Not a failure and nothing is\n' \
       "$_C_WARN" "$(_pipe_dur "$_total")" "$(_pipe_dur "$_slo_total")"

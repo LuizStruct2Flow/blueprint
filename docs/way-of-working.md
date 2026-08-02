@@ -198,7 +198,7 @@ Luiz Scheidegger · 2026
 
 Two things make this different from "another opinionated framework":
 
-- **The persona team** — named AI personas (Sylvia, Christian, Kathrin, …) on Claude Code / Codex / Gemini, coordinating via radio-over
+- **The persona team** — named AI personas on Claude Code / Codex / Gemini, defined in a per-engineer roster, coordinating via radio-over
 - **The blueprint** — a *living operating system*: capabilities derived from production experience, two-way sync to every project
 
 …on top of **eight engineering concerns**, all encoded in tooling:
@@ -234,10 +234,11 @@ The two **meta-layers** below are what's new; the eight concerns underneath are 
 
 # The persona team — radio-over
 
-A configurable team of **named personas** (Sylvia · Klaus · Kathrin · …), each backed by whichever agent you actually run — Claude Code, Codex, Gemini, Copilot, Qwen. Defined in a **per-engineer `AGENT_ROSTER.md`** (gitignored, copied from the tracked [`AGENT_ROSTER.example.md`](AGENT_ROSTER.example.md) on the `.env` model — your fleet is not your teammate's); coordinated via [`AGENTS.md`](AGENTS.md) + `AGENT_SIGNAL.md`.
+A configurable team of **named personas**, each backed by whichever agent you actually run — Claude Code, Codex, Gemini, Copilot, Qwen. Defined in a **per-engineer `AGENT_ROSTER.md`** (gitignored, copied from the tracked [`AGENT_ROSTER.example.md`](AGENT_ROSTER.example.md) on the `.env` model — your fleet is not your teammate's); coordinated via [`AGENTS.md`](AGENTS.md) + `AGENT_SIGNAL.md`.
 
+- **The roster is the single source of identity** — **role** is the key, name is data, so renaming a persona is editing one cell. Every reader resolves through one parser (`scripts/lib/roster.sh`); `--whoami` prints who a session thinks it is and which roster said so. Until BUG-010 the names were *literals inside the scripts*, so renaming did nothing and one fleet's names shipped to every project
 - **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
-- **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_SYLVIA` ≠ `OVER_TO_CHRISTIAN`)
+- **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_<A>` ≠ `OVER_TO_<B>`)
 - **Read-only + out-of-scope work** allowed in parallel
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
 - **Codex / Gemini dispatched by flipping the signal**, not by direct CLI call

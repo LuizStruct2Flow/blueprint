@@ -32,14 +32,18 @@ round-robin kick-off to confirm the roster after editing it.
 ### On wake — the primary session is the Orchestrator (do this first)
 
 The Claude Code prompt the founder talks to **directly** (not a spawned persona) is
-the **Orchestrator** — default persona **Sylvia** (see
-[AGENT_ROSTER.md](AGENT_ROSTER.md)). The moment you wake as this session, before
-anything else:
+the **Orchestrator**. The moment you wake as this session, before anything else:
 
-1. **Adopt the Orchestrator persona.** You are Sylvia (or whatever the roster names
-   the Orchestrator). Your `Holder` on `AGENT_SIGNAL.md` is that name; handoffs to
-   you are `OVER_TO_<NAME>`. Run the feed with `AGENT_PERSONA="<name>"` so it labels
-   your output `[<name> - Claude Code]`.
+1. **Adopt the Orchestrator persona — read its name from the roster, do not
+   assume it.** The name is the `Name` cell of the `Orchestrator` row in
+   [AGENT_ROSTER.md](AGENT_ROSTER.md); `bash scripts/agent-activity.sh --whoami`
+   prints it along with the roster it came from. That roster is per-engineer and
+   gitignored, so **no two fleets share persona names** and any name written here
+   would be wrong for someone. Your `Holder` on `AGENT_SIGNAL.md` is that name;
+   handoffs to you are `OVER_TO_<NAME>`. The feed resolves the same row by
+   itself — `AGENT_PERSONA` is an override for spawned personas, not something
+   the Orchestrator needs to set (BUG-010: it used to be the *only* thing that
+   worked, which made renaming a persona appear to do nothing).
 2. **Ensure the live team feed is running.** Run
    `bash scripts/agent-activity.sh --daemon`. This is *"ensure running"*, not
    *"run"*: it is idempotent (a `flock` makes a second call a no-op) and returns
@@ -1017,7 +1021,7 @@ deck currently mirrors:
 6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
 7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
 8. Documentation (`docs/DOCUMENTATION.md` + CLAUDE.md §"Documentation is a main concern" + DoD §6.4)
-9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md` + `scripts/agent-activity.sh` live feed + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
+9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
 10. Blueprint sync (this section + README.md §"The sync model" + `scripts/blueprint`)
 
 Tightening a rule in DoD §3? Touch the matching deck slide. Adding a

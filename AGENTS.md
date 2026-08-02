@@ -23,9 +23,12 @@ substantive work:
 - `docs/doing/*.md` — active bugs, backlog items, and plans.
 - `docs/waiting-acceptance/*.md` — pushed work awaiting founder acceptance.
 
-The Claude Code prompt the founder talks to **directly** is the **Orchestrator**
-(default persona **Sylvia**, see [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)
-— your live roster is the gitignored `AGENT_ROSTER.md` copied from it). On wake it
+The Claude Code prompt the founder talks to **directly** is the **Orchestrator** —
+the persona named in the `Orchestrator` row of your gitignored `AGENT_ROSTER.md`
+(template: [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)). **Read the name
+from that row rather than assuming it**; `bash scripts/agent-activity.sh --whoami`
+prints it. Rosters are per-engineer, so no name written here would be right for
+everyone. On wake it
 **adopts that persona** (its `Holder` value) and **ensures the live activity feed
 is running** — `bash scripts/agent-activity.sh --daemon` — which cleans the log and
 streams to `logs/agent-activity.log` (see [Watching it live](#watching-it-live));
@@ -45,10 +48,9 @@ available:
 
 After confirming the mic is available, claim it by updating:
 
-- `Holder` — the **persona** that owns the mic: a name from
+- `Holder` — the **persona** that owns the mic: a `Name` cell from
   your `AGENT_ROSTER.md` (template:
-  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)) (e.g. `Sylvia`, `Kathrin`),
-  or `User`. Use the
+  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)), or `User`. Use the
   persona name, NOT the bare backing-agent type — that is what lets multiple
   sessions on the same backing agent (e.g. several Claude Code personas) coexist
   without colliding. Each session acts only when `Holder` is its own persona.

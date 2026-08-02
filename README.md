@@ -18,10 +18,13 @@ upstream so every other project inherits it.
   `.env.example`) — each backed by whichever agent you run: Codex, Claude Code,
   Gemini, Copilot, Qwen — coordinates through a single `AGENT_SIGNAL.md` file:
   radio-over handoff, one mic at a time, no overwrites or duplicate work.
-  Persona names keep same-type agents distinct (two Claude Code sessions =
-  "Sylvia" vs "Christian"). The default team is 15 personas; edit the roster
-  to fit your agents and credits. See [AGENTS.md](AGENTS.md) for the protocol
-  and `scripts/agent-activity.sh` for a live `[Persona - Agent]` feed.
+  Persona names keep same-type agents distinct, so two Claude Code sessions
+  never answer the same handoff. The roster is the single source of that
+  identity — keyed by **role**, so renaming someone is one cell — and every
+  script resolves through it; `scripts/agent-activity.sh --whoami` reports who
+  a session is and which roster said so. The default team is 15 personas; edit
+  the roster to fit your agents and credits. See [AGENTS.md](AGENTS.md) for the
+  protocol and `scripts/agent-activity.sh` for a live `[Persona - Agent]` feed.
 - **The blueprint evolves with every project.** Patterns proven in
   production travel back upstream via `blueprint a2bp`; every project —
   current *and* future — gets every improvement within the same week

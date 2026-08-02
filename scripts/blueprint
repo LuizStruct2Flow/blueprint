@@ -488,7 +488,7 @@ read_blueprint_source() {
       echo "$(pwd)/.blueprint-source with:" >&2
       echo >&2
       echo "  config_version   = 2" >&2
-      echo "  blueprint_source = <path to your local blueprint checkout>" >&2
+      echo "  blueprint_source = <path to your blueprint checkout, RELATIVE to here, e.g. ../blueprint>" >&2
       echo "  blueprint_remote = git@github.com:<owner>/<blueprint>.git" >&2
       echo "  blueprint_branch = main" >&2
       echo "  bootstrap_sha    = <blueprint commit you are adopting against>" >&2

@@ -33,14 +33,16 @@ POLL="${AGENT_CI_POLL:-15}"
 command -v gh >/dev/null 2>&1 || exit 0    # no gh, nothing to watch — silently fine
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-log="$repo_root/logs/agent-activity.log"
+# One appender, shared with the gate renderer — it owns the path resolution and
+# the inode-preserving rotation. This file used to inline its own append, which
+# is how two writers to the same log drift apart on rotation and one of them
+# orphans the supervisor's open handle.
+# shellcheck source=scripts/lib/feed.sh
+. "$repo_root/scripts/lib/feed.sh"
 
 # Emit to the terminal AND to the activity feed, so the result is visible
 # whether or not anyone is still looking at the shell that pushed.
-say(){
-  printf '%s\n' "$1"
-  [ -d "$(dirname "$log")" ] && printf '%s [CI] %s\n' "$(date +%H:%M:%S)" "$1" >>"$log" 2>/dev/null
-}
+say(){ printf '%s\n' "$1"; feed_append "[CI] $1"; }
 
 started=$(date +%s)
 elapsed(){ echo $(( $(date +%s) - started )); }

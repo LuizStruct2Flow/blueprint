@@ -107,6 +107,10 @@ MANAGED_FILES=(
   # derived project without it falls back to divergent paths and re-opens the
   # A-09 cross-project log contamination.
   "scripts/lib/state-dir.sh"
+  # THE activity-feed appender, shared by the gate renderer and the CI watcher.
+  # MUST ship: it owns the inode-preserving rotation, and a second copy of that
+  # rule is how a rotation orphans the feed supervisor's open handle.
+  "scripts/lib/feed.sh"
   # Post-push CI watcher, backgrounded by the gate (FEATURE-002).
   "scripts/watch-ci.sh"
   # THE gate renderer, sourced by .githooks/pre-push. MUST ship: the hook fails

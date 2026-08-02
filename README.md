@@ -202,9 +202,16 @@ blueprint a2bp docs/DoD.md scripts/codex-signal-watch.sh
 
 `a2bp` (apply-to-blueprint) **files a request**: it pushes a branch to the
 blueprint's remote and opens a pull request. It writes into no working tree —
-not yours, not the blueprint's — and it cannot land anything. The blueprint
+not yours, not the blueprint's — and it lands nothing. The blueprint
 owner reads the request and implements it upstream: merging as-is, adapting, or
 rewriting.
+
+That is a statement about **what `a2bp` does**, not a wall around the blueprint.
+Filing a request needs push access to the blueprint remote, so in the usual
+same-owner setup a derived project's agent *could* push to `main` directly by
+running plain `git` instead of `a2bp`. The request flow is a discipline the
+command implements; making it a boundary needs a separate, narrower credential
+(or a fork). See `project_config_paths.md` §"Back-propagation trust boundary".
 
 It requires `config_version = 2` in `.blueprint-source`, naming
 `blueprint_remote` and `blueprint_branch`; a version 1 config refuses and prints

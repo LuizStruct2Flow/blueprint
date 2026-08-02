@@ -83,7 +83,48 @@ out="$( cd "$BP" && GIT_AUTHOR_NAME=T GIT_AUTHOR_EMAIL=t@t.io \
         bash scripts/new-project.sh test-proj "$TARGET" 2>&1 )" || {
   echo "FAIL: bootstrap exited non-zero"; printf '%s\n' "$out" | tail -10; exit 1; }
 
+# --- 0. BUG-015: every lib in scripts/lib/ must be in MANAGED_FILES -----------
+#
+# Adding the six missing names was the symptom fix; this is the defect fix. The
+# list already carried the right reasoning for contamination.sh — "only useful if
+# the file travels" — and five siblings were simply never added, so `a2bp` could
+# not run in ANY derived project and `drift` could not check staleness there.
+# Nothing compared the two lists, so intent and reality drifted in silence.
+#
+# The expected set is read from the FILESYSTEM, not from the CLI source. The
+# first version of this check grepped lib names out of scripts/blueprint — which
+# matches the MANAGED_FILES array itself, so deleting an entry also deleted it
+# from the expected set and the check passed. A mutation test caught that:
+# removing "scripts/lib/request-file.sh" left it green at "12 libs". A guard
+# that reads its expectation from the thing it is guarding cannot fail.
+managed=$(bash "$ROOT/scripts/blueprint" files 2>/dev/null)
+unshipped=""
+n_libs=0
+for libpath in "$ROOT"/scripts/lib/*.sh; do
+  [ -f "$libpath" ] || continue
+  n_libs=$((n_libs+1))
+  lib="scripts/lib/$(basename "$libpath")"
+  printf '%s' "$managed" | grep -q "$lib" || unshipped="$unshipped $lib"
+done
+if [ "$n_libs" -lt 5 ]; then
+  fail "BUG-015: only $n_libs libs found on disk — discovery is broken, so this proved nothing"
+elif [ -n "$unshipped" ]; then
+  fail "BUG-015: libs exist but are NOT in MANAGED_FILES, so a derived project cannot run the CLI:$unshipped"
+else
+  pass "all $n_libs libs in scripts/lib/ are in MANAGED_FILES (they reach derived projects)"
+fi
+
 # --- 1. Secrets and runtime state must not ship -------------------------------
+# BUG-013 — the blueprint's self-identification marker must NOT ship. If it did,
+# every derived project would positively identify as the blueprint and `drift`
+# would compare nothing and exit 0 — the bug restored through the bootstrap door
+# instead of the detection one. Two mechanisms prevent it (export-ignore for
+# archive, absence from MANAGED_FILES for pull); this asserts the bootstrap half
+# rather than trusting the .gitattributes line to stay there.
+if [ -e "$TARGET/.blueprint-root" ]; then
+  fail "BUG-013: .blueprint-root shipped — the derived project will claim to BE the blueprint and drift will compare nothing"
+else pass "the blueprint-root marker did not ship (a derived project cannot claim to be the source)"; fi
+
 if [ -e "$TARGET/.env" ]; then
   fail "A-05: .env shipped into the derived project — this is the SONAR_TOKEN leak path"
 else pass "untracked .env did not ship"; fi

@@ -137,6 +137,19 @@ MANAGED_FILES=(
   # derived project missing this file cannot back-propagate at all — which is
   # the intended fail-closed behaviour, but only useful if the file travels.
   "scripts/lib/contamination.sh"
+  # BUG-015 — the rest of a2bp's plumbing and the staleness probe. These are
+  # SOURCED by this CLI and were absent from this list, so `a2bp` could not run
+  # in ANY derived project and `drift` could not check staleness there. The
+  # comment above already stated the correct reasoning for contamination.sh —
+  # "only useful if the file travels" — and these five siblings simply never got
+  # added. Intent written down, files left behind. Compounds BUG-011: the PR
+  # path was broken at both ends at once.
+  "scripts/lib/staleness.sh"
+  "scripts/lib/request.sh"
+  "scripts/lib/request-build.sh"
+  "scripts/lib/request-config.sh"
+  "scripts/lib/request-inputs.sh"
+  "scripts/lib/request-file.sh"
   "scripts/codex-feed-filter.sh"
   "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
@@ -637,24 +650,32 @@ report_staleness() {
 # --- Are we standing in the blueprint itself? ---
 # Positive identification, not "there is no .blueprint-source" — a derived
 # project that lost its config has no .blueprint-source either, and calling that
-# one "the blueprint" would silently skip every comparison it needs.
+# one "the blueprint" would silently skip every comparison it needs. That
+# reasoning still holds and is why the marker below is a POSITIVE test.
 #
-# The signal: the CLI you are running belongs to the repo you are standing in.
-# That is not a guess — if you are executing `…/blueprint/scripts/blueprint`,
-# then `…/blueprint` IS a blueprint checkout. Verified against real files, and
-# resolved through symlinks because CLAUDE.md documents `ln -s` as an install.
+# BUG-013 — the previous signal was "the CLI you are running belongs to the repo
+# you are standing in". That reads as sound and is worthless: `scripts/blueprint`
+# is itself a MANAGED file, shipped to every derived project at exactly that
+# path. So the signal was trivially true everywhere, and
+# `bash scripts/blueprint drift` — the fallback CLAUDE.md documents, and what a
+# fresh clone and every spawned persona use — reported "This IS the blueprint"
+# and exited 0 having compared nothing. linkedin-watcher-agent sat 18 commits
+# behind for a morning while drift called it clean.
+#
+# The signal is now an explicit marker file that CANNOT reach a derived project:
+# `.blueprint-root` is `export-ignore` (so `git archive`, which new-project.sh
+# bootstraps from, omits it) AND absent from MANAGED_FILES (so `pull` never
+# copies it). Two independent mechanisms, because this one failing silently is
+# what made BUG-013 expensive.
+#
+# It deliberately does NOT also require the CLI-belongs-here test: that would
+# reintroduce a false NEGATIVE for the legitimate `blueprint drift` form run via
+# a PATH symlink from inside the blueprint.
 _bp_is_blueprint_itself() {
-  local self cli_root here
-  self="${BASH_SOURCE[0]}"
-  if command -v readlink >/dev/null 2>&1; then
-    local r; r=$(readlink -f "$self" 2>/dev/null) && [ -n "$r" ] && self="$r"
-  fi
-  cli_root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P) || return 1
+  local here
   here=$(git rev-parse --show-toplevel 2>/dev/null) || here="$PWD"
   here=$(cd "$here" 2>/dev/null && pwd -P) || return 1
-
-  [ "$cli_root" = "$here" ] || return 1
-  [ -f "$here/CLAUDE.md" ] && [ -f "$here/docs/DoD.md" ] && [ -f "$here/scripts/blueprint" ]
+  [ -f "$here/.blueprint-root" ]
 }
 
 # --- Subcommand: drift ---

@@ -152,6 +152,56 @@ else
 fi
 
 # ===========================================================================
+# 4b. BUG-013 — THE REPRODUCER. A derived project running ITS OWN COPY of the
+#     CLI must not identify itself as the blueprint.
+#
+#     Case #4 above uses the blueprint's CLI from outside, which is the
+#     `blueprint drift` (on PATH) form and works. The broken form is
+#     `bash scripts/blueprint drift` — the fallback CLAUDE.md documents when
+#     `blueprint` is not on PATH, and what a fresh clone and every spawned
+#     persona actually use.
+#
+#     `scripts/blueprint` is a MANAGED file, shipped to every derived project at
+#     exactly that path. So "the CLI you are running belongs to the repo you are
+#     standing in" — the signal detection was built on — is trivially true in
+#     every derived project. Every one of them reported "This IS the blueprint"
+#     and exited 0 having compared nothing.
+#
+#     Found from linkedin-watcher-agent, which reported clean all morning while
+#     18 commits and 4 required new files behind — including
+#     scripts/lib/pipeline.sh, without which its pulled hook fails closed.
+# ===========================================================================
+P2="$WORK/derived-own-cli"
+mkdir -p "$P2/docs"
+printf '# CLAUDE\nshared\n'    > "$P2/CLAUDE.md"
+printf '# DoD\nDRIFTED HERE\n' > "$P2/docs/DoD.md"
+# Every derived project carries the CLI and its libs — that is the whole point
+# of MANAGED_FILES, and it is what makes the old signal useless.
+cp -r "$ROOT/scripts" "$P2/scripts"
+(
+  cd "$P2"
+  git init -q -b main .
+  git config user.email t@local; git config user.name t
+  {
+    printf 'blueprint_source = %s\n' "$BP"
+    printf 'bootstrap_sha    = %s\n' "$(git -C "$BP" rev-parse HEAD)"
+    printf 'bootstrap_date   = 2026-01-01\n'
+  } > .blueprint-source
+  git add -A && git -c commit.gpgsign=false commit -q -m init
+) 2>/dev/null
+
+out=$(cd "$P2" && bash scripts/blueprint drift 2>&1 </dev/null)
+if printf '%s' "$out" | grep -qi 'is the blueprint'; then
+  fail "#4b BUG-013: a derived project running its OWN scripts/blueprint says it IS the blueprint — drift compares nothing and exits 0. Output:
+$out"
+elif ! printf '%s' "$out" | grep -q 'docs/DoD.md'; then
+  fail "#4b a derived project running its own CLI did not report its real drift. Output:
+$out"
+else
+  pass "#4b a derived project running its own scripts/blueprint still gets a real drift report"
+fi
+
+# ===========================================================================
 # 5. DETECTION IS POSITIVE, NOT "no .blueprint-source means blueprint".
 #    A project without the file is not the blueprint, and must not be treated
 #    as one. This is the case that separates a real fix from "swallow the error".

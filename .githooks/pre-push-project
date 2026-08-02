@@ -7,9 +7,10 @@
 # NOWHERE and a regression to the sync CLI or the bootstrap script pushes green.
 # That gap was audit finding A-15.
 #
-# Keep every check here fast: the whole pre-push gate has a 30 s ceiling
-# (CLAUDE.md §"Pre-push tolerance"). Measured total for this file: ~19 s, almost
-# all of it the agent-activity --fast suite. The whole hook measures ~20 s.
+# There is NO wall-clock ceiling (CLAUDE.md §"Pre-push tolerance", founder
+# decision 2026-08-02 closing BUG-005). Coverage here is decided on RISK. The
+# gate reports its total and slowest stage every run, so cost stays visible
+# rather than being paid silently by demoting suites to CI.
 
 # Normally sourced by .githooks/pre-push, which has already sourced the renderer
 # and called pipe_init. Sourcing defensively keeps this file runnable on its own
@@ -55,24 +56,14 @@ fi
 # BUG-001 — the activity feed must hold exactly one instance with a bounded
 # process set, and must read file deltas byte-correctly. Guards the fork-bomb
 # regression plus the two silent-data-loss defects found in review rounds 3/4.
-# --fast: the full suite is ~29 s on its own and the WHOLE gate has a 30 s
-# ceiling (CLAUDE.md §"Pre-push tolerance"). The rule is to move work out of
-# pre-push, not to weaken the ceiling.
-#
-# What --fast runs: the shipped BUG-001 mechanisms (RC-1 instance guard, RC-2
-# per-transcript followers INCLUDING #2's 40→80 scaling assertion, RC-3
-# teardown, RC-6 change detection) plus the cheap review-found regressions worth
-# blocking on (R3 command-substitution, R4 byte/char, I-2 nonce, I-3 change
-# token). Those four were caught in review and never shipped, so "covers what
-# shipped" would be the wrong criterion — the criterion is "shipped mechanisms
-# plus cheap regressions worth blocking on".
-#
-# What CI adds (.github/workflows/security.yml): the deterministic race /
-# fault-injection cases #10 and #18, and foreground mode. Both halves run — a
-# suite nothing executes is the A-15 defect this repo already had once.
+# Runs in FULL as of 2026-08-02. It was `--fast` only because the suite is ~29 s
+# and the gate had a 30 s ceiling; the fast subset dropped the deterministic
+# race / fault-injection cases (#10, #18) and foreground mode. Those guard
+# BUG-001, which pegged ~24 of 32 threads for 2.7 days, so running them on every
+# push is worth the seconds.
 if [ -f tests/agent-activity-bound/test.sh ]; then
   _st_agent_activity_bound(){
-    bash tests/agent-activity-bound/test.sh --fast || {
+    bash tests/agent-activity-bound/test.sh || {
       echo "❌ tests/agent-activity-bound/test.sh failed (BUG-001)."
       echo "   The feed must stay one flock-guarded process with no 'tail -F'"
       echo "   followers, and its delta reads must stay byte-exact."
@@ -145,12 +136,12 @@ fi
 # (renaming the roster then does nothing), and roster parsing that breaks on
 # column padding. The second is the dangerous one — a lookup miss used to be
 # indistinguishable from "no roster", so it failed silently. Pure text parsing,
-# no sleeps: ~0.2s, which the 30s ceiling (BUG-005) can afford.
-# --fast: case #12 drives a real supervisor for ~2s to prove a RUNNING feed
-# follows a roster rename. CI runs it; the ceiling has no room here.
+# Runs in FULL as of 2026-08-02: case #12 drives a real supervisor to prove a
+# RUNNING feed follows a roster rename — the half of BUG-010 the founder
+# actually hit ("you are still logging as anna").
 if [ -f tests/roster/test.sh ]; then
   _st_roster(){
-    bash tests/roster/test.sh --fast || {
+    bash tests/roster/test.sh || {
       echo "❌ tests/roster/test.sh failed (BUG-010)."
       echo "   Persona identity must resolve from AGENT_ROSTER.md by ROLE, via"
       echo "   scripts/lib/roster.sh — never from a name baked into a managed script."
@@ -167,12 +158,12 @@ fi
 # time, so the gate CLAUDE.md §Security calls blocking was a no-op in the normal
 # commit-then-push flow. Unrun, this regression is invisible: a secret gate that
 # silently scans nothing looks exactly like one that finds nothing. ~0.3s.
-# --fast: the budget cases drive a hanging scanner and cost ~6s of the 30s
-# ceiling — the gate hit 30.8s with them and was over budget. They run in CI.
-# The correctness cases, which catch a silent fail-open, all stay here.
+# Runs in FULL as of 2026-08-02. The budget cases drive a hanging scanner and
+# were skipped purely on cost; they prove the scan fails CLOSED when it cannot
+# finish, which is exactly the case where a silent pass ships secrets.
 if [ -f tests/pre-push-secrets/test.sh ]; then
   _st_pre_push_secrets(){
-    bash tests/pre-push-secrets/test.sh --fast || {
+    bash tests/pre-push-secrets/test.sh || {
       echo "❌ tests/pre-push-secrets/test.sh failed (A-03)."
       echo "   The secret scan must cover remote..local for every ref being"
       echo "   pushed, or secrets ride out in commits nothing ever looked at."
@@ -184,33 +175,53 @@ else
   pipe_skip "pre-push-secrets · A-03" "suite absent"
 fi
 
-# NOTE — tests/signal-set/ is deliberately CI-only, not here. It protects the
-# coordination publisher, not the correctness or security of the commit being
-# pushed, so it fails the "is this push-critical?" test that everything in this
-# file has to pass. Four-eyes judgement (A-03 R4): keep only fast, push-critical
-# regressions local and move timeline/infrastructure behaviour to CI. The gate
-# had reached 27.6s of a hard 30s ceiling, which is not headroom.
-
-# A-07 — tests/a2bp-contamination/ is now CI-ONLY, and that is a REDUCTION in
-# what blocks a push, recorded as BUG-005 in docs/doing/BUGS.md rather than left as
-# a quiet omission.
+# HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
+# CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
+# (founder decision, BUG-005), and the reasoning is kept because it is a clean
+# record of how a time budget quietly becomes a coverage policy.
 #
-# It cost 2.3s while a2bp compared two files in place. Filing a request means 27
-# real transport runs against a local remote, which is 6.0s — and with BUG-005
-# (tests/agent-activity-bound/ alone consuming 18s of the 30s ceiling) there is
-# no 6s to give. What the gate keeps instead is tests/a2bp-e2e/, whose case #8
-# covers the leak-critical WIRING: a contaminated file blocks the whole request
-# and nothing is pushed. What moved to CI is the 41-assertion detection matrix —
-# which forms of the project name, which host paths, which suppression edge
-# cases. The door that BUG-002 and A-09 came through is still watched here; the
-# catalogue of what to watch for is watched in CI.
+# signal-set was excluded by a "keep only fast, push-critical suites" rule. It
+# costs 0.2 s — there was never a real cost to weigh; the rule existed only
+# because the gate had reached 27.6 s of 30 s.
 #
-# This reverses the moment BUG-005 is resolved.
+# a2bp-contamination was excluded for growing from 2.3 s to 6.0 s when a2bp
+# began driving real transport. That suite is the 41-assertion detection matrix
+# guarding the door BUG-002 and A-09 came through, and its removal was recorded
+# at the time as a REDUCTION in what blocks a push. Both exclusions were
+# defensible only against a clock that no longer exists.
 
-# FEATURE-001 — request identity. The branch name is derived from a length-framed
-# key, so a component's content can never be mistaken for a delimiter; without
-# the framing, "ab"+"c" and "a"+"bc" name the same branch and one project's
-# request silently adopts another's. ~0.3s.
+# A-07 — RESTORED 2026-08-02. The contamination scan on the a2bp request path is
+# the only thing stopping one project's host paths and project name reaching
+# every other project on their next pull.
+if [ -f tests/a2bp-contamination/test.sh ]; then
+  _st_a2bp_contamination(){
+    bash tests/a2bp-contamination/test.sh || {
+      echo "❌ tests/a2bp-contamination/test.sh failed (A-07)."
+      echo "   The detection matrix is what keeps one project's specifics out of"
+      echo "   the blueprint — the door BUG-002 and A-09 both came through."
+      return 1
+    }
+  }
+  pipe_stage "a2bp-contamination · A-07" _st_a2bp_contamination
+else
+  pipe_skip "a2bp-contamination · A-07" "suite absent"
+fi
+
+# RESTORED 2026-08-02. Atomic baton publication, 0.2 s.
+if [ -f tests/signal-set/test.sh ]; then
+  _st_signal_set(){
+    bash tests/signal-set/test.sh || {
+      echo "❌ tests/signal-set/test.sh failed."
+      echo "   Holder/State/Task must publish as ONE indivisible write, or a"
+      echo "   poller samples a new State beside the previous round's Task."
+      return 1
+    }
+  }
+  pipe_stage "signal-set" _st_signal_set
+else
+  pipe_skip "signal-set" "suite absent"
+fi
+
 if [ -f tests/a2bp-request/test.sh ]; then
   _st_a2bp_request(){
     bash tests/a2bp-request/test.sh || {
@@ -271,15 +282,27 @@ fi
 # failed (false reassurance), and blocking — drift runs at every agent wake with
 # no TTY, so a prompt or an unbounded network call hangs the wake. ~2.5s.
 # tests/staleness/test.sh — the probe's VERDICTS (offer bounds, unknown-never-
-# current) — is CI-only, deliberately. Those bounds guard something severe (a
-# fast-forward into a dirty or diverged checkout) but they only fire after a
-# human answers a prompt. What runs here instead is the half that fires
-# automatically on every wake with nobody watching. The gate sits at ~29s of a
-# hard 30s ceiling before either exists, so this is a forced choice, not a
-# preference — see docs/doing/BUGS.md.
+# current) — RESTORED 2026-08-02. Those bounds guard something severe: a
+# fast-forward into a dirty or diverged checkout. They were CI-only because the
+# gate sat at ~29 s of a hard 30 s ceiling and this was called "a forced choice,
+# not a preference". The ceiling is gone, so the choice is no longer forced.
+if [ -f tests/staleness/test.sh ]; then
+  _st_staleness_probe(){
+    bash tests/staleness/test.sh || {
+      echo "❌ tests/staleness/test.sh failed."
+      echo "   The staleness probe must bound its offer and never report an"
+      echo "   unknown checkout as current."
+      return 1
+    }
+  }
+  pipe_stage "staleness probe" _st_staleness_probe
+else
+  pipe_skip "staleness probe" "suite absent"
+fi
+
 if [ -f tests/staleness/drift-integration.sh ]; then
   _st_staleness(){
-    bash tests/staleness/drift-integration.sh --fast || {
+    bash tests/staleness/drift-integration.sh || {
       echo "❌ tests/staleness/drift-integration.sh failed (FEATURE-001 §3b)."
       echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
       echo "   checkout, or change its exit status because of staleness."

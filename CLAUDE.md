@@ -384,14 +384,36 @@ The only path to update a snapshot is local approve + commit + PR review
 of the diff. This turns "snapshot changed" into a visible decision instead
 of silent re-baseline.
 
-## Pre-push tolerance — 30 s ceiling
+## Pre-push tolerance — coverage is decided on risk, never on the clock
 
-The shared pre-push hook at `.githooks/pre-push` must complete in
-≤30 s wall-clock on a typical dev laptop.
+There is **no hard wall-clock ceiling** on the pre-push gate (founder decision,
+2026-08-02, closing BUG-005). The gate is allowed to take the time it needs.
 
-- Anything slower lives in a `test:slow` target or in the CI pipeline.
-- If a test category outgrows the budget, the answer is to move it OUT
-  of pre-push, not to weaken the ceiling.
+There used to be a 30 s ceiling, and it failed in a specific and instructive
+way: **it started deciding what was tested.** When a suite grew past the budget,
+the cheapest response was to demote it to CI-only — so `tests/a2bp-contamination/`
+(41 assertions, guarding the very door BUG-002 and A-09 came through) left the
+gate because it grew from 2.3 s to 6.0 s. That is a coverage decision made on
+budget rather than risk, and nothing about it was visible: the gate still said
+"all checks passed", just over less.
+
+The rules that replace it:
+
+- **Never demote a suite to CI-only to fit a time budget.** If a suite is worth
+  blocking a push, it stays. Move it out only when *risk* says so — it is slow
+  *and* it guards something off the push path — and say which in the comment.
+- **A skip must state its reason**, and the reason must not be "the clock".
+  `pipe_skip` requires one and renders it, so a silent skip is not expressible.
+- **The gate reports its total and its slowest stage on every run**
+  (`scripts/lib/pipeline.sh`). Cost stays visible and arguable instead of being
+  silently paid in coverage — "the gate feels slow" becomes a named stage with a
+  number next to it.
+- **If it becomes genuinely painful, fix the slow suite** — the timings say which
+  one — rather than reducing what is checked.
+
+The one thing that still buys an exception is *scale*, not preference: a suite
+costing minutes, guarding something not on the push path, may live in CI. Name
+the number and the reason where it is excluded.
 
 ## Quality is non-negotiable
 

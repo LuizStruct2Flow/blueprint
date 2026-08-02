@@ -394,7 +394,7 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
 - **Two-commit pattern** — reproducer test (failing) → fix
 - **Coverage thresholds** — whole-tree, tiered: domain/app ≥90%, adapters ≥80%, CLI ≥75% (brownfield ratcheted)
 - **ESLint + Prettier** — both blocking, independent gates
-- **Pre-push ≤30 s** wall-clock — slower tests go to CI
+- **Pre-push coverage is decided on risk, never on the clock** — no wall-clock ceiling; the gate reports its cost instead of silently paying it in coverage
 - **Snapshots are approval-based** — CI never runs with `-u`
 
 ---
@@ -443,9 +443,11 @@ said, a passing one stays quiet. That is not decoration:
   at all — and it can be wiped underneath a live checkout, which happened here on
   2026-08-02 and sent one push out completely ungated. With a banner, its absence
   is the signal.
-- **Per-stage timings make the budget arguable instead of guessed.** The 30 s
-  ceiling was being spent without anyone able to say on what; the render shows
-  one suite taking 19 s of 31 s.
+- **Per-stage timings make cost arguable instead of guessed.** There is no
+  wall-clock ceiling — the old 30 s one started *deciding what was tested*, and
+  a 41-assertion contamination suite left the gate for growing by 3.7 s. The
+  render names the total and the slowest stage every run, so cost is visible
+  rather than silently paid in coverage.
 - **It fails closed by construction** — a stage exits non-zero and the runner
   exits, rather than returning a status one of ~18 call sites could drop. Tested
   against non-zero exits, signals, missing binaries and a missing scratch dir.

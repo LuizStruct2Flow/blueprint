@@ -143,10 +143,15 @@ The shipped code is only as good as the tests that gate it.
    exclusions. The exact `--coverage` invocation + per-layer globs live
    in `project_config_dod.md`. The pre-push gate fails the push if any
    tier's threshold isn't met.
-7. **Pre-push gate must complete in ≤30 s** wall-clock. Slower tests
-   live in a `npm run test:slow`-style target or the CI pipeline. If a
-   test category outgrows the budget, the answer is to move it out of
-   pre-push, not to weaken the ceiling.
+7. **Pre-push coverage is decided on risk, never on the clock.** There is
+   no wall-clock ceiling. A suite worth blocking a push stays in the gate
+   however long it takes; move one to CI only when *risk* justifies it —
+   slow **and** guarding something off the push path — and name the number
+   and the reason where you exclude it. The gate reports its total and its
+   slowest stage every run, so cost stays visible instead of being paid
+   silently in coverage. A ≤30 s ceiling was removed on 2026-08-02
+   (BUG-005) after it demoted a 41-assertion contamination suite to
+   CI-only for growing by 3.7 s.
 
 ## §4 Pre-push gate (fail-fast)
 
@@ -487,7 +492,8 @@ Walk every box. If any is unchecked, finish it; do **not** flip
 - [ ] No new tests call a live non-deterministic service in pre-push
       (e.g. live-LLM tests belong in a nightly eval suite)
 - [ ] Coverage report run; no surprise regression in coverage
-- [ ] Pre-push runtime still ≤30 s
+- [ ] No suite was demoted to CI-only to save time (risk may justify it;
+      the clock may not — §3.7). Any exclusion names its number and reason.
 - [ ] If snapshots changed: locally approved + committed; diff
       reviewed; CI was NOT run with `-u`
 

@@ -4,7 +4,7 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-07-31.** `origin/main` is at **`af7ab47`**.
+> **Last updated: 2026-08-02.** `origin/main` is at **`726d299`**.
 >
 > **Read this first: there are two ID namespaces and only one is a work item.**
 > `BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs — what the commit convention,
@@ -26,12 +26,18 @@
 > they exist to be. An `A-NN` reference anywhere is a citation of history.
 >
 > **TWO THINGS NEED A FOUNDER DECISION, NOT CODE: BUG-004 and BUG-005** (§1).
-> **FEATURE-001 is in `waiting-acceptance/`** awaiting your testing. Next after
-> the decisions: **BUG-006**.
+> **FEATURE-001 and BUG-010 are in `waiting-acceptance/`** awaiting your testing.
+>
+> **Who am I?** Run `bash scripts/agent-activity.sh --whoami`. Do NOT assume a
+> name from any doc: the roster is gitignored and per-engineer, so the
+> Orchestrator's name differs per fleet. On this machine it is **Anna**. Until
+> BUG-010 was fixed (2026-08-02) every surface said Sylvia regardless of what
+> the roster said, which is why older documents here say Sylvia — those are
+> historical, not authoritative.
 
 ## 0. STATUS
 
-- **`origin/main` = `af7ab47`.** Working tree clean, nothing unpushed.
+- **`origin/main` = `726d299`.** Working tree clean, nothing unpushed.
 - **Branch protection is LIVE on `main`** (applied 2026-07-30 with founder
   approval): four required checks, PR required for non-admins, no force-push, no
   deletion, and `enforce_admins: false` — the last line is what keeps trunk-based
@@ -108,13 +114,47 @@ written doc):
 
 ### 1c. Ready to work on without the founder
 
-- **BUG-008 regression test** — the fix is pushed but has no test. It must assert
-  a pulled marker-bearing executable stays executable.
+- **BUG-011** (S1) — `blueprint a2bp` pushes the branch, opens no PR, prints a
+  green ✓ and exits 3 ("filed"). Root-caused and reproduced: `jq` interpolates a
+  `null` `.[0]` as the literal string `null`, which the caller's emptiness guard
+  does not catch. **The exit code asserts filed while nothing was filed**, which
+  breaks the only sanctioned path for improvements to reach the blueprint. The
+  smallest high-value item on this list.
+- **BUG-008 — REOPENED, and it is S1.** The 2026-07-30 fix does not hold:
+  `_bp_sync_exec_bit` was added to all four write paths, but each calls
+  `substitute_placeholders` on the very next line and `bp_substitute_in_place`
+  does its own `mktemp`(600)+`mv`, undoing the chmod. Repair the PRIMITIVE
+  (`chmod --reference` before the `mv`), not the four call sites. Still has no
+  regression test — that absence is why it shipped as "fixed".
 - **BUG-006** — `LWA_FEED_*` env-var contamination in `scripts/log-activity.sh`.
   Same class as BUG-002. Not started.
 - **BUG-009 structural fix** — `project_config_*.md` is both this repo's config
   and the seed template. Mitigated, not fixed; the next concrete thing written
   there propagates again. Real fix: a separate `templates/` source.
+
+**BUG-010 is DONE and pushed (`726d299`)** — the roster is now the single source
+of persona identity, via one parser (`scripts/lib/roster.sh`) that the feed and
+`team-kickoff.sh` both read, keyed by role and tolerant of column padding. Row +
+acceptance test in `waiting-acceptance/BUGS.md`. Two things worth carrying: the
+silent half (a roster miss was indistinguishable from "no roster") is what let it
+survive, and `--whoami` exists now because identity had been observable only by
+reading log lines.
+
+### 1c-bis. Host / connectivity (2026-08-02, diagnosed not fixed)
+
+The founder's Mac→evo-x2 connection drops repeatedly. It is **not** the Wi-Fi or
+the cable (12 kernel NIC events in 2 days). **evo-x2 is dual-homed on two
+different routers with two default routes** — `eno1` 192.168.0.97 via
+192.168.0.1 (metric 100) and `wlp195s0` 192.168.178.130 via 192.168.178.1
+(metric 600). Tailscale logs `portmap: monitor: gateway and self IP changed`
+live during a single `netcheck`; 22,194 magicsock events in 3 days, 63
+"endpoints changed" per day, and `macbook-air-2` is pinned to the Frankfurt DERP
+relay while `imac` gets a direct LAN path. evo-x2's own NAT is friendly
+(`UDP: true`, `MappingVariesByDestIP: false`), so the churn — not the NAT — is
+what prevents hole-punching. **Fix: drop the second default route**
+(netplan + systemd-networkd; `dhcp4-overrides: {use-routes: false}` on
+`wlp195s0`, or turn the radio off). Not applied — it needs sudo and it changes
+networking underneath a remote session.
 
 ### 1d. Waiting on redcare
 

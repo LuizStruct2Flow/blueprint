@@ -169,6 +169,33 @@ else
   pass "sonar-project.properties: SonarQube projectKey substituted at bootstrap"
 fi
 
+# --- 8. `blueprint_source` must be RELATIVE to the project root (BUG-012) -----
+# Bootstrap wrote `blueprint_source = $BLUEPRINT_ROOT`, an absolute host path.
+# It is the one field in .blueprint-source that cannot be correct on two
+# machines at once, and storm2flow proved it: it carried a `/Users/…` path onto
+# a Linux box and every blueprint command died on it (docs/doing/HANDOVER.md).
+#
+# A relative path survives that, and it survives the commoner case too — moving
+# or re-cloning the tree — because what it pins is the LAYOUT (blueprint beside
+# project), which is what bootstrap actually knows. It is resolved from the
+# project root, which costs nothing: read_blueprint_source already requires cwd
+# to be the project root, since it greps ./.blueprint-source.
+#
+# Non-vacuous: pre-fix the value starts with `/`, so case 1 below fires.
+src_val="$(grep '^blueprint_source' "$TARGET/.blueprint-source" 2>/dev/null | cut -d= -f2- | xargs)"
+if [ -z "$src_val" ]; then
+  fail "BUG-012: derived .blueprint-source has no blueprint_source field"
+elif [ "${src_val#/}" != "$src_val" ]; then
+  fail "BUG-012: bootstrap wrote an ABSOLUTE blueprint_source ($src_val) — it
+      cannot be right on two machines at once, and moving either checkout breaks
+      every blueprint command in the derived project"
+elif [ ! -f "$TARGET/$src_val/scripts/blueprint" ]; then
+  fail "BUG-012: blueprint_source ($src_val) does not resolve to a blueprint
+      checkout from the project root — relative, but pointing nowhere"
+else
+  pass "blueprint_source is relative and resolves from the project root"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-05 — bootstrap ships tracked template content only."
   exit 0

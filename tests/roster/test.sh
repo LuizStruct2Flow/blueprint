@@ -235,6 +235,51 @@ for f in scripts/agent-activity.sh scripts/team-kickoff.sh; do
 done
 
 # ===========================================================================
+# 12. A RUNNING feed follows a roster edit — it must not cache identity for its
+#     whole lifetime.
+#
+#     The first fix resolved persona once at startup. `--whoami` (a one-shot)
+#     reported the new name immediately, so the fix looked complete — while the
+#     long-lived supervisor carried on labelling every line with the name the
+#     roster had held when it started. That is BUG-010's own failure shape
+#     wearing a different hat: the displayed name and the roster disagree, and
+#     nothing says so. Reported by the founder: "you are still logging as anna".
+#
+#     Costs ~2s of wall clock (it drives a real supervisor), so it is skipped
+#     under --fast and runs in CI — the 30s pre-push ceiling (BUG-005) has no
+#     room for it.
+# ===========================================================================
+if [ "${1:-}" = "--fast" ]; then
+  echo "  -- #12 skipped (--fast): CI runs it"
+elif [ -f "$FEED" ]; then
+  mkdir -p "$TMP/p4/scripts"
+  cp "$FEED" "$TMP/p4/scripts/" 2>/dev/null
+  cp -r "$ROOT/scripts/lib" "$TMP/p4/scripts/" 2>/dev/null
+  write_roster "$TMP/p4"
+  (
+    cd "$TMP/p4" || exit 1
+    env -u AGENT_PERSONA -u AGENT_BACKING AGENT_FEED_TICK=0.25 \
+      bash scripts/agent-activity.sh >/dev/null 2>&1 &
+    echo $! >feed.pid
+  )
+  sleep 1
+  # The rename, exactly as a founder would make it: one cell in the roster.
+  sed -i 's/| Orchestrator     | Alisa     |/| Orchestrator     | Dara      |/' \
+      "$TMP/p4/AGENT_ROSTER.md" 2>/dev/null
+  sleep 2
+  kill "$(cat "$TMP/p4/feed.pid" 2>/dev/null)" 2>/dev/null
+  wait 2>/dev/null
+  feedlog="$TMP/p4/logs/agent-activity.log"
+  if [ ! -f "$feedlog" ]; then
+    fail "#12 the feed produced no log — cannot tell whether it followed the rename"
+  elif grep -q "Dara" "$feedlog"; then
+    pass "#12 a running feed picks up a roster rename without being restarted"
+  else
+    fail "#12 the running feed never mentioned 'Dara' — it cached its identity at startup"
+  fi
+fi
+
+# ===========================================================================
 # 11. CLAUDE.md points at the ROLE, not at a shipped name.
 #     The fourth site: §"On wake" named the default Orchestrator as if it were
 #     the answer, so an agent that read the docs correctly still got it wrong.

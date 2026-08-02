@@ -56,6 +56,14 @@ After confirming the mic is available, claim it by updating:
   without colliding. Each session acts only when `Holder` is its own persona.
 - `State` — `ACTIVE` while working, `OVER_TO_<NAME>` when handing off to a specific
   persona (e.g. `OVER_TO_KATHRIN`, `OVER_TO_CHRISTIAN`), `OVER_TO_USER`, or `IDLE`
+- **A handback to the BACKING-AGENT type — `OVER_TO_CLAUDE`, `OVER_TO_CODEX` —
+  is valid, not a defect.** It means "I am done, route this": the Orchestrator
+  picks it up and dispatches to the right persona, which is its job. A dispatched
+  agent often has no reason to know which persona should get the work next, and
+  guessing would be worse than handing back. Founder decision, 2026-08-02 —
+  recorded because the alternative reading (that a non-persona handback is a
+  roster bug, BUG-010's class) is plausible enough that it was raised once and
+  would be raised again.
 - `Task` — one short sentence naming the current work
 - `Last update` — absolute date
 

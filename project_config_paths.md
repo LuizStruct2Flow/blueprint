@@ -115,8 +115,27 @@ name carries the project's directory basename, and a directory basename is a
 claim, not a credential: nothing prevents a project from naming itself anything,
 and nothing verifies that the content came from where the branch says.
 
-Today that does not matter, because everything filing requests is ours. The first
-externally-owned project changes it, and these are the things that break:
+**Filing a request requires push access to the blueprint remote, and that has a
+consequence worth stating outright: a derived project is not prevented from
+writing to the blueprint. It is only prevented by `a2bp` declining to.** In the
+same-owner setup every agent authenticates as the owner, usually with admin
+rights and branch protection set to `enforce_admins: false` so the owner keeps
+trunk-based development. The PR requirement therefore does not apply to the
+identity the agents actually present, and an agent that runs plain `git push`
+instead of `a2bp` reaches `main` directly.
+
+**This cannot be closed with repository settings alone.** No ruleset can
+distinguish a derived project's agent from the owner while both present the same
+credential — the missing thing is identity separation, not configuration.
+Closing it needs a *separate, narrower credential* for derived projects (a
+fine-grained token or deploy key, ideally with a ruleset confining it to
+`a2bp/*` refs) or a fork-and-PR flow. Note this is **independent of the owner's
+own `enforce_admins` setting**: a narrower credential for derived projects does
+not touch the owner's direct pushes, so it does not cost trunk-based
+development.
+
+That step is deliberately not taken while every project is ours. The first
+externally-owned project forces it, and these are the things that break:
 
 | Assumption | What breaks when a project is externally owned |
 |---|---|
@@ -125,8 +144,11 @@ externally-owned project changes it, and these are the things that break:
 | The contamination guard ran | It runs on the **requester's** machine. An external requester can simply not run it, or run a patched copy. Receiver-side enforcement (required checks on the request branch) becomes necessary rather than optional. |
 | A reviewer's judgement can be taken on trust | The review is the only gate that decides what lands. Whose review counts becomes an explicit policy question. |
 
-**Do not treat the current model as a security boundary.** It is a
-same-owner convenience with a human review step, which is strictly better than
-the unreviewed direct write it replaced, and strictly weaker than a machine gate.
-Receiver-enforced guarding is designed but deliberately unbuilt — build it when a
-derived project is owned by someone whose review would not be taken on trust.
+**Do not treat the current model as a security boundary, and do not write that a
+derived project "cannot" write into the blueprint.** It can — see above. What is
+true is narrower and worth saying exactly: `a2bp` lands nothing, and a change
+still needs a human to merge a PR. The model is a same-owner convenience with a
+human review step, strictly better than the unreviewed direct write it replaced,
+and strictly weaker than a machine gate. Receiver-enforced guarding is designed
+but deliberately unbuilt — build it when a derived project is owned by someone
+whose review would not be taken on trust.

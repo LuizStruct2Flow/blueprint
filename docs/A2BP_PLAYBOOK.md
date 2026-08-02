@@ -6,9 +6,11 @@
 requester.
 
 `blueprint a2bp` files a **request**: a branch and a pull request against the
-blueprint's remote. It writes into no working tree and cannot land anything.
-Everything in this playbook happens on the other side of that request, when
-someone decides to implement it.
+blueprint's remote. It writes into no working tree and lands nothing — a
+statement about the command's behaviour, not a boundary the repository enforces
+(see `project_config_paths.md` §"Back-propagation trust boundary"). Everything in
+this playbook happens on the other side of that request, when someone decides to
+implement it.
 
 That split is the point. The requester's job ends at "this improvement proved
 itself downstream, here it is". Deciding which deck slides, recipe docs, README

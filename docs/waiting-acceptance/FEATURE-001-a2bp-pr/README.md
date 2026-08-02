@@ -5,8 +5,19 @@
 ## What changed, in one line
 
 `blueprint a2bp` used to `cp` a project's file straight into the blueprint's
-working tree. It now pushes a branch and opens a pull request, and cannot write
-into the blueprint at all.
+working tree. It now pushes a branch and opens a pull request, and itself lands
+nothing.
+
+> **Corrected 2026-08-02.** This line read "and cannot write into the blueprint
+> at all". That overclaims, and the distinction matters: filing a request
+> requires push access to the blueprint remote, and in the same-owner setup
+> every agent authenticates as the owner with `enforce_admins: false`, so an
+> agent running plain `git push` instead of `a2bp` reaches `main` directly. What
+> `a2bp` removed is the *unreviewed automatic* write, which is a real and
+> substantial gain. What it did not create is a boundary. Founder decision the
+> same day: accept the model and state it accurately rather than harden it.
+> Folded into **BUG-011**; see `project_config_paths.md` §"Back-propagation
+> trust boundary".
 
 ## Why it mattered
 

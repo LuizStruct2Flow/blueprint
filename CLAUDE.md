@@ -844,12 +844,36 @@ blueprint a2bp docs/DoD.md
 
 `a2bp` pushes a branch to the blueprint's remote and opens a pull request
 against it. It writes into no working tree — not yours, not the blueprint's —
-and it cannot land anything.
+and it lands nothing.
 
 It used to `cp` the file straight into the blueprint working tree, which made
 every derived project a writer to the generic blueprint. That is the mechanism
 by which **BUG-002** and **A-09** fanned out to every project on their next
 pull, and it is why the write path is gone rather than merely guarded.
+
+**Be precise about what that guarantees, because the obvious reading is wrong.**
+"Lands nothing" is a property of **this command's behaviour**, not a boundary the
+repository enforces. Two things are true at once:
+
+- `a2bp` pushes only to `a2bp/<project>/<hash>` and never to `main`, opens a PR,
+  and has no verb that merges. Nothing it does can land a change.
+- **A derived project is not otherwise prevented from writing to the blueprint.**
+  Filing a request needs push access to the blueprint remote, and in the
+  same-owner setup every agent authenticates as the owner — typically with admin
+  rights and `enforce_admins: false`, so branch protection's PR requirement does
+  not apply to it. An agent that runs plain `git push` instead of `a2bp` reaches
+  `main` directly.
+
+So the discipline is **a convention that `a2bp` implements**, not a wall. It
+cannot be fixed with repository settings while every agent shares one identity:
+no ruleset can distinguish a derived project's agent from the owner when they
+present the same credential. Enforcement needs a *separate, narrower credential*
+(or a fork), which is a deliberate future step and not today's model — see
+`project_config_paths.md` §"Back-propagation trust boundary".
+
+Do not write, or rely on, the claim that a derived project *cannot* write into
+the blueprint. It can. What is true is that `a2bp` does not, and that landing a
+change still requires a human to merge a PR.
 
 The command needs `config_version = 2` in `.blueprint-source`:
 

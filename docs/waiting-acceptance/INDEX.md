@@ -2,7 +2,7 @@
 
 | Item | Pushed | What to test |
 |---|---|---|
-| [**FEATURE-001**](FEATURE-001-a2bp-pr/) — back-propagation becomes a request, not a write | 2026-07-30 | `blueprint a2bp` now files a branch + PR against the blueprint remote and **cannot write into the blueprint at all** — closing the door BUG-002 and audit finding A-09 both came through. Also: `blueprint prs`, `drift` staleness warning, `--force` removed, `config_version = 2`. Test list, accepted costs and the trust boundary are in that folder's [README](FEATURE-001-a2bp-pr/README.md). |
+| [**FEATURE-001**](FEATURE-001-a2bp-pr/) — back-propagation becomes a request, not a write | 2026-07-30 | `blueprint a2bp` now files a branch + PR against the blueprint remote and **itself lands nothing** — closing the door BUG-002 and audit finding A-09 both came through. (Corrected 2026-08-02: this row previously read "cannot write into the blueprint at all", which overclaims. Filing needs push access, and in the same-owner setup an agent bypassing `a2bp` reaches `main` directly — the discipline is the command's behaviour, not a repository boundary. Folded into **BUG-011**.) Also: `blueprint prs`, `drift` staleness warning, `--force` removed, `config_version = 2`. Test list, accepted costs and the trust boundary are in that folder's [README](FEATURE-001-a2bp-pr/README.md). |
 
 ---
 

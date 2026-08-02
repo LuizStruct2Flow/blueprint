@@ -292,6 +292,13 @@ all eight concerns below, plus the agent infra, live in one git repo.
   `{{PROJECT_NAME}}` and **blocks** on host paths, foreign state dirs, and
   any project name that survived. Suppressions are per-line and must carry a
   justification.
+- **A request, not a delivery — and we say exactly what that buys.** `a2bp`
+  pushes to `a2bp/<project>/<hash>`, never to `main`, and has no verb that
+  merges: it lands nothing, and a human merges the PR. It is *not* a wall
+  around the blueprint — filing needs push access, so in a same-owner setup an
+  agent could bypass the command. The discipline is what the tool does; making
+  it a boundary needs a separate credential or a fork. Claiming more than that
+  would be the kind of drift this deck exists to prevent.
 
 > A rule tightened once in any project benefits every project. The blueprint is the multiplier.
 > Which is exactly why the upstream door is the one that has to be guarded.

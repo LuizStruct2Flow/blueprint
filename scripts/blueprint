@@ -107,6 +107,12 @@ MANAGED_FILES=(
   # derived project without it falls back to divergent paths and re-opens the
   # A-09 cross-project log contamination.
   "scripts/lib/state-dir.sh"
+  # Post-push CI watcher, backgrounded by the gate (FEATURE-002).
+  "scripts/watch-ci.sh"
+  # THE gate renderer, sourced by .githooks/pre-push. MUST ship: the hook fails
+  # CLOSED without it (deliberately), so a project that pulls the hook and not
+  # this file cannot push at all until it lands.
+  "scripts/lib/pipeline.sh"
   # THE roster parser, shared by the feed and team-kickoff. MUST ship: both of
   # those are managed files, and without this one they have nowhere to resolve
   # persona identity from — which is BUG-010, where a fleet's persona names were

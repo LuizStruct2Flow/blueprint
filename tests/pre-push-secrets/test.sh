@@ -51,8 +51,12 @@ pass(){ echo "  ok — $*"; }
 
 # --- fixture: a repo the hook runs in and exits quickly -----------------------
 FIX="$WORK/repo"
-mkdir -p "$FIX/.githooks" "$FIX/.claude" "$FIX/bin"
+mkdir -p "$FIX/.githooks" "$FIX/.claude" "$FIX/bin" "$FIX/scripts/lib"
 cp "$HOOK" "$FIX/.githooks/pre-push"
+# FEATURE-002: the hook sources the pipeline renderer and fails closed without
+# it — by design. The fixture must therefore carry it, or every case here fails
+# as "the hook could not start" rather than testing the secret scan at all.
+cp "$ROOT/scripts/lib/pipeline.sh" "$FIX/scripts/lib/pipeline.sh"
 printf '{\n  "permissions": {\n    "allow": []\n  }\n}\n' >"$FIX/.claude/settings.json"
 (
   cd "$FIX"

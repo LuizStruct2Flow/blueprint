@@ -142,6 +142,7 @@ jobs:
           bash tests/gate-arming/test.sh
           bash tests/state-dir/test.sh
           bash tests/roster/test.sh
+          bash tests/pipeline/test.sh
           bash tests/marker-merge/test.sh
           bash tests/bootstrap-identity/test.sh
           bash tests/bootstrap-contents/test.sh

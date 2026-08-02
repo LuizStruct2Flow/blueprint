@@ -39,7 +39,19 @@ fi
 
 # Run a snippet in a real `sh` (dash on Ubuntu), never bash — the hook is
 # #!/bin/sh, and a bashism here would pass in the test and break in the gate.
-run_sh(){ printf '%s\n' "$1" >"$TMP/s.sh"; sh "$TMP/s.sh" >"$TMP/out" 2>&1; echo $?; }
+#
+# AGENT_FEED_LOG is pinned to a temp file for EVERY case. Without it these
+# fixtures append their fake stages ("boom", "noisy") to the real
+# logs/agent-activity.log — observed: one gate run injected ten bogus [GATE]
+# lines into the founder's live feed. A test that writes into the production
+# log is the same contamination class as BUG-002, and it is worse here because
+# the log is what someone reads to find out what actually happened.
+# Cases that assert ON the feed override this with their own path.
+run_sh(){
+  printf '%s\n' "$1" >"$TMP/s.sh"
+  AGENT_FEED_LOG="${AGENT_FEED_LOG:-$TMP/feed.isolated.log}" sh "$TMP/s.sh" >"$TMP/out" 2>&1
+  echo $?
+}
 
 # ===========================================================================
 # 1. A PASSING pipeline exits 0 and says PASSED.
@@ -201,6 +213,85 @@ if grep -qE '1 passed · 1 failed · 1 skipped' "$TMP/out"; then
   pass "#15 the tally is correct with no scratch dir"
 else
   fail "#15 tally wrong with no scratch dir:"; grep '╰─' "$TMP/out" | sed 's/^/        /'
+fi
+
+# ===========================================================================
+# 16. GATE RESULTS REACH THE ACTIVITY FEED.
+#     The terminal render scrolls away and never existed at all for anyone who
+#     was not watching that shell — including an agent asked later "did that
+#     push actually get gated?". logs/agent-activity.log is the durable answer,
+#     and it is the same stream every other agent writes to.
+# ===========================================================================
+FEEDLOG="$TMP/feed.log"
+: >"$FEEDLOG"
+AGENT_FEED_LOG="$FEEDLOG" run_sh ". '$ROOT/scripts/lib/feed.sh'; . '$LIB'; pipe_init 'pre-push gate' 'x'; pipe_stage 'alpha' true; pipe_skip 'beta' 'not here'; pipe_finish" >/dev/null
+
+if grep -q '\[GATE\].*alpha' "$FEEDLOG" && grep -q '\[GATE\].*beta' "$FEEDLOG"; then
+  pass "#16 each stage result is appended to the activity feed"
+else
+  fail "#16 stage results missing from the feed:"; sed 's/^/        /' "$FEEDLOG"
+fi
+
+grep -qE '\[GATE\] PASSED' "$FEEDLOG" \
+  && pass "#16 the verdict is appended to the feed" \
+  || fail "#16 no verdict line in the feed"
+
+# A blocked push must be unmistakable in the log — this is the line someone
+# greps for after the fact.
+: >"$FEEDLOG"
+AGENT_FEED_LOG="$FEEDLOG" run_sh ". '$ROOT/scripts/lib/feed.sh'; . '$LIB'; pipe_init 'pre-push gate'; pipe_stage 'boom' false; pipe_finish" >/dev/null
+grep -q 'PUSH BLOCKED' "$FEEDLOG" \
+  && pass "#16 a failing gate says PUSH BLOCKED in the feed" \
+  || fail "#16 a blocked push is not identifiable in the feed"
+
+# ===========================================================================
+# 17. The feed must stay PLAIN. It is tailed and grepped; ANSI escapes in it
+#     are the same defect as escapes in a CI log, and they break grep patterns
+#     that look anchored but are not.
+# ===========================================================================
+if LC_ALL=C grep -q "$(printf '\033')" "$FEEDLOG"; then
+  fail "#17 ANSI escapes leaked into the activity feed"
+else
+  pass "#17 feed lines are plain text"
+fi
+
+# ===========================================================================
+# 18. Rotation must PRESERVE THE INODE. scripts/agent-activity.sh tracks this
+#     file by offset on an open handle, so a rotation that replaces the inode
+#     leaves the supervisor writing into an unlinked file — the feed would
+#     silently stop updating, which is the worst failure a log can have.
+# ===========================================================================
+: >"$FEEDLOG"
+i=0; while [ $i -lt 60 ]; do echo "filler line $i" >>"$FEEDLOG"; i=$((i+1)); done
+ino_before=$(stat -c %i "$FEEDLOG" 2>/dev/null || stat -f %i "$FEEDLOG")
+AGENT_FEED_LOG="$FEEDLOG" AGENT_FEED_MAX_LINES=20 AGENT_FEED_KEEP_LINES=10 \
+  run_sh ". '$ROOT/scripts/lib/feed.sh'; feed_append 'trigger rotation'" >/dev/null
+ino_after=$(stat -c %i "$FEEDLOG" 2>/dev/null || stat -f %i "$FEEDLOG")
+lines_after=$(wc -l <"$FEEDLOG")
+if [ "$ino_before" = "$ino_after" ] && [ "$lines_after" -le 20 ]; then
+  pass "#18 rotation trims the feed and preserves the inode"
+else
+  fail "#18 rotation broke: inode $ino_before -> $ino_after, $lines_after lines"
+fi
+
+# ===========================================================================
+# 19. THIS SUITE MUST NOT WRITE TO THE REAL FEED.
+#     Non-vacuity guard on the isolation above: if run_sh ever stops pinning
+#     AGENT_FEED_LOG, every case here starts appending fake stages to the live
+#     logs/agent-activity.log, and nothing else would notice.
+# ===========================================================================
+if [ -f "$ROOT/logs/agent-activity.log" ]; then
+  real_before=$(grep -c '\[GATE\]' "$ROOT/logs/agent-activity.log" 2>/dev/null || echo 0)
+  run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage 'canary-must-not-escape' true; pipe_finish" >/dev/null
+  real_after=$(grep -c '\[GATE\]' "$ROOT/logs/agent-activity.log" 2>/dev/null || echo 0)
+  if [ "$real_before" = "$real_after" ] \
+     && ! grep -q 'canary-must-not-escape' "$ROOT/logs/agent-activity.log" 2>/dev/null; then
+    pass "#19 the suite writes no [GATE] lines into the real activity feed"
+  else
+    fail "#19 this suite is polluting logs/agent-activity.log ($real_before -> $real_after)"
+  fi
+else
+  pass "#19 no real feed present to pollute"
 fi
 
 # ===========================================================================

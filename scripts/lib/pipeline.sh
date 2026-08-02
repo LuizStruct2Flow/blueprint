@@ -38,6 +38,14 @@
 #   pipe_skip  "IaC synth" "no infrastructure/ directory"
 #   pipe_finish            # prints the summary; returns 0 pass / 1 fail
 
+# The shared feed appender, so gate results land in logs/agent-activity.log
+# alongside every other agent's work rather than only in the terminal that
+# happened to run the push. Optional by design — see _pipe_feed.
+# shellcheck source=scripts/lib/feed.sh
+if [ -r "${_PIPE_LIBDIR:-scripts/lib}/feed.sh" ]; then
+  . "${_PIPE_LIBDIR:-scripts/lib}/feed.sh"
+fi
+
 # --- state ------------------------------------------------------------------
 _PIPE_DIR=""
 _PIPE_TITLE=""
@@ -95,6 +103,7 @@ pipe_init(){
   printf '\n%s╭─ %s %s%s\n' "$_C_DIM" "$_PIPE_TITLE" "${_PIPE_SUB:+· $_PIPE_SUB }" "$_C_OFF"
   [ "$_PIPE_BUF" = "0" ] && printf '%s│  (no scratch dir — stage output streams unbuffered)%s\n' \
     "$_C_WARN" "$_C_OFF"
+  _pipe_feed "── $_PIPE_TITLE ${_PIPE_SUB:+· $_PIPE_SUB} ──"
   return 0
 }
 
@@ -119,6 +128,24 @@ _pipe_line(){ # STATUS LABEL RIGHT
     bad)  printf '%s│%s %s✗%s %-46s %s%s%s\n' "$_C_DIM" "$_C_OFF" "$_C_BAD" "$_C_OFF" "$2" "$_C_BAD" "$3" "$_C_OFF" ;;
     skip) printf '%s│%s %s–%s %-46s %s%s%s\n' "$_C_DIM" "$_C_OFF" "$_C_WARN" "$_C_OFF" "$2" "$_C_DIM" "$3" "$_C_OFF" ;;
   esac
+  # …and the same result to the activity feed, PLAIN. The terminal render is
+  # ephemeral — it scrolls away, and it is gone entirely for anyone who was not
+  # watching that shell. The feed is the durable record of what the gate did,
+  # and it is what an agent reads back when asked "did that push get gated?".
+  # Never with colour: logs/agent-activity.log is tailed and grepped, and escape
+  # sequences in it are the same mistake as escapes in a CI log.
+  case "$1" in
+    ok)   _pipe_feed "✓ $2  $3" ;;
+    bad)  _pipe_feed "✗ $2  $3" ;;
+    skip) _pipe_feed "– $2  $3" ;;
+  esac
+}
+
+# Guarded so pipeline.sh still works if feed.sh is absent — a missing log must
+# never be the reason a gate cannot render, let alone cannot run.
+_pipe_feed(){
+  command -v feed_append >/dev/null 2>&1 || return 0
+  feed_append "[GATE] $1"
 }
 
 # --- the stage runner -------------------------------------------------------
@@ -208,12 +235,14 @@ pipe_finish(){
   if [ "$_bad" -gt 0 ]; then
     printf '%s╰─ FAILED%s · %s passed · %s failed · %s skipped · %s\n\n' \
       "$_C_BAD" "$_C_OFF" "$_ok" "$_bad" "$_skip" "$(_pipe_dur "$_total")"
+    _pipe_feed "FAILED · $_ok passed · $_bad failed · $_skip skipped · $(_pipe_dur "$_total") — PUSH BLOCKED"
     _pipe_cleanup; trap - EXIT INT TERM
     return 1
   fi
 
   printf '%s╰─ PASSED%s · %s stages · %s skipped · %s\n\n' \
     "$_C_OK" "$_C_OFF" "$_ok" "$_skip" "$(_pipe_dur "$_total")"
+  _pipe_feed "PASSED · $_ok stages · $_skip skipped · $(_pipe_dur "$_total")"
   _pipe_cleanup; trap - EXIT INT TERM
   return 0
 }

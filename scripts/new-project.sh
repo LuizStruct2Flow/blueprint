@@ -179,6 +179,44 @@ fi
 #
 # a2bp refuses until it is filled in, and the refusal prints these same lines.
 BLUEPRINT_SHA="$(cd "$BLUEPRINT_ROOT" && git rev-parse HEAD 2>/dev/null || echo 'no-sha')"
+
+# BUG-012: `blueprint_source` is recorded RELATIVE to the project root.
+#
+# An absolute host path is the one field here that cannot be correct on two
+# machines at once — storm2flow carried a `/Users/…` path onto a Linux box and
+# every blueprint command died on it. A relative path pins the LAYOUT (blueprint
+# beside project), which is the only thing bootstrap actually knows, and it
+# survives the commoner case too: moving or re-cloning the tree.
+#
+# Resolving from the project root costs nothing — `read_blueprint_source`
+# already requires cwd to be the project root, since it greps
+# `./.blueprint-source`.
+#
+# Pure bash rather than `realpath --relative-to`: that flag is GNU-only, and
+# macOS — where the storm2flow path came from — ships BSD realpath without it.
+# Falling back to an absolute path there would leave the originating platform
+# unfixed.
+_relative_path() {
+  local from="$1" to="$2" i=0 j rel=""
+  local -a f_parts t_parts
+  local IFS='/'
+  read -r -a f_parts <<<"${from#/}"
+  read -r -a t_parts <<<"${to#/}"
+  while [ "$i" -lt "${#f_parts[@]}" ] && [ "$i" -lt "${#t_parts[@]}" ] \
+        && [ "${f_parts[$i]}" = "${t_parts[$i]}" ]; do
+    i=$((i + 1))
+  done
+  for (( j = i; j < ${#f_parts[@]}; j++ )); do rel="../$rel"; done
+  for (( j = i; j < ${#t_parts[@]}; j++ )); do rel="${rel}${t_parts[$j]}/"; done
+  rel="${rel%/}"
+  printf '%s' "${rel:-.}"
+}
+
+# Both ends resolved physically first: a relative path computed from a value
+# containing `..` or a symlink would be wrong in a way that only shows up later.
+BLUEPRINT_SOURCE_REL="$(
+  _relative_path "$(cd "$TARGET_DIR" && pwd -P)" "$(cd "$BLUEPRINT_ROOT" && pwd -P)"
+)"
 cat > "$TARGET_DIR/.blueprint-source" <<EOF
 # Records the blueprint commit this project was bootstrapped from,
 # and where back-propagation requests are filed.
@@ -186,7 +224,9 @@ cat > "$TARGET_DIR/.blueprint-source" <<EOF
 config_version   = 2
 
 # LOCAL checkout — read by 'blueprint drift' and 'blueprint pull'.
-blueprint_source = $BLUEPRINT_ROOT
+# RELATIVE to this file's directory (BUG-012): an absolute path cannot be right
+# on two machines at once, and breaks as soon as either checkout moves.
+blueprint_source = $BLUEPRINT_SOURCE_REL
 bootstrap_sha    = $BLUEPRINT_SHA
 bootstrap_date   = $TODAY
 

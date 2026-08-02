@@ -292,7 +292,11 @@ per the normal team workflow below.
 - Every bug fix needs a numbered entry in `docs/doing/BUGS.md` + a regression test
 - **Commit-message convention.** Every commit subject is prefixed with the bug or feature number it serves (`fix(BUG-XXX):` / `feat(FEATURE-YYY):` / `test(BUG-XXX):`), and the body explains *why* the change is being made, not just what changed. The "what" is in the diff; the "why" is the reason the diff exists, and is what a future reader (or `git blame`) actually needs. Commits with no associated number (chore, tooling) still carry a why in the body.
 - **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `test(BUG-XXX): minimal reproducer (failing)` → `fix(BUG-XXX): <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
-- Trunk-based development only — no branches, use feature toggles instead
+- Trunk-based development only — no branches, use feature toggles instead.
+  **This governs PRODUCT repos. It does NOT apply to the blueprint**, where
+  every contribution is a branch + pull request — see §"Never push to the
+  blueprint's `main`". Reading this line as blanket permission is exactly how
+  an agent ends up pushing to the blueprint trunk.
 - Run and report test coverage before every commit/push
 - **Coverage thresholds** (enforced in the pre-push gate):
   - **Measure over the WHOLE source tree, not a curated subset.** A high
@@ -858,6 +862,45 @@ After a non-empty pull, **review with `git diff` and commit in the
 project repo**. `.blueprint-source` bootstrap_sha is updated by
 `blueprint pull` automatically — don't edit it by hand.
 
+### Never push to the blueprint's `main`
+
+**Every change to the blueprint reaches `main` through a pull request. No
+exceptions, no matter who authorized the change.** An agent never runs
+`git push` with `main` checked out in a blueprint checkout.
+
+This is not a style preference and it is not the same question as
+trunk-based development. The blueprint's `main` is the trunk **every derived
+project pulls from**, so anything landing there fans out to all of them on
+their next `blueprint pull`. That reach is precisely what a review step
+exists to gate — it is the same reasoning that makes `a2bp` a *request*
+rather than a delivery (§"Back-propagating"), applied to the one door `a2bp`
+does not cover.
+
+Three ways agents have talked themselves past this, all closed:
+
+1. **"Trunk-based development only — no branches."** That rule governs
+   product repos (§"Team Workflow"). The blueprint is not one.
+2. **"The founder explicitly asked for this blueprint-level edit."** That
+   authorizes the edit, not the push. File it as a PR.
+3. **"It is only committed locally, I have not pushed it."** *A local commit
+   on a shared branch is not isolation.* Whoever pushes next carries your
+   commits out with theirs, and on a repo with concurrent sessions that is
+   routine rather than unlucky. Verified on 2026-08-02: three commits went
+   public across two pushes, none of them ours. **Commit on a branch, or do
+   not commit yet.**
+
+Practically, with a concurrent session in the blueprint checkout, use a
+separate worktree so you never disturb the other session's working tree:
+
+```bash
+git -C <blueprint> worktree add <tmp>/bp-<topic> -b <topic> origin/main
+# edit + commit in that worktree, push the BRANCH, open the PR
+```
+
+Before committing in the blueprint at all, **read that repo's own
+`AGENT_SIGNAL.md`** — it is a different baton from the one in the project
+you are working in, and it may say `Do not push`.
+
 ### Back-propagating (apply-to-blueprint)
 
 When you improve a generic rule in a blueprint-managed file (a tighter
@@ -1044,7 +1087,19 @@ What this means for the agent:
   travel up. The exception is when the founder explicitly asks for
   a blueprint-level edit (this file, `docs/DoD.md`, the recipe docs,
   etc.) — those are evolutionary improvements based on lessons
-  already accumulated.
+  already accumulated. **That exception authorizes the EDIT, never a
+  push to `main`** — it still lands as a branch + pull request, same
+  as everything else (§"Never push to the blueprint's `main`").
+- **There is a third class the two rules above do not cover:
+  blueprint-only machinery.** `scripts/new-project.sh` runs only ever
+  *from* the blueprint, because bootstrapping is the one thing a derived
+  project never does; the same is true of the code paths that behave
+  differently inside the blueprint (`drift`'s self-detection, `a2bp`'s
+  own plumbing). "Prove it downstream first" is not merely inconvenient
+  for these — it is impossible, since no downstream executes them. Fix
+  them in the blueprint directly, with a reproducer that runs in
+  `tests/`, and file it as a PR like anything else. Say in the commit
+  body why the change could not be proven downstream.
 - **Don't over-engineer the blueprint** trying to anticipate
   every project's future needs. Intentional incompleteness is a
   feature — what the blueprint *does* carry, you can rely on.

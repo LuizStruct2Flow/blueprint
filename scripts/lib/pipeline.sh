@@ -256,6 +256,31 @@ pipe_finish(){
   printf '%s╰─ PASSED%s · %s stages · %s skipped · %s%s%s%s\n\n' \
     "$_C_OK" "$_C_OFF" "$_ok" "$_skip" "$(_pipe_dur "$_total")" "$_C_DIM" "$_slow" "$_C_OFF"
   _pipe_feed "PASSED · $_ok stages · $_skip skipped · $(_pipe_dur "$_total")$_slow"
+
+  # --- performance SLO: WARNS, never demotes (BUG-005 / Codex F1) -----------
+  #
+  # The old 30 s rule blocked, and blocking is exactly what made it dangerous:
+  # the cheapest way to satisfy it was to move a suite out of the gate, so a
+  # performance limit silently became a coverage limit. This one has no power to
+  # change what runs. It says "this got slow, go optimise the named stage" — the
+  # response that actually worked, when signal-dispatch went 125.4 s → 75.0 s
+  # with every assertion intact.
+  #
+  # Deliberately never affects the exit status. Overridable per project.
+  _slo_total="${AGENT_GATE_SLO_TOTAL_MS:-120000}"   # 120 s whole gate
+  _slo_stage="${AGENT_GATE_SLO_STAGE_MS:-45000}"    #  45 s single stage
+  if [ "$_total" -gt "$_slo_total" ] 2>/dev/null; then
+    printf '%s   ⚠ gate SLO: %s total exceeds %s. Not a failure and nothing is\n' \
+      "$_C_WARN" "$(_pipe_dur "$_total")" "$(_pipe_dur "$_slo_total")"
+    printf '     demoted — optimise %s, or raise AGENT_GATE_SLO_TOTAL_MS deliberately.%s\n\n' \
+      "${_PIPE_SLOW_LABEL:-the slowest stage}" "$_C_OFF"
+    _pipe_feed "SLO: total $(_pipe_dur "$_total") over $(_pipe_dur "$_slo_total") — optimise ${_PIPE_SLOW_LABEL:-slowest}, do NOT demote"
+  elif [ "${_PIPE_SLOW_MS:-0}" -gt "$_slo_stage" ] 2>/dev/null; then
+    printf '%s   ⚠ gate SLO: %s took %s (over %s). Optimise it — do not move it out.%s\n\n' \
+      "$_C_WARN" "$_PIPE_SLOW_LABEL" "$(_pipe_dur "$_PIPE_SLOW_MS")" \
+      "$(_pipe_dur "$_slo_stage")" "$_C_OFF"
+    _pipe_feed "SLO: $_PIPE_SLOW_LABEL $(_pipe_dur "$_PIPE_SLOW_MS") over $(_pipe_dur "$_slo_stage") — optimise, do NOT demote"
+  fi
   _pipe_cleanup; trap - EXIT INT TERM
   return 0
 }

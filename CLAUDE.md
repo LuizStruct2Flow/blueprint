@@ -397,23 +397,32 @@ gate because it grew from 2.3 s to 6.0 s. That is a coverage decision made on
 budget rather than risk, and nothing about it was visible: the gate still said
 "all checks passed", just over less.
 
-The rules that replace it:
+The rules that replace it, and the two **controls** that make them checkable:
 
 - **Never demote a suite to CI-only to fit a time budget.** If a suite is worth
-  blocking a push, it stays. Move it out only when *risk* says so — it is slow
-  *and* it guards something off the push path — and say which in the comment.
-- **A skip must state its reason**, and the reason must not be "the clock".
-  `pipe_skip` requires one and renders it, so a silent skip is not expressible.
-- **The gate reports its total and its slowest stage on every run**
-  (`scripts/lib/pipeline.sh`). Cost stays visible and arguable instead of being
-  silently paid in coverage — "the gate feels slow" becomes a named stage with a
-  number next to it.
-- **If it becomes genuinely painful, fix the slow suite** — the timings say which
-  one — rather than reducing what is checked.
+  blocking a push, it stays. Move it out only when *risk* says so — it guards
+  something off the push path, where a regression cannot reach a commit.
+- **[`tests/SUITES.md`](tests/SUITES.md) classifies every suite** — tier, the
+  risk if it is absent, and why that tier. `tests/manifest/` **fails the push**
+  if a suite on disk is unclassified, if a `pre-push` suite is not actually
+  invoked by the gate, or if a rationale argues from cost ("too slow", "does not
+  fit", "budget", "ceiling" are rejected patterns).
+- **The gate reports its total and its slowest stage every run**, and a
+  **non-blocking SLO** warns past 120 s total / 45 s per stage. It warns and
+  points at optimising; it has no power to demote anything. The old rule blocked,
+  which is precisely what made moving a suite out the cheapest way to satisfy it.
+- **If it becomes painful, fix the slow suite** — the timings name it.
+  `signal-dispatch` went **125.4 s → 37.5 s** with every assertion intact once
+  someone asked *why* it was slow instead of *where to put it*.
 
-The one thing that still buys an exception is *scale*, not preference: a suite
-costing minutes, guarding something not on the push path, may live in CI. Name
-the number and the reason where it is excluded.
+**Why there are controls and not just rules.** The first version of this section
+claimed a silent skip was "not expressible" because `pipe_skip` requires a
+reason. That was false: a suite simply *omitted* from the gate never reaches
+`pipe_skip` at all — deleting a `pipe_stage` block is a one-line silent coverage
+cut, and the pipeline still prints PASSED. Two suites were in exactly that state
+when the manifest first ran, and one of them (`drift-in-blueprint`) was executing
+**nowhere at all** — in neither the gate nor CI. A rule only a careful reviewer
+can check is not a control.
 
 ## Quality is non-negotiable
 

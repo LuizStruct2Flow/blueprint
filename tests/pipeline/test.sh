@@ -295,6 +295,33 @@ else
 fi
 
 # ===========================================================================
+# 20. THE PERFORMANCE SLO WARNS AND NEVER BLOCKS.
+#     This is the whole design difference from the 30 s ceiling it replaces.
+#     The ceiling BLOCKED, so the cheapest way to satisfy it was to move a suite
+#     out of the gate — a performance limit that silently became a coverage
+#     limit. If this SLO ever gains the power to fail a push, that pressure
+#     returns, so the exit status is asserted explicitly.
+# ===========================================================================
+rc=$(AGENT_GATE_SLO_TOTAL_MS=1 run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage 'a' true; pipe_finish")
+if [ "$rc" = "0" ] && grep -q "SLO" "$TMP/out"; then
+  pass "#20 an exceeded SLO warns and still exits 0 (never blocks)"
+else
+  fail "#20 SLO behaviour wrong (rc=$rc) — it must warn without failing"
+fi
+
+# And it must say "do not demote" rather than implying the suite should move.
+grep -qiE 'do not (move|demote)|optimise' "$TMP/out" \
+  && pass "#20 the SLO warning points at optimising, not at demoting" \
+  || fail "#20 the SLO warning does not steer away from demotion"
+
+# A failing gate must still fail even when the SLO also trips — the warning
+# must never mask or override the verdict.
+rc=$(AGENT_GATE_SLO_TOTAL_MS=1 run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage 'boom' false; pipe_finish")
+[ "$rc" != "0" ] \
+  && pass "#20 an SLO breach does not mask a real failure" \
+  || fail "#20 THE GATE IS OPEN when the SLO trips alongside a failure"
+
+# ===========================================================================
 # 13. The gate actually USES the renderer. Assertions 1-12 could all pass while
 #     .githooks/ ignored the library entirely.
 # ===========================================================================

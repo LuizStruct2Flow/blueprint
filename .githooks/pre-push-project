@@ -91,6 +91,21 @@ if [ -f tests/state-dir/test.sh ]; then
   }
 fi
 
+# BUG-010 — the roster is the single source of persona identity. Guards both
+# halves: a persona name hardcoded in a script that ships to every project
+# (renaming the roster then does nothing), and roster parsing that breaks on
+# column padding. The second is the dangerous one — a lookup miss used to be
+# indistinguishable from "no roster", so it failed silently. Pure text parsing,
+# no sleeps: ~0.2s, which the 30s ceiling (BUG-005) can afford.
+if [ -f tests/roster/test.sh ]; then
+  bash tests/roster/test.sh || {
+    echo "❌ tests/roster/test.sh failed (BUG-010)."
+    echo "   Persona identity must resolve from AGENT_ROSTER.md by ROLE, via"
+    echo "   scripts/lib/roster.sh — never from a name baked into a managed script."
+    exit 1
+  }
+fi
+
 # A-03 — the secret gate must scan the COMMITS BEING PUSHED, not the index.
 # `gitleaks protect --staged` scanned an index that is always empty at pre-push
 # time, so the gate CLAUDE.md §Security calls blocking was a no-op in the normal

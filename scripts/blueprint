@@ -107,6 +107,11 @@ MANAGED_FILES=(
   # derived project without it falls back to divergent paths and re-opens the
   # A-09 cross-project log contamination.
   "scripts/lib/state-dir.sh"
+  # THE roster parser, shared by the feed and team-kickoff. MUST ship: both of
+  # those are managed files, and without this one they have nowhere to resolve
+  # persona identity from — which is BUG-010, where a fleet's persona names were
+  # literals inside scripts that travel to every project.
+  "scripts/lib/roster.sh"
   # THE forward {{PROJECT_NAME}} substitution, shared by pull, drift and a2bp's
   # verifier. MUST ship: this CLI refuses to start without it, because three
   # near-copies of this logic drifted apart and disagreed on legal project

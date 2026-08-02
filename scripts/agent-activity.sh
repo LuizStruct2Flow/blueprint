@@ -12,13 +12,17 @@
 #   bash scripts/agent-activity.sh --daemon   # detach; idempotent; returns at once
 #   bash scripts/agent-activity.sh --stop     # stop the running feed
 #   bash scripts/agent-activity.sh --status   # is it running?
+#   bash scripts/agent-activity.sh --whoami   # which persona this session is
 #   tail -f logs/agent-activity.log           # follow from anywhere
 #
 # Env:
 #   AGENT_STATE_HOME=...  state dir for dispatcher run logs
 #                         (default ~/.<repo-name>)
-#   AGENT_PERSONA=...     this session's persona   (default Sylvia)
-#   AGENT_BACKING=...     this session's agent     (default Claude Code)
+#   AGENT_PERSONA=...     OVERRIDE this session's persona. Default comes from
+#                         the roster's Orchestrator row, never from a literal
+#                         here (BUG-010).
+#   AGENT_BACKING=...     OVERRIDE this session's backing agent. Default is the
+#                         roster's Backing agent cell for the resolved persona.
 #
 # ---------------------------------------------------------------------------
 # BUG-001 — why this is written the way it is.
@@ -57,7 +61,22 @@ state_file="$log_dir/.agent-activity.state"
 . "$repo_root/scripts/lib/state-dir.sh"
 state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
 
-persona="${AGENT_PERSONA:-Sylvia}"; backing="${AGENT_BACKING:-Claude Code}"
+# --- who is this session? (BUG-010) ----------------------------------------
+# The roster's Orchestrator row is the source of truth. AGENT_PERSONA is an
+# OVERRIDE — a spawned, non-primary persona declares itself with it — not the
+# default. It used to be `${AGENT_PERSONA:-<a name>}`, which made renaming the
+# roster do nothing at all and shipped one fleet's persona name to every derived
+# project (same class as BUG-002).
+. "$repo_root/scripts/lib/roster.sh"
+
+persona="${AGENT_PERSONA:-}"
+if [ -z "$persona" ]; then
+  persona="$(bp_roster_name_for_role "$repo_root" Orchestrator)"
+  # Fail visibly, and fall back to the ROLE rather than to somebody's name: a
+  # feed labelled [Orchestrator] is obviously unresolved, where a feed labelled
+  # with a plausible name is indistinguishable from a correct one.
+  [ -n "$persona" ] || persona="Orchestrator"
+fi
 
 TICK="${AGENT_FEED_TICK:-2}"
 MAX_FRAGMENT="${AGENT_FEED_MAX_FRAGMENT:-1048576}"   # 1 MiB force-flush bound
@@ -81,16 +100,20 @@ fi
 ts(){ date +%H:%M:%S; }
 
 # --- roster lookup ----------------------------------------------------------
-# Live roster is per-engineer and gitignored; the example is the tracked
-# template. Prefer the personal copy so a fresh clone still labels personas.
-roster_file="$repo_root/AGENT_ROSTER.md"
-[ -f "$roster_file" ] || roster_file="$repo_root/AGENT_ROSTER.example.md"
+# Delegates to scripts/lib/roster.sh. It used to grep `"| $name |"` with literal
+# single spaces, so a column-padded table — what every markdown formatter emits
+# — never matched, and the miss was indistinguishable from "no roster", so it
+# degraded in silence (BUG-010, half 2). The shared parser trims fields and
+# warns once per unresolved name.
 persona_label(){
   local name="$1" b
-  b=$(grep -E "\| $name \|" "$roster_file" 2>/dev/null | head -1 \
-      | awk -F'|' '{gsub(/^ +| +$/,"",$4); print $4}')
-  if [ -n "$b" ]; then printf '%s - %s' "$name" "$b"; else printf '%s' "$name"; fi
+  b="$(bp_roster_backing_for_name "$repo_root" "$name")"
+  printf '%s%s' "$name" "${b:+ - $b}"
 }
+
+# This session's own backing agent, resolved the same way as everyone else's.
+backing="${AGENT_BACKING:-$(bp_roster_backing_for_name "$repo_root" "$persona")}"
+self_label="$persona${backing:+ - $backing}"
 field(){ grep "^| $1 " "$signal_file" 2>/dev/null | head -1 | sed "s/^| $1 *| //; s/ *|\$//"; }
 
 # ===========================================================================
@@ -405,7 +428,7 @@ supervise_body(){
       newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1)
       if [ -n "$newest" ]; then
         seed_offset "$newest"
-        pump "$newest" jsonl "$persona - $backing"
+        pump "$newest" jsonl "$self_label"
       fi
       for f in "$proj"/*/subagents/agent-*.jsonl; do
         [ -e "$f" ] || continue
@@ -436,13 +459,28 @@ supervise_body(){
 # shellcheck source=scripts/lib/gate.sh
 [ -r "$repo_root/scripts/lib/gate.sh" ] && . "$repo_root/scripts/lib/gate.sh"
 
+# --whoami answers the question that had no answer while BUG-010 was open:
+# "the roster says one thing and the feed says another — which one is this
+# session?". Identity was only observable by reading log lines, so a wrong
+# answer looked exactly like a right one. It prints the resolved label on
+# stdout and the roster it came from on stderr, so both the value and its
+# provenance are checkable without starting the feed.
+cmd_whoami(){
+  printf '%s\n' "$self_label"
+  printf 'roster: %s\n' "$(bp_roster_file "$repo_root" 2>/dev/null || echo '<none found>')" >&2
+  [ -n "${AGENT_PERSONA:-}" ] && printf 'persona: AGENT_PERSONA override\n' >&2
+  [ -n "${AGENT_BACKING:-}" ] && printf 'backing: AGENT_BACKING override\n' >&2
+  return 0
+}
+
 case "${1:-}" in
   --stop)      cmd_stop ;;
   --status)    cmd_status ;;
+  --whoami)    cmd_whoami ;;
   --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
                cmd_daemon ;;
   --supervise) FOREGROUND=0 supervise ;;          # internal: daemon child
   "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
                FOREGROUND=1 supervise ;;          # foreground
-  *)           echo "usage: $0 [--daemon|--stop|--status]" >&2; exit 2 ;;
+  *)           echo "usage: $0 [--daemon|--stop|--status|--whoami]" >&2; exit 2 ;;
 esac

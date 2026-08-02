@@ -25,7 +25,28 @@
 
 set -e
 
-echo "🔒 Pre-push: security + build + lint + tests..."
+# FEATURE-002 — render the gate as a pipeline. The banner is not decoration: a
+# gate that does not run prints NOTHING, which looks exactly like a gate that
+# passed. On 2026-08-02 something wiped core.hooksPath and a push went out
+# completely ungated, indistinguishable from a gated one. With a banner, its
+# absence is the signal.
+#
+# Fails CLOSED and loudly if the renderer is absent. It would be tempting to
+# degrade to plain echoes instead, but that is a second code path through the
+# gate — and the one that runs precisely when something is already wrong. A
+# derived project that pulled this hook before scripts/lib/pipeline.sh lands
+# here, and a confusing block is far better than a gate whose stages quietly
+# do not run.
+# shellcheck source=scripts/lib/pipeline.sh
+if [ -r scripts/lib/pipeline.sh ]; then
+  . scripts/lib/pipeline.sh
+else
+  echo "❌ scripts/lib/pipeline.sh is missing — the gate renderer is absent."
+  echo "   Run: blueprint pull scripts/lib/pipeline.sh"
+  echo "   Blocking the push: a gate that cannot render its stages cannot"
+  echo "   demonstrate that it ran them."
+  exit 1
+fi
 
 # --- What is actually being pushed (A-03) ------------------------------------
 # git feeds a pre-push hook one line per ref on STDIN:
@@ -88,13 +109,26 @@ push_log_opts() {
   done
 }
 
+# Open the pipeline once the ref list is known, so the header can say what is
+# actually being pushed. Everything from here to pipe_finish renders as stages,
+# including .githooks/pre-push-project, which shares this one pipeline rather
+# than opening a second.
+# No external binaries in the header: `basename` is not guaranteed to be on
+# PATH, and a hook that cannot even print its own banner is a hook that blocks
+# a push for a cosmetic reason. tests/pre-push-secrets #11 runs with a
+# deliberately stripped PATH and caught exactly that. Parameter expansion is
+# POSIX and needs nothing installed.
+_pp_head="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
+_pp_n="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo '?')"
+_pp_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+pipe_init "pre-push gate" "${_pp_top##*/} · $_pp_n commit(s) · $_pp_head"
+
 # --- Security: gitleaks + Semgrep + osv-scanner (docs/SECURITY.md cross-recipe rules) ---
 # All three are skipped with a warning if the binary isn't installed locally
 # — CI re-runs them as a backstop. This keeps a fresh clone from being
 # blocked on day 1 while still nudging the developer to install them.
 
-if command -v gitleaks >/dev/null 2>&1; then
-  echo "  → Secret scan (gitleaks)..."
+_st_gitleaks(){
   # Same exit-code discipline as the semgrep step below: gitleaks exits 1 when
   # it FINDS a leak and >=2 when it could not run. Treating both as "found a
   # secret" is misleading in one direction and, worse, an operator who learns to
@@ -154,7 +188,7 @@ if command -v gitleaks >/dev/null 2>&1; then
     echo "   A new ref is scanned over its whole history, which is unbounded, so an"
     echo "   unbounded scanner can blow the ≤30s gate budget with no way to stop it."
     echo "   Install GNU coreutils: brew bundle  (from repo root, uses ./Brewfile)"
-    exit 1
+    return 1
   fi
 
   # ONE deadline for the whole gitleaks step, not one per ref (R4-F1). The
@@ -186,7 +220,7 @@ if command -v gitleaks >/dev/null 2>&1; then
     echo "   Rotate the credential FIRST, then rewrite the history that carries it."
     echo "   A leaked secret is compromised the moment it lands on origin, and"
     echo "   removing the commit does not un-leak it."
-    exit 1
+    return 1
   elif [ "$_gl_rc" -eq 124 ]; then
     tail -10 "$_gl_out"; rm -f "$_gl_out"
     echo "❌ gitleaks did not finish within ${_gl_budget}s — the scan is INCOMPLETE."
@@ -195,21 +229,23 @@ if command -v gitleaks >/dev/null 2>&1; then
     echo "   ref is scanned over its whole history, which is unbounded."
     echo "   Options: raise GITLEAKS_TIMEOUT_SECONDS deliberately for this push,"
     echo "   push a smaller range first, or let CI scan the full history."
-    exit 1
+    return 1
   elif [ "$_gl_rc" -ne 0 ]; then
     tail -30 "$_gl_out"; rm -f "$_gl_out"
     echo "❌ gitleaks could not complete (exit $_gl_rc) — the secret gate did NOT run."
     echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
-    exit 1
+    return 1
   fi
   rm -f "$_gl_out"
+  return 0
+}
+if command -v gitleaks >/dev/null 2>&1; then
+  pipe_stage "secret scan · gitleaks" _st_gitleaks
 else
-  echo "  ⚠ gitleaks not installed locally — secret scan skipped (CI will catch it)."
-  echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+  pipe_skip "secret scan · gitleaks" "gitleaks not installed locally — secret scan skipped (CI will catch it)."
 fi
 
-if command -v semgrep >/dev/null 2>&1; then
-  echo "  → SAST (semgrep p/owasp-top-ten)..."
+_st_semgrep(){
   # p/owasp-top-ten is the conservative baseline; projects can add packs in
   # .githooks/pre-push-project. NOTE: `p/` configs are fetched from the Semgrep
   # registry (cached under ~/.semgrep), so this is NOT a purely offline step.
@@ -232,7 +268,7 @@ if command -v semgrep >/dev/null 2>&1; then
     echo "❌ jq is required to classify semgrep output reliably, but is not installed."
     echo "   Install jq (brew bundle, or apt/dnf install jq). Blocking rather than"
     echo "   guessing whether a non-zero semgrep exit is a finding or a crash."
-    exit 1
+    return 1
   fi
 
   _sg_json="$(mktemp)"; _sg_err="$(mktemp)"
@@ -279,6 +315,10 @@ if command -v semgrep >/dev/null 2>&1; then
     # under a low RLIMIT_MEMLOCK (8 MB is a common Linux default) even with tens
     # of GB free — a strictly better retry than repeating the identical command.
     echo "  ⚠ semgrep did not complete (exit $_sg_rc) — retrying single-job..."
+    # Survives the stage buffer: a retry that succeeded is still a fact about
+    # how this gate ran, and it is the local signature of the io_uring failure
+    # documented in HANDOVER §2. Silently recovering would hide a real thing.
+    pipe_note "retrying single-job"
     _sg_classify "--jobs 1"
   fi
 
@@ -288,7 +328,7 @@ if command -v semgrep >/dev/null 2>&1; then
     echo "❌ Semgrep found ${_sg_findings} WARNING+ finding(s)."
     echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
     echo "   naming the threat-model entry in project_config_security.md that makes it safe."
-    exit 1
+    return 1
   elif [ "$_sg_class" = "incomplete" ]; then
     tail -20 "$_sg_err"
     rm -f "$_sg_json" "$_sg_err"
@@ -297,16 +337,18 @@ if command -v semgrep >/dev/null 2>&1; then
     echo "   Common causes: an unwritable ~/.semgrep dir, or registry/network"
     echo "   unavailable for the p/ pack. Re-run, or set SEMGREP_RULES to a local"
     echo "   ruleset if you need to work offline."
-    exit 1
+    return 1
   fi
   rm -f "$_sg_json" "$_sg_err"
+  return 0
+}
+if command -v semgrep >/dev/null 2>&1; then
+  pipe_stage "SAST · semgrep p/owasp-top-ten" _st_semgrep
 else
-  echo "  ⚠ semgrep not installed locally — SAST skipped (CI will catch it)."
-  echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+  pipe_skip "SAST · semgrep p/owasp-top-ten" "semgrep not installed locally — SAST skipped (CI will catch it)."
 fi
 
-if command -v osv-scanner >/dev/null 2>&1; then
-  echo "  → SCA (osv-scanner over lockfiles)..."
+_st_osv_scanner(){
   # Scan every lockfile in the repo. osv-scanner v2 exits non-zero BOTH on a real
   # finding AND when there are no lockfiles at all ("No package sources found",
   # exit 128) — so a repo without lockfiles (this template before bootstrap, or a
@@ -323,11 +365,14 @@ if command -v osv-scanner >/dev/null 2>&1; then
     echo "❌ osv-scanner found a CVE in a dependency."
     echo "   Upgrade or pin to a known-good version. Track lower-severity CVEs"
     echo "   in docs/config/findings.md with a planned upgrade date."
-    exit 1
+    return 1
   fi
+  return 0
+}
+if command -v osv-scanner >/dev/null 2>&1; then
+  pipe_stage "SCA · osv-scanner" _st_osv_scanner
 else
-  echo "  ⚠ osv-scanner not installed locally — SCA skipped (CI will catch it)."
-  echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+  pipe_skip "SCA · osv-scanner" "osv-scanner not installed locally — SCA skipped (CI will catch it)."
 fi
 
 # Adjust these paths / commands to match your project's workspaces.
@@ -345,30 +390,34 @@ fi
 #                    per project_config_dod.md)
 
 # --- Backend (if present) ---
+_st_backend_build(){ ( cd backend && npm run build ) || { echo "❌ Backend build failed."; return 1; }; }
+_st_backend_lint(){ ( cd backend && npm run lint ) || { echo "❌ Backend lint exceeded --max-warnings threshold."; return 1; }; }
+_st_backend_format_check(){ ( cd backend && npm run format:check ) || { echo "❌ Backend has unformatted files. Run 'npm run format' in backend/ and recommit."; return 1; }; }
+_st_backend_test_coverage(){ ( cd backend && npm run test:coverage ) || { echo "❌ Backend tests failed or coverage below threshold (see project_config_dod.md)."; return 1; }; }
 if [ -d backend ]; then
-  echo "  → Backend build..."
-  ( cd backend && npm run build ) || { echo "❌ Backend build failed."; exit 1; }
-
-  echo "  → Backend lint..."
-  ( cd backend && npm run lint ) || { echo "❌ Backend lint exceeded --max-warnings threshold."; exit 1; }
-
-  echo "  → Backend format check (Prettier)..."
-  ( cd backend && npm run format:check ) || { echo "❌ Backend has unformatted files. Run 'npm run format' in backend/ and recommit."; exit 1; }
-
-  echo "  → Backend tests + coverage..."
-  ( cd backend && npm run test:coverage ) || { echo "❌ Backend tests failed or coverage below threshold (see project_config_dod.md)."; exit 1; }
+  pipe_stage "backend · build" _st_backend_build
+  pipe_stage "backend · lint" _st_backend_lint
+  pipe_stage "backend · format" _st_backend_format_check
+  pipe_stage "backend · tests + coverage" _st_backend_test_coverage
+else
+  pipe_skip "backend · build" "no backend/ directory"
+  pipe_skip "backend · lint" "no backend/ directory"
+  pipe_skip "backend · format" "no backend/ directory"
+  pipe_skip "backend · tests + coverage" "no backend/ directory"
 fi
 
 # --- Frontend (if present) ---
+_st_frontend_lint(){ ( cd frontend && npm run lint ) || { echo "❌ Frontend lint exceeded --max-warnings threshold."; return 1; }; }
+_st_frontend_format_check(){ ( cd frontend && npm run format:check ) || { echo "❌ Frontend has unformatted files. Run 'npm run format' in frontend/ and recommit."; return 1; }; }
+_st_frontend_test_coverage(){ ( cd frontend && npm run test:coverage ) || { echo "❌ Frontend tests failed or coverage below threshold (see project_config_dod.md)."; return 1; }; }
 if [ -d frontend ]; then
-  echo "  → Frontend lint..."
-  ( cd frontend && npm run lint ) || { echo "❌ Frontend lint exceeded --max-warnings threshold."; exit 1; }
-
-  echo "  → Frontend format check (Prettier)..."
-  ( cd frontend && npm run format:check ) || { echo "❌ Frontend has unformatted files. Run 'npm run format' in frontend/ and recommit."; exit 1; }
-
-  echo "  → Frontend tests + coverage..."
-  ( cd frontend && npm run test:coverage ) || { echo "❌ Frontend tests failed or coverage below threshold (see project_config_dod.md)."; exit 1; }
+  pipe_stage "frontend · lint" _st_frontend_lint
+  pipe_stage "frontend · format" _st_frontend_format_check
+  pipe_stage "frontend · tests + coverage" _st_frontend_test_coverage
+else
+  pipe_skip "frontend · lint" "no frontend/ directory"
+  pipe_skip "frontend · format" "no frontend/ directory"
+  pipe_skip "frontend · tests + coverage" "no frontend/ directory"
 fi
 
 # --- IaC validate: cdk synth / terraform validate / helm lint (docs/INFRASTRUCTURE.md cross-recipe rules) ---
@@ -376,60 +425,63 @@ fi
 # tool is installed. Missing tool prints a hint and skips — CI re-runs as
 # the backstop. Same UX pattern as the security gate above.
 
+_st_cdk(){
+  ( cd infra && cdk synth --quiet >/dev/null ) || {
+    echo "❌ cdk synth failed. Fix the IaC errors before pushing."
+    echo "   Run 'cd infra && cdk synth' locally to see the full output."
+    return 1
+  }
+}
+_st_terraform(){
+  ( cd infra && terraform fmt -check -recursive >/dev/null ) || {
+    echo "❌ Terraform files are unformatted. Run 'terraform fmt -recursive' in infra/ and recommit."
+    return 1
+  }
+  # terraform validate needs init; skip if .terraform/ isn't present (CI does the deeper validate)
+  if [ -d infra/.terraform ]; then
+    ( cd infra && terraform validate >/dev/null ) || {
+      echo "❌ terraform validate failed. Fix the IaC errors before pushing."
+      return 1
+    }
+  else
+    echo "    (skipping terraform validate — run 'terraform init' in infra/ to enable locally)"
+  fi
+}
+_st_helm(){
+  for chart in infra/charts/*/; do
+    helm lint "$chart" >/dev/null || { echo "❌ helm lint failed on $chart"; return 1; }
+  done
+}
+
 if [ -d infra ]; then
   # Recipe A — CDK (TypeScript): detect by infra/cdk.json
   if [ -f infra/cdk.json ]; then
     if command -v cdk >/dev/null 2>&1; then
-      echo "  → IaC synth (cdk)..."
-      ( cd infra && cdk synth --quiet >/dev/null ) || {
-        echo "❌ cdk synth failed. Fix the IaC errors before pushing."
-        echo "   Run 'cd infra && cdk synth' locally to see the full output."
-        exit 1
-      }
+      pipe_stage "IaC synth · cdk" _st_cdk
     else
-      echo "  ⚠ cdk not installed locally — IaC synth skipped (CI will catch it)."
-      echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+      pipe_skip "IaC synth · cdk" "cdk not installed (brew bundle) — CI will catch it"
     fi
   fi
 
   # Recipe B — Terraform: detect by any infra/**/*.tf
   if ls infra/**/*.tf >/dev/null 2>&1 || ls infra/*.tf >/dev/null 2>&1; then
     if command -v terraform >/dev/null 2>&1; then
-      echo "  → IaC validate (terraform)..."
-      ( cd infra && terraform fmt -check -recursive >/dev/null ) || {
-        echo "❌ Terraform files are unformatted. Run 'terraform fmt -recursive' in infra/ and recommit."
-        exit 1
-      }
-      # terraform validate needs init; skip if .terraform/ isn't present (CI does the deeper validate)
-      if [ -d infra/.terraform ]; then
-        ( cd infra && terraform validate >/dev/null ) || {
-          echo "❌ terraform validate failed. Fix the IaC errors before pushing."
-          exit 1
-        }
-      else
-        echo "    (skipping terraform validate — run 'terraform init' in infra/ to enable locally)"
-      fi
+      pipe_stage "IaC validate · terraform" _st_terraform
     else
-      echo "  ⚠ terraform not installed locally — IaC validate skipped (CI will catch it)."
-      echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+      pipe_skip "IaC validate · terraform" "terraform not installed (brew bundle) — CI will catch it"
     fi
   fi
 
   # Recipe C — Helm charts: detect by infra/charts/*/Chart.yaml
   if ls infra/charts/*/Chart.yaml >/dev/null 2>&1; then
     if command -v helm >/dev/null 2>&1; then
-      echo "  → IaC lint (helm)..."
-      for chart in infra/charts/*/; do
-        helm lint "$chart" >/dev/null || {
-          echo "❌ helm lint failed on $chart"
-          exit 1
-        }
-      done
+      pipe_stage "IaC lint · helm" _st_helm
     else
-      echo "  ⚠ helm not installed locally — chart lint skipped (CI will catch it)."
-      echo "     Install: brew bundle  (from repo root, uses ./Brewfile)"
+      pipe_skip "IaC lint · helm" "helm not installed (brew bundle) — CI will catch it"
     fi
   fi
+else
+  pipe_skip "IaC validate" "no infra/ directory"
 fi
 
 # --- .claude/settings.json host-path guard (generic struct2flow rule) ---
@@ -446,16 +498,20 @@ fi
 # To allow-list a legitimate generic path that happens to contain /Users
 # or /home as a literal substring (rare), add a comment line above the
 # entry: this grep is line-based and won't match across lines.
-echo "  → .claude/settings.json host-path guard..."
-if [ -f .claude/settings.json ]; then
+_st_host_paths(){
   HOST_PATHS=$(grep -nE '/(Users|home)/[A-Za-z0-9_.-]+/' .claude/settings.json || true)
   if [ -n "$HOST_PATHS" ]; then
     echo "❌ .claude/settings.json contains host-specific paths."
     echo "   Move them to .claude/settings.local.json (gitignored) — settings.json"
     echo "   is committed and must stay host-agnostic."
     echo "$HOST_PATHS" | sed 's/^/     /'
-    exit 1
+    return 1
   fi
+}
+if [ -f .claude/settings.json ]; then
+  pipe_stage "settings.json host-path guard" _st_host_paths
+else
+  pipe_skip "settings.json host-path guard" "no .claude/settings.json"
 fi
 
 # --- Project-specific guards (sourced if present) ---
@@ -467,8 +523,24 @@ fi
 # This keeps .githooks/pre-push pristine (blueprint-managed) and lets the
 # blueprint sync forward without trampling your project guards.
 if [ -f .githooks/pre-push-project ]; then
-  echo "  → Project-specific guards..."
   . .githooks/pre-push-project
+else
+  pipe_skip "project guards" "no .githooks/pre-push-project"
 fi
 
-echo "✅ All checks passed. Pushing..."
+# pipe_finish returns non-zero if any stage failed. `set -e` is on, so an
+# explicit exit keeps the intent readable rather than relying on the last
+# command's status — and a failing gate must exit non-zero even if pipe_finish
+# is ever changed to return something else.
+if pipe_finish; then
+  # FEATURE-002 — the server side of the pipeline. Detached and fire-and-forget:
+  # it cannot block the push, cannot change its exit status, and exits on a hard
+  # deadline even if no run ever appears. Opt out with AGENT_CI_WATCH=0.
+  if [ "${AGENT_CI_WATCH:-1}" = "1" ] && [ -x scripts/watch-ci.sh ] \
+     && command -v gh >/dev/null 2>&1; then
+    ( setsid sh scripts/watch-ci.sh "$(git rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1 & ) 2>/dev/null || true
+    echo "  watching CI for $(git rev-parse --short HEAD 2>/dev/null) — results here and in logs/agent-activity.log"
+  fi
+  exit 0
+fi
+exit 1

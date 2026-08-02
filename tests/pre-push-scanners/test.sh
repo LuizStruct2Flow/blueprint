@@ -43,8 +43,14 @@ pass(){ echo "  ok — $*"; }
 # No backend/ or frontend/, no pre-push-project, no IaC — so the hook reaches the
 # scanner section, then falls straight through. Shims make the scanners instant.
 FIX="$WORK/repo"
-mkdir -p "$FIX/.githooks" "$FIX/.claude" "$FIX/bin"
+mkdir -p "$FIX/.githooks" "$FIX/.claude" "$FIX/bin" "$FIX/scripts/lib"
 cp "$HOOK" "$FIX/.githooks/pre-push"
+# FEATURE-002: the hook sources the pipeline renderer, so the fixture needs it
+# too. It is NOT optional in the hook — a missing renderer fails the push
+# closed, deliberately — so leaving it out of the fixture turns every case in
+# this file into "the hook could not start", which is exactly what happened
+# when this was first wired: 17 assertions failed for one missing file.
+cp "$ROOT/scripts/lib/pipeline.sh" "$FIX/scripts/lib/pipeline.sh"
 printf '{\n  "permissions": {\n    "allow": []\n  }\n}\n' >"$FIX/.claude/settings.json"
 ( cd "$FIX" && git init -q . ) 2>/dev/null
 

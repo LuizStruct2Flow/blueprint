@@ -434,6 +434,26 @@ The shared `.githooks/pre-push` hook **blocks the push** if any step fails:
 
 Same hook, every project. No "I'll skip pre-push just this once."
 
+**It renders as a pipeline**, one line per stage with its status and duration,
+then a `PASSED` / `FAILED` summary — a failing stage prints exactly what the tool
+said, a passing one stays quiet. That is not decoration:
+
+- **A gate that does not run prints nothing, which looks exactly like a gate that
+  passed.** `core.hooksPath` is repo-local config, so a fresh clone has no gate
+  at all — and it can be wiped underneath a live checkout, which happened here on
+  2026-08-02 and sent one push out completely ungated. With a banner, its absence
+  is the signal.
+- **Per-stage timings make the budget arguable instead of guessed.** The 30 s
+  ceiling was being spent without anyone able to say on what; the render shows
+  one suite taking 19 s of 31 s.
+- **It fails closed by construction** — a stage exits non-zero and the runner
+  exits, rather than returning a status one of ~18 call sites could drop. Tested
+  against non-zero exits, signals, missing binaries and a missing scratch dir.
+
+After the push, the **server side** streams the required checks as they land.
+Both halves, one view — with the distinction kept sharp: the local gate *blocks*,
+CI only *reports*.
+
 ---
 
 # 4 · Observability — MALT

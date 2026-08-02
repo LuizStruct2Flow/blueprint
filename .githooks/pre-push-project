@@ -11,16 +11,45 @@
 # (CLAUDE.md §"Pre-push tolerance"). Measured total for this file: ~19 s, almost
 # all of it the agent-activity --fast suite. The whole hook measures ~20 s.
 
-echo "  → Blueprint shell regression tests..."
+# Normally sourced by .githooks/pre-push, which has already sourced the renderer
+# and called pipe_init. Sourcing defensively keeps this file runnable on its own
+# (and keeps the "every gate file wires to the one renderer" assertion honest)
+# without starting a second pipeline inside the parent's.
+# shellcheck source=scripts/lib/pipeline.sh
+command -v pipe_stage >/dev/null 2>&1 || . scripts/lib/pipeline.sh
 
 # BP-7 — `blueprint pull` must do a marker-aware merge, preserving the
 # project's outside-marker content byte-for-byte.
-if [ -f tests/marker-merge/test.sh ]; then
-  bash tests/marker-merge/test.sh || {
-    echo "❌ tests/marker-merge/test.sh failed — marker-aware merge is broken."
-    echo "   A pull would clobber project-owned content outside the markers."
-    exit 1
+# FEATURE-002 — the gate renderer must FAIL CLOSED. This file and .githooks/
+# pre-push now route every check through pipe_stage, so if the renderer ever
+# lets a non-zero stage through, EVERY gate in this repo silently stops
+# guarding anything — and it would look exactly like a passing gate. Cheapest
+# high-value suite here at ~0.5s.
+if [ -f tests/pipeline/test.sh ]; then
+  _st_pipeline(){
+    bash tests/pipeline/test.sh || {
+      echo "❌ tests/pipeline/test.sh failed (FEATURE-002)."
+      echo "   The gate renderer must fail closed: a non-zero stage has to block"
+      echo "   the push, including with no scratch dir available."
+      return 1
+    }
   }
+  pipe_stage "pipeline · FEATURE-002" _st_pipeline
+else
+  pipe_skip "pipeline · FEATURE-002" "suite absent"
+fi
+
+if [ -f tests/marker-merge/test.sh ]; then
+  _st_marker_merge(){
+    bash tests/marker-merge/test.sh || {
+      echo "❌ tests/marker-merge/test.sh failed — marker-aware merge is broken."
+      echo "   A pull would clobber project-owned content outside the markers."
+      return 1
+    }
+  }
+  pipe_stage "marker-merge" _st_marker_merge
+else
+  pipe_skip "marker-merge" "suite absent"
 fi
 
 # BUG-001 — the activity feed must hold exactly one instance with a bounded
@@ -42,12 +71,17 @@ fi
 # fault-injection cases #10 and #18, and foreground mode. Both halves run — a
 # suite nothing executes is the A-15 defect this repo already had once.
 if [ -f tests/agent-activity-bound/test.sh ]; then
-  bash tests/agent-activity-bound/test.sh --fast || {
-    echo "❌ tests/agent-activity-bound/test.sh failed (BUG-001)."
-    echo "   The feed must stay one flock-guarded process with no 'tail -F'"
-    echo "   followers, and its delta reads must stay byte-exact."
-    exit 1
+  _st_agent_activity_bound(){
+    bash tests/agent-activity-bound/test.sh --fast || {
+      echo "❌ tests/agent-activity-bound/test.sh failed (BUG-001)."
+      echo "   The feed must stay one flock-guarded process with no 'tail -F'"
+      echo "   followers, and its delta reads must stay byte-exact."
+      return 1
+    }
   }
+  pipe_stage "agent-activity-bound · BUG-001" _st_agent_activity_bound
+else
+  pipe_skip "agent-activity-bound · BUG-001" "suite absent"
 fi
 
 # BUG-003 — the security gate must distinguish "scanner found something" from
@@ -56,12 +90,17 @@ fi
 # NOTE: the fixture copies only .githooks/pre-push (not this file), so the
 # nested hook run terminates rather than recursing.
 if [ -f tests/pre-push-scanners/test.sh ]; then
-  bash tests/pre-push-scanners/test.sh || {
-    echo "❌ tests/pre-push-scanners/test.sh failed (BUG-003)."
-    echo "   A broken scanner must never be reported as a security finding, and"
-    echo "   a tool failure must fail closed rather than pass as a clean scan."
-    exit 1
+  _st_pre_push_scanners(){
+    bash tests/pre-push-scanners/test.sh || {
+      echo "❌ tests/pre-push-scanners/test.sh failed (BUG-003)."
+      echo "   A broken scanner must never be reported as a security finding, and"
+      echo "   a tool failure must fail closed rather than pass as a clean scan."
+      return 1
+    }
   }
+  pipe_stage "pre-push-scanners · BUG-003" _st_pre_push_scanners
+else
+  pipe_skip "pre-push-scanners · BUG-003" "suite absent"
 fi
 
 # BUG-004 — the gate must arm itself on paths that already run, so a fresh clone
@@ -70,12 +109,17 @@ fi
 # tell "preserved unset" from "armed it"), a deliberate foreign core.hooksPath
 # must never be clobbered, and arm_gate must never fail its caller. ~2.3s.
 if [ -f tests/gate-arming/test.sh ]; then
-  bash tests/gate-arming/test.sh || {
-    echo "❌ tests/gate-arming/test.sh failed (BUG-004)."
-    echo "   A tracked hook is not an active hook — if arming regresses, clones"
-    echo "   go back to pushing completely ungated."
-    exit 1
+  _st_gate_arming(){
+    bash tests/gate-arming/test.sh || {
+      echo "❌ tests/gate-arming/test.sh failed (BUG-004)."
+      echo "   A tracked hook is not an active hook — if arming regresses, clones"
+      echo "   go back to pushing completely ungated."
+      return 1
+    }
   }
+  pipe_stage "gate-arming · BUG-004" _st_gate_arming
+else
+  pipe_skip "gate-arming · BUG-004" "suite absent"
 fi
 
 # A-09 — the feed and the dispatchers must derive ONE per-project state dir. An
@@ -83,12 +127,17 @@ fi
 # the shared helper or restoring a literal state path could otherwise push green
 # while cross-project log contamination silently returns. ~0.1s.
 if [ -f tests/state-dir/test.sh ]; then
-  bash tests/state-dir/test.sh || {
-    echo "❌ tests/state-dir/test.sh failed (A-09)."
-    echo "   Feed and dispatchers must share one derivation (scripts/lib/state-dir.sh)"
-    echo "   or another project's Codex output bleeds into this feed."
-    exit 1
+  _st_state_dir(){
+    bash tests/state-dir/test.sh || {
+      echo "❌ tests/state-dir/test.sh failed (A-09)."
+      echo "   Feed and dispatchers must share one derivation (scripts/lib/state-dir.sh)"
+      echo "   or another project's Codex output bleeds into this feed."
+      return 1
+    }
   }
+  pipe_stage "state-dir · A-09" _st_state_dir
+else
+  pipe_skip "state-dir · A-09" "suite absent"
 fi
 
 # BUG-010 — the roster is the single source of persona identity. Guards both
@@ -100,12 +149,17 @@ fi
 # --fast: case #12 drives a real supervisor for ~2s to prove a RUNNING feed
 # follows a roster rename. CI runs it; the ceiling has no room here.
 if [ -f tests/roster/test.sh ]; then
-  bash tests/roster/test.sh --fast || {
-    echo "❌ tests/roster/test.sh failed (BUG-010)."
-    echo "   Persona identity must resolve from AGENT_ROSTER.md by ROLE, via"
-    echo "   scripts/lib/roster.sh — never from a name baked into a managed script."
-    exit 1
+  _st_roster(){
+    bash tests/roster/test.sh --fast || {
+      echo "❌ tests/roster/test.sh failed (BUG-010)."
+      echo "   Persona identity must resolve from AGENT_ROSTER.md by ROLE, via"
+      echo "   scripts/lib/roster.sh — never from a name baked into a managed script."
+      return 1
+    }
   }
+  pipe_stage "roster · BUG-010" _st_roster
+else
+  pipe_skip "roster · BUG-010" "suite absent"
 fi
 
 # A-03 — the secret gate must scan the COMMITS BEING PUSHED, not the index.
@@ -117,12 +171,17 @@ fi
 # ceiling — the gate hit 30.8s with them and was over budget. They run in CI.
 # The correctness cases, which catch a silent fail-open, all stay here.
 if [ -f tests/pre-push-secrets/test.sh ]; then
-  bash tests/pre-push-secrets/test.sh --fast || {
-    echo "❌ tests/pre-push-secrets/test.sh failed (A-03)."
-    echo "   The secret scan must cover remote..local for every ref being"
-    echo "   pushed, or secrets ride out in commits nothing ever looked at."
-    exit 1
+  _st_pre_push_secrets(){
+    bash tests/pre-push-secrets/test.sh --fast || {
+      echo "❌ tests/pre-push-secrets/test.sh failed (A-03)."
+      echo "   The secret scan must cover remote..local for every ref being"
+      echo "   pushed, or secrets ride out in commits nothing ever looked at."
+      return 1
+    }
   }
+  pipe_stage "pre-push-secrets · A-03" _st_pre_push_secrets
+else
+  pipe_skip "pre-push-secrets · A-03" "suite absent"
 fi
 
 # NOTE — tests/signal-set/ is deliberately CI-only, not here. It protects the
@@ -153,12 +212,17 @@ fi
 # the framing, "ab"+"c" and "a"+"bc" name the same branch and one project's
 # request silently adopts another's. ~0.3s.
 if [ -f tests/a2bp-request/test.sh ]; then
-  bash tests/a2bp-request/test.sh || {
-    echo "❌ tests/a2bp-request/test.sh failed (FEATURE-001)."
-    echo "   The request key must stay framed and the ref must stay validated by"
-    echo "   git itself, or two distinct requests can collide on one branch."
-    exit 1
+  _st_a2bp_request(){
+    bash tests/a2bp-request/test.sh || {
+      echo "❌ tests/a2bp-request/test.sh failed (FEATURE-001)."
+      echo "   The request key must stay framed and the ref must stay validated by"
+      echo "   git itself, or two distinct requests can collide on one branch."
+      return 1
+    }
   }
+  pipe_stage "a2bp-request · FEATURE-001" _st_a2bp_request
+else
+  pipe_skip "a2bp-request · FEATURE-001" "suite absent"
 fi
 
 # FEATURE-001 — request construction. Two properties, both load-bearing:
@@ -168,12 +232,17 @@ fi
 #      own earlier request instead of refusing forever.
 # Runs git plumbing against a scratch fixture; no network. ~1.5s.
 if [ -f tests/a2bp-build/test.sh ]; then
-  bash tests/a2bp-build/test.sh || {
-    echo "❌ tests/a2bp-build/test.sh failed (FEATURE-001)."
-    echo "   A request must touch exactly the files it names and rebuild to the"
-    echo "   same SHA on any machine."
-    exit 1
+  _st_a2bp_build(){
+    bash tests/a2bp-build/test.sh || {
+      echo "❌ tests/a2bp-build/test.sh failed (FEATURE-001)."
+      echo "   A request must touch exactly the files it names and rebuild to the"
+      echo "   same SHA on any machine."
+      return 1
+    }
   }
+  pipe_stage "a2bp-build · FEATURE-001" _st_a2bp_build
+else
+  pipe_skip "a2bp-build · FEATURE-001" "suite absent"
 fi
 
 # FEATURE-001 §5.1/§8 — where a request is filed, and which bytes go into it. The
@@ -182,12 +251,17 @@ fi
 # path escaping the root) and that it is going to the repository they declared
 # (never a remote inferred from a local checkout). ~0.2s.
 if [ -f tests/a2bp-inputs/test.sh ]; then
-  bash tests/a2bp-inputs/test.sh || {
-    echo "❌ tests/a2bp-inputs/test.sh failed (FEATURE-001)."
-    echo "   a2bp must refuse symlinks, root-escaping paths, unmanaged files and"
-    echo "   version 1 configs — before anything reaches a remote."
-    exit 1
+  _st_a2bp_inputs(){
+    bash tests/a2bp-inputs/test.sh || {
+      echo "❌ tests/a2bp-inputs/test.sh failed (FEATURE-001)."
+      echo "   a2bp must refuse symlinks, root-escaping paths, unmanaged files and"
+      echo "   version 1 configs — before anything reaches a remote."
+      return 1
+    }
   }
+  pipe_stage "a2bp-inputs · FEATURE-001" _st_a2bp_inputs
+else
+  pipe_skip "a2bp-inputs · FEATURE-001" "suite absent"
 fi
 
 # FEATURE-001 §3b — `drift` reports whether the LOCAL blueprint checkout is behind
@@ -204,12 +278,17 @@ fi
 # hard 30s ceiling before either exists, so this is a forced choice, not a
 # preference — see docs/doing/BUGS.md.
 if [ -f tests/staleness/drift-integration.sh ]; then
-  bash tests/staleness/drift-integration.sh --fast || {
-    echo "❌ tests/staleness/drift-integration.sh failed (FEATURE-001 §3b)."
-    echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
-    echo "   checkout, or change its exit status because of staleness."
-    exit 1
+  _st_staleness(){
+    bash tests/staleness/drift-integration.sh --fast || {
+      echo "❌ tests/staleness/drift-integration.sh failed (FEATURE-001 §3b)."
+      echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
+      echo "   checkout, or change its exit status because of staleness."
+      return 1
+    }
   }
+  pipe_stage "staleness" _st_staleness
+else
+  pipe_skip "staleness" "suite absent"
 fi
 
 # FEATURE-001 — the assembly. Layered suites prove each part; this proves the whole
@@ -218,32 +297,47 @@ fi
 # `cp` straight into that tree, which is how BUG-002 and A-09 fanned out to every
 # project. ~1.1s.
 if [ -f tests/a2bp-e2e/test.sh ]; then
-  bash tests/a2bp-e2e/test.sh || {
-    echo "❌ tests/a2bp-e2e/test.sh failed (FEATURE-001)."
-    echo "   a2bp must file a request and must not be able to write into the"
-    echo "   blueprint, force-push a request branch, or file an empty one."
-    exit 1
+  _st_a2bp_e2e(){
+    bash tests/a2bp-e2e/test.sh || {
+      echo "❌ tests/a2bp-e2e/test.sh failed (FEATURE-001)."
+      echo "   a2bp must file a request and must not be able to write into the"
+      echo "   blueprint, force-push a request branch, or file an empty one."
+      return 1
+    }
   }
+  pipe_stage "a2bp-e2e · FEATURE-001" _st_a2bp_e2e
+else
+  pipe_skip "a2bp-e2e · FEATURE-001" "suite absent"
 fi
 
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
 if [ -f tests/bootstrap-contents/test.sh ]; then
-  bash tests/bootstrap-contents/test.sh || {
-    echo "❌ tests/bootstrap-contents/test.sh failed (A-05)."
-    echo "   Bootstrap must not leak secrets, runtime state, or the blueprint's"
-    echo "   own work items into a derived project."
-    exit 1
+  _st_bootstrap_contents(){
+    bash tests/bootstrap-contents/test.sh || {
+      echo "❌ tests/bootstrap-contents/test.sh failed (A-05)."
+      echo "   Bootstrap must not leak secrets, runtime state, or the blueprint's"
+      echo "   own work items into a derived project."
+      return 1
+    }
   }
+  pipe_stage "bootstrap-contents · A-05" _st_bootstrap_contents
+else
+  pipe_skip "bootstrap-contents · A-05" "suite absent"
 fi
 
 # A-14 — bootstrap must INHERIT the operator's git identity, never write one,
 # and must fail before creating anything when no identity is resolvable.
 if [ -f tests/bootstrap-identity/test.sh ]; then
-  bash tests/bootstrap-identity/test.sh || {
-    echo "❌ tests/bootstrap-identity/test.sh failed."
-    echo "   Bootstrap must inherit the git author identity (never hardcode one)"
-    echo "   and must not leave a half-bootstrapped directory behind."
-    exit 1
+  _st_bootstrap_identity(){
+    bash tests/bootstrap-identity/test.sh || {
+      echo "❌ tests/bootstrap-identity/test.sh failed."
+      echo "   Bootstrap must inherit the git author identity (never hardcode one)"
+      echo "   and must not leave a half-bootstrapped directory behind."
+      return 1
+    }
   }
+  pipe_stage "bootstrap-identity" _st_bootstrap_identity
+else
+  pipe_skip "bootstrap-identity" "suite absent"
 fi

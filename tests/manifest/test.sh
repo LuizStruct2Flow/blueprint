@@ -58,21 +58,42 @@ rows(){
   ' "$MANIFEST"
 }
 
+# live_cmds FILE... — the files with COMMENT LINES REMOVED.
+#
+# Codex R2-F1b: membership was checked with an unanchored `grep` for the path,
+# so commenting out an invocation kept the control green while the suite stopped
+# running. Reproduced: `sed -i '/tests\/pipeline/s/^/#/' .githooks/pre-push*`
+# left the manifest passing "every pre-push/both suite is invoked by the gate".
+# Strip comments first, then require an anchored `bash tests/<suite>/<file>.sh`
+# command rather than arbitrary text containing the path.
+live_cmds(){ sed 's/#.*//' "$@" 2>/dev/null; }
+
 # ===========================================================================
 # 1. EVERY SUITE ON DISK IS CLASSIFIED.
 #    This is the assertion that closes F1: an omission is now a failure rather
 #    than an absence nobody can see.
 # ===========================================================================
+# Codex R2-F1a: discovery used to recognise only `tests/*/test.sh`, so renaming
+# a runner — or adding `tests/unclassified/check.sh` — made a suite INVISIBLE to
+# the control while it still passed. Ordinary refactoring was enough; no lying
+# in the manifest required. Classify by DIRECTORY and consider every shell file
+# under tests/, so the convention itself is enforced rather than assumed.
 missing=""
-for d in "$ROOT"/tests/*/; do
-  name="$(basename "$d")"
-  [ -f "$d/test.sh" ] || continue
-  rows | cut -f1 | grep -qx "$name" || missing="$missing $name"
+for f in $(find "$ROOT/tests" -type f -name '*.sh' 2>/dev/null | sort); do
+  rel="${f#"$ROOT"/tests/}"
+  dir="${rel%%/*}"
+  if [ "$dir" = "$rel" ]; then
+    # A shell file sitting directly in tests/ belongs to no suite at all.
+    missing="$missing $rel(top-level)"
+    continue
+  fi
+  rows | cut -f1 | grep -qx "$dir" || \
+    case " $missing " in *" $dir "*) ;; *) missing="$missing $dir" ;; esac
 done
 if [ -n "$missing" ]; then
-  fail "#1 suites exist but are not classified in tests/SUITES.md:$missing"
+  fail "#1 shell files exist under tests/ whose suite is not classified:$missing"
 else
-  pass "#1 every suite on disk is classified"
+  pass "#1 every suite directory containing shell files is classified"
 fi
 
 # ===========================================================================
@@ -114,8 +135,7 @@ notrun=""
 while IFS="$(printf '\t')" read -r s t _ _; do
   [ -n "$s" ] || continue
   case "$t" in pre-push|both) ;; *) continue ;; esac
-  if ! grep -q "tests/$s/test.sh" "$GATE" 2>/dev/null \
-     && ! grep -q "tests/$s/test.sh" "$HOOK" 2>/dev/null; then
+  if ! live_cmds "$GATE" "$HOOK" | grep -qE "(^|[^#[:alnum:]_/])bash +tests/$s/[a-z0-9._-]+\\.sh"; then
     notrun="$notrun $s"
   fi
 done <<EOF
@@ -135,7 +155,8 @@ if [ -f "$CI" ]; then
   while IFS="$(printf '\t')" read -r s t _ _; do
     [ -n "$s" ] || continue
     case "$t" in CI|both) ;; *) continue ;; esac
-    grep -q "tests/$s/" "$CI" 2>/dev/null || ci_missing="$ci_missing $s"
+    live_cmds "$CI" | grep -qE "bash +tests/$s/[a-z0-9._-]+\\.sh" \
+      || ci_missing="$ci_missing $s"
   done <<EOF
 $(rows)
 EOF

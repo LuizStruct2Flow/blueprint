@@ -82,6 +82,15 @@ chmod +x "$CMD"
 # green under artificial CPU load — which is what ruled load out and pointed at
 # clock granularity. Any sub-settle pause needs to survive ONE boundary
 # crossing, so the smallest sound integer settle is 2.
+#
+# **"Sound" is scoped to the integral-clock alignment race, and nothing wider**
+# (Codex R2). A 0.8 s writer sleep is a MINIMUM, not a bound: a multi-second
+# scheduler stall can still stretch it past settle, and no timeout is a
+# publication boundary. That limit is not hypothetical and not hidden — case #5
+# characterises exactly that behaviour, and `scripts/signal-set.sh` (atomic
+# publication, case #6) is the actual fix for it. What SETTLE=2 buys is
+# immunity to `date +%s` truncation, which is a different and narrower claim
+# than "this suite cannot be flaky".
 SETTLE="${SIGNAL_TEST_SETTLE:-2}"     # watcher settle window, whole seconds (min 2)
 POLL="${SIGNAL_TEST_POLL:-0.2}"       # watcher poll interval, may be fractional
 WATCH_MAX="${SIGNAL_TEST_WATCH_MAX:-60}"   # safety net only; never the pacing

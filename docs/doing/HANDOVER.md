@@ -4,7 +4,7 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-08-02.** `origin/main` is at **`726d299`**.
+> **Last updated: 2026-08-02.** `origin/main` is at **`7bd575f`**.
 >
 > **Read this first: there are two ID namespaces and only one is a work item.**
 > `BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs — what the commit convention,
@@ -37,7 +37,14 @@
 
 ## 0. STATUS
 
-- **`origin/main` = `726d299`.** Working tree clean, nothing unpushed.
+- **`origin/main` = `7bd575f`.** Working tree clean, nothing unpushed.
+- **A concurrent session is committing to this repo.** BUG-012 (`9bb4f96`,
+  `726d299`) landed mid-session from another prompt on the same git identity,
+  and a plain `git push origin main` carried it along with BUG-010 — four
+  commits pushed where two were intended. Nothing was lost or broken, but the
+  claimed scope of a push is not automatically the scope you worked on. Check
+  `git log @{u}..` before pushing, and expect BUG-012 in `doing/BUGS.md` to be
+  owned by someone else.
 - **Branch protection is LIVE on `main`** (applied 2026-07-30 with founder
   approval): four required checks, PR required for non-admins, no force-push, no
   deletion, and `enforce_admins: false` — the last line is what keeps trunk-based
@@ -132,7 +139,7 @@ written doc):
   and the seed template. Mitigated, not fixed; the next concrete thing written
   there propagates again. Real fix: a separate `templates/` source.
 
-**BUG-010 is DONE and pushed (`726d299`)** — the roster is now the single source
+**BUG-010 is DONE and pushed (`7311335` test + `fda2971` fix)** — the roster is now the single source
 of persona identity, via one parser (`scripts/lib/roster.sh`) that the feed and
 `team-kickoff.sh` both read, keyed by role and tolerant of column padding. Row +
 acceptance test in `waiting-acceptance/BUGS.md`. Two things worth carrying: the

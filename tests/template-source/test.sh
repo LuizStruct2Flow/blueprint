@@ -115,7 +115,16 @@ if [ ! -x "$ROOT/scripts/new-project.sh" ]; then
   fail "#4 scripts/new-project.sh is not executable"
 else
   out="$TMP/proj"
-  if ( cd "$TMP" && bash "$ROOT/scripts/new-project.sh" tmpl-check "$out" ) >"$TMP/boot.log" 2>&1; then
+  # new-project.sh REFUSES to run without a git author identity (A-14: it
+  # inherits one rather than baking a person into every derived repo). CI has
+  # none configured, so the identity is supplied for this run only — via the
+  # documented env-var override, which is exactly the path that contract
+  # exists to support. Without this the case fails in CI for a reason that has
+  # nothing to do with the template split.
+  if ( cd "$TMP" \
+       && GIT_AUTHOR_NAME="tmpl test" GIT_AUTHOR_EMAIL="tmpl@local" \
+          GIT_COMMITTER_NAME="tmpl test" GIT_COMMITTER_EMAIL="tmpl@local" \
+          bash "$ROOT/scripts/new-project.sh" tmpl-check "$out" ) >"$TMP/boot.log" 2>&1; then
     absent=""
     for c in $CONFIGS; do
       [ -f "$out/$c" ] || absent="$absent $c"

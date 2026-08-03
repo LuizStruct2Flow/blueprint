@@ -65,16 +65,24 @@ coverage/
 # These files reveal how the founder works with Codex + Claude Code.
 # Lifecycle artifacts under docs/ stay PUBLIC; only the four
 # methodology files inside docs/ are listed here.
-CLAUDE.md
-AGENTS.md
-AGENT_SIGNAL.md
+/CLAUDE.md
+/AGENTS.md
+/AGENT_SIGNAL.md
 docs/DoD.md
 docs/PUBLISHING.md
 docs/doing/HANDOVER.md
 docs/**/CODEX_REVIEW.md
-project_config_overview.md
-project_config_paths.md
-project_config_dod.md
+/project_config_overview.md
+/project_config_paths.md
+/project_config_dod.md
+
+# BUG-009 — the patterns above are ANCHORED with a leading slash on purpose.
+# They name files at the repository ROOT. Written bare, a gitignore pattern
+# matches at every depth, so `templates/project_config_*.md` — the seed source —
+# was silently skipped by `git add` and a PR went out with an empty templates/.
+# `git add` reports nothing when it skips an ignored path, so the only signal was
+# CI failing on a missing template. Keep the slashes.
+
 # A-27: security + infra were omitted while docs/PUBLISHING.md's preflight has
 # always required ALL FIVE `project_config_*.md` to be ignored. They are the two
 # most sensitive of the set — the threat model, adversary assumptions and
@@ -83,8 +91,8 @@ project_config_dod.md
 # (In the blueprint itself all five stay tracked as templates: git ignores
 # .gitignore for already-tracked paths, which is how the other three already
 # behave.)
-project_config_security.md
-project_config_infra.md
+/project_config_security.md
+/project_config_infra.md
 
 # struct2flow agent-protocol scripts (Codex dispatcher etc.).
 # Project-specific scripts that ship publicly go in scripts/ with

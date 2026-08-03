@@ -3,10 +3,14 @@
 | Item | Pushed | What to test |
 |---|---|---|
 
-_Empty._ Everything pushed up to 2026-08-02 was accepted by the founder that day:
-**BUG-005**, **BUG-010**, **FEATURE-001** and **FEATURE-002** are in
-[`../done/`](../done/). FEATURE-001's folder — plan, 17 review rounds, the six
-defects only implementation found — travelled with it.
+| [**BUG-004**](BUG-004-gate-arming/) — a fresh clone is ungated | 2026-08-02 | **Both halves closed.** Half A was branch protection; Half B is GitHub **secret-scanning push protection**, now enabled — server-side, so it blocks a pushed secret regardless of whether a local hook ran, and costs nothing in trunk-based. Test: try pushing a commit containing a recognisable token and confirm GitHub refuses it. |
+| **BUG-012** — bootstrap wrote an absolute `blueprint_source` | 2026-08-02 | Fixed by the linkedin-watcher-agent session. Test: bootstrap a project, move either checkout, confirm `drift` still resolves. |
+| **BUG-013** — `drift` told every derived project "This IS the blueprint" | 2026-08-02 | The big one. Test: run `bash scripts/blueprint drift` in a derived project — it must report real drift, not "This IS the blueprint". |
+| **BUG-014** — a test suite wrote into the repo under test | 2026-08-02 | Test: `git config --get core.hooksPath` still set after a gated push. |
+| **BUG-015** — six libs the CLI needs never shipped | 2026-08-02 | Test: `blueprint pull` in a derived project, then confirm `blueprint a2bp --dry-run` runs there at all. |
+
+Earlier work accepted the same day — **BUG-005**, **BUG-010**, **FEATURE-001**,
+**FEATURE-002** — is in [`../done/`](../done/).
 
 ---
 

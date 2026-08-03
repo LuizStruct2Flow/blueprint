@@ -4,7 +4,7 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-08-02.** `origin/main` is at **`7bd575f`**.
+> **Last updated: 2026-08-02 (end of session).** `origin/main` is at **`47e1a7f`**.
 >
 > **Read this first: there are two ID namespaces and only one is a work item.**
 > `BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs — what the commit convention,
@@ -37,7 +37,16 @@
 
 ## 0. STATUS
 
-- **`origin/main` = `7bd575f`.** Working tree clean, nothing unpushed.
+- **`origin/main` = `47e1a7f`.** Working tree clean, nothing unpushed.
+- **BLUEPRINT CHANGES NOW GO THROUGH A PULL REQUEST.** PR #3 landed 2026-08-02:
+  never `git push` with `main` checked out in a blueprint checkout, no matter who
+  authorized the change. Trunk-based governs PRODUCT repos; the blueprint's
+  `main` is the trunk every project pulls from. Use a worktree
+  (`git worktree add <tmp>/bp-<topic> -b <topic> origin/main`) — verified safe
+  now that BUG-014 is fixed; before that it corrupted the branch being pushed.
+- **Secret-scanning push protection is ENABLED** on this repo (2026-08-02),
+  which is what closed BUG-004 Half B. Server-side, so it holds even when the
+  local gate is absent or disarmed.
 - **A concurrent session is committing to this repo.** BUG-012 (`9bb4f96`,
   `726d299`) landed mid-session from another prompt on the same git identity,
   and a plain `git push origin main` carried it along with BUG-010 — four
@@ -84,9 +93,12 @@ stream should not arm it — a monitor on a file nobody writes is pure overhead.
 
 | Item | What is needed |
 |---|---|
-| **BUG-004 Half B** | A fresh clone still pushes ungated (Half A does not close it — the admin bypass is what preserves trunk-based). Three levers: accept explicitly; rely on CI detection (already runs on push to `main` — fine for tests, **weak for secrets: this repo is PUBLIC, so a pushed secret is world-readable before gitleaks starts**); or drop the bypass, which ends trunk-based. |
-| **BUG-005** | Gate at ~29 s of a hard 30 s ceiling; `tests/agent-activity-bound --fast` alone is 18.1 s. It has already displaced real coverage — `tests/a2bp-contamination/` (41 assertions) is CI-only. The obvious fix does NOT work: those sleeps are negative assertions and cannot be polled for. Shorten the multiples, move cases to CI, or change the ceiling. |
-| **FEATURE-001 acceptance** | Cannot be accepted from here — every meaningful test runs FROM a derived project. Pairs with the derived-project work below; same session. |
+| **Acceptance** | Five items sit in `waiting-acceptance/`: BUG-004, BUG-012, BUG-013, BUG-014, BUG-015. Per-item tests are in [INDEX.md](../waiting-acceptance/INDEX.md). |
+| **ai-server-blueprint** | Still undecided: it has **zero** struct2flow marker files, so adopting it is a full bootstrap, not a repair. Is it a struct2flow project at all? |
+
+**Nothing else is blocked on a decision.** BUG-004 and BUG-005, which sat here
+for days, are both resolved — see §1f for why BUG-004 stayed open longer than it
+should have.
 
 ### 1b. Derived projects — the big change this session
 
@@ -183,6 +195,26 @@ patterns, which the founder says exist there but are on neither the board nor
   match the `Bash(blueprint *)` allowlist and routes around the prompt.
 
 ### 1f. History worth carrying (not action items)
+
+- **BUG-004 stayed open for days because of how I framed it, not because it was
+  hard.** I kept restating three levers — accept, detect via CI, or drop the
+  admin bypass — all policy trades, and kept handing them back to the founder. I
+  never checked whether GitHub offered a *server-side preventive* control. It
+  does, it is free on public repos, and it was disabled. **When an item sits on
+  a founder decision for more than a day, re-examine whether the option set is
+  actually complete.**
+- **Three tests were green for the wrong reason in one session**, all caught only
+  by deliberately checking they could fail: `SETTLE=1` (a clock race that passed
+  standalone and failed in the gate), the BUG-014 reproducer (setting
+  `GIT_WORK_TREE` as well as `GIT_DIR` made the defect vanish), and the BUG-015
+  guard (it read its expectation from the very array it was guarding, so
+  deleting an entry deleted the expectation too). **For anything guard-shaped,
+  the mutation check is not optional.**
+- **A suite can cover the right subject and still miss the defect** by exercising
+  the wrong entry point. `tests/drift-in-blueprint/` had a derived-project case
+  for weeks; it drove the blueprint's CLI from outside, while the broken path was
+  the project's own copy (BUG-013).
+
 
 - **FEATURE-001** (a2bp files a request, cannot write into the blueprint) —
   17 plan-review rounds, then **six defects that only implementation found**,

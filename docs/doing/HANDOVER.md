@@ -4,7 +4,8 @@
 > state. On **wake**: read this FIRST, then `AGENT_SIGNAL.md`, `CLAUDE.md`,
 > `MEMORY.md`. On **sleep**: make every section current, then confirm "ready to sleep".
 >
-> **Last updated: 2026-08-02 (end of session).** `origin/main` is at **`47e1a7f`**.
+> **Last updated: 2026-08-03.** `origin/main` is at **`40eafa5`**; PR #14
+> (BUG-020) is open and green, awaiting a round-2 Codex verdict.
 >
 > **Read this first: there are two ID namespaces and only one is a work item.**
 > `BUG-XXX` / `FEATURE-XXX` are the lifecycle IDs — what the commit convention,
@@ -25,19 +26,46 @@
 > IDs: the reviews argue about findings by name, so renaming would break the trail
 > they exist to be. An `A-NN` reference anywhere is a citation of history.
 >
-> **TWO THINGS NEED A FOUNDER DECISION, NOT CODE: BUG-004 and BUG-005** (§1).
-> **FEATURE-001 and BUG-010 are in `waiting-acceptance/`** awaiting your testing.
+> **`doing/` now holds exactly one work item: BUG-019.** Everything else that
+> was in it on 2026-08-02 has been fixed and moved to `waiting-acceptance/`.
+> BUG-019 has a written plan and Codex consensus, and is NOT yet implemented.
 >
 > **Who am I?** Run `bash scripts/agent-activity.sh --whoami`. Do NOT assume a
 > name from any doc: the roster is gitignored and per-engineer, so the
-> Orchestrator's name differs per fleet. On this machine it is **Anna**. Until
+> Orchestrator's name differs per fleet. On this machine it is **Eto**. Until
 > BUG-010 was fixed (2026-08-02) every surface said Sylvia regardless of what
 > the roster said, which is why older documents here say Sylvia — those are
 > historical, not authoritative.
 
 ## 0. STATUS
 
-- **`origin/main` = `47e1a7f`.** Working tree clean, nothing unpushed.
+- **`origin/main` = `40eafa5`.** One branch open: `fix/bug-020-state-in-project`
+  (PR #14), gate-green locally and in CI.
+- **Nine bugs closed on 2026-08-03**, all via PR, all with a failing reproducer
+  committed before the fix: BUG-006, 008, 009, 011, 013, 014, 015, 016, 018
+  (BUG-017 closed OBSOLETE with evidence), plus BUG-005 and BUG-020. They sit in
+  `waiting-acceptance/` — none is promoted to `done/` without your word.
+- **BUG-019 is the only item left in `doing/`, and it is deliberately unbuilt.**
+  `docs/doing/PLAN-BUG-019.md` has the analysis; Codex agreed with option (a)
+  (live baton untracked under `logs/state/`, `AGENT_SIGNAL.md` keeps the protocol
+  prose, mirroring the `AGENT_ROSTER.md` / `.example` split). Per the Major Bug
+  Process both sides have now committed, so implementation IS authorized — it
+  simply had not started when this was written.
+- **A lesson that generalised across the whole day, worth carrying:** six
+  separate tests passed for the wrong reason, each asserting an OUTCOME the
+  defect also produces. The repair in every case was to assert the MECHANISM —
+  which argv, which branch, which message. Two more instances landed today: the
+  A-09 suite asserted a literal path instead of the distinctness property it
+  exists to protect, and a `$HOME` blocklist guard was narrowed until it went
+  green (Codex broke it in one pass with two lines). Both are now structural.
+- **Restart the signal watchers after changing the state-dir derivation.** The
+  launcher bakes `RUN_LOG`/`OUTPUT_LAST` into the exported wake command, so a
+  watcher started earlier keeps writing the OLD paths for its whole life. This
+  cost real time on 2026-08-03 because it is indistinguishable from a resolution
+  bug from the outside.
+- **`~/.blueprint/` is now unused but still present** — its contents were copied
+  into `logs/state/` and nothing writes there any more. Removing it needs your
+  hand; the agent was denied the delete, correctly.
 - **BLUEPRINT CHANGES NOW GO THROUGH A PULL REQUEST.** PR #3 landed 2026-08-02:
   never `git push` with `main` checked out in a blueprint checkout, no matter who
   authorized the change. Trunk-based governs PRODUCT repos; the blueprint's

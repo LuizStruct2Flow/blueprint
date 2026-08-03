@@ -470,21 +470,35 @@ CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=1 \
   timeout 10 bash "$W/scripts/start-codex-signal-watch.sh" --poll 1 \
   > "$W/watch6c.out" 2>&1 &
 w6c=$!
-sleep 4
-printf '%s\n' "$W/b" > "$BD_POINTER"   # identical content, new path
-sleep 4
+
+# WAIT for the first dispatch before moving, instead of assuming a sleep covers
+# it. Codex round-4 MEDIUM, and it is the scheduling profile I had asked about:
+# if the first dispatch lands only AFTER the move, the run count is still 1 and
+# the case reports "no replay" — while having tested nothing, because there was
+# no prior dispatch to replay. A fixed sleep encodes an assumption about the
+# machine; polling for the precondition encodes the precondition.
+runs=0
+for _ in $(seq 1 40); do
+  [ -f "$STUB_MARKER" ] && runs="$(wc -l < "$STUB_MARKER" | tr -d ' ')"
+  [ "$runs" -ge 1 ] && break
+  sleep 0.5
+done
+
+if [ "$runs" -ne 1 ]; then
+  fail "#6c INCONCLUSIVE: expected exactly one dispatch BEFORE the move, saw $runs — the replay claim is untested (output: $(tr '\n' ' ' < "$W/watch6c.out" | tail -c 200))"
+else
+  printf '%s\n' "$W/b" > "$BD_POINTER"   # identical content, new path
+  # Long enough for a replay to have happened: settle 1s + poll 1s, plus slack.
+  sleep 4
+  runs="$(wc -l < "$STUB_MARKER" | tr -d ' ')"
+  if [ "$runs" -eq 1 ]; then
+    pass "#6c one dispatch before the move, still one after (no replay)"
+  else
+    fail "#6c the path move REPLAYED an already-dispatched baton ($runs dispatches) — finished work re-run"
+  fi
+fi
 kill "$w6c" 2>/dev/null
 wait "$w6c" 2>/dev/null
-
-runs=0
-[ -f "$STUB_MARKER" ] && runs="$(wc -l < "$STUB_MARKER" | tr -d ' ')"
-if [ "$runs" -eq 1 ]; then
-  pass "#6c a path move with identical content dispatched exactly once (no replay)"
-elif [ "$runs" -eq 0 ]; then
-  fail "#6c INCONCLUSIVE: nothing dispatched at all, so the no-replay claim is untested (output: $(tr '\n' ' ' < "$W/watch6c.out" | tail -c 200))"
-else
-  fail "#6c the path move REPLAYED an already-dispatched baton ($runs dispatches) — finished work re-run"
-fi
 rm -rf "$W"
 
 # ===========================================================================

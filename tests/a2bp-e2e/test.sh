@@ -32,7 +32,7 @@ fail() { echo "FAIL: $*"; FAILED=1; }
 pass() { echo "  ok — $*"; }
 
 # Exit statuses under test (must match request-file.sh).
-RC_OK=0; RC_PENDING=3; RC_BLOCKED=4; RC_NOTHING=6
+RC_OK=0; RC_PENDING=3; RC_BLOCKED=4; RC_FAILED=5; RC_NOTHING=6
 
 # --- the blueprint remote (bare) and a working checkout of it ---------------
 BPWORK="$WORK/bp-work"
@@ -77,16 +77,24 @@ run() { ( cd "$PROJ" && "$CLI" "$@" 2>&1 ); }
 
 # ===========================================================================
 # 1. A request is FILED: the branch lands on the remote, carrying the change.
-#    gh is absent in this fixture, so the run stops after the push and reports
-#    decision-pending — which is itself the contract for "branch is up, PR is
-#    not".
+#    gh is absent in this fixture, so the branch is pushed and NO PR is opened.
+#    That is RC_FAILED (5), not decision-pending (3) — changed with BUG-011.
+#
+#    This comment used to say 3 was "itself the contract for branch is up, PR is
+#    not". That reading is the bug. CLAUDE.md defines 3 as "filed and awaiting a
+#    decision", and with no PR there is nothing for anyone to decide on — a
+#    script reading 3 concludes a reviewer has the request when nobody does.
+#    5 with an explicit "open one by hand from <ref>" is the truthful answer.
 # ===========================================================================
 out=$(run a2bp docs/DoD.md); rc=$?
-if [ "$rc" -ne "$RC_PENDING" ]; then
-  fail "#1 expected decision-pending ($RC_PENDING), got $rc. Output:
+if [ "$rc" -ne "$RC_FAILED" ]; then
+  fail "#1 expected operational-failure ($RC_FAILED) with no gh present, got $rc. Output:
+$out"
+elif ! printf '%s' "$out" | grep -q 'opening the PR failed'; then
+  fail "#1 exit was right but the reason was not stated — the operator must be told the branch is up and the PR is not. Output:
 $out"
 else
-  pass "#1 a2bp files a request and reports decision-pending, not success"
+  pass "#1 with no gh: the branch is pushed, no PR is claimed, and the exit code says operational failure (BUG-011)"
 fi
 
 # `**`, not `*`. for-each-ref matches patterns with WM_PATHNAME, so a single
@@ -135,8 +143,8 @@ out=$(run a2bp docs/DoD.md); rc=$?
 tip_after=$(git -C "$REMOTE" rev-parse "$REQ_REF")
 if [ "$tip_before" != "$tip_after" ]; then
   fail "#3 re-running moved the branch tip — a request already under review would be rewritten"
-elif [ "$rc" -ne "$RC_PENDING" ]; then
-  fail "#3 re-running gave $rc, expected $RC_PENDING. Output:
+elif [ "$rc" -ne "$RC_FAILED" ]; then
+  fail "#3 re-running gave $rc, expected $RC_FAILED (still no gh, so still no PR). Output:
 $out"
 elif ! printf '%s' "$out" | grep -qi "adopting"; then
   fail "#3 re-running did not report adopting the existing branch. Output:

@@ -52,6 +52,29 @@ if [ ! -x "$BLUEPRINT_BIN" ]; then
 fi
 
 WORK="$(mktemp -d)"
+
+# BUG-011 — a `gh` shim, so a2bp can reach a REAL "filed" state in this fixture.
+#
+# The remote here is a local bare repo, so `gh pr create` against it is
+# impossible by construction. That used to be invisible: the pr-create failure
+# branch returned 3, this suite maps 3 to 0 ("filed"), and 27 cases silently
+# read "the PR step failed" as "the request was filed" — the very defect
+# BUG-011 describes, fooling the test suite that was supposed to guard this path.
+#
+# Now that a failed pr-create correctly returns 5, the fixture has to supply a
+# gh that can succeed. Shimming it is also more honest: these cases ask "did the
+# contamination guard let this content through?", and that question should not
+# depend on whether GitHub is reachable from the test host.
+GH_SHIM="$(mktemp -d)"
+cat >"$GH_SHIM/gh" <<'SH'
+#!/bin/sh
+case "$1 $2" in
+  "pr list")   exit 0 ;;                                   # no existing PR
+  "pr create") echo "https://example.invalid/pr/1"; exit 0 ;;
+esac
+exit 0
+SH
+chmod +x "$GH_SHIM/gh"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 # The project directory's BASENAME is the project name the CLI derives, so it
@@ -153,7 +176,7 @@ run_a2bp_in() {
   # never produced. Only a branch this run created counts.
   refs_before=$(git -C "$FAKE_REMOTE" for-each-ref --format='%(refname)' 'refs/heads/a2bp/**' | LC_ALL=C sort)
 
-  ( cd "$dir" && "$BLUEPRINT_BIN" a2bp "$@" ) >"$WORK/out" 2>&1
+  ( cd "$dir" && PATH="$GH_SHIM:$PATH" "$BLUEPRINT_BIN" a2bp "$@" ) >"$WORK/out" 2>&1
   local rc=$?
   # a2bp returns 3 (decision-pending) when a request IS filed — non-zero on
   # purpose, so no script can read "filed" as "landed". Every case here asks a

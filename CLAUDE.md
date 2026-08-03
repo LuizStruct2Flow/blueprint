@@ -13,10 +13,15 @@ project, the root copy if it is about this one.
 
 ## Agent Coordination
 
-The agents on this project coordinate through [AGENT_SIGNAL.md](AGENT_SIGNAL.md)
+The agents on this project coordinate through the live baton at
+`logs/state/signal.md` — untracked per-checkout state, written only by
+`scripts/signal-set.sh`, with the protocol documented in
+[AGENT_SIGNAL.md](AGENT_SIGNAL.md)
 — the slim live "radio over" baton (Holder / State / Task / Last update; history
-in `git log`). `Holder` is a **persona name** from the team roster, not a bare
-agent type.
+in `logs/state/signal-history.log`, appended on every flip). **Do not hand-edit
+the baton rows** — one writer publishes the whole baton atomically, so no poller
+can sample a half-written state. `Holder` is a **persona name** from the team
+roster, not a bare agent type.
 
 - **`AGENT_ROSTER.md`** — the team (who's who): each persona, its role, and its
   backing agent. **Per-engineer and gitignored, on the `.env` model**: the tracked
@@ -46,7 +51,7 @@ the **Orchestrator**. The moment you wake as this session, before anything else:
    [AGENT_ROSTER.md](AGENT_ROSTER.md); `bash scripts/agent-activity.sh --whoami`
    prints it along with the roster it came from. That roster is per-engineer and
    gitignored, so **no two fleets share persona names** and any name written here
-   would be wrong for someone. Your `Holder` on `AGENT_SIGNAL.md` is that name;
+   would be wrong for someone. Your `Holder` on the live baton is that name;
    handoffs to you are `OVER_TO_<NAME>`. The feed resolves the same row by
    itself — `AGENT_PERSONA` is an override for spawned personas, not something
    the Orchestrator needs to set (BUG-010: it used to be the *only* thing that
@@ -64,7 +69,7 @@ the **Orchestrator**. The moment you wake as this session, before anything else:
 3. **Arm the wake-time Monitors.** Reactivity is a `Monitor`, not a habit of
    remembering to look:
 
-   - **The mic** (generic, every project) — watch `AGENT_SIGNAL.md` and emit on
+   - **The mic** (generic, every project) — watch `logs/state/signal.md` and emit on
      any change to `Holder` / `State`. Without it you discover a dispatched
      agent has finished only when the founder tells you, which turns every
      hand-off into a manual poll. Emit on **every** state change, not just
@@ -181,7 +186,7 @@ Details and the exact gate order live in [docs/DoD.md](docs/DoD.md) §4 + §7.
 ## Definition of Done — read before every handoff
 
 [**`docs/DoD.md`**](docs/DoD.md) is the canonical handoff checklist for
-Claude Code + Codex. Before flipping `AGENT_SIGNAL.md` to `OVER_TO_USER`
+Claude Code + Codex. Before flipping the baton to `OVER_TO_USER`
 (or to the other agent), walk the **Handoff checklist** in §A–§H. The
 sections of CLAUDE.md describe the rules in detail; the DoD is the
 operational gate that enforces them.
@@ -297,7 +302,7 @@ a read-only audit plus the non-gated moves it implies. Walk this checklist:
    (with a re-open trigger). A deliverable pushed to `main` belongs in
    `waiting-acceptance/`, and **its plan/folder moves with it** (plans
    travel with the work — see §"Major Bug Process").
-2. **`AGENT_SIGNAL.md` matches the folders.** If the `Task` field claims
+2. **The live baton matches the folders.** If the `Task` field claims
    artefacts are waiting, `ls docs/waiting-acceptance/` must show them.
 3. **`backlog/` carries triggers.** Every parked item has a re-open
    trigger or an `OBSOLETE` marker; flag any that don't.

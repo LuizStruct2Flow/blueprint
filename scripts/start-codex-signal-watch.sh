@@ -109,7 +109,7 @@ echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
   --sandbox workspace-write \
   --skip-git-repo-check \
   --output-last-message "$OUTPUT_LAST" \
-  "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The shared signal lives at AGENT_SIGNAL.md. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then flip AGENT_SIGNAL.md back to Holder=Claude Code / State=OVER_TO_CLAUDE (or ACTIVE if you finished the whole thread) and update the Task field with what you did. Commit your changes if appropriate." \
+  "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. Commit your changes if appropriate." \
   2>>"$RUN_LOG" | bash "$ROOT/scripts/codex-feed-filter.sh" >>"$RUN_LOG"
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"

@@ -113,11 +113,16 @@ else
 fi
 
 ROOT="$(repo_root)"
-SIGNAL_FILE="$ROOT/AGENT_SIGNAL.md"
+# Same state-dir derivation as the feed and the launchers (A-09) — one mechanism.
+# Sourced BEFORE anything calls into it: agent_signal_file() lives here too now,
+# and a use-before-source silently yielded an empty path rather than failing.
+. "$ROOT/scripts/lib/state-dir.sh"
+# BUG-019: the LIVE baton is untracked state, resolved through the one shared
+# helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
+# and — worse, before the split — a file git rewrites under a live dispatch.
+SIGNAL_FILE="$(agent_signal_file "$ROOT")"
 TARGET_STATE="OVER_TO_CODEX"
 POLL_SECONDS=2
-# Same state-dir derivation as the feed and the launchers (A-09) — one mechanism.
-. "$ROOT/scripts/lib/state-dir.sh"
 LOG_FILE="$(agent_state_dir "$ROOT")/signal.log"
 ONCE=0
 COMMAND=()

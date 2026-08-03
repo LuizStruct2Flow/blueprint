@@ -2,7 +2,9 @@
 
 Canonical rules for how the team agents — **Codex, Claude Code, Gemini, and
 GitHub Copilot** — coordinate in this repo. The live state is the slim baton in
-[AGENT_SIGNAL.md](AGENT_SIGNAL.md) (the "radio over" file); **this file is the
+[AGENT_SIGNAL.md](AGENT_SIGNAL.md) (the protocol) and the LIVE baton at
+`logs/state/signal.md` (untracked, written only by `scripts/signal-set.sh` —
+BUG-019); **this file is the
 protocol** (how the radio works). `CLAUDE.md` points here rather than duplicating
 it.
 
@@ -16,7 +18,10 @@ to `logs/agent-activity.log`. `--stop` ends it; `--status` reports whether it ru
 At the start of every session or after any "wake" prompt, read before doing
 substantive work:
 
-- `AGENT_SIGNAL.md` — current holder, state, and handoff task.
+- `logs/state/signal.md` — the LIVE baton: current holder, state, handoff task.
+  **Untracked** per-checkout state, so a branch operation cannot rewrite it
+  under a running dispatch (BUG-019). Written ONLY via `scripts/signal-set.sh`.
+- `AGENT_SIGNAL.md` — the protocol itself. Tracked, and carries no live state.
 - `AGENTS.md` (this file) — the coordination protocol.
 - `CLAUDE.md` — shared project rules and delivery process.
 - `docs/config/*.md` — stable product, acceptance, and findings context.
@@ -67,8 +72,11 @@ After confirming the mic is available, claim it by updating:
 - `Task` — one short sentence naming the current work
 - `Last update` — absolute date
 
-Keep `AGENT_SIGNAL.md` **slim**: the four-row baton above only. History lives in
-`git log -p AGENT_SIGNAL.md`; per-slice decisions live in the relevant
+Keep the live baton **slim**: the four rows above only. History lives in
+`logs/state/signal-history.log`, appended by `signal-set.sh` on every flip —
+it used to be `git log -p AGENT_SIGNAL.md`, and the journal is more accurate
+on one axis, because it also records flips that were never committed.
+Per-slice decisions live in the relevant
 `docs/doing/PLAN-*.md`.
 
 ### Rules
@@ -105,7 +113,7 @@ Keep `AGENT_SIGNAL.md` **slim**: the four-row baton above only. History lives in
 
 **Agents stay active after a handoff** — after flipping the state to
 `OVER_TO_CODEX`, `OVER_TO_GEMINI`, `OVER_TO_COPILOT`, or `OVER_TO_USER`, an agent
-does NOT go silent waiting for a prompt. It keeps re-reading `AGENT_SIGNAL.md`
+does NOT go silent waiting for a prompt. It keeps re-reading the live baton
 until the state advances (e.g. `OVER_TO_CLAUDE`), then claims the mic and
 continues. Stop only when there's genuinely nothing to do (signal `IDLE`, no open
 plans, all bugs in `done/`).
@@ -146,7 +154,7 @@ code is the one whose clean review authorizes the push.
 
 1. **`Monitor`-based mtime poll (push-style, preferred).** Spawn a persistent
    `Monitor` task at the start of any session where the signal is non-IDLE. The
-   script polls `AGENT_SIGNAL.md`'s mtime every 2 s and emits one stdout line per
+   script polls the live baton's mtime every 2 s and emits one stdout line per
    change — each line arrives as a task notification that wakes the session
    asynchronously, even between turns. Exact command:
 
@@ -193,7 +201,7 @@ message", cancel via `TaskStop` and rely on (3).
 ## Dispatching Codex (signal-driven, not a direct CLI call)
 
 Claude Code does **not** invoke `codex` directly. Codex is woken by a
-signal-driven dispatcher that watches `AGENT_SIGNAL.md` and runs the real Codex
+signal-driven dispatcher that watches the live baton and runs the real Codex
 CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
 
 1. **The dispatcher (start once, leave running).** Launch
@@ -267,7 +275,7 @@ signal table before; keep a git copy to restore.
 
 ## GitHub Copilot (notify-only)
 
-`GitHub Copilot` is a recognized team agent handed the mic via `AGENT_SIGNAL.md`
+`GitHub Copilot` is a recognized team agent handed the mic via the live baton
 like the others. To hand off, set `Holder = GitHub Copilot` + `State =
 OVER_TO_COPILOT` with a one-line `Task`.
 
@@ -299,7 +307,7 @@ On start it:
      (`~/.claude/projects/.../<session>.jsonl`, via jq; private thinking excluded),
    - `[CODEX]` / `[GEMINI]` — full run output from their dispatch logs
      (`logs/state/{codex,gemini}-runs.log`),
-   - mic/state changes from `AGENT_SIGNAL.md`.
+   - mic/state changes from the live baton.
    Copilot is notify-only (it runs in the IDE; no log to tail).
 
 - `scripts/start-all-watchers.sh` — starts the autonomous dispatchers (Codex,

@@ -194,6 +194,42 @@ else
 fi
 
 # ===========================================================================
+# 4. The journal follows the baton, and an overridden baton takes it along.
+#
+#    The journal is meant to replace `git log -p AGENT_SIGNAL.md` as the
+#    hand-off history. Its first version derived its own path from the repo root
+#    instead of from the baton, so a suite that points AGENT_SIGNAL_FILE at a
+#    fixture still appended to the REAL journal — tests/signal-set/ wrote eleven
+#    fixture rows into it on the first run.
+#
+#    Two independent derivations of one location is the A-09 defect, reintroduced
+#    in the very change that documents it. Asserted here because "the record went
+#    somewhere else" is invisible until someone reads the record.
+# ===========================================================================
+#    BOTH override paths are checked. The first fix honoured $AGENT_SIGNAL_FILE
+#    and still leaked, because tests/signal-set/ uses `--file`, which is parsed
+#    AFTER the journal was derived. One input path validated and the other not
+#    is the same hole this script's --task/--task-file normalisation once had,
+#    so testing only the path I happened to think of would have re-shipped it.
+for _mode in env flag; do
+  jt="$(mktemp -d)"
+  mkdir -p "$jt/elsewhere"
+  if [ "$_mode" = env ]; then
+    AGENT_SIGNAL_FILE="$jt/elsewhere/signal.md" bash "$ROOT/scripts/signal-set.sh" \
+      --holder JTest --state ACTIVE --task 'journal follows the baton' >/dev/null 2>&1
+  else
+    bash "$ROOT/scripts/signal-set.sh" --file "$jt/elsewhere/signal.md" \
+      --holder JTest --state ACTIVE --task 'journal follows the baton' >/dev/null 2>&1
+  fi
+  if [ -f "$jt/elsewhere/signal-history.log" ]; then
+    pass "#4 the journal follows a baton overridden by --$_mode"
+  else
+    fail "#4 no journal beside the baton overridden by --$_mode — it went elsewhere, probably the real one"
+  fi
+  rm -rf "$jt"
+done
+
+# ===========================================================================
 # 0. FIXTURE ISOLATION — the suite must not have touched the REAL baton.
 #    Checked last so it covers every case above, and named #0 because it is a
 #    precondition of the others meaning anything.

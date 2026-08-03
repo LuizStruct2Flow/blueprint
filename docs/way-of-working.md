@@ -238,6 +238,7 @@ A configurable team of **named personas**, each backed by whichever agent you ac
 
 - **The roster is the single source of identity** — **role** is the key, name is data, so renaming a persona is editing one cell. Every reader resolves through one parser (`scripts/lib/roster.sh`); `--whoami` prints who a session thinks it is and which roster said so. Until BUG-010 the names were *literals inside the scripts*, so renaming did nothing and one fleet's names shipped to every project
 - **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
+- **The live baton is untracked, and that is load-bearing** — it lives in `logs/state/signal.md`, not in a tracked file. Git *owns* tracked files in the working tree, so `switch` / `checkout` / `stash` / `rebase` rewrite them — including under a running dispatch, which silently left the dispatched agent with nothing to claim (BUG-019). Rare until every change became a branch + PR; then routine. One writer (`scripts/signal-set.sh`) publishes atomically, so no poller can sample a half-written baton. Hand-off history moved from `git log` to an append-only journal, which also captures flips that were never committed
 - **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_<A>` ≠ `OVER_TO_<B>`)
 - **Read-only + out-of-scope work** allowed in parallel
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events

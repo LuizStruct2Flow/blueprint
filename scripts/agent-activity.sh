@@ -66,7 +66,14 @@ if [ -L "$_bp_self" ]; then
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
 repo_root="$_bp_root"
-signal_file="$repo_root/AGENT_SIGNAL.md"
+# Sourced here rather than further down, because agent_signal_file() lives in
+# the same lib and the baton is resolved immediately below. A use-before-source
+# yields an empty path silently instead of failing.
+. "$repo_root/scripts/lib/state-dir.sh"
+# BUG-019: the LIVE baton is untracked state, resolved through the one shared
+# helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
+# and — worse, before the split — a file git rewrites under a live dispatch.
+signal_file="$(agent_signal_file "$repo_root")"
 log_dir="$repo_root/logs"; mkdir -p "$log_dir"
 out="$log_dir/agent-activity.log"
 lock_file="$log_dir/.agent-activity.lock"
@@ -77,8 +84,7 @@ state_file="$log_dir/.agent-activity.state"
 # (BUG-002: this used to hardcode ~/.linkedin-watcher-agent).  a2bp-allow: that
 # path is the incident record, quoted in a comment, not a live path. The derivation is
 # shared with the dispatchers via scripts/lib/state-dir.sh so both sides compute
-# the identical directory — one mechanism, never two (A-09).
-. "$repo_root/scripts/lib/state-dir.sh"
+# the identical directory — one mechanism, never two (A-09). Sourced above.
 state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
 
 # --- who is this session? (BUG-010) ----------------------------------------

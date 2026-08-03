@@ -308,6 +308,25 @@ else
   pipe_skip "a2bp-pr-filing · BUG-011" "suite absent"
 fi
 
+# BUG-008 — pull must preserve the executable bit. A pulled `.githooks/pre-push`
+# that comes out 600 is ARMED but never runs: core.hooksPath is set, and git
+# skips a non-executable hook without a word. This bug was "fixed" once and
+# shipped broken because there was no test; the suite pins the PRIMITIVE, since
+# the previous repair fixed the four callers and the primitive undid them.
+if [ -f tests/pull-exec-bit/test.sh ]; then
+  _st_pull_exec_bit(){
+    bash tests/pull-exec-bit/test.sh || {
+      echo "❌ tests/pull-exec-bit/test.sh failed (BUG-008)."
+      echo "   A pulled executable must stay executable, or the gate is armed"
+      echo "   and silently skipped in every project that pulls it."
+      return 1
+    }
+  }
+  pipe_stage "pull-exec-bit · BUG-008" _st_pull_exec_bit
+else
+  pipe_skip "pull-exec-bit · BUG-008" "suite absent"
+fi
+
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
 # (founder decision, BUG-005), and the reasoning is kept because it is a clean

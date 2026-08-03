@@ -33,7 +33,6 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
-| **BUG-018** | Interactive `pull` dies on `/dev/tty` in a non-interactive session, while `drift` handles the same case gracefully | S3 | **REOPENED 2026-08-03 — acceptance REJECTED it.** The no-TTY guard stopped the crash and printed the right advice, then returned **0**, so a caller read "sync succeeded" while nothing was pulled. Re-fixed: a refusal now exits 7. The regression allowed it — its check could not fire when rc was 0 | `blueprint pull <file>` without `--yes` reaches its prompt and aborts with `scripts/blueprint:820: /dev/tty: No such device or address` — after printing the diff, so the operator sees a proposal and then a crash. Any agent session, CI job, or `nohup` run hits this. `drift` already solves exactly this: `tests/staleness/drift-integration.sh` case #1 pins "no TTY: warns, offers a copy-pasteable command, never prompts". `pull` should degrade the same way — detect the absent TTY, print the `--yes` invocation, and exit non-zero without having half-run. Same class as BUG-011's exit-code contract: a command must not report progress it did not make. |
 
 
 BUG-002 moved to `waiting-acceptance/` on 2026-07-27; its blocker (audit finding

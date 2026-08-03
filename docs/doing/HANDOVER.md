@@ -39,22 +39,25 @@
 
 ## 0. STATUS
 
-- **`origin/main` = `9597202`.** One open item: BUG-018, reopened by acceptance
-  testing and re-fixed but not yet merged.
-- **ACCEPTANCE IS DONE — 13 accepted, 1 rejected.** The founder delegated
-  acceptance to Codex for every ticket needing no founder judgement. It verified
-  each claim **empirically against the tree** rather than re-reading the rows,
-  and that distinction is exactly what produced the rejection.
-  `waiting-acceptance/` is EMPTY; `done/` holds 15.
-- **BUG-018 was REJECTED and is back in `doing/`.** The no-TTY guard stopped the
-  crash and printed the right advice — then returned **0**, so a script or agent
-  checking the status read "sync succeeded" while nothing had been pulled. The
-  regression suite allowed it: its check could not fire when the exit code was 0.
-  Re-fixed — a refusal exits 7, and `#1b` asserts an in-sync pull still exits 0
-  so the correction is not over-applied. **This is the third appearance of one
-  shape** (BUG-016: a partial pull claiming a full sync; BUG-011: a2bp reporting
-  FILED with nothing filed): *a command that declines to act must not report
-  success for declining.*
+- **`origin/main` = `270b248`. Nothing open: no bugs, no branches, no PRs.**
+  `doing/` 0, `waiting-acceptance/` 0, `done/` **16**.
+- **All 14 items were accepted.** The founder delegated acceptance to Codex for
+  every ticket needing no founder judgement; it verified each claim
+  **empirically against the tree** rather than re-reading the rows. That
+  distinction produced the one rejection, so it earned itself.
+- **BUG-018 was REJECTED, re-fixed, and re-accepted.** The no-TTY guard stopped
+  the crash and printed the right advice — then returned **0**, so a caller read
+  "sync succeeded" while nothing was pulled. Its regression could not catch it:
+  the check was an `elif` that only fired when rc was non-zero, so on the exact
+  defect its failure branch was unreachable. Now: a refusal exits 7, an in-sync
+  pull still exits 0, and three independent assertions replace one compound one.
+  Second-round verification also confirmed **nothing calls `blueprint pull` and
+  checks its status**, so the new non-zero exit breaks no flow.
+- **THE SHAPE THAT KEEPS RECURRING, now three times in this repo:** BUG-016 (a
+  partial pull claiming a full sync), BUG-011 (`a2bp` reporting FILED with
+  nothing filed), BUG-018 (a refusal reporting success). ***A command that
+  declines to act must not report success for declining.*** Every one was found
+  by someone else checking, never by the code.
 - **BUG-004 accepted on a read-only API check** — `secret_scanning=enabled`,
   `secret_scanning_push_protection=enabled`. No test secret was pushed: a secret
   in a public repo's history is not undone by deleting the branch.

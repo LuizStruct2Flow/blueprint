@@ -18,6 +18,16 @@
 
 set -u
 
+# BUG-014 — never inherit git's repo pointers.
+#
+# Sharpened by this suite in particular: case #6 sets GIT_DIR ON PURPOSE, to
+# prove a script's root anchor ignores it. That deliberate export must never
+# leak to the `git init` that builds the decoy, or the fixture lands in the real
+# repository — which is precisely BUG-014, committed by the test written to
+# police its neighbours. The gate caught exactly that. The export is scoped to
+# the one command being probed; everything else runs with these unset.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$ROOT/scripts/lib/state-dir.sh"
 FAILED=0

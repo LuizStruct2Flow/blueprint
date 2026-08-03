@@ -9,7 +9,7 @@ set -euo pipefail
 # prompt. Codex's response (file edits, signal flip) lands directly in
 # the repo via `--sandbox workspace-write`; the human-readable summary
 # is appended to the project's state dir (see scripts/lib/state-dir.sh —
-# `~/.<repo-name>/codex-runs.log` by default) for review.
+# `<repo>/logs/state/codex-runs.log` by default) for review.
 #
 # Usage:
 #   scripts/start-codex-signal-watch.sh
@@ -22,7 +22,13 @@ set -euo pipefail
 # extension. If you install Codex via npm globally instead, point
 # `CODEX_BIN` at that binary.
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Anchored to this script's own location — NOT to `git rev-parse` (which answers
+# about the caller's exported GIT_DIR, per BUG-014) and NOT to `pwd`. Either can
+# name a different checkout, and this script then sources THAT tree's
+# lib/state-dir.sh, so a stale copy of the derivation wins and the feed and the
+# dispatcher stop sharing a state dir. See scripts/codex-signal-watch.sh
+# repo_root() for the full reasoning and the reproduction.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Discover the Codex binary. Prefer an explicit override, otherwise
 # walk the VS Code extension dirs for the latest bundled `codex`.

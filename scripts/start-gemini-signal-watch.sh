@@ -9,8 +9,8 @@ set -euo pipefail
 # real Gemini CLI in non-interactive (-p) YOLO mode with the current `Task`
 # field as the prompt. Gemini's file edits + signal flip land directly in
 # the repo; its final message + run log are captured to the project's state dir
-# (see scripts/lib/state-dir.sh — `~/.<repo-name>/gemini-last-message.md` and
-# `~/.<repo-name>/gemini-runs.log` by default).
+# (see scripts/lib/state-dir.sh — `<repo>/logs/state/gemini-last-message.md`
+# and `<repo>/logs/state/gemini-runs.log` by default).
 #
 # Usage:
 #   scripts/start-gemini-signal-watch.sh
@@ -24,7 +24,10 @@ set -euo pipefail
 # incidental; the poller is provider-agnostic). The trigger STATE is passed
 # as --state OVER_TO_GEMINI so this never collides with the Codex watcher.
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Anchored to this script's own location — see scripts/codex-signal-watch.sh
+# repo_root() for why `git rev-parse` and `pwd` are both wrong here (exported
+# GIT_DIR, and a different checkout's lib/state-dir.sh silently winning).
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Discover the Gemini binary.
 if [[ -n "${GEMINI_BIN:-}" ]]; then

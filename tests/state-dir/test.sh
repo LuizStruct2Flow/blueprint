@@ -130,57 +130,189 @@ if [ -f "$HELPER" ]; then
     || fail "#5 AGENT_STATE_HOME no longer overrides — got '$o'"
 fi
 
-# No consumer may rebuild a $HOME-based STATE path of its own. Comments are
-# stripped so the incident record above is not a finding.
+# --- #5b: STRUCTURAL guard, not a $HOME blocklist -----------------------------
 #
-# Narrowed deliberately. A bare `$HOME/.` match reported three legitimate uses:
-# $HOME/.claude/projects (reading Claude's own transcripts), $HOME/.nvm and
-# $HOME/.vscode (locating an installed binary). None of those is agent state,
-# and a guard that reports them is one someone widens until it means nothing.
-# What BUG-020 forbids is a $HOME path carrying a STATE ARTEFACT, or a
-# hand-rolled ~/.<repo-name> derivation that bypasses the shared helper.
-# ONE definition of the pattern, used by both #5b (scan the tree) and #5c (prove
-# the pattern still bites). Two copies would drift, which is the same defect
-# A-09 fixed for the state dir itself.
-PAT='\$HOME[^ ]*(runs\.log|signal\.log|last-message)|\$HOME/\.\$\(basename|\$HOME/\.\$\{'
+# The first version of this test grepped for `$HOME` shapes. Codex broke it in
+# one pass with two lines that reintroduce the bug and match no pattern:
+#
+#     RUN_LOG="${HOME}/.$(basename "$repo_root")/codex-runs.log"
+#     STATE_DIR="$(printf "%s/.%s" "$HOME" "$(basename "$repo_root")")"
+#
+# The first uses braces, the second names no artefact near $HOME. Widening the
+# regex to catch those invites the next two spellings — a blocklist of ways to
+# spell a bad path can never be complete, and every widening step made the guard
+# fire on legitimate uses ($HOME/.claude/projects, $HOME/.nvm, $HOME/.vscode).
+#
+# So assert the REQUIREMENT instead of enumerating its violations. A-09's actual
+# rule is "every consumer derives its state paths from the one shared helper",
+# and that is structural:
+#
+#   A. A line naming a state artefact must root it in a helper-derived variable.
+#   B. An assignment to the state-dir variable must call agent_state_dir.
+#
+# Any reconstruction — $HOME, ${HOME}, printf, a hardcoded absolute path, a new
+# spelling nobody has thought of — fails one of these, because it has to name an
+# artefact or set the dir, and both routes are checked.
+# Artefact FILENAMES, with their extensions. Matching the bare token
+# `last-message` also matched codex's `--output-last-message` FLAG, whose value
+# was correctly derived — a guard that flags the flag teaches people to ignore
+# it. The artefacts are files, so match them as files.
+ART='runs\.log|signal\.log|last-message\.md'
+DERIVED='STATE_DIR|state_dir|LOG_FILE|agent_state_dir'
 
-homey=""
+# An operator passing an explicit path on the command line is the same
+# sanctioned override as AGENT_STATE_HOME, so `LOG_FILE="$2"` inside argument
+# parsing is not a reconstruction. Kept deliberately narrow — only a bare
+# positional — because anything looser is a hole: a reconstruction has to build
+# the path from parts, and it cannot do that with `"$2"` alone.
+OVERRIDE='=\"\$[0-9]\"$'
+
+structural=""
 for f in scripts/agent-activity.sh $DISPATCHERS; do
   [ -f "$ROOT/$f" ] || continue
-  if sed 's/#.*//' "$ROOT/$f" | grep -qE "$PAT"; then
-    homey="$homey $f"
+  # Strip comments AND the usage heredoc. Both are documentation, not code
+  # paths: `--log PATH (default: <repo>/logs/state/signal.log)` legitimately
+  # names an artefact to a human and derives nothing. Their correctness is
+  # Codex's MEDIUM #3 (stale text pointing at the old location), which is a
+  # real concern but a different one — mixing it in here would mean the
+  # structural rule fires on prose and gets ignored.
+  body="$(sed -e "/<<'USAGE'/,/^USAGE$/d" -e 's/#.*//' "$ROOT/$f")"
+
+  # (A) every artefact-naming line is rooted in a derived variable
+  if printf '%s\n' "$body" | grep -E "$ART" | grep -qvE "$DERIVED"; then
+    structural="$structural $f(A)"
+  fi
+
+  # (B) every state-dir assignment comes from the helper
+  if printf '%s\n' "$body" | grep -E '^[[:space:]]*(STATE_DIR|state_dir|LOG_FILE)=' \
+       | grep -vE "$OVERRIDE" | grep -qv 'agent_state_dir'; then
+    structural="$structural $f(B)"
   fi
 done
-if [ -n "$homey" ]; then
-  fail "#5b a consumer still builds a \$HOME state path — the split would return:$homey"
+if [ -n "$structural" ]; then
+  fail "#5b a consumer builds a state path outside the shared helper:$structural"
 else
-  pass "#5b no consumer builds its own \$HOME state path"
+  pass "#5b every consumer roots its state paths in agent_state_dir"
 fi
 
-# --- #5c: prove #5b's pattern is not merely narrow enough to always pass ------
+# --- #5c: prove #5b actually bites -------------------------------------------
 #
-# #5b was narrowed AFTER it fired on three legitimate $HOME uses. Narrowing a
-# guard until it goes green is how a guard stops guarding, so the pattern is
-# pinned here against the two shapes this bug actually had — taken verbatim from
-# the pre-fix files (c284cc1^) — plus the benign line that caused the narrowing.
-# If someone widens or guts #5b's regex, this fails.
-BAD_A='RUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"'
-BAD_B='state_dir="${AGENT_STATE_HOME:-$HOME/.$(basename "$repo_root")}"'
-OK_A='  proj="$HOME/.claude/projects/$(printf "%s" "$repo_root")"'
+# A structural guard can still be vacuous, so it is run against the shapes that
+# must fail: the two historical spellings from c284cc1^, and BOTH of Codex's
+# bypasses, which is the point of writing the guard structurally in the first
+# place. The benign lines must stay clean.
+check_bad() { # name, line
+  if printf '%s\n' "$2" | grep -E "$ART" | grep -qvE "$DERIVED"; then return 0; fi
+  if printf '%s\n' "$2" | grep -E '^[[:space:]]*(STATE_DIR|state_dir|LOG_FILE)=' \
+       | grep -vE "$OVERRIDE" | grep -qv 'agent_state_dir'; then return 0; fi
+  fail "#5c the guard does NOT catch $1: $2"
+  return 1
+}
+check_ok() { # name, line
+  if printf '%s\n' "$2" | grep -E "$ART" | grep -qvE "$DERIVED"; then
+    fail "#5c the guard wrongly flags $1: $2"
+    return 1
+  fi
+  return 0
+}
 
 vac=0
-for sample in "$BAD_A" "$BAD_B"; do
-  if ! printf '%s\n' "$sample" | grep -qE "$PAT"; then
-    fail "#5c the guard does NOT catch a known-defective line: $sample"
-    vac=1
+check_bad "the original literal-placeholder path" \
+  'RUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"' || vac=1
+check_bad "the original derived-basename path" \
+  'state_dir="${AGENT_STATE_HOME:-$HOME/.$(basename "$repo_root")}"' || vac=1
+check_bad "Codex bypass 1 (braced \$HOME)" \
+  'RUN_LOG="${HOME}/.$(basename "$repo_root")/codex-runs.log"' || vac=1
+check_bad "Codex bypass 2 (printf, no artefact name)" \
+  'STATE_DIR="$(printf "%s/.%s" "$HOME" "$(basename "$repo_root")")"' || vac=1
+
+check_ok "transcript reading" \
+  '  proj="$HOME/.claude/projects/$(printf "%s" "$repo_root")"' || vac=1
+check_ok "a correct derived assignment" \
+  'RUN_LOG="$STATE_DIR/codex-runs.log"' || vac=1
+
+[ "$vac" -eq 0 ] \
+  && pass "#5c the guard catches all four defect shapes, including both Codex bypasses"
+
+# ===========================================================================
+# 6. Codex HIGH — an exported GIT_DIR must not move the resolved root.
+#
+#    Git exports GIT_DIR to every hook, and the pre-push gate runs the suites,
+#    so anything launched from that context inherits it (this is BUG-014's
+#    mechanism). A root resolved with `git rev-parse --show-toplevel` then
+#    answers about the CALLER's environment rather than the script's own tree:
+#    Codex reproduced the feed landing on <repo>/logs/state while the launcher
+#    landed on <repo>/scripts/logs/state. Different dirs is A-09 reopened.
+#
+#    The anchor expression is extracted FROM each script and evaluated, so this
+#    tests the shipped code rather than a copy of the formula that could agree
+#    with a broken file by coincidence.
+# ===========================================================================
+ANCHORED="scripts/agent-activity.sh scripts/start-codex-signal-watch.sh scripts/start-gemini-signal-watch.sh"
+hostile="$(mktemp -d)"
+git init -q "$hostile/decoy" 2>/dev/null
+
+for f in $ANCHORED; do
+  [ -f "$ROOT/$f" ] || { fail "#6 $f not found"; continue; }
+
+  # Pull the script's OWN root assignment (repo_root= or ROOT=).
+  expr_line="$(grep -m1 -E '^(ROOT|repo_root)="\$\(' "$ROOT/$f")"
+  if [ -z "$expr_line" ]; then
+    fail "#6 $f has no recognisable root anchor to test"
+    continue
+  fi
+
+  # Evaluate it the way a hook would: GIT_DIR exported at a decoy repo, and
+  # cwd inside scripts/ rather than the repo top.
+  # Run the extracted line in a shell whose $0 IS the script under test — the
+  # anchor is `dirname "$0"`, so evaluating it in this test's own shell would
+  # resolve against the test file and prove nothing. cwd is scripts/ and GIT_DIR
+  # points at a decoy repo: the hook environment, reproduced.
+  got="$(
+    cd "$ROOT/scripts" || exit 1
+    GIT_DIR="$hostile/decoy/.git" \
+      bash -c "${expr_line%%#*}"'
+        printf "%s\n" "${ROOT:-${repo_root:-}}"' "$ROOT/$f"
+  )"
+
+  if [ "$got" = "$ROOT" ]; then
+    pass "#6 $f anchors to its own tree under an exported GIT_DIR"
+  else
+    fail "#6 $f resolved '$got' under an exported GIT_DIR, expected '$ROOT' — A-09 reopened"
   fi
 done
-if printf '%s\n' "$OK_A" | grep -qE "$PAT"; then
-  fail "#5c the guard flags \$HOME/.claude/projects, which is transcript reading, not state"
-  vac=1
+rm -rf "$hostile"
+
+# Non-vacuity: the OLD anchor must actually fail this, or #6 proves nothing.
+old_got="$(
+  cd "$ROOT/scripts" || exit 1
+  hostile2="$(mktemp -d)"; git init -q "$hostile2/decoy" 2>/dev/null
+  GIT_DIR="$hostile2/decoy/.git"; export GIT_DIR
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+)"
+if [ "$old_got" = "$ROOT" ]; then
+  fail "#6b the pre-fix anchor also resolved correctly — the hostile env is not hostile, so #6 is vacuous"
+else
+  pass "#6b the pre-fix anchor DOES break here ('$old_got') — #6 is testing something real"
 fi
-[ "$vac" -eq 0 ] \
-  && pass "#5c the guard fires on both historical defect shapes and spares the benign one"
+
+# #6c — structural sweep. #6 evaluates an extracted `ROOT="$(...)"` line, so it
+# cannot reach codex-signal-watch.sh (whose anchor is a function) or any script
+# added later. The rule is simple enough to assert directly: nothing on the
+# state-dir path may anchor its repo root with `git rev-parse`, because that
+# answers about the caller's exported GIT_DIR rather than the script's own tree.
+revparse=""
+for f in scripts/agent-activity.sh $DISPATCHERS; do
+  [ -f "$ROOT/$f" ] || continue
+  if sed 's/#.*//' "$ROOT/$f" | grep -q 'rev-parse --show-toplevel'; then
+    revparse="$revparse $f"
+  fi
+done
+if [ -n "$revparse" ]; then
+  fail "#6c anchors its root with git rev-parse, which an exported GIT_DIR redirects:$revparse"
+else
+  pass "#6c no state-dir consumer anchors its root with git rev-parse"
+fi
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-09 — feed and dispatchers rendezvous on one per-project state dir."

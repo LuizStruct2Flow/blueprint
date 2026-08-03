@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # The command receives AGENT_SIGNAL_HOLDER, AGENT_SIGNAL_STATE, and
 # AGENT_SIGNAL_TASK in its environment. Every trigger is also appended to
-# the project's state dir (~/.<repo-name>/signal.log; see scripts/lib/state-dir.sh).
+# the project's state dir (<repo>/logs/state/signal.log; see scripts/lib/state-dir.sh).
 
 usage() {
   cat <<'USAGE'
@@ -22,7 +22,7 @@ Options:
   --file PATH       Signal file to watch (default: ./AGENT_SIGNAL.md)
   --state STATE     State that triggers the command (default: OVER_TO_CODEX)
   --poll SECONDS    Poll interval in seconds (default: 2)
-  --log PATH        Trigger log path (default: ~/.<repo-name>/signal.log)
+  --log PATH        Trigger log path (default: <repo>/logs/state/signal.log)
   --once            Exit after the first trigger
   -h, --help        Show this help
 
@@ -31,8 +31,32 @@ If neither is provided, the watcher only writes the trigger log line.
 USAGE
 }
 
+# Anchored to THIS SCRIPT's location, never to cwd or to git's idea of the
+# repository. Both alternatives are wrong in ways that reopen A-09:
+#
+#   * `git rev-parse --show-toplevel` answers about the CALLER's environment.
+#     Git exports GIT_DIR to every hook (BUG-014), and the gate runs from a
+#     pre-push hook, so a dispatcher launched under one resolves whatever that
+#     variable names — Codex reproduced the feed landing on <repo>/logs/state
+#     while the launcher landed on <repo>/scripts/logs/state.
+#   * `pwd` answers about wherever the operator happened to be standing.
+#
+# Either can resolve a DIFFERENT CHECKOUT, and the launcher then sources that
+# tree's lib/state-dir.sh — so an old copy of the derivation silently wins and
+# the feed and dispatcher stop rendezvousing.
+#
+# The script's own path cannot drift from the tree it belongs to, which is the
+# property we actually need. This matches scripts/agent-activity.sh:49.
+#
+# SEPARATE HAZARD, worth knowing here because it looks identical from outside:
+# start-codex-signal-watch.sh resolves the state dir ONCE and bakes RUN_LOG and
+# OUTPUT_LAST into the exported CODEX_WAKE_COMMAND string. A watcher started
+# before a state-dir change keeps writing the OLD paths for its entire life, no
+# matter what the working tree says. That is what a live dispatch did during
+# BUG-020 — a stale process, not a resolution bug — and it cost real time to
+# attribute. **Restart the watchers after changing the state-dir derivation.**
 repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null || pwd
+  ( cd "$(dirname "$0")/.." && pwd )
 }
 
 trim() {

@@ -9,8 +9,8 @@ set -euo pipefail
 # real Gemini CLI in non-interactive (-p) YOLO mode with the current `Task`
 # field as the prompt. Gemini's file edits + signal flip land directly in
 # the repo; its final message + run log are captured to the project's state dir
-# (see scripts/lib/state-dir.sh — `~/.<repo-name>/gemini-last-message.md` and
-# `~/.<repo-name>/gemini-runs.log` by default).
+# (see scripts/lib/state-dir.sh — `<repo>/logs/state/gemini-last-message.md`
+# and `<repo>/logs/state/gemini-runs.log` by default).
 #
 # Usage:
 #   scripts/start-gemini-signal-watch.sh
@@ -24,7 +24,29 @@ set -euo pipefail
 # incidental; the poller is provider-agnostic). The trigger STATE is passed
 # as --state OVER_TO_GEMINI so this never collides with the Codex watcher.
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Anchored to this script's own location — see scripts/codex-signal-watch.sh
+# repo_root() for why `git rev-parse` and `pwd` are both wrong here (exported
+# GIT_DIR, and a different checkout's lib/state-dir.sh silently winning).
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# for why $0, cwd and `git rev-parse` are each wrong here. The block below is
+# byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
+# cannot be shared as a lib, because finding the lib is the very problem it
+# solves.
+_bp_self="${BASH_SOURCE[0]}"
+_bp_hops=0
+while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
+  _bp_dir="$(cd -P "$(dirname "$_bp_self")" && pwd)"
+  _bp_self="$(readlink "$_bp_self")"
+  case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
+  _bp_hops=$((_bp_hops + 1))
+done
+if [ -L "$_bp_self" ]; then
+  echo "FATAL: symlink chain for $_bp_self exceeds 40 hops — cycle?" >&2
+  exit 1
+fi
+_bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+ROOT="$_bp_root"
 
 # Discover the Gemini binary.
 if [[ -n "${GEMINI_BIN:-}" ]]; then
@@ -52,21 +74,28 @@ fi
 
 # State dir derived the SAME way the activity feed derives it (A-09) — so the
 # feed reads exactly the run log THIS project writes, never another project's.
-. "$ROOT/scripts/lib/state-dir.sh"
-STATE_DIR="$(agent_state_dir "$ROOT")"
-mkdir -p "$STATE_DIR"
-RUN_LOG="$STATE_DIR/gemini-runs.log"
-OUTPUT_LAST="$STATE_DIR/gemini-last-message.md"
+# The state dir is derived INSIDE the wake command (below), not here — see
+# start-codex-signal-watch.sh for why exporting a resolved path freezes it for
+# the watcher's whole life. The `--log` argument that used to be built from a
+# copy here is gone too: the poller derives signal.log from its own script root,
+# which is this same tree, so passing it was a second derivation that could only
+# ever disagree by being stale.
 
 export GEMINI_BIN
-export RUN_LOG
-export OUTPUT_LAST
 export ROOT
 # Runs every time State = OVER_TO_GEMINI fires. AGENT_SIGNAL_TASK is the
 # current Task field, exported by the poller. We hand Gemini the radio-over
 # preamble + Task and let it edit files / flip the signal in YOLO mode.
 export CODEX_WAKE_COMMAND='
 set -u
+# Resolved HERE, on every dispatch — not baked in when the watcher started.
+# A watcher lives for days; the derivation can change under it, and a frozen
+# path fails silently (BUG-020, Codex review round 2 finding 3).
+. "$ROOT/scripts/lib/state-dir.sh"
+STATE_DIR="$(agent_state_dir "$ROOT")"
+mkdir -p "$STATE_DIR"
+RUN_LOG="$STATE_DIR/gemini-runs.log"
+OUTPUT_LAST="$STATE_DIR/gemini-last-message.md"
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching gemini -p (yolo) ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
@@ -80,4 +109,4 @@ end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] gemini finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
 '
 
-exec "${ROOT}/scripts/codex-signal-watch.sh" --state OVER_TO_GEMINI --log "$STATE_DIR/signal.log" "$@"
+exec "${ROOT}/scripts/codex-signal-watch.sh" --state OVER_TO_GEMINI "$@"

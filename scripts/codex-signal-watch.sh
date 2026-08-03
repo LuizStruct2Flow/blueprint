@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # The command receives AGENT_SIGNAL_HOLDER, AGENT_SIGNAL_STATE, and
 # AGENT_SIGNAL_TASK in its environment. Every trigger is also appended to
-# the project's state dir (~/.<repo-name>/signal.log; see scripts/lib/state-dir.sh).
+# the project's state dir (<repo>/logs/state/signal.log; see scripts/lib/state-dir.sh).
 
 usage() {
   cat <<'USAGE'
@@ -22,7 +22,7 @@ Options:
   --file PATH       Signal file to watch (default: ./AGENT_SIGNAL.md)
   --state STATE     State that triggers the command (default: OVER_TO_CODEX)
   --poll SECONDS    Poll interval in seconds (default: 2)
-  --log PATH        Trigger log path (default: ~/.<repo-name>/signal.log)
+  --log PATH        Trigger log path (default: <repo>/logs/state/signal.log)
   --once            Exit after the first trigger
   -h, --help        Show this help
 
@@ -31,9 +31,57 @@ If neither is provided, the watcher only writes the trigger log line.
 USAGE
 }
 
-repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null || pwd
-}
+# Anchored to THIS SCRIPT's location, never to cwd or to git's idea of the
+# repository. Both alternatives are wrong in ways that reopen A-09:
+#
+#   * `git rev-parse --show-toplevel` answers about the CALLER's environment.
+#     Git exports GIT_DIR to every hook (BUG-014), and the gate runs from a
+#     pre-push hook, so a dispatcher launched under one resolves whatever that
+#     variable names — Codex reproduced the feed landing on <repo>/logs/state
+#     while the launcher landed on <repo>/scripts/logs/state.
+#   * `pwd` answers about wherever the operator happened to be standing.
+#
+# Either can resolve a DIFFERENT CHECKOUT, and the launcher then sources that
+# tree's lib/state-dir.sh — so an old copy of the derivation silently wins and
+# the feed and dispatcher stop rendezvousing.
+#
+# The script's own path cannot drift from the tree it belongs to, which is the
+# property we actually need. This matches scripts/agent-activity.sh:49.
+#
+# A SEPARATE HAZARD that used to live here, now fixed rather than documented.
+# The launcher resolved the state dir once and baked RUN_LOG/OUTPUT_LAST into
+# the exported wake-command string, so a watcher started before a derivation
+# change kept writing the OLD paths for its entire life — indistinguishable from
+# a resolution bug from outside, which is what made it expensive to attribute.
+# The first response was a note telling operators to restart their watchers.
+# Codex was right to reject that: a rule you must remember is not a fix (the
+# same conclusion BUG-004, BUG-014 and the no-chaining hook each reached). The
+# wake command now derives the state dir on every dispatch, so a running watcher
+# follows the change with no restart and no instruction to forget.
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# THIRD wrong answer, found by Codex in review round 2: `dirname "$0"`. It fixes
+# the two above but breaks under a symlink — he installed an out-of-tree link and
+# the watcher tried to source `/tmp/scripts/lib/state-dir.sh`. `$0` is the
+# invocation path, not the file; sourcing gets the caller's `$0` instead.
+# So resolve THIS FILE physically, through links.
+#
+# The block below is byte-identical in every consumer and tests/state-dir/ #7
+# enforces that. It cannot be shared as a lib: finding the lib is the very
+# problem it solves.
+_bp_self="${BASH_SOURCE[0]}"
+_bp_hops=0
+while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
+  _bp_dir="$(cd -P "$(dirname "$_bp_self")" && pwd)"
+  _bp_self="$(readlink "$_bp_self")"
+  case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
+  _bp_hops=$((_bp_hops + 1))
+done
+if [ -L "$_bp_self" ]; then
+  echo "FATAL: symlink chain for $_bp_self exceeds 40 hops — cycle?" >&2
+  exit 1
+fi
+_bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+repo_root() { printf '%s\n' "$_bp_root"; }
 
 trim() {
   local value="$1"

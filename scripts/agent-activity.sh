@@ -17,7 +17,8 @@
 #
 # Env:
 #   AGENT_STATE_HOME=...  state dir for dispatcher run logs
-#                         (default ~/.<repo-name>)
+#                         (default <repo>/logs/state — BUG-020: inside the
+#                         project, so deleting it deletes the state)
 #   AGENT_PERSONA=...     OVERRIDE this session's persona. Default comes from
 #                         the roster's Orchestrator row, never from a literal
 #                         here (BUG-010).
@@ -45,7 +46,26 @@
 
 set -uo pipefail
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# for why $0, cwd and `git rev-parse` are each wrong here. The block below is
+# byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
+# cannot be shared as a lib, because finding the lib is the very problem it
+# solves.
+_bp_self="${BASH_SOURCE[0]}"
+_bp_hops=0
+while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
+  _bp_dir="$(cd -P "$(dirname "$_bp_self")" && pwd)"
+  _bp_self="$(readlink "$_bp_self")"
+  case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
+  _bp_hops=$((_bp_hops + 1))
+done
+if [ -L "$_bp_self" ]; then
+  echo "FATAL: symlink chain for $_bp_self exceeds 40 hops — cycle?" >&2
+  exit 1
+fi
+_bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+repo_root="$_bp_root"
 signal_file="$repo_root/AGENT_SIGNAL.md"
 log_dir="$repo_root/logs"; mkdir -p "$log_dir"
 out="$log_dir/agent-activity.log"

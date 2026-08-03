@@ -494,24 +494,49 @@ else
 fi
 rm -rf "$cyc"
 
-# HONEST LIMIT: on this host the observed rc is 126 — the KERNEL/bash refused to
-# open the cyclic file, so the hop-exhaustion branch never executed. The branch
-# is therefore not covered by the case above, and pretending otherwise is the
-# same over-claim I have already made twice on this PR.
+# #10d — reach the exhaustion branch DIRECTLY.
 #
-# It is still worth having: bash gets there first for direct execution, but the
-# guard is what makes the outcome ours rather than a coincidence of who checks
-# first, and ELOOP limits differ across kernels. So assert the branch EXISTS in
-# every copy rather than claiming it was exercised.
+# I wrote that this branch was uncoverable: a real >40 chain hits the kernel's
+# ELOOP first, so #10c only ever observed rc=126 (bash refusing the cyclic file)
+# and the code I had just written went unexercised. I said so rather than
+# claiming coverage I did not have.
+#
+# Codex then built it in one pass, and the trick is worth keeping: shadow
+# `readlink` on PATH so it always answers with a path that is still a symlink.
+# The walk can then never converge, the bound is what stops it, and the branch
+# runs on this kernel like any other line. The lesson is that "the OS gets there
+# first" was a fact about the DEFAULT environment, not about the code — and a
+# test controls its environment.
+hop="$(mktemp -d)"
+mkdir -p "$hop/real/scripts" "$hop/bin"
+blk="$(sed -n '/^_bp_self=/,/^_bp_root=/p' "$ROOT/scripts/codex-signal-watch.sh")"
+printf '%s\nprintf "%%s\\n" "$_bp_root"\n' "$blk" > "$hop/real/scripts/probe.sh"
+ln -s "$hop/real/scripts/probe.sh" "$hop/real/scripts/entry.sh"
+
+# Always hand back a path that is itself a symlink, so the walk cannot converge.
+printf '#!/bin/sh\nprintf "%%s\\n" "%s/real/scripts/entry.sh"\n' "$hop" > "$hop/bin/readlink"
+chmod +x "$hop/bin/readlink"
+
+hop_out="$(PATH="$hop/bin:$PATH" bash "$hop/real/scripts/entry.sh" 2>&1)"
+hop_rc=$?
+if [ "$hop_rc" -ne 0 ] && [ "${hop_out#*exceeds 40 hops}" != "$hop_out" ]; then
+  pass "#10d the hop-exhaustion branch runs: rc=$hop_rc and names the path"
+else
+  fail "#10d exhaustion branch not reached — rc=$hop_rc, output '$hop_out'"
+fi
+rm -rf "$hop"
+
+# Structural companion: every copy must carry the guard, since #10d exercises
+# only the one it extracted.
 noguard=""
 for f in scripts/agent-activity.sh $DISPATCHERS; do
   [ -f "$ROOT/$f" ] || continue
   grep -q 'exceeds 40 hops' "$ROOT/$f" || noguard="$noguard $f"
 done
 if [ -n "$noguard" ]; then
-  fail "#10d the hop-exhaustion guard is missing, so a cycle would resolve to a wrong root:$noguard"
+  fail "#10e a copy lacks the hop-exhaustion guard, so a cycle would resolve to a wrong root:$noguard"
 else
-  pass "#10d every copy carries an explicit hop-exhaustion guard (branch not covered — see comment)"
+  pass "#10e every copy carries the hop-exhaustion guard"
 fi
 
 if [ "$FAILED" -eq 0 ]; then

@@ -1,9 +1,30 @@
 # PLAN-BUG-019 — the coordination baton is a tracked file
 
-**Status:** awaiting multi-AI consensus. **Implementation is not authorized.**
-Per CLAUDE.md §"Major Bug Process": this touches the persona-coordination
-protocol, which is the mechanism the whole team runs on, so a direction gets
-agreed before code is written.
+**Status: CONSENSUS REACHED 2026-08-03 — option (a). Implementation authorized,
+not yet started.** Per CLAUDE.md §"Major Bug Process": this touches the
+persona-coordination protocol, which is the mechanism the whole team runs on, so
+a direction was agreed before any code was written.
+
+### The consensus, and what Codex added to it
+
+He agreed with option (a) and with the reasoning on the crux I said I held
+weakly: mic flips are **local operational events**, so losing their cross-machine
+git history is acceptable, while durable decisions belong in tracked plan and
+review documents. He went further than I did on one point — the append-only local
+journal is **more accurate** than `git log` was, because it records transitions
+that were never committed, and today's `git log` silently omits those.
+
+Two refinements of his that are part of the agreement and must survive into the
+implementation:
+
+1. **`signal-set.sh` becomes the sole supported writer**, with the Codex/Gemini
+   dispatch preambles and every other caller routed through it. Direct row
+   editing becomes unsupported *and mechanically guarded* — not merely
+   discouraged, which is the shape this repo has rejected four times.
+2. **If journalling direct edits is still wanted, watcher-based journalling is a
+   BACKSTOP only — never a second authoritative write path.** Two writers that
+   agree by coincidence is the A-09 shape, and this plan must not reintroduce it
+   one layer up.
 
 ---
 

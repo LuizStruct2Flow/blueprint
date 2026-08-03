@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # NOTIFY-ONLY: This watcher only notifies a human/operator when the mic flips to
 # GitHub Copilot. It does NOT invoke any Copilot CLI or act as an autonomous
-# dispatcher. Operators should claim the mic in AGENT_SIGNAL.md and act manually.
-# Lightweight watcher for AGENT_SIGNAL.md that notifies when mic flips to GitHub Copilot
+# dispatcher. Operators claim the mic by RUNNING scripts/signal-set.sh, then act
+# manually. Do not hand-edit the baton (BUG-019: one writer, atomic publication).
+# Lightweight watcher for the live baton that notifies when the mic flips to GitHub Copilot
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/state-dir.sh
@@ -42,7 +43,8 @@ while true; do
     if [ "$state" = "OVER_TO_COPILOT" ] || [ "$holder" = "GitHub Copilot" ]; then
       echo "=== Copilot handoff detected ==="
       echo "Task: $task"
-      echo "See AGENT_SIGNAL.md to claim the mic and follow docs/DoD.md before acting."
+      echo "Claim the mic with: scripts/signal-set.sh --holder <you> --state ACTIVE --task ..."
+      echo "Protocol: AGENT_SIGNAL.md. Walk docs/DoD.md before acting."
     fi
   fi
 done

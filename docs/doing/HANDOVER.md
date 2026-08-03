@@ -45,12 +45,18 @@
   committed before the fix: BUG-006, 008, 009, 011, 013, 014, 015, 016, 018
   (BUG-017 closed OBSOLETE with evidence), plus BUG-005 and BUG-020. They sit in
   `waiting-acceptance/` — none is promoted to `done/` without your word.
-- **BUG-019 is the only item left in `doing/`, and it is deliberately unbuilt.**
-  `docs/doing/PLAN-BUG-019.md` has the analysis; Codex agreed with option (a)
-  (live baton untracked under `logs/state/`, `AGENT_SIGNAL.md` keeps the protocol
-  prose, mirroring the `AGENT_ROSTER.md` / `.example` split). Per the Major Bug
-  Process both sides have now committed, so implementation IS authorized — it
-  simply had not started when this was written.
+- **`doing/` holds no open bug rows.** BUG-019 was implemented, reviewed and
+  pushed the same day; its plan travelled with it to `waiting-acceptance/`.
+- **BUG-019 CHANGED HOW THE MIC WORKS — read this before coordinating.** The
+  live baton is `logs/state/signal.md`: untracked, per-checkout, written ONLY by
+  `scripts/signal-set.sh`. `AGENT_SIGNAL.md` is now the protocol document and
+  holds no live rows. Hand-off history is `logs/state/signal-history.log`, not
+  `git log -p AGENT_SIGNAL.md`. **Do not hand-edit baton rows** — a half-written
+  baton has dispatched agents against finished work twice.
+- **A watcher started before that change keeps polling the OLD path** and never
+  fires, silently. Restart the signal watchers once after pulling it. This is
+  recorded as an open finding with a fix direction (resolve the path per tick,
+  as the wake command now does for the state dir) rather than left as folklore.
 - **A lesson that generalised across the whole day, worth carrying:** six
   separate tests passed for the wrong reason, each asserting an OUTCOME the
   defect also produces. The repair in every case was to assert the MECHANISM —

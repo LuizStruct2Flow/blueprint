@@ -1,7 +1,8 @@
 # PLAN-BUG-019 — the coordination baton is a tracked file
 
-**Status: CONSENSUS REACHED 2026-08-03 — option (a). Implementation authorized,
-not yet started.** Per CLAUDE.md §"Major Bug Process": this touches the
+**Status: IMPLEMENTED + PUSHED 2026-08-03 — option (a), as agreed.** Landed on
+`fix/bug-019-untracked-baton` (PR #15) with `tests/baton-durability/` as the
+regression. Kept as the decision record for how the direction was chosen. Per CLAUDE.md §"Major Bug Process": this touches the
 persona-coordination protocol, which is the mechanism the whole team runs on, so
 a direction was agreed before any code was written.
 

@@ -88,8 +88,24 @@ done
 JOURNAL="$(dirname "$SIGNAL")/signal-history.log"
 
 mkdir -p "$(dirname "$SIGNAL")"
+
+# The seed is a TEMPLATE FED TO THE REWRITE, never written to the final path.
+#
+# The first version wrote the default IDLE baton straight to $SIGNAL and let the
+# atomic rewrite replace it a moment later. Codex was right that this
+# contradicts the whole point of the file: for that instant a reader sees an
+# empty, partial, or default baton at the canonical path. The default being IDLE
+# makes an accidental dispatch unlikely, but "unlikely" is not the guarantee
+# this script exists to provide — one atomic publication is.
+#
+# So an absent baton is seeded into a temp file used only as awk's INPUT. The
+# only thing that ever appears at $SIGNAL is the finished, requested baton, via
+# a single rename.
+SEED_SRC=""
 if [ ! -f "$SIGNAL" ]; then
-  cat > "$SIGNAL" <<'SEED'
+  SEED_SRC="$(mktemp "${SIGNAL}.seed.XXXXXX")"
+  trap 'rm -f "$SEED_SRC"' EXIT INT TERM
+  cat > "$SEED_SRC" <<'SEED'
 <!-- LIVE coordination baton — untracked, per-checkout (BUG-019).
      Written only by scripts/signal-set.sh. The protocol itself is documented in
      the tracked AGENT_SIGNAL.md; this file is state, not documentation. -->
@@ -150,7 +166,11 @@ TASK="$(printf '%s' "$TASK" | sed 's/|/\\|/g')"
 
 TODAY="$(date '+%Y-%m-%d')"
 TMP="$(mktemp "${SIGNAL}.XXXXXX")"
-trap 'rm -f "$TMP"' EXIT INT TERM
+trap 'rm -f "$TMP" "$SEED_SRC"' EXIT INT TERM
+
+# awk reads the existing baton, or the seed template when there is none. Either
+# way the finished file is produced in $TMP and published by one rename.
+SRC="${SEED_SRC:-$SIGNAL}"
 
 # Rewrite the four baton rows; everything else in the file is passed through
 # untouched, so the surrounding prose stays project-owned.
@@ -173,7 +193,7 @@ awk '
   /^\| Task \|/        { print "| Task | " task " |"; next }
   /^\| Last update \|/ { print "| Last update | " today " |"; next }
   { print }
-' "$SIGNAL" > "$TMP"
+' "$SRC" > "$TMP"
 
 for _row in "| Holder |" "| State |" "| Task |"; do
   grep -qF "$_row" "$TMP" || die "row '$_row' missing after rewrite — refusing to publish a malformed baton"

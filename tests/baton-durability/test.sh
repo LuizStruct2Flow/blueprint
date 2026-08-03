@@ -36,6 +36,24 @@ set -u
 # those would operate on the REAL repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
+# AND never inherit the DISPATCHER's baton pointers. codex-signal-watch.sh does
+# `export AGENT_SIGNAL_FILE="$SIGNAL_FILE"` before running the wake command, so
+# every process inside a dispatch — including an agent that runs this suite as
+# part of a review — inherits a pointer to the REAL baton. `agent_signal_file()`
+# honours it, so the fixture's own copy of signal-set.sh wrote live state no
+# matter what its cwd or script root said.
+#
+# That is what happened: Codex ran this suite while reviewing the PR that
+# introduced it, and four fixture rows landed in the real baton and journal,
+# leaving it at OVER_TO_CODEX — a self-dispatching loop, which on a metered
+# agent is a cost incident, not just an annoyance.
+#
+# It is BUG-014's exact shape (git exports GIT_DIR to hooks, so fixtures wrote
+# the real repo) and the header above already draws that comparison — I wrote
+# the analogy and then unset only the variables from the first instance.
+# AGENT_STATE_HOME is unset for the same reason: it would relocate the journal.
+unset AGENT_SIGNAL_FILE AGENT_STATE_HOME
+
 # AND never reach the REAL baton. `signal-set.sh` defaults to a RELATIVE
 # `AGENT_SIGNAL.md`, so a call made from the repo root publishes into the live
 # signal of the repository under test. The first draft of this suite did exactly
@@ -49,9 +67,26 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 # position rather than from the thing that owns it. Every signal-set call below
 # runs with cwd inside the fixture, and this guard fails the suite rather than
 # letting a future edit reintroduce it silently.
-_real_signal="$(cd "$(dirname "$0")/../.." && pwd)/AGENT_SIGNAL.md"
-_real_before=""
-[ -f "$_real_signal" ] && _real_before="$(cat "$_real_signal")"
+# Snapshot the RESOLVED live baton and its journal — not the tracked file.
+#
+# The first version of this guard snapshotted AGENT_SIGNAL.md, which after this
+# very change is protocol prose that nothing writes. So it compared a file that
+# could not differ, reported "no fixture reached live state", and passed while
+# the suite was overwriting the real baton. Codex found it by reproducing the
+# corruption the guard existed to detect.
+#
+# That is the day's recurring failure in its purest form: a guard that watches
+# the wrong thing cannot fail, and a green that cannot fail is worse than no
+# test, because it is believed. Resolve through the same helper the production
+# code uses, so the guard follows the baton wherever it moves.
+_bd_root="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=scripts/lib/state-dir.sh
+. "$_bd_root/scripts/lib/state-dir.sh"
+_real_signal="$(agent_signal_file "$_bd_root")"
+_real_journal="$(agent_signal_journal "$_bd_root")"
+_real_before=""; _real_jbefore=""
+[ -f "$_real_signal" ]  && _real_before="$(cat "$_real_signal")"
+[ -f "$_real_journal" ] && _real_jbefore="$(cat "$_real_journal")"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FAILED=0
@@ -111,13 +146,30 @@ export STUB_MARKER="$W/stub-ran"
 ( cd "$W" && CODEX_BIN="$W/stub-codex" bash "$W/scripts/signal-set.sh" \
   --holder Tester --state OVER_TO_CODEX --task 'baton durability fixture' ) >/dev/null 2>&1
 
-CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=6 \
-  timeout 40 bash "$W/scripts/start-codex-signal-watch.sh" --poll 1 --once \
+CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE="${BD_SETTLE:-12}" \
+  timeout 60 bash "$W/scripts/start-codex-signal-watch.sh" --poll 1 --once \
   > "$W/watch.out" 2>&1 &
 watch_pid=$!
 
 # Land the branch operation INSIDE the settle window.
+#
+# This is a race, and a race that can pass for the wrong reason is worse than no
+# test. Codex's F5: on a loaded runner the sleep can overshoot the settle window,
+# the watcher dispatches BEFORE the checkout lands, the marker appears, and the
+# suite reports green having tested nothing.
+#
+# The window is widened (settle 12s, sleep 2s) so overshoot needs a ~10s
+# scheduling stall rather than a ~4s one — but widening only makes it rarer, and
+# rare-and-silent is the combination this repo keeps getting burned by. So the
+# overshoot is DETECTED: if the stub already ran when the checkout lands, the
+# window was missed and the case fails as inconclusive instead of passing.
+#
+# A green from this case therefore means "the checkout demonstrably preceded the
+# dispatch", not "a marker exists".
 sleep 2
+if [ -f "$STUB_MARKER" ]; then
+  fail "#1 INCONCLUSIVE: the watcher dispatched before the checkout landed — the settle window was missed, so this run proves nothing (loaded machine? raise AGENT_SIGNAL_SETTLE)"
+fi
 git -C "$W" checkout -- AGENT_SIGNAL.md >/dev/null 2>&1
 checkout_rc=$?
 
@@ -230,16 +282,64 @@ for _mode in env flag; do
 done
 
 # ===========================================================================
+# 5. First creation is atomic — the canonical path never shows a default baton.
+#
+#    Codex F4. The seed used to be written straight to $SIGNAL and replaced a
+#    moment later, so a poller could read an empty, partial or IDLE baton at the
+#    canonical path. The IDLE default made an accidental dispatch unlikely, but
+#    "unlikely" is not the guarantee this script exists to provide.
+#
+#    Asserted by watching the path while a first publication happens: every
+#    sample that sees a file at all must see the REQUESTED baton, never the
+#    seed's Holder=Nobody / State=IDLE.
+# ===========================================================================
+at="$(mktemp -d)"
+abaton="$at/first/signal.md"
+mkdir -p "$at/first"
+(
+  for _ in $(seq 1 400); do
+    if [ -f "$abaton" ]; then
+      grep -q 'Holder | Nobody' "$abaton" 2>/dev/null && echo SAW_SEED >> "$at/samples"
+      grep -q 'Holder | Atomic' "$abaton" 2>/dev/null && echo SAW_FINAL >> "$at/samples"
+    fi
+  done
+) &
+sampler=$!
+AGENT_SIGNAL_FILE="$abaton" bash "$ROOT/scripts/signal-set.sh" \
+  --holder Atomic --state ACTIVE --task 'first creation is atomic' >/dev/null 2>&1
+wait "$sampler" 2>/dev/null
+
+if grep -q SAW_SEED "$at/samples" 2>/dev/null; then
+  fail "#5 the default seed baton was visible at the canonical path — first creation is not atomic"
+elif [ -f "$abaton" ] && grep -q 'Holder | Atomic' "$abaton"; then
+  pass "#5 first creation publishes only the requested baton (no seed ever visible)"
+else
+  fail "#5 no baton produced at $abaton"
+fi
+rm -rf "$at"
+
+# ===========================================================================
 # 0. FIXTURE ISOLATION — the suite must not have touched the REAL baton.
 #    Checked last so it covers every case above, and named #0 because it is a
 #    precondition of the others meaning anything.
 # ===========================================================================
-if [ -n "$_real_before" ]; then
-  if [ "$_real_before" = "$(cat "$_real_signal")" ]; then
-    pass "#0 the real baton is byte-identical — no fixture reached live state"
-  else
-    fail "#0 THIS SUITE MODIFIED THE REAL BATON at $_real_signal — a fixture reached live state"
-  fi
+_bd_leaked=""
+if [ -n "$_real_before" ] && [ "$_real_before" != "$(cat "$_real_signal" 2>/dev/null)" ]; then
+  _bd_leaked="$_bd_leaked baton($_real_signal)"
+fi
+# The journal is checked too, because it is append-only: a fixture that wrote it
+# leaves a row even if the baton was restored. Endpoint comparison of the baton
+# alone can be defeated by modify-then-restore; the journal cannot be un-appended
+# without noticing. Neither is airtight on its own — the real boundary is the
+# unset above plus fixture-local paths — but a growing journal is the cheapest
+# evidence that something reached live state.
+if [ "$_real_jbefore" != "$(cat "$_real_journal" 2>/dev/null)" ]; then
+  _bd_leaked="$_bd_leaked journal($_real_journal)"
+fi
+if [ -n "$_bd_leaked" ]; then
+  fail "#0 THIS SUITE REACHED LIVE STATE:$_bd_leaked"
+else
+  pass "#0 the real baton and journal are byte-identical — no fixture reached live state"
 fi
 
 if [ "$FAILED" -eq 0 ]; then

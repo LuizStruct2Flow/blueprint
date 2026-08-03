@@ -18,8 +18,10 @@ The agents on this project coordinate through the live baton at
 `scripts/signal-set.sh`, with the protocol documented in
 [AGENT_SIGNAL.md](AGENT_SIGNAL.md)
 — the slim live "radio over" baton (Holder / State / Task / Last update; history
-in `git log`). `Holder` is a **persona name** from the team roster, not a bare
-agent type.
+in `logs/state/signal-history.log`, appended on every flip). **Do not hand-edit
+the baton rows** — one writer publishes the whole baton atomically, so no poller
+can sample a half-written state. `Holder` is a **persona name** from the team
+roster, not a bare agent type.
 
 - **`AGENT_ROSTER.md`** — the team (who's who): each persona, its role, and its
   backing agent. **Per-engineer and gitignored, on the `.env` model**: the tracked

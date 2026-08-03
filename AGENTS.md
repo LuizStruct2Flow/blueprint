@@ -163,21 +163,28 @@ code is the one whose clean review authorizes the push.
    # RC-6: `stat -f %m` is macOS syntax; on GNU it means "filesystem status" and
    # `%m` is invalid, printing a block to stdout while exiting 1. Probe once.
    if stat -c %Y . >/dev/null 2>&1; then mt(){ stat -c %Y "$1"; }; else mt(){ stat -f %m "$1"; }; fi
-   last=$(mt AGENT_SIGNAL.md)
+   # BUG-019: watch the LIVE baton, resolved through the same helper production
+   # uses. This recipe used to name AGENT_SIGNAL.md, which is now protocol prose
+   # — a monitor pointed there never fires, and the session that armed it goes
+   # blind exactly when it believes it is covered. Resolving rather than
+   # hardcoding means the recipe follows the baton if it ever moves again.
+   . scripts/lib/state-dir.sh
+   SIG=$(agent_signal_file "$PWD")
+   last=$(mt "$SIG")
    while true; do
      sleep 2
-     new=$(stat -f %m AGENT_SIGNAL.md 2>/dev/null)
+     new=$(mt "$SIG" 2>/dev/null)
      if [ -n "$new" ] && [ "$new" != "$last" ]; then
        last=$new
-       holder=$(grep '^| Holder ' AGENT_SIGNAL.md | head -1 | sed 's/^| Holder *| //; s/ *|$//')
-       state=$(grep '^| State ' AGENT_SIGNAL.md | head -1 | sed 's/^| State *| //; s/ *|$//')
+       holder=$(grep '^| Holder ' "$SIG" | head -1 | sed 's/^| Holder *| //; s/ *|$//')
+       state=$(grep '^| State ' "$SIG" | head -1 | sed 's/^| State *| //; s/ *|$//')
        echo "[signal-change] Holder=$holder State=$state"
      fi
    done
    ```
 
    Invoke via the `Monitor` tool with `persistent: true`, `timeout_ms: 3600000`
-   (1 h — the tool's hard max), description `"AGENT_SIGNAL.md state-line change
+   (1 h — the tool's hard max), description `"live baton state-line change
    watcher (Holder + State)"`. Latency ~2 s, zero token cost between events,
    self-noise tolerable (fires on own writes too — just re-read and continue).
 

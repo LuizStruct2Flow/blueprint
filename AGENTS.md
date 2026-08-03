@@ -242,8 +242,8 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
    identical instructions can legitimately recur, and that block lasted the
    whole life of the watcher. Pinned by `tests/signal-dispatch/` (CI, ~80s).
 
-3. **Where output lands.** `~/.{{PROJECT_NAME}}/codex-runs.log` (full run log),
-   `~/.{{PROJECT_NAME}}/codex-last-message.md` (final message), `~/.{{PROJECT_NAME}}/signal.log`
+3. **Where output lands.** `logs/state/codex-runs.log` (full run log),
+   `logs/state/codex-last-message.md` (final message), `logs/state/signal.log`
    (trigger log). Codex flips the signal back to
    `Holder=Claude Code / State=OVER_TO_CLAUDE` itself. Keep a signal-change
    `Monitor` (mechanism 1) armed so Claude Code wakes on the flip-back.
@@ -252,7 +252,7 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
 `codex` on `PATH`, then `~/.vscode/extensions/*/bin/*/codex`. Set
 `CODEX_BIN=/path/to/codex` to override. **Common failure modes:** dispatcher not
 running when the signal flips; calling `codex` directly (bypasses the protocol);
-binary not found; wrong log path (it is `~/.{{PROJECT_NAME}}/`, not `~/`).
+binary not found; wrong log path (it is `logs/state/` inside the project, not `~/`).
 
 ## Dispatching Gemini (signal-driven)
 
@@ -260,8 +260,8 @@ Mirror of the Codex dispatcher, for Gemini. `scripts/start-gemini-signal-watch.s
 (via the shared `codex-signal-watch.sh` poller with `--state OVER_TO_GEMINI`) runs
 the headless Gemini CLI on each flip to `OVER_TO_GEMINI`. Use the headless CLI, not
 the interactive IDE agent (it stalls): `GOOGLE_GENAI_USE_GCA=true gemini
---skip-trust --yolo --prompt "..."`. Output lands in `~/.{{PROJECT_NAME}}/gemini-runs.log`
-and `~/.{{PROJECT_NAME}}/gemini-last-message.md`. **Caveat:** instruct Gemini to edit
+--skip-trust --yolo --prompt "..."`. Output lands in `logs/state/gemini-runs.log`
+and `logs/state/gemini-last-message.md`. **Caveat:** instruct Gemini to edit
 ONLY the `Holder`/`State`/`Task` fields on hand-back — it has flattened the whole
 signal table before; keep a git copy to restore.
 
@@ -298,7 +298,7 @@ On start it:
    - `[Claude Code]` — text + tool calls from the live session transcript
      (`~/.claude/projects/.../<session>.jsonl`, via jq; private thinking excluded),
    - `[CODEX]` / `[GEMINI]` — full run output from their dispatch logs
-     (`~/.{{PROJECT_NAME}}/{codex,gemini}-runs.log`),
+     (`logs/state/{codex,gemini}-runs.log`),
    - mic/state changes from `AGENT_SIGNAL.md`.
    Copilot is notify-only (it runs in the IDE; no log to tail).
 

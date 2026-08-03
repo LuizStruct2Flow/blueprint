@@ -9,7 +9,7 @@ set -euo pipefail
 # prompt. Codex's response (file edits, signal flip) lands directly in
 # the repo via `--sandbox workspace-write`; the human-readable summary
 # is appended to the project's state dir (see scripts/lib/state-dir.sh —
-# `~/.<repo-name>/codex-runs.log` by default) for review.
+# `<repo>/logs/state/codex-runs.log` by default) for review.
 #
 # Usage:
 #   scripts/start-codex-signal-watch.sh
@@ -22,7 +22,32 @@ set -euo pipefail
 # extension. If you install Codex via npm globally instead, point
 # `CODEX_BIN` at that binary.
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Anchored to this script's own location — NOT to `git rev-parse` (which answers
+# about the caller's exported GIT_DIR, per BUG-014) and NOT to `pwd`. Either can
+# name a different checkout, and this script then sources THAT tree's
+# lib/state-dir.sh, so a stale copy of the derivation wins and the feed and the
+# dispatcher stop sharing a state dir. See scripts/codex-signal-watch.sh
+# repo_root() for the full reasoning and the reproduction.
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# for why $0, cwd and `git rev-parse` are each wrong here. The block below is
+# byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
+# cannot be shared as a lib, because finding the lib is the very problem it
+# solves.
+_bp_self="${BASH_SOURCE[0]}"
+_bp_hops=0
+while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
+  _bp_dir="$(cd -P "$(dirname "$_bp_self")" && pwd)"
+  _bp_self="$(readlink "$_bp_self")"
+  case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
+  _bp_hops=$((_bp_hops + 1))
+done
+if [ -L "$_bp_self" ]; then
+  echo "FATAL: symlink chain for $_bp_self exceeds 40 hops — cycle?" >&2
+  exit 1
+fi
+_bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+ROOT="$_bp_root"
 
 # Discover the Codex binary. Prefer an explicit override, otherwise
 # walk the VS Code extension dirs for the latest bundled `codex`.
@@ -49,13 +74,11 @@ EOF
   exit 1
 fi
 
-# State dir derived the SAME way the activity feed derives it (A-09) — so the
-# feed reads exactly the run log THIS project writes, never another project's.
-. "$ROOT/scripts/lib/state-dir.sh"
-STATE_DIR="$(agent_state_dir "$ROOT")"
-mkdir -p "$STATE_DIR"
-RUN_LOG="$STATE_DIR/codex-runs.log"
-OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
+# The state dir is derived INSIDE the wake command (below), not here. Deriving
+# it at launcher start and exporting the result froze the paths for the life of
+# the watcher — days — so a change to the derivation kept writing the old ones
+# with nothing failing. Two derivations, one of them stale, is the A-09 shape
+# again; there is deliberately only one, and it runs per dispatch.
 
 # The wake command runs every time `State = OVER_TO_CODEX` fires.
 # `AGENT_SIGNAL_TASK` is the current `Task` field, exported by
@@ -63,11 +86,17 @@ OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 # coordination instructions so Codex knows it's in the radio-over
 # protocol.
 export CODEX_BIN
-export RUN_LOG
-export OUTPUT_LAST
 export ROOT
 export CODEX_WAKE_COMMAND='
 set -u
+# Resolved HERE, on every dispatch — not baked in when the watcher started.
+# A watcher lives for days; the derivation can change under it, and a frozen
+# path fails silently (BUG-020, Codex review round 2 finding 3).
+. "$ROOT/scripts/lib/state-dir.sh"
+STATE_DIR="$(agent_state_dir "$ROOT")"
+mkdir -p "$STATE_DIR"
+RUN_LOG="$STATE_DIR/codex-runs.log"
+OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"

@@ -253,6 +253,24 @@ else
   pipe_skip "git-isolation · BUG-014" "suite absent"
 fi
 
+# The no-chain guard is an ENFORCEMENT control, and Codex F4 found it failing
+# OPEN on malformed input and missing jq — the opposite of its stated contract,
+# and undetectable without a test. A guard that evaporates when something is
+# already wrong is worse than no guard, because it is trusted. ~0.3s.
+if [ -f tests/no-chain-guard/test.sh ]; then
+  _st_no_chain_guard(){
+    bash tests/no-chain-guard/test.sh || {
+      echo "❌ tests/no-chain-guard/test.sh failed."
+      echo "   The guard must block chains, permit pipes, and FAIL CLOSED on"
+      echo "   anything it cannot parse — including a missing jq."
+      return 1
+    }
+  }
+  pipe_stage "no-chain-guard" _st_no_chain_guard
+else
+  pipe_skip "no-chain-guard" "suite absent"
+fi
+
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
 # (founder decision, BUG-005), and the reasoning is kept because it is a clean

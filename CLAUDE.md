@@ -107,6 +107,39 @@ around the prompt rather than asking*.
 If a command is not on the allowlist, ask for it to be added, or run it plainly
 and let the prompt happen. Both are correct; disguising it is not.
 
+**This is enforced, not merely written down.** `scripts/no-chain-guard.sh` is a
+`PreToolUse` hook on `Bash` that blocks `&&`, `||` and `;` and permits pipes.
+It exists because the rule above lived here for weeks while an agent broke it
+through an entire session believing it was complying, and the founder had to
+correct it three separate times. A rule that must be remembered at the moment
+the author is busy is the wrong shape of fix — the same conclusion BUG-004
+reached about "flip the mic last" and BUG-014 about fixture isolation. Ported
+from the peer stream rather than re-derived.
+
+Two consequences to work with rather than around:
+
+- **Agent scratch lives in the project, in `.scratch/`** (gitignored, and
+  `export-ignore`d so it cannot reach a derived project). Out-of-project scratch
+  needs a directory *grant* to be reachable; in-project scratch needs none — so
+  this **removes** a permission rather than adding one, which is the half worth
+  having. `/private/tmp` was dropped from `additionalDirectories` for exactly
+  that reason.
+- **The guard matches operators inside quoted text**, including heredoc bodies
+  and string literals — a commit message or a Python snippet containing `;`
+  trips it. So write the content to `.scratch/` with the Write tool and then run
+  or reference the file: `git commit -F .scratch/msg`, `python3 .scratch/x.py`.
+  The file is reviewable, which is better practice anyway. This repo has the same
+  class of false positive in its deny list already: `Bash(* --no-verify*)` blocks
+  a task string that merely *discusses* `--no-verify`.
+
+**The distinction that decides where temp files go** is not "is it temporary?"
+but **"would being inside a git tree break this?"**. Agent scratch — drafts,
+fixtures, snippets — goes in `.scratch/`. A *tooling workspace* that a tool will
+walk (a scratch clone, a worktree, a hermetic build root) must be outside any
+git tree, is created with `mktemp -d` by the code that needs it, and is that
+code's responsibility to remove on every exit path. `a2bp`'s scratch clone is
+the worked example of the second kind.
+
 The concrete instance of this rule for `blueprint drift` is in §"Wake-time drift
 check (mandatory on every fresh session)".
 

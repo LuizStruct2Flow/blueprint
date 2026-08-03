@@ -41,3 +41,9 @@ docs/backlog/BUGS.md              -export-ignore
 # if it shipped, every derived project would claim to be the source of truth and
 # compare nothing. Belt and braces with its absence from MANAGED_FILES.
 .blueprint-root                    export-ignore
+
+# Agent scratch. Gitignored already, so nothing here is tracked — but the
+# export-ignore is belt and braces for the same reason .blueprint-root has one:
+# two independent mechanisms, because a scratch fixture reaching a derived
+# project would be one project's debris seeded into every new one.
+.scratch/                          export-ignore

@@ -146,7 +146,7 @@ export STUB_MARKER="$W/stub-ran"
 ( cd "$W" && CODEX_BIN="$W/stub-codex" bash "$W/scripts/signal-set.sh" \
   --holder Tester --state OVER_TO_CODEX --task 'baton durability fixture' ) >/dev/null 2>&1
 
-CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE="${BD_SETTLE:-12}" \
+CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE="${BD_SETTLE:-8}" \
   timeout 60 bash "$W/scripts/start-codex-signal-watch.sh" --poll 1 --once \
   > "$W/watch.out" 2>&1 &
 watch_pid=$!
@@ -158,7 +158,7 @@ watch_pid=$!
 # the watcher dispatches BEFORE the checkout lands, the marker appears, and the
 # suite reports green having tested nothing.
 #
-# The window is widened (settle 12s, sleep 2s) so overshoot needs a ~10s
+# The window is widened (settle 8s, sleep 2s) so overshoot needs a ~6s
 # scheduling stall rather than a ~4s one — but widening only makes it rarer, and
 # rare-and-silent is the combination this repo keeps getting burned by. So the
 # overshoot is DETECTED: if the stub already ran when the checkout lands, the
@@ -379,8 +379,14 @@ cat > "$W/a/signal.md" <<'IDLE'
 | Task | nothing yet |
 IDLE
 
+# The timeout is the RUNTIME of this case, not a safety margin: #6b asserts that
+# NO dispatch happens, and `--once` means the watcher exits only on dispatch or
+# on timeout — so it always burns the full value. At 25s it was two thirds of
+# this suite's cost and pushed the gate past its SLO. 8s is comfortably past the
+# point a wandering watcher would have fired (pointer moves at 3s, settle 2s),
+# and the gate's rule is to optimise a slow suite, never to demote it.
 CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=2 \
-  timeout 25 bash "$W/scripts/start-codex-signal-watch.sh" \
+  timeout 8 bash "$W/scripts/start-codex-signal-watch.sh" \
   --poll 1 --once --file "$W/a/signal.md" > "$W/watch6b.out" 2>&1 &
 w6b=$!
 sleep 3

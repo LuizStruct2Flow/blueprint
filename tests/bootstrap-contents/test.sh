@@ -49,6 +49,19 @@ pass(){ echo "  ok — $*"; }
 BP="$WORK/blueprint"
 mkdir -p "$BP"
 git -C "$ROOT" archive HEAD | tar -x -C "$BP" || { echo "FAIL: could not archive the blueprint"; exit 1; }
+
+# BUG-009 — templates/ is export-ignore'd, so `git archive` deliberately omits
+# it: a DERIVED project must not carry a seed source. But this fixture stands in
+# for a BLUEPRINT, and a blueprint without templates/ cannot bootstrap anything.
+# Copy it in explicitly.
+#
+# The distinction is the point of the split, and the fixture has to model it:
+# archive = what a derived project receives, working tree = what a blueprint is.
+# new-project.sh fails loudly when templates/ is absent, and that failure is
+# what surfaced this — a fixture that was silently not a blueprint.
+if [ -d "$ROOT/templates" ]; then
+  cp -R "$ROOT/templates" "$BP/templates"
+fi
 [ -f "$BP/scripts/new-project.sh" ] || { echo "FAIL: fixture blueprint has no new-project.sh"; exit 1; }
 
 # Make the fixture a real repo so `git archive HEAD` works inside it. Include a

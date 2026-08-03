@@ -73,4 +73,5 @@ fails a test instead of passing unnoticed.
 | `bootstrap-identity` | both | Bootstrap writes a git identity or fails unsafely without one | Same path |
 | `drift-in-blueprint` | both | `blueprint drift` dies in the blueprint itself (BUG-007) | Guards the command every agent runs on every wake. **Found by this manifest's first run to be executing NOWHERE — in neither the gate nor CI (audit finding A-15 exactly)** |
 | `git-isolation` | both | A test suite writes commits and config into the developer's real repository, disarming the gate (BUG-014) | Guards the gate's own integrity: this is what wiped `core.hooksPath` and let an ungated push through |
+| `no-chain-guard` | both | The command-chaining guard fails open, so compound commands inherit an allowlist match and defeat the deny list | Guards an enforcement control; it shipped failing open on malformed input and missing jq, which nothing could have detected without this |
 | `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above |

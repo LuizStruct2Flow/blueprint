@@ -46,7 +46,18 @@
 
 set -uo pipefail
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# for why $0, cwd and `git rev-parse` are each wrong here. The block below is
+# byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
+# cannot be shared as a lib, because finding the lib is the very problem it
+# solves.
+_bp_self="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  _bp_res="$(readlink -f "$_bp_self" 2>/dev/null)" && [ -n "$_bp_res" ] && _bp_self="$_bp_res"
+fi
+_bp_root="$(cd "$(dirname "$_bp_self")/.." && pwd -P)"
+repo_root="$_bp_root"
 signal_file="$repo_root/AGENT_SIGNAL.md"
 log_dir="$repo_root/logs"; mkdir -p "$log_dir"
 out="$log_dir/agent-activity.log"

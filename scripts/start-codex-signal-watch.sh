@@ -28,7 +28,18 @@ set -euo pipefail
 # lib/state-dir.sh, so a stale copy of the derivation wins and the feed and the
 # dispatcher stop sharing a state dir. See scripts/codex-signal-watch.sh
 # repo_root() for the full reasoning and the reproduction.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# for why $0, cwd and `git rev-parse` are each wrong here. The block below is
+# byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
+# cannot be shared as a lib, because finding the lib is the very problem it
+# solves.
+_bp_self="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  _bp_res="$(readlink -f "$_bp_self" 2>/dev/null)" && [ -n "$_bp_res" ] && _bp_self="$_bp_res"
+fi
+_bp_root="$(cd "$(dirname "$_bp_self")/.." && pwd -P)"
+ROOT="$_bp_root"
 
 # Discover the Codex binary. Prefer an explicit override, otherwise
 # walk the VS Code extension dirs for the latest bundled `codex`.
@@ -55,13 +66,11 @@ EOF
   exit 1
 fi
 
-# State dir derived the SAME way the activity feed derives it (A-09) — so the
-# feed reads exactly the run log THIS project writes, never another project's.
-. "$ROOT/scripts/lib/state-dir.sh"
-STATE_DIR="$(agent_state_dir "$ROOT")"
-mkdir -p "$STATE_DIR"
-RUN_LOG="$STATE_DIR/codex-runs.log"
-OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
+# The state dir is derived INSIDE the wake command (below), not here. Deriving
+# it at launcher start and exporting the result froze the paths for the life of
+# the watcher — days — so a change to the derivation kept writing the old ones
+# with nothing failing. Two derivations, one of them stale, is the A-09 shape
+# again; there is deliberately only one, and it runs per dispatch.
 
 # The wake command runs every time `State = OVER_TO_CODEX` fires.
 # `AGENT_SIGNAL_TASK` is the current `Task` field, exported by
@@ -69,11 +78,17 @@ OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 # coordination instructions so Codex knows it's in the radio-over
 # protocol.
 export CODEX_BIN
-export RUN_LOG
-export OUTPUT_LAST
 export ROOT
 export CODEX_WAKE_COMMAND='
 set -u
+# Resolved HERE, on every dispatch — not baked in when the watcher started.
+# A watcher lives for days; the derivation can change under it, and a frozen
+# path fails silently (BUG-020, Codex review round 2 finding 3).
+. "$ROOT/scripts/lib/state-dir.sh"
+STATE_DIR="$(agent_state_dir "$ROOT")"
+mkdir -p "$STATE_DIR"
+RUN_LOG="$STATE_DIR/codex-runs.log"
+OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"

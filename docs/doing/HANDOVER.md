@@ -58,11 +58,14 @@
   A-09 suite asserted a literal path instead of the distinctness property it
   exists to protect, and a `$HOME` blocklist guard was narrowed until it went
   green (Codex broke it in one pass with two lines). Both are now structural.
-- **Restart the signal watchers after changing the state-dir derivation.** The
-  launcher bakes `RUN_LOG`/`OUTPUT_LAST` into the exported wake command, so a
-  watcher started earlier keeps writing the OLD paths for its whole life. This
-  cost real time on 2026-08-03 because it is indistinguishable from a resolution
-  bug from the outside.
+- **A watcher no longer needs restarting when the state-dir derivation changes.**
+  It used to: the launcher baked `RUN_LOG`/`OUTPUT_LAST` into the exported wake
+  command, so a watcher started earlier kept writing the OLD paths for its whole
+  life — indistinguishable from a resolution bug, which is what made it expensive
+  to attribute on 2026-08-03. My first response was a note telling you to restart
+  them; Codex rejected that, correctly, on the grounds this repo has now reached
+  four times (BUG-004, BUG-014, the no-chaining hook): **a rule you must remember
+  is not a fix.** The wake command derives the dir on every dispatch instead.
 - **`~/.blueprint/` is now unused but still present** — its contents were copied
   into `logs/state/` and nothing writes there any more. Removing it needs your
   hand; the agent was denied the delete, correctly.

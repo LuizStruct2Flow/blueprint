@@ -48,16 +48,32 @@ USAGE
 # The script's own path cannot drift from the tree it belongs to, which is the
 # property we actually need. This matches scripts/agent-activity.sh:49.
 #
-# SEPARATE HAZARD, worth knowing here because it looks identical from outside:
-# start-codex-signal-watch.sh resolves the state dir ONCE and bakes RUN_LOG and
-# OUTPUT_LAST into the exported CODEX_WAKE_COMMAND string. A watcher started
-# before a state-dir change keeps writing the OLD paths for its entire life, no
-# matter what the working tree says. That is what a live dispatch did during
-# BUG-020 — a stale process, not a resolution bug — and it cost real time to
-# attribute. **Restart the watchers after changing the state-dir derivation.**
-repo_root() {
-  ( cd "$(dirname "$0")/.." && pwd )
-}
+# A SEPARATE HAZARD that used to live here, now fixed rather than documented.
+# The launcher resolved the state dir once and baked RUN_LOG/OUTPUT_LAST into
+# the exported wake-command string, so a watcher started before a derivation
+# change kept writing the OLD paths for its entire life — indistinguishable from
+# a resolution bug from outside, which is what made it expensive to attribute.
+# The first response was a note telling operators to restart their watchers.
+# Codex was right to reject that: a rule you must remember is not a fix (the
+# same conclusion BUG-004, BUG-014 and the no-chaining hook each reached). The
+# wake command now derives the state dir on every dispatch, so a running watcher
+# follows the change with no restart and no instruction to forget.
+# --- physical script root (A-09 / BUG-020) -----------------------------------
+# THIRD wrong answer, found by Codex in review round 2: `dirname "$0"`. It fixes
+# the two above but breaks under a symlink — he installed an out-of-tree link and
+# the watcher tried to source `/tmp/scripts/lib/state-dir.sh`. `$0` is the
+# invocation path, not the file; sourcing gets the caller's `$0` instead.
+# So resolve THIS FILE physically, through links.
+#
+# The block below is byte-identical in every consumer and tests/state-dir/ #7
+# enforces that. It cannot be shared as a lib: finding the lib is the very
+# problem it solves.
+_bp_self="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  _bp_res="$(readlink -f "$_bp_self" 2>/dev/null)" && [ -n "$_bp_res" ] && _bp_self="$_bp_res"
+fi
+_bp_root="$(cd "$(dirname "$_bp_self")/.." && pwd -P)"
+repo_root() { printf '%s\n' "$_bp_root"; }
 
 trim() {
   local value="$1"

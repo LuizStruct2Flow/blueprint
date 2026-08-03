@@ -127,6 +127,26 @@ else
 fi
 
 # ===========================================================================
+# 4b. THE OTHER no-PR PATH — `gh` not installed at all (Codex F1).
+#
+#     Case #4 only inspects the block after "opening the PR failed", so it was
+#     blind to the EARLIER `command -v gh` branch, which still returned
+#     BP_RC_PENDING (3). That is the COMMON path: most environments without gh
+#     never reach the pr-create call. The first fix corrected the rarer branch
+#     and left the bug exactly where it bites most.
+# ===========================================================================
+nogh=$(sed -n '/if ! command -v gh/,/^  fi/p' "$CLI")
+if [ -z "$nogh" ]; then
+  fail "#4b could not locate the missing-gh branch — assertion would be vacuous"
+elif printf '%s' "$nogh" | grep -q 'BP_RC_PENDING'; then
+  fail "#4b gh is not installed, no PR can exist, yet it returns BP_RC_PENDING (3) — 'filed' asserted with no PR"
+elif printf '%s' "$nogh" | grep -q 'BP_RC_FAILED'; then
+  pass "#4b the missing-gh path returns BP_RC_FAILED (5), like the pr-create failure"
+else
+  fail "#4b the missing-gh branch returns neither FAILED nor PENDING — unclear contract"
+fi
+
+# ===========================================================================
 # 5. The caller must not treat a literal 'null' as an existing PR, even if the
 #    probe regresses. Defence in depth: #1 fixes the source, this fixes the
 #    consumer, and the bug needed BOTH to be wrong to reach the user.

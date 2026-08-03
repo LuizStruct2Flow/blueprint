@@ -137,6 +137,57 @@ elif [ "$broke" -eq 0 ]; then
   pass "#5 all $checked executable placeholder-bearing managed files stay executable"
 fi
 
+# ===========================================================================
+# 6. FAULT INJECTION — mode copy FAILS, so the file must be left ALONE.
+#    (Codex F2.) bp_copy_mode used to return success when both probes failed
+#    and to discard the fallback chmod's status, so the caller went on to
+#    install the 600 temp and silently disabled the hook again — BUG-008
+#    reintroduced through the error path of its own fix.
+#
+#    "Never fatal" is the wrong instinct here: aborting ONE file replacement
+#    leaves a working executable in place; continuing destroys it.
+# ===========================================================================
+inj="$TMP/inj"; mkdir -p "$inj"
+printf '#!/bin/sh\nexit 1\n' >"$inj/chmod"; chmod +x "$inj/chmod"
+printf '#!/bin/sh\nexit 1\n' >"$inj/stat";  chmod +x "$inj/stat"
+
+k="$TMP/faulty.sh"
+printf '#!/bin/sh\n# {{PROJECT_NAME}}\n' >"$k"
+chmod 755 "$k"
+k_before="$(cat "$k")"
+
+( PATH="$inj:$PATH"; . "$LIB"; bp_substitute_in_place "$k" demo-project ) >/dev/null 2>&1
+k_rc=$?
+k_mode="$(mode_of "$k")"
+
+if [ "$k_rc" -eq 0 ]; then
+  fail "#6 mode copy failed but bp_substitute_in_place reported success"
+elif [ "$k_mode" != "755" ]; then
+  fail "#6 mode copy failed and the file was replaced anyway (now $k_mode) — the hook is silently disabled"
+elif [ "$(cat "$k")" != "$k_before" ]; then
+  fail "#6 mode copy failed and the CONTENT was replaced anyway"
+else
+  pass "#6 when the mode cannot be preserved, the original is left untouched and the call fails"
+fi
+
+# No temp debris beside the destination.
+leftover=$(find "$TMP" -maxdepth 1 -name '.bp-subst.*' 2>/dev/null | wc -l | tr -d ' ')
+[ "$leftover" = "0" ] \
+  && pass "#6 no .bp-subst temp files leaked on the failure path" \
+  || fail "#6 $leftover temp file(s) left beside the destination"
+
+# ===========================================================================
+# 7. The temp is created BESIDE the destination, not in $TMPDIR (Codex F3).
+#    A bare mktemp lands in /tmp; if that is another filesystem, `mv` degrades
+#    to copy-then-unlink and is NOT atomic — the very property the comment
+#    claimed. Asserted on the source, since observing the rename is racy.
+# ===========================================================================
+if grep -q 'mktemp "\$dir/' "$LIB"; then
+  pass "#7 the temp is created in the destination's directory (atomic rename)"
+else
+  fail "#7 bp_substitute_in_place still uses a bare mktemp — mv may cross filesystems and lose atomicity"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-008 — pull preserves the executable bit; an armed hook actually runs."
   exit 0

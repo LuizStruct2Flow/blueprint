@@ -34,6 +34,23 @@ pass() { echo "  ok — $*"; }
 # Exit statuses under test (must match request-file.sh).
 RC_OK=0; RC_PENDING=3; RC_BLOCKED=4; RC_FAILED=5; RC_NOTHING=6
 
+# --- Codex F1: make "no gh" true rather than assumed -------------------------
+# `command -v gh` must FAIL, so a shim is useless here — a shim is found. The
+# only honest way is a PATH with no gh on it at all. Built by removing every
+# directory that currently contains one.
+NO_GH_PATH="$(
+  printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    [ -x "$d/gh" ] && continue
+    printf '%s:' "$d"
+  done
+)"
+if PATH="$NO_GH_PATH" command -v gh >/dev/null 2>&1; then
+  echo "FAIL: could not construct a gh-free PATH; the no-gh cases would be vacuous"
+  exit 1
+fi
+
+
 # --- the blueprint remote (bare) and a working checkout of it ---------------
 BPWORK="$WORK/bp-work"
 mkdir -p "$BPWORK"
@@ -77,7 +94,13 @@ run() { ( cd "$PROJ" && "$CLI" "$@" 2>&1 ); }
 
 # ===========================================================================
 # 1. A request is FILED: the branch lands on the remote, carrying the change.
-#    gh is absent in this fixture, so the branch is pushed and NO PR is opened.
+#    gh is HIDDEN for real here (NO_GH_PATH below), not merely assumed absent.
+#    This comment used to claim "gh is absent in this fixture" while doing
+#    nothing to make it so; on a host with gh installed the case passed because
+#    real gh failed against the local bare remote and reached a DIFFERENT
+#    branch. It therefore never exercised the no-gh path it named (Codex F1).
+#
+#    The branch is pushed and NO PR is opened.
 #    That is RC_FAILED (5), not decision-pending (3) — changed with BUG-011.
 #
 #    This comment used to say 3 was "itself the contract for branch is up, PR is
@@ -86,12 +109,12 @@ run() { ( cd "$PROJ" && "$CLI" "$@" 2>&1 ); }
 #    script reading 3 concludes a reviewer has the request when nobody does.
 #    5 with an explicit "open one by hand from <ref>" is the truthful answer.
 # ===========================================================================
-out=$(run a2bp docs/DoD.md); rc=$?
+out=$(PATH="$NO_GH_PATH" run a2bp docs/DoD.md); rc=$?
 if [ "$rc" -ne "$RC_FAILED" ]; then
   fail "#1 expected operational-failure ($RC_FAILED) with no gh present, got $rc. Output:
 $out"
-elif ! printf '%s' "$out" | grep -q 'opening the PR failed'; then
-  fail "#1 exit was right but the reason was not stated — the operator must be told the branch is up and the PR is not. Output:
+elif ! printf '%s' "$out" | grep -q 'gh is not installed'; then
+  fail "#1 exit was right but via the WRONG branch — this case must exercise the missing-gh path, not a failed pr-create (Codex F1). Output:
 $out"
 else
   pass "#1 with no gh: the branch is pushed, no PR is claimed, and the exit code says operational failure (BUG-011)"

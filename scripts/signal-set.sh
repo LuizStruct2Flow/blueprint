@@ -101,11 +101,11 @@ mkdir -p "$(dirname "$SIGNAL")"
 # So an absent baton is seeded into a temp file used only as awk's INPUT. The
 # only thing that ever appears at $SIGNAL is the finished, requested baton, via
 # a single rename.
-SEED_SRC=""
+_bp_seed_src=""
 if [ ! -f "$SIGNAL" ]; then
-  SEED_SRC="$(mktemp "${SIGNAL}.seed.XXXXXX")"
-  trap 'rm -f "$SEED_SRC"' EXIT INT TERM
-  cat > "$SEED_SRC" <<'SEED'
+  _bp_seed_src="$(mktemp "${SIGNAL}.seed.XXXXXX")"
+  trap 'rm -f "$_bp_seed_src"' EXIT INT TERM
+  cat > "$_bp_seed_src" <<'SEED'
 <!-- LIVE coordination baton — untracked, per-checkout (BUG-019).
      Written only by scripts/signal-set.sh. The protocol itself is documented in
      the tracked AGENT_SIGNAL.md; this file is state, not documentation. -->
@@ -166,11 +166,11 @@ TASK="$(printf '%s' "$TASK" | sed 's/|/\\|/g')"
 
 TODAY="$(date '+%Y-%m-%d')"
 TMP="$(mktemp "${SIGNAL}.XXXXXX")"
-trap 'rm -f "$TMP" "$SEED_SRC"' EXIT INT TERM
+trap 'rm -f "$TMP" "$_bp_seed_src"' EXIT INT TERM
 
 # awk reads the existing baton, or the seed template when there is none. Either
 # way the finished file is produced in $TMP and published by one rename.
-SRC="${SEED_SRC:-$SIGNAL}"
+SRC="${_bp_seed_src:-$SIGNAL}"
 
 # Rewrite the four baton rows; everything else in the file is passed through
 # untouched, so the surrounding prose stays project-owned.

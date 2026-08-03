@@ -17,7 +17,8 @@
 #
 # Env:
 #   AGENT_STATE_HOME=...  state dir for dispatcher run logs
-#                         (default ~/.<repo-name>)
+#                         (default <repo>/logs/state — BUG-020: inside the
+#                         project, so deleting it deletes the state)
 #   AGENT_PERSONA=...     OVERRIDE this session's persona. Default comes from
 #                         the roster's Orchestrator row, never from a literal
 #                         here (BUG-010).

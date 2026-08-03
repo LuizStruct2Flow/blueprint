@@ -877,6 +877,17 @@ cmd_pull() {
       if ! : 2>/dev/null </dev/tty; then
         echo "  ${C_YELLOW}not interactive${C_RESET} — cannot prompt, so nothing is pulled."
         echo "  ${C_DIM}Re-run with --yes to accept without prompting, or run from a terminal.${C_RESET}"
+        # REFUSED is not the same as NOTHING TO DO, and the exit code has to say
+        # which. Acceptance testing rejected the first fix for exactly this: the
+        # guard stopped the crash and printed the right advice, then returned 0
+        # — so a script or agent that checked the status read "sync succeeded"
+        # while the project stayed behind on every file.
+        #
+        # That is the defect BUG-016 fixed one field over (a partial pull
+        # claiming a full sync) and the one BUG-011 fixed in a2bp (reporting
+        # FILED with nothing filed). Same shape a third time: a command that
+        # declines to act must not report success for declining.
+        refused_no_tty=1
         break
       fi
       printf "  Pull this file? [y/N/q] "
@@ -920,6 +931,14 @@ cmd_pull() {
     echo "${C_GREEN}✓ Pulled $pulled file(s). Review with 'git diff' and commit.${C_RESET}"
   else
     echo "${C_DIM}Nothing pulled.${C_RESET}"
+  fi
+
+  # Non-zero ONLY when we declined to act. "Nothing pulled because nothing
+  # drifted" is a success and still returns 0 — conflating the two would make
+  # every in-sync project look broken, which is the opposite failure and just as
+  # useless to a caller.
+  if [ "${refused_no_tty:-0}" -eq 1 ]; then
+    return 7
   fi
 }
 

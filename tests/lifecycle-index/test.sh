@@ -61,7 +61,21 @@ ids_index="$(grep -oE '^\| \[?\*\*(BUG|FEATURE)-[0-9]+\*\*' "$INDEX" \
 # and passes. Assert there is something to compare BEFORE comparing.
 n_rows="$(printf '%s\n' "$ids_rows" | grep -c . || true)"
 if [ "${n_rows:-0}" -lt 1 ]; then
-  fail "#0 no item rows parsed from BUGS.md — the pattern no longer matches, so every check below is vacuous"
+  # ZERO rows has two very different causes and the first version of this guard
+  # treated them as one — it failed the moment `waiting-acceptance/` legitimately
+  # emptied, which is a GOOD state, not a broken pattern. Distinguish them by
+  # the table header: if the file still has one, the table is intact and simply
+  # has no rows; if it does not, the format changed under the pattern.
+  #
+  # Recording it because it is this repo's recurring mistake in miniature: an
+  # assertion that two different causes both produce cannot tell you which
+  # happened.
+  if grep -q '^|---' "$ROWS"; then
+    pass "#0 nothing is waiting — the table is intact and empty, which is a valid state"
+    echo "PASS: nothing waiting; index and rows trivially agree."
+    exit 0
+  fi
+  fail "#0 no item rows AND no table header in BUGS.md — the format changed, so every check below would be vacuous"
   echo "FAILED: see the FAIL lines above."
   exit 1
 fi

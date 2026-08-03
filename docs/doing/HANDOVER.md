@@ -39,14 +39,25 @@
 
 ## 0. STATUS
 
-- **`origin/main` = `954a682`. Nothing open — no branches, no PRs, no unpushed
-  work.**
-- **Twelve bugs closed on 2026-08-03**, all via PR, all with a failing reproducer
-  committed before the fix: BUG-005, 006, 008, 009, 011, 013, 014, 015, 016, 018,
-  019, 020 (BUG-017 closed OBSOLETE with evidence). All fourteen rows sit in
-  `waiting-acceptance/` — **none is promoted to `done/` without your word.**
-- **`doing/` holds no open bug rows** for the first time. The four `BUG-0XX`
-  strings still in that file are prose references to closed items, not rows.
+- **`origin/main` = `9597202`.** One open item: BUG-018, reopened by acceptance
+  testing and re-fixed but not yet merged.
+- **ACCEPTANCE IS DONE — 13 accepted, 1 rejected.** The founder delegated
+  acceptance to Codex for every ticket needing no founder judgement. It verified
+  each claim **empirically against the tree** rather than re-reading the rows,
+  and that distinction is exactly what produced the rejection.
+  `waiting-acceptance/` is EMPTY; `done/` holds 15.
+- **BUG-018 was REJECTED and is back in `doing/`.** The no-TTY guard stopped the
+  crash and printed the right advice — then returned **0**, so a script or agent
+  checking the status read "sync succeeded" while nothing had been pulled. The
+  regression suite allowed it: its check could not fire when the exit code was 0.
+  Re-fixed — a refusal exits 7, and `#1b` asserts an in-sync pull still exits 0
+  so the correction is not over-applied. **This is the third appearance of one
+  shape** (BUG-016: a partial pull claiming a full sync; BUG-011: a2bp reporting
+  FILED with nothing filed): *a command that declines to act must not report
+  success for declining.*
+- **BUG-004 accepted on a read-only API check** — `secret_scanning=enabled`,
+  `secret_scanning_push_protection=enabled`. No test secret was pushed: a secret
+  in a public repo's history is not undone by deleting the branch.
 - **BUG-019 CHANGED HOW THE MIC WORKS — read this before coordinating.** The
   live baton is `logs/state/signal.md`: untracked, per-checkout, written ONLY by
   `scripts/signal-set.sh`. `AGENT_SIGNAL.md` is now the protocol document and

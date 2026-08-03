@@ -131,6 +131,23 @@ else
   pipe_skip "state-dir · A-09" "suite absent"
 fi
 
+# The acceptance INDEX must list every item actually waiting. Found by an lcm
+# pass on 2026-08-03: the index listed 5 while BUGS.md held 14, so nine fixes
+# were invisible to the only person who can accept them. Two records of one
+# fact, kept in step by memory. ~0.1s.
+if [ -f tests/lifecycle-index/test.sh ]; then
+  _st_lcindex(){
+    bash tests/lifecycle-index/test.sh || {
+      echo "❌ tests/lifecycle-index/test.sh failed."
+      echo "   docs/waiting-acceptance/INDEX.md and BUGS.md disagree on membership."
+      return 1
+    }
+  }
+  pipe_stage "lifecycle-index" _st_lcindex
+else
+  pipe_skip "lifecycle-index" "suite absent"
+fi
+
 # BUG-019 — a branch operation must not destroy a live dispatch. The baton used
 # to be a TRACKED file holding LIVE state, so checkout/switch/stash/rebase
 # rewrote it mid-dispatch and the dispatched agent silently had nothing to

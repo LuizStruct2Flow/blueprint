@@ -107,7 +107,7 @@ Per-slice decisions live in the relevant
   the state value, e.g. `OVER_TO_CODEX`.
 - Use `OVER_TO_USER` when founder acceptance, rejection, or product direction is
   needed.
-- Before flipping to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md) §A–§G. If
+- Before flipping to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md) §A–§H. If
   `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task` field
   claims are waiting, the handoff is not done.
 

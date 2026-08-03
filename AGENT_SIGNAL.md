@@ -50,7 +50,7 @@ yours with `--whoami`, never assume it, since the roster is per-engineer.
 `State = ACTIVE` first. The full protocol is in [AGENTS.md](AGENTS.md).
 
 **Before flipping the mic to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md)
-§A–§G.** If `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task`
+§A–§H.** If `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task`
 field claims are waiting, the handoff is not done.
 
 ## History

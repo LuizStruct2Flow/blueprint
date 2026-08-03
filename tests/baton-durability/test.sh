@@ -379,17 +379,25 @@ cat > "$W/a/signal.md" <<'IDLE'
 | Task | nothing yet |
 IDLE
 
-# The timeout is the RUNTIME of this case, not a safety margin: #6b asserts that
-# NO dispatch happens, and `--once` means the watcher exits only on dispatch or
-# on timeout — so it always burns the full value. At 25s it was two thirds of
-# this suite's cost and pushed the gate past its SLO. 8s is comfortably past the
-# point a wandering watcher would have fired (pointer moves at 3s, settle 2s),
-# and the gate's rule is to optimise a slow suite, never to demote it.
+# Do NOT let the timeout decide this case.
+#
+# Trimming it to 8s left only ~2s of scheduling margin, and Codex was right that
+# this can false-pass: "no dispatch" would then be indistinguishable from "the
+# watcher had not got round to it yet". Waiting longer is not the answer either
+# — the timeout is this case's entire runtime, since `--once` exits only on
+# dispatch.
+#
+# Assert the MECHANISM instead. A watcher that is STILL RUNNING after the move
+# has demonstrably not dispatched — `--once` would have exited it. So move the
+# pointer early, wait comfortably past the point a wandering watcher would fire
+# (move at 1.5s + settle 2s ≈ 3.5s), then check liveness at 5s. That
+# distinguishes "the pin held" from "the watcher died or ran out of clock",
+# which a bare marker-absence check cannot. The timeout is now only a backstop.
 CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=2 \
-  timeout 8 bash "$W/scripts/start-codex-signal-watch.sh" \
+  timeout 20 bash "$W/scripts/start-codex-signal-watch.sh" \
   --poll 1 --once --file "$W/a/signal.md" > "$W/watch6b.out" 2>&1 &
 w6b=$!
-sleep 3
+sleep 1.5
 cat > "$W/b/signal.md" <<'GO'
 | Field | Value |
 |---|---|
@@ -398,12 +406,84 @@ cat > "$W/b/signal.md" <<'GO'
 | Task | pinned watcher must ignore this |
 GO
 printf '%s\n' "$W/b" > "$BD_POINTER"
+sleep 5
+# Liveness BEFORE the marker check: `--once` exits on dispatch, so a process
+# still running is positive evidence that none happened.
+still_running=0
+kill -0 "$w6b" 2>/dev/null && still_running=1
+kill "$w6b" 2>/dev/null
 wait "$w6b" 2>/dev/null
 
 if [ -f "$STUB_MARKER" ]; then
   fail "#6b a --file pin was overridden by re-resolution — the watcher wandered off the path the operator named"
+elif [ "$still_running" -ne 1 ]; then
+  fail "#6b INCONCLUSIVE: the watcher was gone before the check, so 'no dispatch' proves nothing (output: $(tr '\n' ' ' < "$W/watch6b.out" | tail -c 200))"
 else
-  pass "#6b an explicit --file pin is never re-resolved (and #6 is therefore not vacuous)"
+  pass "#6b an explicit --file pin is never re-resolved — watcher still polling, no dispatch (and #6 is therefore not vacuous)"
+fi
+rm -rf "$W"
+
+# --- #6c: a path move must not REPLAY an already-dispatched baton -------------
+#
+# Codex round-3 HIGH. My first version of the move handler cleared
+# `last_trigger_key` along with the settle state, reasoning that pending state
+# belonged to the old file. But a migration that COPIES the baton to its new
+# home produces identical Holder|State|Task — and a cleared key makes that look
+# like a brand-new instruction, so finished work is dispatched a second time.
+#
+# On a metered agent that is a duplicate bill, not a duplicate log line, which
+# is why it ranks HIGH rather than as a tidiness point. It is also the same
+# defect the settle window exists to prevent, arriving through a different door.
+#
+# The fixture dispatches once at path A, then moves an IDENTICAL baton to B.
+# Exactly one dispatch must ever happen. Counted by appending to the marker
+# rather than truncating it, so a second run cannot hide inside the first.
+build_fixture
+export STUB_MARKER="$W/stub-count"
+cat > "$W/stub-codex" <<'STUB2'
+#!/usr/bin/env bash
+echo ran >> "$STUB_MARKER"
+STUB2
+chmod +x "$W/stub-codex"
+
+cat > "$W/scripts/lib/state-dir.sh" <<'SHIM2'
+#!/bin/sh
+agent_state_dir()   { printf '%s\n' "$(cat "$BD_POINTER")"; }
+agent_signal_file() { printf '%s\n' "${AGENT_SIGNAL_FILE:-$(cat "$BD_POINTER")/signal.md}"; }
+agent_signal_journal() { printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }
+SHIM2
+
+export BD_POINTER="$W/pointer"
+mkdir -p "$W/a" "$W/b"
+printf '%s\n' "$W/a" > "$BD_POINTER"
+cat > "$W/a/signal.md" <<'GO2'
+| Field | Value |
+|---|---|
+| Holder | Tester |
+| State | OVER_TO_CODEX |
+| Task | identical baton, must dispatch exactly once |
+GO2
+cp "$W/a/signal.md" "$W/b/signal.md"
+
+# No --once: the watcher must stay alive so a SECOND dispatch is possible.
+CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=1 \
+  timeout 10 bash "$W/scripts/start-codex-signal-watch.sh" --poll 1 \
+  > "$W/watch6c.out" 2>&1 &
+w6c=$!
+sleep 4
+printf '%s\n' "$W/b" > "$BD_POINTER"   # identical content, new path
+sleep 4
+kill "$w6c" 2>/dev/null
+wait "$w6c" 2>/dev/null
+
+runs=0
+[ -f "$STUB_MARKER" ] && runs="$(wc -l < "$STUB_MARKER" | tr -d ' ')"
+if [ "$runs" -eq 1 ]; then
+  pass "#6c a path move with identical content dispatched exactly once (no replay)"
+elif [ "$runs" -eq 0 ]; then
+  fail "#6c INCONCLUSIVE: nothing dispatched at all, so the no-replay claim is untested (output: $(tr '\n' ' ' < "$W/watch6c.out" | tail -c 200))"
+else
+  fail "#6c the path move REPLAYED an already-dispatched baton ($runs dispatches) — finished work re-run"
 fi
 rm -rf "$W"
 

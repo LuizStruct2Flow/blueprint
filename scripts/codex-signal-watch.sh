@@ -287,12 +287,21 @@ refresh_signal_file() {
   printf '[%s] signal path moved: %s -> %s\n' \
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$SIGNAL_FILE" "$now_file" | tee -a "$LOG_FILE"
   SIGNAL_FILE="$now_file"
-  # The pending settle state belongs to the OLD file's content; carrying it over
-  # would compare keys across two different batons.
-  last_trigger_key=""
+  # Clear the SETTLE state — a half-observed candidate belongs to the old file.
   pending_key=""
   pending_since=0
   last_mtime=""
+  # But KEEP last_trigger_key. Clearing it was a HIGH in review: if the baton at
+  # the new path carries the same Holder|State|Task as one already dispatched —
+  # which is exactly what a migration that copies the file produces — a cleared
+  # key re-dispatches finished work. That is the defect the settle window exists
+  # to prevent, arriving through a different door, and on a metered agent it is
+  # a duplicate bill rather than a duplicate log line.
+  #
+  # Keeping it is also the CONSISTENT choice: last_trigger_key already persists
+  # across every ordinary tick, so carrying it across a move changes nothing
+  # about what "already dispatched" means. Clearing it was the special case, and
+  # special cases in dispatch identity are what Codex rejected once before.
 }
 
 while true; do

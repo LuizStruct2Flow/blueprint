@@ -798,6 +798,12 @@ cmd_pull() {
     esac
   done
 
+  # BUG-016 — did the caller name specific paths? Captured HERE, before the
+  # default below fills `files` with everything drifted, because afterwards the
+  # two cases are indistinguishable.
+  local partial=0
+  [ ${#files[@]} -gt 0 ] && partial=1
+
   # Default: every drifted or missing file
   if [ ${#files[@]} -eq 0 ]; then
     for f in "${MANAGED_FILES[@]}"; do
@@ -852,6 +858,27 @@ cmd_pull() {
     fi
     [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
     if [ "$auto_yes" -eq 0 ]; then
+      # BUG-018 — degrade, do not die. `read </dev/tty` is unguarded in a
+      # non-interactive context (CI, a spawned agent, a piped run), where it
+      # fails with "No such device or address" AFTER the diff has been printed.
+      # `drift` already handles this and is pinned by a test; pull differed from
+      # it by accident rather than by decision.
+      #
+      # Refusing is the safe default: this is the branch where the operator has
+      # NOT said yes, so proceeding would pull unreviewed content. It names
+      # --yes rather than only reporting the problem.
+      # `[ -r /dev/tty ]` is NOT sufficient and was my first attempt: the device
+      # node exists and passes the readability test even when the process has no
+      # controlling terminal — it is the OPEN that fails. So actually open it.
+      # Redirection ORDER matters: they are processed left to right, so
+      # `: </dev/tty 2>/dev/null` attempts the open BEFORE stderr is silenced
+      # and bash's "No such device" message escapes to the real stderr — which
+      # is exactly the noise this guard exists to remove. Silence stderr first.
+      if ! : 2>/dev/null </dev/tty; then
+        echo "  ${C_YELLOW}not interactive${C_RESET} — cannot prompt, so nothing is pulled."
+        echo "  ${C_DIM}Re-run with --yes to accept without prompting, or run from a terminal.${C_RESET}"
+        break
+      fi
       printf "  Pull this file? [y/N/q] "
       read -r ans </dev/tty
       case "$ans" in
@@ -872,8 +899,20 @@ cmd_pull() {
   echo
   if [ $pulled -gt 0 ]; then
     CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
-    if [ -f .blueprint-source ] && [ "$CURRENT_SHA" != "no-sha" ]; then
-      # Update bootstrap_sha to blueprint HEAD
+    # BUG-016 — bootstrap_sha means "this project is synced UP TO this commit".
+    # A single-file pull does not make that true, and writing it anyway made
+    # every later `drift` report "0 commits since sync" while the project was
+    # still behind on every other managed file. The lie was durable: nothing
+    # else recomputes that number, so the project looked current until someone
+    # diffed by hand. linkedin-watcher-agent sat 18 commits behind this way.
+    #
+    # Only a FULL pull earns the update. A partial pull says so instead, which
+    # is information the operator can act on rather than a silent omission.
+    if [ "$partial" -eq 1 ]; then
+      echo "${C_DIM}bootstrap_sha left unchanged — this was a partial pull, so the"
+      echo "project is not synced to blueprint HEAD. Run 'blueprint pull' with no"
+      echo "paths to sync fully.${C_RESET}"
+    elif [ -f .blueprint-source ] && [ "$CURRENT_SHA" != "no-sha" ]; then
       sed -i.bak "s/^bootstrap_sha.*=.*/bootstrap_sha    = $CURRENT_SHA/" .blueprint-source
       rm -f .blueprint-source.bak
       echo "Updated .blueprint-source bootstrap_sha → $CURRENT_SHA"

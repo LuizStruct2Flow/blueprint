@@ -148,6 +148,7 @@ jobs:
           # a2bp-e2e was gate-only, so CI carried no backstop for it.
           bash tests/manifest/test.sh
           bash tests/no-chain-guard/test.sh
+          bash tests/pull-behaviour/test.sh
           bash tests/git-isolation/test.sh
           bash tests/drift-in-blueprint/test.sh
           bash tests/a2bp-e2e/test.sh

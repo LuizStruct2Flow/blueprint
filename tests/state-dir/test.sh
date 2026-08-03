@@ -361,7 +361,12 @@ cp "$ROOT/scripts/start-codex-signal-watch.sh" \
    "$ROOT/scripts/codex-feed-filter.sh" "$WORK/scripts/" 2>/dev/null
 cp "$ROOT/scripts/lib/state-dir.sh" "$WORK/scripts/lib/"
 
-cat > "$WORK/AGENT_SIGNAL.md" <<'SIG'
+# BUG-019 — the watcher reads the LIVE baton (untracked, under the state dir),
+# not the tracked AGENT_SIGNAL.md, which is the protocol document. Written here
+# directly rather than via signal-set.sh so this suite keeps testing the
+# state-dir derivation without taking a dependency on the publisher.
+mkdir -p "$WORK/logs/state"
+cat > "$WORK/logs/state/signal.md" <<'SIG'
 | Field | Value |
 |---|---|
 | Holder | Jesko |

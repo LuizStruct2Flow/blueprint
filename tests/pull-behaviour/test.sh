@@ -70,22 +70,56 @@ new_project(){
 sha_of(){ grep '^bootstrap_sha' "$1/.blueprint-source" | cut -d= -f2- | tr -d ' '; }
 
 # ===========================================================================
-# 1. BUG-018 — a pull with no TTY must not crash on /dev/tty.
-#    It may refuse, it may skip, it may require --yes. It must not die with a
-#    device error after already printing the diff.
+# 1. BUG-018 — a pull with no TTY must degrade AND say so in its exit code.
+#
+#    REOPENED by acceptance testing. The first version of this case asserted
+#    only "no /dev/tty crash, and if it failed it explained why" — an `elif`
+#    that could not fire when the exit code was 0. So the fix stopped the crash,
+#    printed the right advice, returned 0, and the test passed. A caller
+#    checking the status read "sync succeeded" while nothing had been pulled.
+#
+#    That is the third appearance of one shape: BUG-016 (a partial pull claiming
+#    a full sync), BUG-011 (a2bp reporting FILED with nothing filed), this. A
+#    command that DECLINES to act must not report success for declining.
+#
+#    All three properties are now asserted independently, so no one of them can
+#    carry the case on its own.
 # ===========================================================================
 P="$TMP/p18"
 new_project "$P"
 out=$( cd "$P" && bash "$BP/scripts/blueprint" pull docs/DoD.md </dev/null 2>&1 )
 rc=$?
+bad18=0
 if printf '%s' "$out" | grep -q '/dev/tty'; then
   fail "#1 pull crashed on /dev/tty with no terminal — it must degrade, as drift already does. Output tail:
 $(printf '%s' "$out" | tail -3)"
-elif [ "$rc" -ne 0 ] && ! printf '%s' "$out" | grep -qiE 'not interactive|no terminal|--yes'; then
-  fail "#1 pull failed with no TTY but never said why (rc=$rc):
+  bad18=1
+fi
+if ! printf '%s' "$out" | grep -qiE 'not interactive|no terminal|--yes'; then
+  fail "#1 pull refused with no TTY but never said why — the operator cannot act on it:
 $(printf '%s' "$out" | tail -3)"
+  bad18=1
+fi
+if [ "$rc" -eq 0 ]; then
+  fail "#1 pull REFUSED to pull and still exited 0 — a caller cannot tell that from a successful sync (this is what acceptance rejected)"
+  bad18=1
+fi
+[ "$bad18" -eq 0 ] && pass "#1 with no TTY: no device error, an actionable message, and a non-zero exit (rc=$rc)"
+
+# 1b. The converse — a pull that legitimately has nothing to do still exits 0.
+#     Without this, "make the refusal non-zero" could be satisfied by making
+#     every quiet pull look broken, which is the opposite error and just as
+#     useless to a caller. Pull the same file twice with --yes: the second run
+#     has nothing to do and must succeed.
+P2="$TMP/p18b"
+new_project "$P2"
+( cd "$P2" && bash "$BP/scripts/blueprint" pull --yes docs/DoD.md ) </dev/null >/dev/null 2>&1
+( cd "$P2" && bash "$BP/scripts/blueprint" pull --yes docs/DoD.md ) </dev/null >/dev/null 2>&1
+rc2=$?
+if [ "$rc2" -eq 0 ]; then
+  pass "#1b an in-sync pull still exits 0 — the refusal code did not swallow the success case"
 else
-  pass "#1 with no TTY, pull degrades with an actionable message instead of a device error"
+  fail "#1b an in-sync pull exited $rc2 — the non-zero refusal was over-applied to a legitimate no-op"
 fi
 
 # ===========================================================================

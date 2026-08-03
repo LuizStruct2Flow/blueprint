@@ -33,6 +33,7 @@ pass(){ echo "  ok — $*"; }
 [ -f "$GUARD" ] || { echo "FAIL: missing $GUARD"; exit 1; }
 
 # run_guard <payload> → exit code (stderr discarded)
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 run_guard(){ printf '%s' "$1" | bash "$GUARD" >/dev/null 2>&1; echo $?; }
 bash_payload(){ printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(printf '%s' "$1" | jq -R .)"; }
 
@@ -103,11 +104,43 @@ rc=$(run_guard '{"tool_name":"Bash","tool_input":{}}')
   && pass "#4 a Bash payload with no command fails closed" \
   || fail "#4 a Bash payload with no command returned $rc"
 
-# Missing jq — the review's second reproduction.
-rc=$(printf '%s' "$(bash_payload 'echo ok && rm -rf target')" | PATH=/nonexistent /bin/bash "$GUARD" >/dev/null 2>&1; echo $?)
+# Missing jq. PATH=/nonexistent was WRONG (Codex R2-F4): it removes `cat` too,
+# so the guard's own `cat` failed, the payload came back empty, and it blocked
+# at the EMPTY-PAYLOAD check — never reaching the missing-jq branch at all.
+# Deleting that branch entirely left this case green. Two lessons, both pinned
+# below: build a PATH that has the utilities and lacks only jq, and assert the
+# CAUSE, because otherwise one fail-closed branch impersonates another.
+BASH_BIN="$(command -v bash)"
+nojq="$TMP/nojq"; mkdir -p "$nojq"
+for u in cat printf sed grep; do
+  src="$(command -v "$u" 2>/dev/null)"
+  [ -n "$src" ] && ln -sf "$src" "$nojq/$u"
+done
+if PATH="$nojq" command -v jq >/dev/null 2>&1; then
+  fail "#4 could not build a jq-free PATH — the missing-jq case would be vacuous"
+else
+  out=$(printf '%s' "$(bash_payload 'echo ok && rm -rf target')" | PATH="$nojq" "$BASH_BIN" "$GUARD" 2>&1 >/dev/null)
+  rc=$(printf '%s' "$(bash_payload 'echo ok && rm -rf target')" | PATH="$nojq" "$BASH_BIN" "$GUARD" >/dev/null 2>&1; echo $?)
+  if [ "$rc" != "2" ]; then
+    fail "#4 with jq absent a CHAINED command returned $rc"
+  elif ! printf '%s' "$out" | grep -q 'jq is not on PATH'; then
+    fail "#4 it blocked, but via the WRONG branch — the message must name the missing jq, or another fail-closed path is impersonating this one. Got: $out"
+  else
+    pass "#4 missing jq fails closed, and for the stated reason (was exit 0 — a chained command sailed through)"
+  fi
+fi
+
+# --- Codex R2-F3: schema-invalid JSON must not pass. `jq -r` renders a number
+# as text, so these produced plausible strings and reached exit 0.
+rc=$(run_guard '{"tool_name":7,"tool_input":{"command":"a && b"}}')
 [ "$rc" = "2" ] \
-  && pass "#4 missing jq fails closed (was 0 — a chained command sailed through)" \
-  || fail "#4 with no jq on PATH a CHAINED command returned $rc"
+  && pass "#4 a non-string tool_name fails closed" \
+  || fail "#4 tool_name as a NUMBER returned $rc — a schema-invalid payload crossed an enforcement boundary"
+
+rc=$(run_guard '{"tool_name":"Bash","tool_input":{"command":7}}')
+[ "$rc" = "2" ] \
+  && pass "#4 a non-string command fails closed" \
+  || fail "#4 command as a NUMBER returned $rc"
 
 # ===========================================================================
 # 5. A NON-BASH tool passes — but only because its identity PARSED. "I cannot

@@ -73,16 +73,23 @@ payload="$(cat 2>/dev/null || true)"
 command -v jq >/dev/null 2>&1 \
   || die_closed "jq is not on PATH, so the payload cannot be parsed"
 
-tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null)" \
+# TYPES are validated, not merely presence (Codex R2-F3). `jq -r` renders a JSON
+# number as text, so `{"tool_name":7}` and `{"tool_input":{"command":7}}` both
+# produced plausible strings and reached exit 0 — a schema-invalid payload
+# walking straight through an enforcement boundary. Syntactically valid JSON is
+# not a valid payload, and this is the place that distinction has to be made.
+tool="$(printf '%s' "$payload" \
+  | jq -r 'if (.tool_name|type) == "string" then .tool_name else empty end' 2>/dev/null)" \
   || die_closed "payload is not valid JSON"
-[ -n "$tool" ] || die_closed "payload has no .tool_name"
+[ -n "$tool" ] || die_closed "payload has no string .tool_name"
 
-# Identity parsed. Anything that is not Bash is out of scope and allowed.
+# Identity parsed AND well-typed. Anything that is not Bash is out of scope.
 [ "$tool" = "Bash" ] || exit 0
 
-cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null)" \
+cmd="$(printf '%s' "$payload" \
+  | jq -r 'if (.tool_input.command|type) == "string" then .tool_input.command else empty end' 2>/dev/null)" \
   || die_closed "Bash payload is not valid JSON"
-[ -n "$cmd" ] || die_closed "Bash payload has no .tool_input.command"
+[ -n "$cmd" ] || die_closed "Bash payload has no string .tool_input.command"
 
 # `&&`, `||`, or `;` anywhere in the command string. Deliberately naive: the
 # peer stream's experience is that a cleverer parser is not worth it, because

@@ -179,7 +179,14 @@
       "Bash(gh pr *)",
       "Bash(gh api *)",
       "Bash(gh run *)",
-      "Bash(rm -rf .scratch/*)"
+      "Bash(rm -rf .scratch/*)",
+      "Bash(bash .scratch/*)",
+      "Bash(sh .scratch/*)",
+      "Bash(bash -n *)",
+      "Bash(sh -n *)",
+      "Bash(sh tests/*)",
+      "Bash(gh workflow *)",
+      "Bash(rm -rf .scratch)"
     ],
     "deny": [
       "Bash(sudo rm *)",

@@ -4,6 +4,13 @@ This file is the struct2flow **generic** agent protocol. Project-specific
 overrides live in `project_config_overview.md`, `project_config_paths.md`,
 and `project_config_dod.md` at the repo root. Read those alongside this file.
 
+**In the blueprint itself, those root files are THIS repo's own config and do
+not ship** — the seed source a new project is built from lives in
+[`templates/`](templates/README.md). They used to be the same files, so anything
+the blueprint wrote about itself propagated to every project (BUG-009). If you
+are editing one, ask which you mean: `templates/` if it belongs to every
+project, the root copy if it is about this one.
+
 ## Agent Coordination
 
 The agents on this project coordinate through [AGENT_SIGNAL.md](AGENT_SIGNAL.md)

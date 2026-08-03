@@ -47,3 +47,21 @@ docs/backlog/BUGS.md              -export-ignore
 # two independent mechanisms, because a scratch fixture reaching a derived
 # project would be one project's debris seeded into every new one.
 .scratch/                          export-ignore
+
+# BUG-009 — the root project_config_*.md are THIS REPO'S OWN configuration, not
+# the template. They must never reach a derived project: bootstrap ships
+# `git archive HEAD`, so without these lines whatever the blueprint wrote about
+# itself went out to every new project. It already did once — a wake-time
+# Monitor row describing an incident in this stream was seeded verbatim into
+# linkedin-watcher-agent.
+#
+# The seed source lives in templates/ and is copied by new-project.sh directly
+# from the blueprint working tree, so it does not need to travel in the archive
+# either — and must not, or a derived project would carry a templates/ dir it
+# has no use for and could seed from.
+project_config_overview.md         export-ignore
+project_config_paths.md            export-ignore
+project_config_dod.md              export-ignore
+project_config_security.md         export-ignore
+project_config_infra.md            export-ignore
+templates/                         export-ignore

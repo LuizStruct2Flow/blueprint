@@ -87,14 +87,11 @@
   adding a file to `MANAGED_FILES` changes what `pull` writes into EVERY
   project, which deserves a review of its own rather than arriving as a side
   effect of a bug fix.
-- **`~/.blueprint/` still exists and is unused.** Its contents were copied into
-  `logs/state/` and nothing writes there any more. Removing it is yours — the
-  agent was denied the delete, correctly, because it is outside the project.
-- **`docs/doing/` still holds two non-work-item files** —
-  `BLUEPRINT-AUDIT-2026-07-23.md` and `RUNBOOK-HOST-CONNECTIVITY.md`. Neither is
-  a lifecycle item; both read as stable reference and probably belong in
-  `docs/config/`. Surfaced rather than moved, because that is a
-  reorganisation call, not a lifecycle transition.
+- **`~/.blueprint/` is gone** — the founder removed it on 2026-08-03 after the
+  state moved in-project. Verified: no live watcher for this repo points there.
+  (Other projects still have their own `~/.<name>` dirs until they pull BUG-020.)
+- **The host-connectivity runbook is deleted** (founder call, 2026-08-03) — it
+  was host-specific, not blueprint work.
 - **A watcher no longer needs restarting when the state-dir derivation changes.**
   It used to: the launcher baked `RUN_LOG`/`OUTPUT_LAST` into the exported wake
   command, so a watcher started earlier kept writing the OLD paths for its whole
@@ -227,19 +224,17 @@ silent half (a roster miss was indistinguishable from "no roster") is what let i
 survive, and `--whoami` exists now because identity had been observable only by
 reading log lines.
 
-### 1c-bis. Host / connectivity
+### 1c-bis. Host / connectivity — REMOVED 2026-08-03
 
-The founder's remote connection to this dev host drops when working away from
-the host's own LAN. Diagnosed 2026-08-02; same-LAN is resolved, remote is not.
-Full diagnosis, evidence and the ordered fixes live in
-[RUNBOOK-HOST-CONNECTIVITY.md](RUNBOOK-HOST-CONNECTIVITY.md).
+The host-connectivity runbook was deleted at the founder's request. It was
+host-specific (one machine, one LAN, one set of routers) and not blueprint work.
 
-**That runbook is host-specific and stays in `docs/doing/`**, which
-`.gitattributes` marks `export-ignore`. **This file is `-export-ignore` — it
-ships into every bootstrapped project** — so concrete hosts, addresses and
-routers must not be written here. An earlier revision of this section carried
-them and would have seeded one machine's network topology into every new
-project: BUG-009's exact failure mode, in the file that documents BUG-009.
+**The rule it existed to demonstrate still stands, and is the reason this note
+remains:** HANDOVER.md is `-export-ignore`, so it **ships into every
+bootstrapped project**. Concrete hosts, addresses and routers must never be
+written here. An earlier revision of this section carried them and would have
+seeded one machine's network topology into every new project — BUG-009's exact
+failure mode, in the file that documents BUG-009.
 
 ### 1d. Waiting on redcare
 
@@ -402,7 +397,11 @@ patterns, which the founder says exist there but are on neither the board nor
 ## 5. Pointers
 
 - **Baton:** `AGENT_SIGNAL.md`. **Rules:** `CLAUDE.md`. **DoD:** `docs/DoD.md`.
-- **Audit register:** `docs/doing/BLUEPRINT-AUDIT-2026-07-23.md`.
+- **Audit register:** `docs/config/BLUEPRINT-AUDIT-2026-07-23.md` (moved
+  2026-08-03 — it spans done, waiting AND open findings at once, so it is a
+  reference record, not a work item that can sit in one lifecycle folder).
+  **Its five verified-open findings are parked in `docs/backlog/BACKLOG.md`
+  with re-open triggers: A-04, A-13, A-16, A-17, A-25.**
 - **Decision records:** `docs/waiting-acceptance/` (plan + 16 review rounds).
 - **Gotcha:** this repo is both the template *and* a working repo, so its own
   `docs/doing/` content would otherwise ship into every derived project. That is

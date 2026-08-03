@@ -1009,6 +1009,13 @@ not landed, and no script may read "PR opened" as "the blueprint has this":
 `0` dry-run clean, `3` filed and awaiting a decision, `4` a guard refused
 (nothing filed), `5` operational failure, `6` nothing to request.
 
+**`3` means a PR actually exists.** A pushed branch with no PR opened — because
+`gh` is missing, unauthenticated, or the call failed — is `5`, not `3`
+(BUG-011). The distinction is the whole value of the code: `3` promises a
+reviewer now has something in front of them, and a run that returns it while
+nothing was filed has told every caller something false. `a2bp` says so
+explicitly in that case and names the branch to open a PR from by hand.
+
 **A back-propagation is a REQUEST, not a delivery.** What travels upstream is a
 proposal that an improvement proved itself downstream; the blueprint owner then
 **implements it in the blueprint** — merging it as-is, adapting it, or rewriting

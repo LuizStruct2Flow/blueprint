@@ -32,7 +32,45 @@ fail() { echo "FAIL: $*"; FAILED=1; }
 pass() { echo "  ok — $*"; }
 
 # Exit statuses under test (must match request-file.sh).
-RC_OK=0; RC_PENDING=3; RC_BLOCKED=4; RC_NOTHING=6
+RC_OK=0; RC_PENDING=3; RC_BLOCKED=4; RC_FAILED=5; RC_NOTHING=6
+
+# --- Codex F1: make "no gh" true rather than assumed -------------------------
+# `command -v gh` must FAIL, so a shim is useless — a shim is found.
+#
+# My first attempt removed every PATH DIRECTORY containing a gh binary. That
+# passed here (gh lives alone in ~/.local/bin) and exploded in CI with exit 127,
+# because there gh shares /usr/bin with git, sed and everything else — so it
+# deleted the entire toolchain. Same over-stripping mistake as PATH=/nonexistent
+# in the guard suite, and host-dependent in the worst way: green locally, broken
+# on the machine that matters.
+#
+# A symlink farm of every executable EXCEPT gh is deterministic on any host: the
+# toolchain is complete, and the one binary under test is genuinely absent.
+NO_GH_DIR="$WORK/nogh-bin"
+mkdir -p "$NO_GH_DIR"
+printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+  [ -d "$d" ] || continue
+  for exe in "$d"/*; do
+    [ -f "$exe" ] || continue
+    [ -x "$exe" ] || continue
+    n="${exe##*/}"
+    [ "$n" = "gh" ] && continue
+    [ -e "$NO_GH_DIR/$n" ] || ln -s "$exe" "$NO_GH_DIR/$n" 2>/dev/null
+  done
+done
+NO_GH_PATH="$NO_GH_DIR"
+
+if PATH="$NO_GH_PATH" command -v gh >/dev/null 2>&1; then
+  echo "FAIL: could not construct a gh-free PATH; the no-gh cases would be vacuous"
+  exit 1
+fi
+# Non-vacuity the other way: the toolchain must still WORK, or a 127 would be
+# mistaken for the behaviour under test — which is exactly what CI caught.
+if ! PATH="$NO_GH_PATH" git --version >/dev/null 2>&1; then
+  echo "FAIL: the gh-free PATH cannot run git; the no-gh cases would test nothing"
+  exit 1
+fi
+
 
 # --- the blueprint remote (bare) and a working checkout of it ---------------
 BPWORK="$WORK/bp-work"
@@ -77,16 +115,30 @@ run() { ( cd "$PROJ" && "$CLI" "$@" 2>&1 ); }
 
 # ===========================================================================
 # 1. A request is FILED: the branch lands on the remote, carrying the change.
-#    gh is absent in this fixture, so the run stops after the push and reports
-#    decision-pending — which is itself the contract for "branch is up, PR is
-#    not".
+#    gh is HIDDEN for real here (NO_GH_PATH below), not merely assumed absent.
+#    This comment used to claim "gh is absent in this fixture" while doing
+#    nothing to make it so; on a host with gh installed the case passed because
+#    real gh failed against the local bare remote and reached a DIFFERENT
+#    branch. It therefore never exercised the no-gh path it named (Codex F1).
+#
+#    The branch is pushed and NO PR is opened.
+#    That is RC_FAILED (5), not decision-pending (3) — changed with BUG-011.
+#
+#    This comment used to say 3 was "itself the contract for branch is up, PR is
+#    not". That reading is the bug. CLAUDE.md defines 3 as "filed and awaiting a
+#    decision", and with no PR there is nothing for anyone to decide on — a
+#    script reading 3 concludes a reviewer has the request when nobody does.
+#    5 with an explicit "open one by hand from <ref>" is the truthful answer.
 # ===========================================================================
-out=$(run a2bp docs/DoD.md); rc=$?
-if [ "$rc" -ne "$RC_PENDING" ]; then
-  fail "#1 expected decision-pending ($RC_PENDING), got $rc. Output:
+out=$(PATH="$NO_GH_PATH" run a2bp docs/DoD.md); rc=$?
+if [ "$rc" -ne "$RC_FAILED" ]; then
+  fail "#1 expected operational-failure ($RC_FAILED) with no gh present, got $rc. Output:
+$out"
+elif ! printf '%s' "$out" | grep -q 'gh is not installed'; then
+  fail "#1 exit was right but via the WRONG branch — this case must exercise the missing-gh path, not a failed pr-create (Codex F1). Output:
 $out"
 else
-  pass "#1 a2bp files a request and reports decision-pending, not success"
+  pass "#1 with no gh: the branch is pushed, no PR is claimed, and the exit code says operational failure (BUG-011)"
 fi
 
 # `**`, not `*`. for-each-ref matches patterns with WM_PATHNAME, so a single
@@ -135,8 +187,8 @@ out=$(run a2bp docs/DoD.md); rc=$?
 tip_after=$(git -C "$REMOTE" rev-parse "$REQ_REF")
 if [ "$tip_before" != "$tip_after" ]; then
   fail "#3 re-running moved the branch tip — a request already under review would be rewritten"
-elif [ "$rc" -ne "$RC_PENDING" ]; then
-  fail "#3 re-running gave $rc, expected $RC_PENDING. Output:
+elif [ "$rc" -ne "$RC_FAILED" ]; then
+  fail "#3 re-running gave $rc, expected $RC_FAILED (still no gh, so still no PR). Output:
 $out"
 elif ! printf '%s' "$out" | grep -qi "adopting"; then
   fail "#3 re-running did not report adopting the existing branch. Output:

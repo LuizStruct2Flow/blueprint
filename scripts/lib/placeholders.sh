@@ -184,16 +184,69 @@ bp_substitute_stream() {
   [ "$first" -eq 1 ] || [ "$final_nl" -eq 0 ] || printf '\n'
 }
 
+# bp_copy_mode SRC DST — give DST the permissions SRC has.
+#
+# BUG-008. `mktemp` creates at 600 and `mv` carries the temp's mode onto the
+# destination, so every substitution silently de-executed its file. The three
+# managed files that are both executable and placeholder-bearing include
+# `.githooks/pre-push` — and git skips a non-executable hook WITHOUT A WORD,
+# while `core.hooksPath` still reports the gate as armed.
+#
+# GNU `--reference` first because it is exact and atomic; `stat` is the fallback
+# for BSD/macOS. Probing in that order matters: on GNU, `stat -f` means
+# "filesystem status" and would happily print an unrelated block rather than
+# fail (the A-06 lesson), so the GNU form must be tried and accepted first.
+# FAILS CLOSED (Codex F2). Returns non-zero unless a copy method actually
+# succeeded. The first version returned 0 when both probes failed and also
+# discarded the fallback chmod's status — so on a host where mode discovery or
+# application fails, the caller went on to install the 600 temp file and
+# silently disabled the hook again. That is the precise failure BUG-008 is
+# about, reintroduced through the error path of its own fix.
+#
+# "Never fatal" was the wrong instinct here: aborting ONE file replacement
+# leaves a working executable in place, while continuing destroys it.
+bp_copy_mode() {
+  local src="$1" dst="$2" m
+  chmod --reference="$src" "$dst" 2>/dev/null && return 0
+  m=$(stat -c '%a' "$src" 2>/dev/null) || m=$(stat -f '%Lp' "$src" 2>/dev/null) || return 1
+  [ -n "$m" ] || return 1
+  chmod "$m" "$dst" 2>/dev/null || return 1
+  return 0
+}
+
 # bp_substitute_in_place FILE NAME
 # The file is only replaced if substitution succeeded — a refused file (binary,
 # unrepresentable name) is left exactly as it was rather than half-written.
+#
+# BUG-008 is fixed HERE, in the primitive, not at the call sites. The previous
+# attempt added a chmod to all four callers — and each of them calls this
+# function on the very next line, so this mv undid the chmod immediately. Fixing
+# a caller cannot help while the primitive it calls destroys the mode.
+#
+# `mv` is kept rather than switching to `cat >`: mv is atomic, so a crash cannot
+# leave a half-written managed file, and `bp_copy_mode` makes the temp carry the
+# destination's permissions BEFORE the move rather than repairing them after.
+# The temp is created BESIDE THE DESTINATION (Codex F3), not in $TMPDIR. A bare
+# `mktemp` normally lands in /tmp, and if that is a different filesystem then
+# `mv` degrades to copy-then-unlink and is NOT atomic — a crash mid-move leaves
+# a partial managed file, which is exactly what the atomicity claim said could
+# not happen. Same directory means the rename is a true atomic replace.
+#
+# Every failure path removes the temp and leaves the original untouched, so a
+# refused or un-chmod-able file keeps its working content and mode.
 bp_substitute_in_place() {
-  local f="$1" nm="$2" tmp rc=0
-  tmp=$(mktemp)
+  local f="$1" nm="$2" dir tmp rc=0
+  dir=$(dirname "$f")
+  tmp=$(mktemp "$dir/.bp-subst.XXXXXX") || return 1
   bp_substitute_stream "$f" "$nm" > "$tmp" || rc=$?
   if [ "$rc" -ne 0 ]; then
     rm -f "$tmp"
     return "$rc"
   fi
-  mv "$tmp" "$f"
+  if ! bp_copy_mode "$f" "$tmp"; then
+    rm -f "$tmp"
+    echo "error: could not preserve the mode of $f; refusing to replace it" >&2
+    return 1
+  fi
+  mv "$tmp" "$f" || { rm -f "$tmp"; return 1; }
 }

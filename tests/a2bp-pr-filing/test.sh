@@ -131,7 +131,10 @@ fi
 #    probe regresses. Defence in depth: #1 fixes the source, this fixes the
 #    consumer, and the bug needed BOTH to be wrong to reach the user.
 # ===========================================================================
-guard=$(grep -n 'existing" != ' "$CLI" | head -1)
+# Read the WHOLE condition, not its first line: it is a multi-line `if` with a
+# trailing backslash, and grepping one line found the part without the check and
+# reported a fixed guard as broken.
+guard=$(sed -n '/if \[ -n "\$existing" \]/,/; then/p' "$CLI")
 if [ -z "$guard" ]; then
   fail "#5 could not find the caller's guard on \$existing — assertion would be vacuous"
 elif printf '%s' "$guard" | grep -q 'null'; then

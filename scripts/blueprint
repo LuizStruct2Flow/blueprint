@@ -1188,7 +1188,14 @@ cmd_a2bp() {
   # this whole design protects, and reads as though the decision was not seen.
   local existing state url
   existing=$(bp_file_existing_pr "$slug" "$ref") || true
-  if [ -n "$existing" ] && [ "$existing" != "	" ]; then
+  # The literal "null" check is defence in depth, not belt-and-braces padding:
+  # BUG-011 needed BOTH the probe and this guard to be wrong before it reached a
+  # user. The probe is fixed (`.[0] // empty`); this makes the consumer refuse a
+  # value it cannot act on, so a regression upstream degrades to "no PR found"
+  # — which re-files, an annoyance — rather than to "already open: null", which
+  # silently reports success and files nothing.
+  if [ -n "$existing" ] && [ "$existing" != "	" ] \
+     && [ "$existing" != "null	null" ] && [ "${existing%%	*}" != "null" ]; then
     state=${existing%%	*}
     url=${existing#*	}
     case "$state" in
@@ -1212,7 +1219,11 @@ cmd_a2bp() {
     echo "${C_YELLOW}The branch is pushed, but opening the PR failed:${C_RESET}"
     printf '%s\n' "$url" | sed 's/^/  /'
     echo "  ${C_DIM}Open one by hand from $ref, or re-run — the branch will be adopted.${C_RESET}"
-    return "$BP_RC_PENDING"
+    # BUG-011 — FAILED (5), not PENDING (3). 3 is a promise that a reviewer now
+    # has something to look at; nothing was filed here, and a caller that reads
+    # 3 as "the request is in" has been told something false. A pushed branch
+    # with no PR is an operational failure, which is exactly what 5 means.
+    return "$BP_RC_FAILED"
   }
 
   echo "${C_GREEN}✓ request filed:${C_RESET} $url"

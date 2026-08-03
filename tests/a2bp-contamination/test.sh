@@ -70,7 +70,11 @@ cat >"$GH_SHIM/gh" <<'SH'
 #!/bin/sh
 case "$1 $2" in
   "pr list")   exit 0 ;;                                   # no existing PR
-  "pr create") echo "https://example.invalid/pr/1"; exit 0 ;;
+  # A REALISTIC PR URL. Real `gh pr create` prints .../<owner>/<repo>/pull/<n>,
+  # and a2bp now requires that shape before it will report a request as
+  # filed (Codex R2-F1: a zero exit with unusable output is not evidence).
+  # The old fake, ".../pr/1", was not a URL gh would ever emit.
+  "pr create") echo "https://example.invalid/acme/blueprint/pull/1"; exit 0 ;;
 esac
 exit 0
 SH

@@ -175,7 +175,11 @@
       "Bash(echo \"EXIT=$?\")",
       "Bash(python3 -)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(gh pr *)",
+      "Bash(gh api *)",
+      "Bash(gh run *)",
+      "Bash(rm -rf .scratch/*)"
     ],
     "deny": [
       "Bash(sudo rm *)",
@@ -201,7 +205,6 @@
       "Bash(git push *:*)"
     ],
     "additionalDirectories": [
-      "/private/tmp",
       "../../agent-exchange",
       "../blueprint"
     ]
@@ -224,6 +227,18 @@
           {
             "type": "command",
             "command": "bash scripts/log-activity.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/no-chain-guard.sh",
             "timeout": 5
           }
         ]

@@ -39,31 +39,62 @@
 
 ## 0. STATUS
 
-- **`origin/main` = `40eafa5`.** One branch open: `fix/bug-020-state-in-project`
-  (PR #14), gate-green locally and in CI.
-- **Nine bugs closed on 2026-08-03**, all via PR, all with a failing reproducer
-  committed before the fix: BUG-006, 008, 009, 011, 013, 014, 015, 016, 018
-  (BUG-017 closed OBSOLETE with evidence), plus BUG-005 and BUG-020. They sit in
-  `waiting-acceptance/` — none is promoted to `done/` without your word.
-- **`doing/` holds no open bug rows.** BUG-019 was implemented, reviewed and
-  pushed the same day; its plan travelled with it to `waiting-acceptance/`.
+- **`origin/main` = `954a682`. Nothing open — no branches, no PRs, no unpushed
+  work.**
+- **Twelve bugs closed on 2026-08-03**, all via PR, all with a failing reproducer
+  committed before the fix: BUG-005, 006, 008, 009, 011, 013, 014, 015, 016, 018,
+  019, 020 (BUG-017 closed OBSOLETE with evidence). All fourteen rows sit in
+  `waiting-acceptance/` — **none is promoted to `done/` without your word.**
+- **`doing/` holds no open bug rows** for the first time. The four `BUG-0XX`
+  strings still in that file are prose references to closed items, not rows.
 - **BUG-019 CHANGED HOW THE MIC WORKS — read this before coordinating.** The
   live baton is `logs/state/signal.md`: untracked, per-checkout, written ONLY by
   `scripts/signal-set.sh`. `AGENT_SIGNAL.md` is now the protocol document and
   holds no live rows. Hand-off history is `logs/state/signal-history.log`, not
   `git log -p AGENT_SIGNAL.md`. **Do not hand-edit baton rows** — a half-written
   baton has dispatched agents against finished work twice.
-- **A watcher started before that change keeps polling the OLD path** and never
-  fires, silently. Restart the signal watchers once after pulling it. This is
-  recorded as an open finding with a fix direction (resolve the path per tick,
-  as the wake command now does for the state dir) rather than left as folklore.
-- **A lesson that generalised across the whole day, worth carrying:** six
-  separate tests passed for the wrong reason, each asserting an OUTCOME the
-  defect also produces. The repair in every case was to assert the MECHANISM —
-  which argv, which branch, which message. Two more instances landed today: the
-  A-09 suite asserted a literal path instead of the distinctness property it
-  exists to protect, and a `$HOME` blocklist guard was narrowed until it went
-  green (Codex broke it in one pass with two lines). Both are now structural.
+- **A running watcher now FOLLOWS the baton if the path moves.** It did not, and
+  that was this change's own migration failure: every dispatcher running across
+  the upgrade kept polling the old path and never fired again, silently. I wanted
+  to defer it to a separate bug; Codex was right that a change which breaks every
+  process running across it owns that breakage, so it is fixed here. An explicit
+  `--file` (or `AGENT_SIGNAL_FILE` set before startup) stays pinned.
+- **THE LESSON OF THE DAY, worth carrying into any repo:** a test that asserts an
+  OUTCOME the defect also produces is not a test. Six suites passed for the wrong
+  reason before today; five more instances landed during it — the A-09 suite
+  pinning a literal path instead of the distinctness property; a `$HOME`
+  blocklist Codex broke twice; a cycle test passing on a fallback branch while
+  the guard went unexercised; a fixture-isolation guard **snapshotting a file
+  that could not change**, so it reported "clean" while the suite corrupted the
+  real baton; and three timing cases that could pass because a sleep overshot.
+  Two repairs recur: **assert the mechanism, not the outcome**, and **poll for
+  the precondition — a fixed sleep encodes an assumption about the machine.**
+- **The other repeated shape: a path resolved from the CALLER's position rather
+  than from the thing that owns it.** BUG-020 (root anchoring), BUG-019 (the
+  baton), and three of my own defects while fixing BUG-019 — one of them written
+  into the file documenting the other two. When reviewing anything that resolves
+  a location, ask whose position it answers about.
+- **Codex raised 15 findings across BUG-019 and BUG-020 and every one was real**,
+  including four HIGHs I would not have found. Reviews are worth the round trips;
+  the ones that hurt were the ones that found guards watching nothing.
+
+### Queued, deliberately NOT done
+
+- **Make `AGENT_SIGNAL.md` blueprint-managed.** It could not be while it held
+  live state — `blueprint pull` would have clobbered a running baton. Now that
+  it is pure protocol prose it can be, and today a change to the radio-over
+  rules reaches derived projects only by hand. Deliberately its own diff:
+  adding a file to `MANAGED_FILES` changes what `pull` writes into EVERY
+  project, which deserves a review of its own rather than arriving as a side
+  effect of a bug fix.
+- **`~/.blueprint/` still exists and is unused.** Its contents were copied into
+  `logs/state/` and nothing writes there any more. Removing it is yours — the
+  agent was denied the delete, correctly, because it is outside the project.
+- **`docs/doing/` still holds two non-work-item files** —
+  `BLUEPRINT-AUDIT-2026-07-23.md` and `RUNBOOK-HOST-CONNECTIVITY.md`. Neither is
+  a lifecycle item; both read as stable reference and probably belong in
+  `docs/config/`. Surfaced rather than moved, because that is a
+  reorganisation call, not a lifecycle transition.
 - **A watcher no longer needs restarting when the state-dir derivation changes.**
   It used to: the launcher baked `RUN_LOG`/`OUTPUT_LAST` into the exported wake
   command, so a watcher started earlier kept writing the OLD paths for its whole

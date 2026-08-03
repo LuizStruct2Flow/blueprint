@@ -251,7 +251,7 @@ declare -A OFFSET INODE LABEL
 emit(){
   # The supervisor writes BOTH sinks itself — no `tee` process, so the
   # "exactly one resident process" contract holds in foreground too.
-  if [ "${FOREGROUND:-0}" = "1" ]; then printf '%s\n' "$1"; fi
+  if [ "${AGENT_FEED_FOREGROUND:-0}" = "1" ]; then printf '%s\n' "$1"; fi
   printf '%s\n' "$1" >>"$out"
 }
 
@@ -515,8 +515,8 @@ case "${1:-}" in
   --whoami)    cmd_whoami ;;
   --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
                cmd_daemon ;;
-  --supervise) FOREGROUND=0 supervise ;;          # internal: daemon child
+  --supervise) AGENT_FEED_FOREGROUND=0 supervise ;;          # internal: daemon child
   "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
-               FOREGROUND=1 supervise ;;          # foreground
+               AGENT_FEED_FOREGROUND=1 supervise ;;          # foreground
   *)           echo "usage: $0 [--daemon|--stop|--status|--whoami]" >&2; exit 2 ;;
 esac

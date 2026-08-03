@@ -174,6 +174,17 @@ for f in "${TARGETS[@]}"; do
   fi
 done
 
+# --- Seed the LIVE baton (BUG-019) ---
+# AGENT_SIGNAL.md is the protocol; the baton itself is untracked per-checkout
+# state under logs/state/, so a freshly bootstrapped project has none. Seed it
+# here for the same reason the roster is copied from its .example: a new project
+# should be able to run the ceremony without a manual first step.
+if [[ -f "$TARGET_DIR/scripts/signal-set.sh" ]]; then
+  ( cd "$TARGET_DIR" && bash scripts/signal-set.sh \
+      --holder Nobody --state IDLE \
+      --task "Bootstrapped from the blueprint. Claim the mic to begin." ) >/dev/null 2>&1 || true
+fi
+
 # --- Today's date in HANDOVER + AGENT_SIGNAL stamps ---
 TODAY="$(date '+%Y-%m-%d')"
 for f in "$TARGET_DIR/AGENT_SIGNAL.md" "$TARGET_DIR/docs/doing/HANDOVER.md"; do

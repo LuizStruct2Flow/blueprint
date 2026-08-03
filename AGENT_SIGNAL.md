@@ -1,23 +1,66 @@
-# Agent Signal
+# Agent Signal — the radio-over protocol
 
-Shared "radio over" baton for the agent team. `Holder` is a **persona name** from
-[AGENT_ROSTER.md](AGENT_ROSTER.md) (e.g. `Sylvia`); the coordination protocol is in
-[AGENTS.md](AGENTS.md). On claiming the mic, set `State = ACTIVE` (A2BP).
+**This file is the protocol. It is not the baton.**
+
+The live baton lives at **`logs/state/signal.md`**, which is untracked
+per-checkout state. Read it with:
+
+```bash
+bash scripts/agent-activity.sh --whoami   # who am I
+cat logs/state/signal.md                  # who holds the mic
+```
+
+Write it with **`scripts/signal-set.sh`, which is the only supported writer**:
+
+```bash
+scripts/signal-set.sh --holder <Persona> --state ACTIVE      --task '...'
+scripts/signal-set.sh --holder <Persona> --state OVER_TO_CODEX --task-file .scratch/task.md
+```
+
+Do **not** hand-edit the baton rows. One writer publishes the whole baton in a
+single atomic `mv`, so a poller can never sample a half-written state — `Task`
+from the previous round beside the new `State` was a real defect, twice.
+
+## Why the live state is not in this file
+
+It used to be, and that was a bug (**BUG-019**). A tracked file holding live
+runtime state is fine until you notice that git *owns* tracked files in the
+working tree: `git switch`, `git checkout <file>`, `git stash` and `git rebase`
+all rewrite them — correctly, by their own contract — **including while an agent
+is mid-dispatch**.
+
+Reproduced live rather than inferred: a `git checkout AGENT_SIGNAL.md` reverted
+the baton while Codex was claiming the mic, and it stopped, correctly — *"the
+baton changed before I could claim it."* Nothing failed. The watcher simply had
+nothing left to claim. A dispatch that dies loudly costs minutes; one that dies
+silently costs the session.
+
+It was rare until every change became a branch + PR. The mechanism never
+changed; the frequency changed by an order of magnitude.
+
+This is the same split already used for
+[`AGENT_ROSTER.md`](AGENT_ROSTER.example.md): live per-checkout state stays
+untracked, the tracked artefact carries what every checkout shares.
+
+## The protocol
+
+`Holder` is a **persona name** from [AGENT_ROSTER.md](AGENT_ROSTER.md) — read
+yours with `--whoami`, never assume it, since the roster is per-engineer.
+`State` is `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`. On claiming the mic, set
+`State = ACTIVE` first. The full protocol is in [AGENTS.md](AGENTS.md).
 
 **Before flipping the mic to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md)
-§A–§G.** If `ls docs/waiting-acceptance/` doesn't show the artefacts the
-`Task` field claims are waiting, the handoff is not done.
+§A–§G.** If `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task`
+field claims are waiting, the handoff is not done.
 
-## Current Signal
+## History
 
-| Field | Value |
-|---|---|
-| Holder | Eto |
-| State | OVER_TO_USER |
-| Task | Codex round 2 done: timing audit CLEAN (SETTLE=2 verified sound for the quantisation race, case #5 fine, early-stop did NOT weaken #1/#5/#6, ~75s reproduced 3x independently), plus two new findings, both fixed and both verified by reproducing his bypasses first. R2-F1 MEDIUM: the manifest proved STRINGS existed, not that suites execute — a commented-out invocation still satisfied the unanchored grep, and discovery saw only tests/*/test.sh so a renamed runner was invisible. Fixed: comments stripped, anchored bash tests/<suite>/<file>.sh required, and every shell file under tests/ must belong to a declared suite. Both bypasses now fail closed. R2-F2 LOW: the SLO warned on EVERY successful run (120s/45s against a 142.3s/75s baseline), so it could not distinguish regression from normal and would be trained out; raised to 180s/95s with ~26% headroom, documented ratchet, and a test asserting a healthy gate is silent. Gate 140.1s, SLO now correctly quiet. NOTE: Codex flipped the mic to OVER_TO_CLAUDE, not OVER_TO_ETO — the roster rename has not reached its dispatch preamble. Minor, but it is the BUG-010 class again. BUG-005 in waiting-acceptance; BUG-010 accepted in done/. |
-| _prior_ | **CHANGES-REQUESTED — review recorded in `docs/doing/CODEX-REVIEW-A03.md` (uncommitted: Codex sandbox cannot write `.git/index.lock`).** F1 HIGH: pushed A-03 `1c4dd4c` uses `<local> --not --remotes` for a new branch, so a commit already on any other/private remote is excluded when first disclosed to the target/public remote; reproduced (`all=1`, current selector=0). Fix against the destination remote or scan all reachable history, and add a multi-remote regression. F2 HIGH: unpushed dispatch guard permanently blocks an intentional byte-identical rerun for the watcher lifetime; the claimed one-poll delay is false, and restart also loses guard state. Use an explicit round/generation or atomic Task+State publication; test identical tasks in two legitimate rounds. F3 MEDIUM: pushed-state docs still say A-03 is next/nothing in flight. README process judgement: review the named commit snapshot + require clean/explicit claimed scope; an unstaged-tracked pre-push warning is only a backstop. Current suites and syntax/diff checks pass but miss F1/F2. **Do not push.** |
-| Last update | 2026-08-02 |
+Hand-off history is `logs/state/signal-history.log`, appended by
+`signal-set.sh` on every flip.
 
-History lives in `git log -p AGENT_SIGNAL.md`. Per-slice decisions live in
-the corresponding `docs/doing/PLAN-*.md` / `docs/done/PLAN-*.md` artifact.
-This file stays at one block: the active baton.
+It used to be `git log -p AGENT_SIGNAL.md`, and losing that was the real cost of
+this change — weighed deliberately rather than waved away. Mic flips are local
+operational events; the durable decisions they surround belong in
+`docs/doing/PLAN-*.md` and the review documents, which are tracked. The journal
+is also more accurate in one respect: it records flips that were never
+committed, which `git log` could never show.

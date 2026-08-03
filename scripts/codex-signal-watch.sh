@@ -113,11 +113,22 @@ else
 fi
 
 ROOT="$(repo_root)"
-SIGNAL_FILE="$ROOT/AGENT_SIGNAL.md"
+# Same state-dir derivation as the feed and the launchers (A-09) — one mechanism.
+# Sourced BEFORE anything calls into it: agent_signal_file() lives here too now,
+# and a use-before-source silently yielded an empty path rather than failing.
+. "$ROOT/scripts/lib/state-dir.sh"
+# BUG-019: the LIVE baton is untracked state, resolved through the one shared
+# helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
+# and — worse, before the split — a file git rewrites under a live dispatch.
+SIGNAL_FILE="$(agent_signal_file "$ROOT")"
+# Was the path PINNED by an operator, or merely derived? Captured before any of
+# our own exports, because trigger_if_needed exports AGENT_SIGNAL_FILE for the
+# wake command and that would otherwise look like an operator override on the
+# next read — the watcher would pin itself to its own value.
+SIGNAL_FILE_EXPLICIT=0
+[[ -n "${AGENT_SIGNAL_FILE:-}" ]] && SIGNAL_FILE_EXPLICIT=1
 TARGET_STATE="OVER_TO_CODEX"
 POLL_SECONDS=2
-# Same state-dir derivation as the feed and the launchers (A-09) — one mechanism.
-. "$ROOT/scripts/lib/state-dir.sh"
 LOG_FILE="$(agent_state_dir "$ROOT")/signal.log"
 ONCE=0
 COMMAND=()
@@ -126,6 +137,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --file)
       SIGNAL_FILE="$2"
+      SIGNAL_FILE_EXPLICIT=1
       shift 2
       ;;
     --state)
@@ -246,8 +258,55 @@ trigger_if_needed() {
   return 0
 }
 
+# BUG-019 migration hazard — re-resolve the baton path EVERY TICK.
+#
+# `SIGNAL_FILE` used to be resolved once at startup. When BUG-019 moved the live
+# baton, every already-running watcher kept polling the OLD path — a file that
+# no longer changes — and never fired again. It failed SILENTLY: no error, no
+# log line, just a watcher patiently polling a file nobody writes. Found live,
+# by a dispatch that went nowhere and a verdict that never arrived.
+#
+# The answer is not "restart your watchers after upgrading". That is the shape
+# this repo has now rejected five times (BUG-004's "flip the mic last",
+# BUG-014's fixture isolation, the no-chaining rule that needed a hook,
+# BUG-020's baked RUN_LOG, this), and the excuse that it is a one-time migration
+# does not hold — the failure is silent either way, and "only during an upgrade"
+# describes exactly the moment nobody is watching for it.
+#
+# An EXPLICIT path is never re-resolved: `--file`, or AGENT_SIGNAL_FILE set by
+# the operator before startup, is a pin and stays pinned. The distinction is
+# captured at startup rather than inferred later, because this process exports
+# AGENT_SIGNAL_FILE itself when dispatching, and would otherwise mistake its own
+# export for an operator's intent.
+refresh_signal_file() {
+  [[ "$SIGNAL_FILE_EXPLICIT" -eq 1 ]] && return 0
+  local now_file
+  # Computed with our own export cleared, for the same reason.
+  now_file="$( AGENT_SIGNAL_FILE=; agent_signal_file "$ROOT" )"
+  [[ -n "$now_file" && "$now_file" != "$SIGNAL_FILE" ]] || return 0
+  printf '[%s] signal path moved: %s -> %s\n' \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$SIGNAL_FILE" "$now_file" | tee -a "$LOG_FILE"
+  SIGNAL_FILE="$now_file"
+  # Clear the SETTLE state — a half-observed candidate belongs to the old file.
+  pending_key=""
+  pending_since=0
+  last_mtime=""
+  # But KEEP last_trigger_key. Clearing it was a HIGH in review: if the baton at
+  # the new path carries the same Holder|State|Task as one already dispatched —
+  # which is exactly what a migration that copies the file produces — a cleared
+  # key re-dispatches finished work. That is the defect the settle window exists
+  # to prevent, arriving through a different door, and on a metered agent it is
+  # a duplicate bill rather than a duplicate log line.
+  #
+  # Keeping it is also the CONSISTENT choice: last_trigger_key already persists
+  # across every ordinary tick, so carrying it across a move changes nothing
+  # about what "already dispatched" means. Clearing it was the special case, and
+  # special cases in dispatch identity are what Codex rejected once before.
+}
+
 while true; do
-  if trigger_if_needed && [[ "$ONCE" -eq 1 ]]; then
+  refresh_signal_file
+  if [[ -f "$SIGNAL_FILE" ]] && trigger_if_needed && [[ "$ONCE" -eq 1 ]]; then
     exit 0
   fi
 

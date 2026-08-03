@@ -26,7 +26,12 @@
 # pipeline", "CDK", "DSGVO"), which is the same contamination in prose form.
 set -uo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-sig="$repo_root/AGENT_SIGNAL.md"
+# shellcheck source=scripts/lib/state-dir.sh
+. "$repo_root/scripts/lib/state-dir.sh"
+# BUG-019: the LIVE baton is untracked state, resolved through the one shared
+# helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
+# and — worse, before the split — a file git rewrites under a live dispatch.
+sig="$(agent_signal_file "$repo_root")"
 
 # shellcheck source=scripts/lib/roster.sh
 . "$repo_root/scripts/lib/roster.sh"

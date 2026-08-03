@@ -141,6 +141,7 @@ jobs:
           set -euo pipefail
           bash tests/gate-arming/test.sh
           bash tests/state-dir/test.sh
+          bash tests/baton-durability/test.sh
           bash tests/roster/test.sh
           bash tests/pipeline/test.sh
           # Added 2026-08-02 — tests/manifest found these running NOWHERE.

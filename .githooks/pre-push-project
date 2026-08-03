@@ -131,6 +131,27 @@ else
   pipe_skip "state-dir · A-09" "suite absent"
 fi
 
+# BUG-019 — a branch operation must not destroy a live dispatch. The baton used
+# to be a TRACKED file holding LIVE state, so checkout/switch/stash/rebase
+# rewrote it mid-dispatch and the dispatched agent silently had nothing to
+# claim. This suite starts a real watcher and fires a checkout inside the settle
+# window, so it costs a few seconds of real waiting — the only honest way to
+# test a race. It stays in the gate because every fix here is a branch, which is
+# exactly the condition that made the bug routine. ~10s.
+if [ -f tests/baton-durability/test.sh ]; then
+  _st_baton(){
+    bash tests/baton-durability/test.sh || {
+      echo "❌ tests/baton-durability/test.sh failed (BUG-019)."
+      echo "   Live mic state must be untracked, so git cannot rewrite it under a"
+      echo "   running dispatch. Check scripts/lib/state-dir.sh agent_signal_file()."
+      return 1
+    }
+  }
+  pipe_stage "baton-durability · BUG-019" _st_baton
+else
+  pipe_skip "baton-durability · BUG-019" "suite absent"
+fi
+
 # BUG-010 — the roster is the single source of persona identity. Guards both
 # halves: a persona name hardcoded in a script that ships to every project
 # (renaming the roster then does nothing), and roster parsing that breaks on

@@ -104,7 +104,20 @@ cp -R "$ROOT/scripts/lib/." "$REPO/scripts/lib/" 2>/dev/null
 lib_libs=$(find "$REPO/scripts/lib" -maxdepth 1 -name '*.sh' -type f 2>/dev/null | wc -l | tr -d ' ')
 [ "${lib_libs:-0}" -ge 1 ] || { echo "FAIL: fixture scripts/lib/ has no *.sh — the feed will abort on its missing source dependency"; exit 1; }
 cp "$ROOT/AGENT_ROSTER.example.md" "$REPO/" 2>/dev/null
-SIG="$REPO/AGENT_SIGNAL.md"
+# BUG-019 — the feed watches the LIVE baton, which is untracked state under
+# logs/state/, not the tracked AGENT_SIGNAL.md (that is the protocol document
+# now). Writing the old path left every edit invisible to the feed, and only
+# #9b caught it: the cases that assert "nothing was emitted" pass happily when
+# the feed is watching a file nobody writes. An absence-assertion cannot tell
+# quiet from deaf, which is why the suite needs at least one case that demands
+# a positive emission.
+# This fixture runs the feed with AGENT_STATE_HOME="$STATE", so the baton
+# resolves under $STATE — NOT under $REPO/logs/state. Following the same
+# override the fixture already sets is the point: hardcoding either literal
+# would make the test agree with the feed only by coincidence, which is the
+# A-09 defect in test form.
+SIG="$STATE/signal.md"
+mkdir -p "$(dirname "$SIG")"
 LOG="$REPO/logs/agent-activity.log"
 CODEXLOG="$STATE/codex-runs.log"
 : >"$CODEXLOG"

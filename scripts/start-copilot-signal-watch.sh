@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # NOTIFY-ONLY: This watcher only notifies a human/operator when the mic flips to
 # GitHub Copilot. It does NOT invoke any Copilot CLI or act as an autonomous
-# dispatcher. Operators should claim the mic in AGENT_SIGNAL.md and act manually.
-# Lightweight watcher for AGENT_SIGNAL.md that notifies when mic flips to GitHub Copilot
+# dispatcher. Operators claim the mic by RUNNING scripts/signal-set.sh, then act
+# manually. Do not hand-edit the baton (BUG-019: one writer, atomic publication).
+# Lightweight watcher for the live baton that notifies when the mic flips to GitHub Copilot
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-signal_file="$repo_root/AGENT_SIGNAL.md"
+# shellcheck source=scripts/lib/state-dir.sh
+. "$repo_root/scripts/lib/state-dir.sh"
+# BUG-019: the LIVE baton is untracked state, resolved through the one shared
+# helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
+# and — worse, before the split — a file git rewrites under a live dispatch.
+signal_file="$(agent_signal_file "$repo_root")"
 last=""
 echo "Starting Copilot signal watcher (watching $signal_file)"
 if [ ! -f "$signal_file" ]; then
-  echo "AGENT_SIGNAL.md not found at $signal_file" >&2
+  echo "No live baton at $signal_file — run scripts/signal-set.sh once to seed it" >&2
   exit 1
 fi
 # BUG-001 / RC-6: `stat -f %m f || stat -c %Y f` is NOT a portable fallback. On
@@ -37,7 +43,8 @@ while true; do
     if [ "$state" = "OVER_TO_COPILOT" ] || [ "$holder" = "GitHub Copilot" ]; then
       echo "=== Copilot handoff detected ==="
       echo "Task: $task"
-      echo "See AGENT_SIGNAL.md to claim the mic and follow docs/DoD.md before acting."
+      echo "Claim the mic with: scripts/signal-set.sh --holder <you> --state ACTIVE --task ..."
+      echo "Protocol: AGENT_SIGNAL.md. Walk docs/DoD.md before acting."
     fi
   fi
 done

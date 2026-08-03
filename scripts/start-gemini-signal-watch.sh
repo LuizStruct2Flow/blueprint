@@ -103,7 +103,7 @@ cd "$ROOT"
 # GOOGLE_GENAI_USE_GCA=true selects the Gemini Code Assist OAuth creds
 # (~/.gemini/oauth_creds.json from the extension login); --skip-trust trusts
 # this workspace for the run so --yolo can auto-approve file writes.
-GOOGLE_GENAI_USE_GCA=true "$GEMINI_BIN" --skip-trust --yolo --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The shared signal lives at AGENT_SIGNAL.md and Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then EDIT ONLY the Holder/State/Task rows of AGENT_SIGNAL.md to set Holder=Claude Code and State=OVER_TO_CLAUDE with a one-line summary of what you produced, preserving the rest of the file verbatim. Do NOT run git commit or git add." \
+GOOGLE_GENAI_USE_GCA=true "$GEMINI_BIN" --skip-trust --yolo --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
   2>&1 | tee "$OUTPUT_LAST" >> "$RUN_LOG"
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] gemini finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"

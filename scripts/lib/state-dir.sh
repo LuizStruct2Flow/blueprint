@@ -55,3 +55,50 @@ agent_state_dir() {
   fi
   printf '%s\n' "${AGENT_STATE_HOME:-$_asd_root/logs/state}"
 }
+
+# BUG-019 — the LIVE coordination baton.
+#
+# `AGENT_SIGNAL.md` was a TRACKED file holding LIVE runtime state. Each property
+# is fine alone and a defect together: git owns tracked files in the working
+# tree, so `git switch`, `git checkout <file>`, `git stash` and `git rebase`
+# rewrite the baton — correctly, by their own contract — INCLUDING while an
+# agent is mid-dispatch. Reproduced live: a checkout reverted the baton and the
+# dispatched agent refused to proceed, silently. Nothing failed; the watcher
+# simply had nothing left to claim.
+#
+# It was rare until every fix became a branch. The mechanism never changed; the
+# frequency changed by an order of magnitude.
+#
+# The split: live mic state lives here, untracked (logs/ is gitignored), while
+# AGENT_SIGNAL.md keeps the protocol prose. That is exactly the shape already
+# used for AGENT_ROSTER.md / AGENT_ROSTER.example.md, which is per-engineer live
+# state with a tracked template — the precedent, not a new idea.
+#
+# What it costs, stated because it was the crux of the decision: `git log -p
+# AGENT_SIGNAL.md` stops being the hand-off history. Agreed with Codex that mic
+# flips are LOCAL OPERATIONAL EVENTS while durable decisions belong in tracked
+# plan and review documents — and that the append-only journal beside this file
+# is in one way MORE accurate, because it records flips that were never
+# committed, which git could never show.
+#
+# agent_signal_file [repo_root]
+#   Honors $AGENT_SIGNAL_FILE if set, else `<state dir>/signal.md`.
+agent_signal_file() {
+  printf '%s\n' "${AGENT_SIGNAL_FILE:-$(agent_state_dir "${1:-}")/signal.md}"
+}
+
+# agent_signal_journal [repo_root]
+#   Append-only record of every flip. A BACKSTOP, never a second writer: only
+#   signal-set.sh appends, and nothing reads it to decide anything. Two writers
+#   that agree by coincidence is the A-09 defect one level up.
+#
+#   Derived from the BATON's directory, not independently from the repo root, so
+#   it follows $AGENT_SIGNAL_FILE wherever that points. The first version
+#   resolved it from the root alone, and tests/signal-set/ — which overrides the
+#   baton to a fixture — appended eleven fixture rows to the REAL journal on its
+#   first run. A record that follows its subject cannot drift from it; two
+#   independent derivations of one location is the A-09 defect, and I had just
+#   reintroduced it in the file that documents it.
+agent_signal_journal() {
+  printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"
+}

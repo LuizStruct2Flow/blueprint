@@ -25,7 +25,41 @@
 # whole new one — never a mixture.
 set -euo pipefail
 
-SIGNAL="${AGENT_SIGNAL_FILE:-AGENT_SIGNAL.md}"
+# BUG-019 — resolve the live baton from THIS SCRIPT's tree, never from cwd.
+#
+# This used to default to a bare relative `AGENT_SIGNAL.md`, which resolves
+# against wherever the caller happens to stand. That is not a theoretical
+# hazard: the first draft of tests/baton-durability/ called this script from the
+# repo root to publish into a FIXTURE, and instead published into the REAL
+# baton — the live watcher then dispatched the real Codex against a task reading
+# "baton durability fixture", in the real working tree, with workspace-write.
+#
+# Same defect class as BUG-020's root anchoring, and as the bug this change
+# fixes: a path resolved from the CALLER's position rather than from the thing
+# that owns it. The physical-root block below is byte-identical to the one in
+# every other consumer (tests/state-dir/ #7 enforces that).
+_bp_self="${BASH_SOURCE[0]}"
+_bp_hops=0
+while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
+  _bp_dir="$(cd -P "$(dirname "$_bp_self")" && pwd)"
+  _bp_self="$(readlink "$_bp_self")"
+  case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
+  _bp_hops=$((_bp_hops + 1))
+done
+if [ -L "$_bp_self" ]; then
+  echo "FATAL: symlink chain for $_bp_self exceeds 40 hops — cycle?" >&2
+  exit 1
+fi
+_bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+
+. "$_bp_root/scripts/lib/state-dir.sh"
+SIGNAL="$(agent_signal_file "$_bp_root")"
+# JOURNAL is derived AFTER argument parsing, from the baton actually in use.
+# Deriving it here missed `--file`, which is parsed below: tests/signal-set/
+# points the baton at a fixture with `--file` and its eleven rows still landed
+# in the REAL journal. Honouring $AGENT_SIGNAL_FILE but not `--file` is a guard
+# with a hole in exactly the shape of the second input path — the same defect
+# this script's own --task/--task-file normalisation had.
 HOLDER=""
 STATE=""
 TASK=""
@@ -47,7 +81,43 @@ done
 
 [ -n "$HOLDER" ] || die "--holder is required"
 [ -n "$STATE" ]  || die "--state is required"
-[ -f "$SIGNAL" ] || die "no signal file at $SIGNAL"
+# The live baton is untracked per-checkout state (BUG-019), so a fresh clone has
+# none and this is its first writer. Seed it rather than refusing: "no signal
+# file" was a sensible error when the file was tracked and its absence meant
+# something was wrong; now absence just means nobody has taken the mic yet.
+JOURNAL="$(dirname "$SIGNAL")/signal-history.log"
+
+mkdir -p "$(dirname "$SIGNAL")"
+
+# The seed is a TEMPLATE FED TO THE REWRITE, never written to the final path.
+#
+# The first version wrote the default IDLE baton straight to $SIGNAL and let the
+# atomic rewrite replace it a moment later. Codex was right that this
+# contradicts the whole point of the file: for that instant a reader sees an
+# empty, partial, or default baton at the canonical path. The default being IDLE
+# makes an accidental dispatch unlikely, but "unlikely" is not the guarantee
+# this script exists to provide — one atomic publication is.
+#
+# So an absent baton is seeded into a temp file used only as awk's INPUT. The
+# only thing that ever appears at $SIGNAL is the finished, requested baton, via
+# a single rename.
+_bp_seed_src=""
+if [ ! -f "$SIGNAL" ]; then
+  _bp_seed_src="$(mktemp "${SIGNAL}.seed.XXXXXX")"
+  trap 'rm -f "$_bp_seed_src"' EXIT INT TERM
+  cat > "$_bp_seed_src" <<'SEED'
+<!-- LIVE coordination baton — untracked, per-checkout (BUG-019).
+     Written only by scripts/signal-set.sh. The protocol itself is documented in
+     the tracked AGENT_SIGNAL.md; this file is state, not documentation. -->
+
+| Field | Value |
+|---|---|
+| Holder | Nobody |
+| State | IDLE |
+| Task | (none) |
+| Last update | (never) |
+SEED
+fi
 
 if [ -n "$TASK_FILE" ]; then
   [ -f "$TASK_FILE" ] || die "no such --task-file: $TASK_FILE"
@@ -96,7 +166,11 @@ TASK="$(printf '%s' "$TASK" | sed 's/|/\\|/g')"
 
 TODAY="$(date '+%Y-%m-%d')"
 TMP="$(mktemp "${SIGNAL}.XXXXXX")"
-trap 'rm -f "$TMP"' EXIT INT TERM
+trap 'rm -f "$TMP" "$_bp_seed_src"' EXIT INT TERM
+
+# awk reads the existing baton, or the seed template when there is none. Either
+# way the finished file is produced in $TMP and published by one rename.
+SRC="${_bp_seed_src:-$SIGNAL}"
 
 # Rewrite the four baton rows; everything else in the file is passed through
 # untouched, so the surrounding prose stays project-owned.
@@ -119,7 +193,7 @@ awk '
   /^\| Task \|/        { print "| Task | " task " |"; next }
   /^\| Last update \|/ { print "| Last update | " today " |"; next }
   { print }
-' "$SIGNAL" > "$TMP"
+' "$SRC" > "$TMP"
 
 for _row in "| Holder |" "| State |" "| Task |"; do
   grep -qF "$_row" "$TMP" || die "row '$_row' missing after rewrite — refusing to publish a malformed baton"
@@ -129,4 +203,12 @@ chmod --reference="$SIGNAL" "$TMP" 2>/dev/null || true
 mv "$TMP" "$SIGNAL"
 trap - EXIT INT TERM
 
-echo "signal-set: published Holder=$HOLDER State=$STATE (atomic)"
+# Journal the flip. This replaces `git log -p AGENT_SIGNAL.md` as the hand-off
+# history, and is better on one axis: it records flips that were never
+# committed, which git could not show. It is a BACKSTOP — append-only, written
+# only here, and read by nothing that makes a decision. A second writer that
+# agrees with this one by coincidence is the A-09 defect one level up.
+printf '[%s] Holder=%s State=%s Task=%s\n' \
+  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOLDER" "$STATE" "$TASK" >> "$JOURNAL" 2>/dev/null || true
+
+echo "signal-set: published Holder=$HOLDER State=$STATE (atomic) → $SIGNAL"

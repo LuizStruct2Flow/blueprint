@@ -271,6 +271,25 @@ else
   pipe_skip "no-chain-guard" "suite absent"
 fi
 
+# BUG-016 / BUG-018 — pull must record only what it actually synced, and must
+# survive having no TTY. A partial pull that advances bootstrap_sha makes every
+# later drift report "0 commits since sync" while the project is still behind,
+# and nothing recomputes that number — linkedin-watcher-agent sat 18 commits
+# behind partly this way. ~3s.
+if [ -f tests/pull-behaviour/test.sh ]; then
+  _st_pull_behaviour(){
+    bash tests/pull-behaviour/test.sh || {
+      echo "❌ tests/pull-behaviour/test.sh failed (BUG-016/BUG-018)."
+      echo "   A partial pull must not claim a full sync, and pull must degrade"
+      echo "   rather than die when there is no terminal."
+      return 1
+    }
+  }
+  pipe_stage "pull-behaviour · BUG-016/018" _st_pull_behaviour
+else
+  pipe_skip "pull-behaviour · BUG-016/018" "suite absent"
+fi
+
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
 # (founder decision, BUG-005), and the reasoning is kept because it is a clean

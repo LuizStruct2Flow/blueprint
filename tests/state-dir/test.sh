@@ -381,7 +381,13 @@ cat > "$WORK/stub-codex" <<'STUB'
 STUB
 chmod +x "$WORK/stub-codex"
 
-ln -s "$WORK/scripts/start-codex-signal-watch.sh" "$LINKS/launch-via-symlink.sh"
+# A TWO-HOP chain whose second hop is RELATIVE. One absolute hop is the easy
+# case and `readlink -f` handled it; the portable walk has to re-anchor a
+# relative target against the LINK's own directory, and a chain has to be
+# followed rather than resolved in one call. Both are exercised here.
+mkdir -p "$LINKS/nested"
+ln -s "$WORK/scripts/start-codex-signal-watch.sh" "$LINKS/nested/hop2.sh"
+ln -s "nested/hop2.sh" "$LINKS/launch-via-symlink.sh"
 
 STUB_MARKER="$WORK/stub-ran"
 export STUB_MARKER
@@ -419,6 +425,55 @@ else
 fi
 
 rm -rf "$WORK" "$LINKS"
+
+# ===========================================================================
+# 10. The resolver must not depend on `readlink -f`.
+#
+#     Codex round-3 HIGH. `-f` is a GNU extension: on BSD and older macOS
+#     `readlink` EXISTS but rejects it, so the previous form left _bp_self as
+#     the unresolved out-of-tree symlink and the launcher went looking for
+#     /tmp/scripts. It failed silently, which is worse than the bug it replaced
+#     — and `command -v readlink` succeeded, so the guard that was supposed to
+#     detect absence saw nothing wrong.
+#
+#     Asserted on the source rather than by faking a BSD host: the property we
+#     want is "does not rely on a GNU extension", and that is exactly what a
+#     grep for the flag says. #8/#9 cover the behaviour on this host.
+# ===========================================================================
+gnu_dep=""
+for f in scripts/agent-activity.sh $DISPATCHERS; do
+  [ -f "$ROOT/$f" ] || continue
+  if sed 's/#.*//' "$ROOT/$f" | grep -q 'readlink -f'; then
+    gnu_dep="$gnu_dep $f"
+  fi
+done
+if [ -n "$gnu_dep" ]; then
+  fail "#10 resolver depends on GNU \`readlink -f\`, which BSD/older macOS rejects:$gnu_dep"
+else
+  pass "#10 no consumer depends on GNU \`readlink -f\`"
+fi
+
+# #10b proves the REPLACEMENT is correct; #10 is what catches the defect.
+#
+# Stated explicitly because I have over-claimed a guard twice on this PR alone.
+# On a GNU host the old `readlink -f` form ALSO passes #10b — it resolves a
+# two-hop relative chain fine. The bug was never visible here; it was visible on
+# BSD/older macOS, where `-f` is rejected. So #10b would not have caught it, and
+# only #10's grep for the flag would. Together: #10 forbids the dependency, #10b
+# proves the portable walk that replaced it actually follows a chain.
+probe="$(mktemp -d)"
+mkdir -p "$probe/real/scripts" "$probe/links/nested"
+blk="$(sed -n '/^_bp_self=/,/^_bp_root=/p' "$ROOT/scripts/codex-signal-watch.sh")"
+printf '%s\nprintf "%%s\\n" "$_bp_root"\n' "$blk" > "$probe/real/scripts/probe.sh"
+ln -s "$probe/real/scripts/probe.sh" "$probe/links/nested/hop2.sh"
+ln -s "nested/hop2.sh" "$probe/links/probe-entry.sh"
+got_probe="$(bash "$probe/links/probe-entry.sh" 2>&1)"
+if [ "$got_probe" = "$probe/real" ]; then
+  pass "#10b the shipped resolver follows a two-hop relative chain to the real tree"
+else
+  fail "#10b the resolver returned '$got_probe', expected '$probe/real' — chain not followed"
+fi
+rm -rf "$probe"
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-09 — feed and dispatchers rendezvous on one per-project state dir."

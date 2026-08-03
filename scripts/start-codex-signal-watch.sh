@@ -35,10 +35,14 @@ set -euo pipefail
 # cannot be shared as a lib, because finding the lib is the very problem it
 # solves.
 _bp_self="${BASH_SOURCE[0]}"
-if command -v readlink >/dev/null 2>&1; then
-  _bp_res="$(readlink -f "$_bp_self" 2>/dev/null)" && [ -n "$_bp_res" ] && _bp_self="$_bp_res"
-fi
-_bp_root="$(cd "$(dirname "$_bp_self")/.." && pwd -P)"
+_bp_hops=0
+while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
+  _bp_dir="$(cd -P "$(dirname "$_bp_self")" && pwd)"
+  _bp_self="$(readlink "$_bp_self")"
+  case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
+  _bp_hops=$((_bp_hops + 1))
+done
+_bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
 ROOT="$_bp_root"
 
 # Discover the Codex binary. Prefer an explicit override, otherwise

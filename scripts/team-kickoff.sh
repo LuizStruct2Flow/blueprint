@@ -37,8 +37,8 @@ DRY_RUN=0
 # Pacing, so the activity feed has time to capture each move. Overridable so the
 # regression test does not have to sleep through the ceremony (BUG-005: the gate
 # has a hard 30 s ceiling and no slack to give).
-CLAIM_PAUSE="${KICKOFF_CLAIM_PAUSE:-3}"
-HANDOFF_PAUSE="${KICKOFF_HANDOFF_PAUSE:-2}"
+CLAIM_PAUSE="${AGENT_KICKOFF_CLAIM_PAUSE:-3}"
+HANDOFF_PAUSE="${AGENT_KICKOFF_HANDOFF_PAUSE:-2}"
 
 # --- introductions, keyed by ROLE ------------------------------------------
 # A role with a numeric suffix (Front-End-1, QA-2) shares its base role's line,

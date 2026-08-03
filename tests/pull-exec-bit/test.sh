@@ -148,8 +148,19 @@ fi
 #    leaves a working executable in place; continuing destroys it.
 # ===========================================================================
 inj="$TMP/inj"; mkdir -p "$inj"
+STATLOG="$TMP/stat-args"
+: >"$STATLOG"
 printf '#!/bin/sh\nexit 1\n' >"$inj/chmod"; chmod +x "$inj/chmod"
-printf '#!/bin/sh\nexit 1\n' >"$inj/stat";  chmod +x "$inj/stat"
+# RECORDS its arguments (Codex R2-F2). A shim that only `exit 1`s proves the
+# both-probes-failed OUTCOME and nothing about the probes: deleting the BSD
+# fallback entirely left the suite green. Recording lets #6b assert that each
+# form was actually attempted.
+cat >"$inj/stat" <<STATSHIM
+#!/bin/sh
+echo "\$@" >>"$STATLOG"
+exit 1
+STATSHIM
+chmod +x "$inj/stat"
 
 k="$TMP/faulty.sh"
 printf '#!/bin/sh\n# {{PROJECT_NAME}}\n' >"$k"
@@ -175,6 +186,18 @@ leftover=$(find "$TMP" -maxdepth 1 -name '.bp-subst.*' 2>/dev/null | wc -l | tr 
 [ "$leftover" = "0" ] \
   && pass "#6 no .bp-subst temp files leaked on the failure path" \
   || fail "#6 $leftover temp file(s) left beside the destination"
+
+# BOTH probe forms must be attempted (Codex R2-F2). The mutation that exposed
+# this: delete `|| m=$(stat -f '%Lp' ...)` from bp_copy_mode and the suite still
+# passed, because it only observed the final failure. A guard for a portability
+# fallback that never runs the fallback is not a guard.
+if ! grep -q -- '-c' "$STATLOG" 2>/dev/null; then
+  fail "#6b the GNU probe (stat -c) was never attempted: $(tr '\n' '|' <"$STATLOG")"
+elif ! grep -q -- '-f' "$STATLOG" 2>/dev/null; then
+  fail "#6b the BSD fallback (stat -f) was never attempted — deleting it would not fail this suite: $(tr '\n' '|' <"$STATLOG")"
+else
+  pass "#6b both the GNU and BSD mode probes are attempted before giving up"
+fi
 
 # ===========================================================================
 # 7. The temp is created BESIDE the destination, not in $TMPDIR (Codex F3).

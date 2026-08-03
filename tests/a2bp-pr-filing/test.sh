@@ -147,6 +147,22 @@ else
 fi
 
 # ===========================================================================
+# 4c. THE THIRD no-PR PATH — `gh pr create` exits ZERO with no usable URL
+#     (Codex R2-F1). It can print nothing, `null`, or a warning; the code then
+#     announced "request filed" and returned 3 on the strength of an exit status
+#     alone. Same boundary already defended for bp_file_existing_pr: when the
+#     OUTPUT is the evidence, a success status is not a substitute for it.
+# ===========================================================================
+blk=$(sed -n '/gh reported success but returned no usable PR URL/,/esac/p' "$CLI")
+if [ -z "$blk" ]; then
+  fail "#4c no guard on gh pr create's output — a zero exit with an empty or 'null' URL still reports filed"
+elif ! printf '%s' "$blk" | grep -q 'BP_RC_FAILED'; then
+  fail "#4c the no-usable-URL path does not return BP_RC_FAILED"
+else
+  pass "#4c a zero-exit gh pr create with no usable URL returns FAILED, not 'filed'"
+fi
+
+# ===========================================================================
 # 5. The caller must not treat a literal 'null' as an existing PR, even if the
 #    probe regresses. Defence in depth: #1 fixes the source, this fixes the
 #    consumer, and the bug needed BOTH to be wrong to reach the user.

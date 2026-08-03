@@ -1231,6 +1231,21 @@ cmd_a2bp() {
     return "$BP_RC_FAILED"
   }
 
+  # BUG-011 / Codex R2-F1 — THE THIRD no-PR path. `gh pr create` exiting zero is
+  # not proof a PR exists: it can print nothing, `null`, or a warning, and this
+  # code then announced "request filed" and returned 3 on the strength of an
+  # exit status alone. That is the same boundary already defended for
+  # bp_file_existing_pr — when the OUTPUT is the evidence the caller relies on,
+  # a success status does not substitute for it.
+  case "$url" in
+    https://*/pull/*|https://*/pulls/*) ;;
+    *)
+      echo "${C_YELLOW}gh reported success but returned no usable PR URL:${C_RESET}"
+      printf '%s\n' "${url:-<empty>}" | sed 's/^/  /'
+      echo "  ${C_DIM}The branch is pushed. Open a PR from $ref against $BP_CFG_BRANCH.${C_RESET}"
+      return "$BP_RC_FAILED" ;;
+  esac
+
   echo "${C_GREEN}✓ request filed:${C_RESET} $url"
   echo
   echo "${C_BOLD}This is a REQUEST, not a delivery.${C_RESET}"

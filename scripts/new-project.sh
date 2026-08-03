@@ -109,6 +109,31 @@ if ! git -C "$BLUEPRINT_ROOT" rev-parse HEAD >/dev/null 2>&1; then
 fi
 git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD | tar -x -C "$TARGET_DIR"
 
+# --- BUG-009: seed project_config_* from templates/, not from this repo's own --
+# The archive deliberately EXCLUDES the blueprint's own project_config_*.md
+# (.gitattributes export-ignore), because those describe THIS repo. The seed
+# source is templates/, copied straight from the blueprint working tree.
+#
+# Before the split those were the same files, so anything the blueprint wrote
+# about itself shipped to every new project — a monitor row describing an
+# incident in the blueprint's own stream was seeded verbatim into a derived
+# project. Same class as BUG-002, BUG-006 and BUG-010: a specific thing baked
+# into a file that travels.
+#
+# Fails LOUDLY if a template is missing: a project bootstrapped without its
+# config files looks fine until someone needs one, and the fix then is a manual
+# archaeology exercise.
+for _cfg in project_config_overview.md project_config_paths.md \
+            project_config_dod.md project_config_security.md \
+            project_config_infra.md; do
+  if [[ ! -f "$BLUEPRINT_ROOT/templates/$_cfg" ]]; then
+    echo "ERROR: $BLUEPRINT_ROOT/templates/$_cfg is missing — cannot seed the project config." >&2
+    echo "       The blueprint checkout is incomplete or predates the BUG-009 split." >&2
+    exit 1
+  fi
+  cp "$BLUEPRINT_ROOT/templates/$_cfg" "$TARGET_DIR/$_cfg"
+done
+
 # Files the blueprint deliberately does NOT track but a project still needs.
 # AGENT_ROSTER.md is gitignored per-engineer state (A-12), so it is seeded from
 # the tracked example further down rather than copied.

@@ -475,6 +475,45 @@ else
 fi
 rm -rf "$probe"
 
+# #10c — a symlink CYCLE must fail loudly, not resolve to something plausible.
+#
+# The hop bound stops a hang. On its own it then returns whatever `dirname` of a
+# still-unresolved link yields, which is a silent wrong answer — precisely the
+# failure mode Codex flagged in round 3, where `readlink -f` degrading quietly
+# was worse than the missing-file error it replaced. Trading a hang for a lie is
+# not a fix, so the exhausted case exits non-zero.
+cyc="$(mktemp -d)"
+ln -s "$cyc/b.sh" "$cyc/a.sh"
+ln -s "$cyc/a.sh" "$cyc/b.sh"
+cyc_out="$(bash "$cyc/a.sh" 2>&1)"
+cyc_rc=$?
+if [ "$cyc_rc" -eq 0 ]; then
+  fail "#10c a symlink cycle produced rc=0 and output '$cyc_out' — silently wrong"
+else
+  pass "#10c a symlink cycle fails non-zero (rc=$cyc_rc) rather than resolving"
+fi
+rm -rf "$cyc"
+
+# HONEST LIMIT: on this host the observed rc is 126 — the KERNEL/bash refused to
+# open the cyclic file, so the hop-exhaustion branch never executed. The branch
+# is therefore not covered by the case above, and pretending otherwise is the
+# same over-claim I have already made twice on this PR.
+#
+# It is still worth having: bash gets there first for direct execution, but the
+# guard is what makes the outcome ours rather than a coincidence of who checks
+# first, and ELOOP limits differ across kernels. So assert the branch EXISTS in
+# every copy rather than claiming it was exercised.
+noguard=""
+for f in scripts/agent-activity.sh $DISPATCHERS; do
+  [ -f "$ROOT/$f" ] || continue
+  grep -q 'exceeds 40 hops' "$ROOT/$f" || noguard="$noguard $f"
+done
+if [ -n "$noguard" ]; then
+  fail "#10d the hop-exhaustion guard is missing, so a cycle would resolve to a wrong root:$noguard"
+else
+  pass "#10d every copy carries an explicit hop-exhaustion guard (branch not covered — see comment)"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: A-09 — feed and dispatchers rendezvous on one per-project state dir."
   exit 0

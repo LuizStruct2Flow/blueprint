@@ -42,6 +42,10 @@ while [ -L "$_bp_self" ] && [ "$_bp_hops" -lt 40 ]; do
   case "$_bp_self" in /*) ;; *) _bp_self="$_bp_dir/$_bp_self" ;; esac
   _bp_hops=$((_bp_hops + 1))
 done
+if [ -L "$_bp_self" ]; then
+  echo "FATAL: symlink chain for $_bp_self exceeds 40 hops — cycle?" >&2
+  exit 1
+fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
 ROOT="$_bp_root"
 

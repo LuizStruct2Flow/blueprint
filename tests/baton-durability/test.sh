@@ -282,6 +282,126 @@ for _mode in env flag; do
 done
 
 # ===========================================================================
+# 6. A RUNNING watcher follows the baton when the path moves under it.
+#
+#    This PR caused the failure it fixes. Moving the live baton left every
+#    already-running dispatcher polling the OLD path — a file that no longer
+#    changes — and it never fired again, silently. I hit it live: a dispatch of
+#    this very review went nowhere, and I noticed only because the verdict never
+#    arrived and the run log was 26 minutes stale.
+#
+#    Codex's call, and the right one: fix it HERE rather than defer it, because
+#    it is a migration failure of this change and not an independent bug.
+#
+#    A POSITIVE-emission test, deliberately. The property is "a dispatch still
+#    happens", and only a test that demands the dispatch can tell a watcher that
+#    followed the move from one that is quietly polling nothing — the same
+#    lesson `agent-activity-bound` taught earlier today, where only its one
+#    positive case noticed a fixture writing a file nobody read.
+#
+#    The fixture shims `agent_signal_file()` to read a pointer file, so the path
+#    can move WHILE the watcher runs. That shims the derivation, not the watcher
+#    — what is under test is whether the watcher asks again, and it either does
+#    or it does not.
+# ===========================================================================
+build_fixture
+export STUB_MARKER="$W/stub-ran"
+
+cat > "$W/scripts/lib/state-dir.sh" <<'SHIM'
+#!/bin/sh
+# Fixture shim: resolve the baton through a pointer file so the path can move
+# under a running watcher. Same contract as the real helper.
+agent_state_dir()   { printf '%s\n' "$(cat "$BD_POINTER")"; }
+agent_signal_file() { printf '%s\n' "${AGENT_SIGNAL_FILE:-$(cat "$BD_POINTER")/signal.md}"; }
+agent_signal_journal() { printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }
+SHIM
+
+export BD_POINTER="$W/pointer"
+mkdir -p "$W/a" "$W/b"
+printf '%s\n' "$W/a" > "$BD_POINTER"
+
+cat > "$W/a/signal.md" <<'IDLE'
+| Field | Value |
+|---|---|
+| Holder | Nobody |
+| State | IDLE |
+| Task | nothing yet |
+IDLE
+
+CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=2 \
+  timeout 60 bash "$W/scripts/start-codex-signal-watch.sh" --poll 1 --once \
+  > "$W/watch6.out" 2>&1 &
+w6=$!
+
+sleep 3
+# Move the baton out from under the running watcher.
+cat > "$W/b/signal.md" <<'GO'
+| Field | Value |
+|---|---|
+| Holder | Tester |
+| State | OVER_TO_CODEX |
+| Task | the path moved under a running watcher |
+GO
+printf '%s\n' "$W/b" > "$BD_POINTER"
+
+wait "$w6" 2>/dev/null
+if [ -f "$STUB_MARKER" ]; then
+  pass "#6 a running watcher followed the baton to its new path and still dispatched"
+else
+  fail "#6 the watcher kept polling the old path and never fired — the migration hazard (output: $(tr '\n' ' ' < "$W/watch6.out" | tail -c 300))"
+fi
+rm -rf "$W"
+
+# --- #6b: an EXPLICIT path is a PIN and is never re-resolved ------------------
+#
+# Two jobs in one case. It is the non-vacuity proof for #6 — the identical
+# scenario with re-resolution disabled must NOT dispatch, so #6's green comes
+# from the refresh and not from the fixture dispatching anyway. And it is the
+# assertion that the refresh did not quietly override an operator: `--file`
+# (like AGENT_SIGNAL_FILE set before startup) means "watch exactly this", and a
+# watcher that wandered off it would be a worse bug than the one being fixed.
+build_fixture
+export STUB_MARKER="$W/stub-ran"
+cat > "$W/scripts/lib/state-dir.sh" <<'SHIM'
+#!/bin/sh
+agent_state_dir()   { printf '%s\n' "$(cat "$BD_POINTER")"; }
+agent_signal_file() { printf '%s\n' "${AGENT_SIGNAL_FILE:-$(cat "$BD_POINTER")/signal.md}"; }
+agent_signal_journal() { printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }
+SHIM
+export BD_POINTER="$W/pointer"
+mkdir -p "$W/a" "$W/b"
+printf '%s\n' "$W/a" > "$BD_POINTER"
+cat > "$W/a/signal.md" <<'IDLE'
+| Field | Value |
+|---|---|
+| Holder | Nobody |
+| State | IDLE |
+| Task | nothing yet |
+IDLE
+
+CODEX_BIN="$W/stub-codex" AGENT_SIGNAL_SETTLE=2 \
+  timeout 25 bash "$W/scripts/start-codex-signal-watch.sh" \
+  --poll 1 --once --file "$W/a/signal.md" > "$W/watch6b.out" 2>&1 &
+w6b=$!
+sleep 3
+cat > "$W/b/signal.md" <<'GO'
+| Field | Value |
+|---|---|
+| Holder | Tester |
+| State | OVER_TO_CODEX |
+| Task | pinned watcher must ignore this |
+GO
+printf '%s\n' "$W/b" > "$BD_POINTER"
+wait "$w6b" 2>/dev/null
+
+if [ -f "$STUB_MARKER" ]; then
+  fail "#6b a --file pin was overridden by re-resolution — the watcher wandered off the path the operator named"
+else
+  pass "#6b an explicit --file pin is never re-resolved (and #6 is therefore not vacuous)"
+fi
+rm -rf "$W"
+
+# ===========================================================================
 # 5. First creation is atomic — the canonical path never shows a default baton.
 #
 #    Codex F4. The seed used to be written straight to $SIGNAL and replaced a

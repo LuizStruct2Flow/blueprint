@@ -121,6 +121,12 @@ ROOT="$(repo_root)"
 # helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
 # and — worse, before the split — a file git rewrites under a live dispatch.
 SIGNAL_FILE="$(agent_signal_file "$ROOT")"
+# Was the path PINNED by an operator, or merely derived? Captured before any of
+# our own exports, because trigger_if_needed exports AGENT_SIGNAL_FILE for the
+# wake command and that would otherwise look like an operator override on the
+# next read — the watcher would pin itself to its own value.
+SIGNAL_FILE_EXPLICIT=0
+[[ -n "${AGENT_SIGNAL_FILE:-}" ]] && SIGNAL_FILE_EXPLICIT=1
 TARGET_STATE="OVER_TO_CODEX"
 POLL_SECONDS=2
 LOG_FILE="$(agent_state_dir "$ROOT")/signal.log"
@@ -131,6 +137,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --file)
       SIGNAL_FILE="$2"
+      SIGNAL_FILE_EXPLICIT=1
       shift 2
       ;;
     --state)
@@ -251,8 +258,46 @@ trigger_if_needed() {
   return 0
 }
 
+# BUG-019 migration hazard — re-resolve the baton path EVERY TICK.
+#
+# `SIGNAL_FILE` used to be resolved once at startup. When BUG-019 moved the live
+# baton, every already-running watcher kept polling the OLD path — a file that
+# no longer changes — and never fired again. It failed SILENTLY: no error, no
+# log line, just a watcher patiently polling a file nobody writes. Found live,
+# by a dispatch that went nowhere and a verdict that never arrived.
+#
+# The answer is not "restart your watchers after upgrading". That is the shape
+# this repo has now rejected five times (BUG-004's "flip the mic last",
+# BUG-014's fixture isolation, the no-chaining rule that needed a hook,
+# BUG-020's baked RUN_LOG, this), and the excuse that it is a one-time migration
+# does not hold — the failure is silent either way, and "only during an upgrade"
+# describes exactly the moment nobody is watching for it.
+#
+# An EXPLICIT path is never re-resolved: `--file`, or AGENT_SIGNAL_FILE set by
+# the operator before startup, is a pin and stays pinned. The distinction is
+# captured at startup rather than inferred later, because this process exports
+# AGENT_SIGNAL_FILE itself when dispatching, and would otherwise mistake its own
+# export for an operator's intent.
+refresh_signal_file() {
+  [[ "$SIGNAL_FILE_EXPLICIT" -eq 1 ]] && return 0
+  local now_file
+  # Computed with our own export cleared, for the same reason.
+  now_file="$( AGENT_SIGNAL_FILE=; agent_signal_file "$ROOT" )"
+  [[ -n "$now_file" && "$now_file" != "$SIGNAL_FILE" ]] || return 0
+  printf '[%s] signal path moved: %s -> %s\n' \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$SIGNAL_FILE" "$now_file" | tee -a "$LOG_FILE"
+  SIGNAL_FILE="$now_file"
+  # The pending settle state belongs to the OLD file's content; carrying it over
+  # would compare keys across two different batons.
+  last_trigger_key=""
+  pending_key=""
+  pending_since=0
+  last_mtime=""
+}
+
 while true; do
-  if trigger_if_needed && [[ "$ONCE" -eq 1 ]]; then
+  refresh_signal_file
+  if [[ -f "$SIGNAL_FILE" ]] && trigger_if_needed && [[ "$ONCE" -eq 1 ]]; then
     exit 0
   fi
 

@@ -35,18 +35,39 @@ pass() { echo "  ok — $*"; }
 RC_OK=0; RC_PENDING=3; RC_BLOCKED=4; RC_FAILED=5; RC_NOTHING=6
 
 # --- Codex F1: make "no gh" true rather than assumed -------------------------
-# `command -v gh` must FAIL, so a shim is useless here — a shim is found. The
-# only honest way is a PATH with no gh on it at all. Built by removing every
-# directory that currently contains one.
-NO_GH_PATH="$(
-  printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
-    [ -n "$d" ] || continue
-    [ -x "$d/gh" ] && continue
-    printf '%s:' "$d"
+# `command -v gh` must FAIL, so a shim is useless — a shim is found.
+#
+# My first attempt removed every PATH DIRECTORY containing a gh binary. That
+# passed here (gh lives alone in ~/.local/bin) and exploded in CI with exit 127,
+# because there gh shares /usr/bin with git, sed and everything else — so it
+# deleted the entire toolchain. Same over-stripping mistake as PATH=/nonexistent
+# in the guard suite, and host-dependent in the worst way: green locally, broken
+# on the machine that matters.
+#
+# A symlink farm of every executable EXCEPT gh is deterministic on any host: the
+# toolchain is complete, and the one binary under test is genuinely absent.
+NO_GH_DIR="$WORK/nogh-bin"
+mkdir -p "$NO_GH_DIR"
+printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+  [ -d "$d" ] || continue
+  for exe in "$d"/*; do
+    [ -f "$exe" ] || continue
+    [ -x "$exe" ] || continue
+    n="${exe##*/}"
+    [ "$n" = "gh" ] && continue
+    [ -e "$NO_GH_DIR/$n" ] || ln -s "$exe" "$NO_GH_DIR/$n" 2>/dev/null
   done
-)"
+done
+NO_GH_PATH="$NO_GH_DIR"
+
 if PATH="$NO_GH_PATH" command -v gh >/dev/null 2>&1; then
   echo "FAIL: could not construct a gh-free PATH; the no-gh cases would be vacuous"
+  exit 1
+fi
+# Non-vacuity the other way: the toolchain must still WORK, or a 127 would be
+# mistaken for the behaviour under test — which is exactly what CI caught.
+if ! PATH="$NO_GH_PATH" git --version >/dev/null 2>&1; then
+  echo "FAIL: the gh-free PATH cannot run git; the no-gh cases would test nothing"
   exit 1
 fi
 

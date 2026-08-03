@@ -150,6 +150,8 @@ jobs:
           bash tests/no-chain-guard/test.sh
           bash tests/pull-behaviour/test.sh
           bash tests/git-isolation/test.sh
+          bash tests/a2bp-pr-filing/test.sh
+          bash tests/pull-exec-bit/test.sh
           bash tests/drift-in-blueprint/test.sh
           bash tests/a2bp-e2e/test.sh
           bash tests/marker-merge/test.sh

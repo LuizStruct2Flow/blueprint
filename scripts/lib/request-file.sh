@@ -112,11 +112,18 @@ bp_file_push() {
 # Queried for ANY state, not just open. Re-filing a request the blueprint owner
 # has already closed is worse than failing: it re-spends the reviewer attention
 # this design exists to protect, and reads as though the decision was not seen.
+# BUG-011 — `.[0] // empty` is load-bearing. With a bare `.[0]`, an EMPTY list
+# yields null, and jq interpolates null into a string as the literal "null" —
+# so this printed `null<TAB>null` and the caller read a non-existent PR as an
+# existing one, reporting a request as filed when none was. `// empty` makes jq
+# emit nothing at all for an absent element, which is what "no PR" must look
+# like. The interpolation is the trap: `.[0].url` alone would have been empty,
+# but inside "\(…)" null becomes text.
 bp_file_existing_pr() {
   local slug="$1" ref="$2"
   command -v gh >/dev/null 2>&1 || return 1
   gh pr list --repo "$slug" --head "$ref" --state all \
-     --json state,url --jq '.[0] | "\(.state)\t\(.url)"' 2>/dev/null
+     --json state,url --jq '.[0] // empty | "\(.state)\t\(.url)"' 2>/dev/null
 }
 
 # --- bp_file_pr_body PROJECT BASE REMOTE BRANCH SPEC... ---------------------

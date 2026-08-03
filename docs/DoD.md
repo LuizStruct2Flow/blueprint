@@ -25,14 +25,14 @@ checklist you read before every handoff. Both agents are bound by it.
 
 ```
 docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
-              (promote)        (push to main)              (founder explicitly accepts)
+              (promote)        (PR merged to main)         (founder explicitly accepts)
 ```
 
 | State | What lives here | How items leave |
 |---|---|---|
 | `backlog/` | **Parked** work. Bugs, features, plans, decision records that exist but are not active. Every item carries a state: `KEEP` (will be pulled), `DEFER` (re-open trigger documented), or `OBSOLETE` (audit trail before deletion). | **Promotion** (move row / `PLAN-*.md` / folder into `doing/`) or **cancellation** (delete + one-line pointer in `docs/config/findings.md`). |
-| `doing/` | Active work being implemented. `BUGS.md` rows, `PLAN-*.md` files, `HANDOVER.md`, `CHANGES.md` rows for non-bug changes in flight. | The push to `main` that ships the fix/feature. |
-| `waiting-acceptance/` | Pushed to `main`, awaiting founder acceptance testing. Bug rows in `BUGS.md`, behavior changes in `CHANGES.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
+| `doing/` | Active work being implemented. `BUGS.md` rows, `PLAN-*.md` files, `HANDOVER.md`, `CHANGES.md` rows for non-bug changes in flight. | **The PR merging to `main`** — not the branch push. An item whose PR is still open is waiting on review, not on the founder, and stays here. |
+| `waiting-acceptance/` | **Merged to `main`**, awaiting founder acceptance testing. Bug rows in `BUGS.md`, behavior changes in `CHANGES.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
 | `done/` | Founder-accepted, fully delivered work. | Items don't leave; this is the source of truth for "what we have delivered". |
 
 **Reopen path**: if the founder rejects acceptance, finds a regression, or
@@ -43,7 +43,10 @@ in the same handoff turn.
 - `backlog/` is **not** a graveyard — every parked row carries an explicit
   re-open trigger or an OBSOLETE marker. Rows without one get groomed out
   at the next grooming pass.
-- `doing/` is not a graveyard either — if it's pushed, move it.
+- `doing/` is not a graveyard either — if its PR has **merged**, move it. Check
+  after every merge, not after every push: with the PR rule in force those are
+  different moments, and treating them as one leaves finished work looking
+  untouched.
 - `waiting-acceptance/` is the only path into `done/`. Never promote
   straight from `doing/` to `done/` (and never from `backlog/`).
 - `done/` is founder-only — agents never auto-promote.
@@ -62,7 +65,9 @@ Every bug — minor or major — follows this:
 1. **Sequential numbering**: `BUG-001`, `BUG-002`, … Don't reuse numbers.
 2. **Row in `docs/{state}/BUGS.md`** matching the lifecycle (§1).
    The bug exists in exactly **one** of the three BUGS.md files at any
-   time. After pushing the fix, move it; don't leave a copy in `doing/`.
+   time. Once the fix is ON `main` — which now means once its PR has
+   merged, not merely once a branch is pushed — move it; don't leave a
+   copy in `doing/`.
 3. **Numbered regression test** with the bug number in the test name:
    ```js
    it('BUG-007: <one-line summary>', () => { … })

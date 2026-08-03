@@ -41,23 +41,48 @@
 #      no guard AND prompts on everything, and those two compound.
 #
 # Contract: read the tool payload on stdin, exit 0 to allow, exit 2 to block
-# with the reason on stderr. Never fail open on a parse problem — but never
-# block a tool that is not Bash either.
+# with the reason on stderr.
+#
+# FAILS CLOSED (Codex F4). The first version said "never fail open on a parse
+# problem" and then did exactly that three times: missing `jq` exited 0, and
+# both `jq` calls discarded their errors into empty strings that also exited 0.
+# Verified: `printf '{bad json' | bash scripts/no-chain-guard.sh` returned 0,
+# and so did a valid chained payload under `PATH=/nonexistent`.
+#
+# That is not degraded logging. This hook exists because a compound command can
+# inherit an early allowlist match and defeat the deny list; silently disabling
+# it recreates the exact condition it was added to prevent, and does so in the
+# circumstances where something is already wrong. A tool call refused with an
+# actionable message costs one retry; a guard that evaporates costs the control.
+#
+# A NON-BASH tool is still allowed — but only after its identity was parsed
+# successfully. "I could not tell what tool this is" is not "this is not Bash".
 
 set -uo pipefail
 
+die_closed() {
+  printf 'BLOCKED (no-chain-guard): %s\n' "$1" >&2
+  printf 'This hook fails closed. Fix the cause rather than removing the guard;\n' >&2
+  printf 'it is what keeps a compound command from inheriting an allowlist match.\n' >&2
+  exit 2
+}
+
 payload="$(cat 2>/dev/null || true)"
+[ -n "$payload" ] || die_closed "empty tool payload on stdin"
 
-# Only Bash is in scope. Without jq, fail OPEN: a missing dependency must not
-# make every tool call unusable, and the rule it enforces is a hygiene rule, not
-# a security boundary.
-command -v jq >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 \
+  || die_closed "jq is not on PATH, so the payload cannot be parsed"
 
-tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null)"
+tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null)" \
+  || die_closed "payload is not valid JSON"
+[ -n "$tool" ] || die_closed "payload has no .tool_name"
+
+# Identity parsed. Anything that is not Bash is out of scope and allowed.
 [ "$tool" = "Bash" ] || exit 0
 
-cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null)"
-[ -n "$cmd" ] || exit 0
+cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null)" \
+  || die_closed "Bash payload is not valid JSON"
+[ -n "$cmd" ] || die_closed "Bash payload has no .tool_input.command"
 
 # `&&`, `||`, or `;` anywhere in the command string. Deliberately naive: the
 # peer stream's experience is that a cleverer parser is not worth it, because

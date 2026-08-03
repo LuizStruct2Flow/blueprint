@@ -239,11 +239,26 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
    `doing/BUGS.md`, major-bug / feature plans as `doing/PLAN-*.md`,
    multi-file epics in their own folder, and the canonical
    `doing/HANDOVER.md` resume doc.
-2. **After pushing** the fix/feature to `main` → move to **`waiting-acceptance/`**:
+2. **Once the fix/feature is ON `main`** → move to **`waiting-acceptance/`**:
    - Move the bug row from `doing/BUGS.md` to `waiting-acceptance/BUGS.md`.
    - Move the `PLAN-*.md` file from `doing/` to `waiting-acceptance/`.
    - Behaviour changes (no underlying defect) → row in
      `waiting-acceptance/CHANGES.md`.
+
+   **The trigger is the MERGE, not the push.** This used to say "after
+   pushing", and while pushing meant landing on `main` the two were the same
+   event. §"Never push to the blueprint's `main`" separated them: you now push a
+   branch, and the work reaches `main` only when its PR merges. An item whose PR
+   is still open belongs in `doing/` — it is not waiting on the founder, it is
+   waiting on review.
+
+   This is not pedantry about wording; it caused a real failure the day the PR
+   rule landed. Five fixed bugs sat in `doing/` across an afternoon of pushing
+   while `waiting-acceptance/` stayed empty, so the founder — correctly — read
+   the folders as "nothing has been finished". **When a workflow changes,
+   the lifecycle triggers that referenced the old workflow have to be re-read;
+   they do not fail loudly, they just quietly describe something that no longer
+   happens.**
 3. **User tests and confirms** (explicit signal like "BUG-0XX is done" /
    "accept item Y") → move from `waiting-acceptance/` to `done/`. Claude
    does NOT auto-promote to `done/`.

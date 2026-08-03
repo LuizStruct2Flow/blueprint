@@ -327,6 +327,26 @@ else
   pipe_skip "pull-exec-bit · BUG-008" "suite absent"
 fi
 
+# BUG-006 — a managed script must carry no project-specific env namespace.
+# `LWA_FEED_*` was one project's initials in a file that ships to every project,
+# so every derived project inherited knobs named after somebody else's repo. The
+# guard is generic on purpose: this repo has now found four instances of "a
+# specific thing baked into a travelling file" by hand (BUG-002, 006, 009, 010).
+# ~0.3s.
+if [ -f tests/env-namespace/test.sh ]; then
+  _st_env_namespace(){
+    bash tests/env-namespace/test.sh || {
+      echo "❌ tests/env-namespace/test.sh failed (BUG-006)."
+      echo "   A managed script defines an env var outside the generic"
+      echo "   namespaces, or duplicates the shared feed appender."
+      return 1
+    }
+  }
+  pipe_stage "env-namespace · BUG-006" _st_env_namespace
+else
+  pipe_skip "env-namespace · BUG-006" "suite absent"
+fi
+
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02
 # (founder decision, BUG-005), and the reasoning is kept because it is a clean

@@ -77,4 +77,5 @@ fails a test instead of passing unnoticed.
 | `pull-behaviour` | both | A partial pull claims a full sync so drift reports zero commits behind, and pull dies with no TTY (BUG-016/BUG-018) | Guards the sync record every project trusts; a false "in sync" is invisible until someone diffs by hand |
 | `a2bp-pr-filing` | both | `a2bp` reports a request as filed when no PR was opened (BUG-011) | Guards the only sanctioned path for improvements to reach the blueprint; an exit code that asserts success while doing nothing is undetectable downstream |
 | `pull-exec-bit` | both | A pulled hook comes out non-executable, so the gate is armed but silently never runs (BUG-008) | Guards whether the gate runs at all in every project that pulls; git skips a non-executable hook without a word |
+| `env-namespace` | both | A managed script carries one project's env namespace to every other project (BUG-006) | Same class as BUG-002/009/010 — a specific thing baked into a file that travels; found four times by hand before this guard existed |
 | `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above |

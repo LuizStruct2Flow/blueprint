@@ -44,7 +44,7 @@ The 2026-07-29 QA pass dispositioned everything before this:
   folder travelled with its row, so the Codex review trail sits beside the
   thing it reviewed.
 - **A-22 REJECTED** and reopened as **BUG-004** in
-  [`../doing/BUG-004-gate-arming/`](../doing/BUG-004-gate-arming/).
+  [`../done/BUG-004-gate-arming/`](../done/BUG-004-gate-arming/).
 
 The verdicts and their evidence are in
 [`../done/ACCEPTANCE-JESKO-2026-07-29.md`](../done/ACCEPTANCE-JESKO-2026-07-29.md).

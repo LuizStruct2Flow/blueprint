@@ -46,7 +46,7 @@ than inspection. Records in [`../done/`](../done/):
 **A-02** is closed (scanners installed).
 
 **A-22 was REJECTED on 2026-07-29** and is reopened in
-[`BUG-004-gate-arming/`](BUG-004-gate-arming/) — see below.
+[`../done/BUG-004-gate-arming/`](../done/BUG-004-gate-arming/) — see below.
 
 > **Jesko's explicit caveat, recorded so it is not lost:** accepting these seven
 > is **not** acceptance of **A-22**. The gate that protects them is armed on this

@@ -178,6 +178,30 @@ else
   pass "#3 all $checked per-item artefact(s) sit with their row"
 fi
 
+# ===========================================================================
+# 4. No lifecycle table carries an all-empty placeholder row.
+#
+#    `| | | | |` was shipped as a "stub" in backlog/BACKLOG.md and
+#    backlog/BUGS.md. It renders as a REAL row, so each file claimed one parked
+#    item that did not exist. A header with nothing under it already says
+#    "none"; a placeholder row says something false.
+#
+#    Small, but it is the session's whole theme: a record that states something
+#    untrue costs more than an absent one, because it is believed.
+# ===========================================================================
+phantom=""
+for f in $(find "$DOCS" -name 'BUGS.md' -o -name 'BACKLOG.md' -o -name 'CHANGES.md' | sort); do
+  # A row of nothing but pipes and whitespace — but NOT the |---|---| separator.
+  if grep -qE '^\|([[:space:]]*\|)+[[:space:]]*$' "$f"; then
+    phantom="$phantom ${f#"$ROOT/"}"
+  fi
+done
+if [ -n "$phantom" ]; then
+  fail "#4 empty placeholder row(s) — the table claims an item that does not exist:$phantom"
+else
+  pass "#4 no lifecycle table carries a phantom placeholder row"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: the acceptance index and the waiting rows agree on membership."
   exit 0

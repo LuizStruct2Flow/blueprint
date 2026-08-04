@@ -162,6 +162,9 @@ MANAGED_FILES=(
   # .githooks/ — generic gate
   ".githooks/pre-push"
   ".githooks/pre-push-project.example"
+  # commit-msg: every commit names its backlog item (DoD §1b rule 1). Generic —
+  # the rule applies to every project, blueprint or derived.
+  ".githooks/commit-msg"
 
   # gitleaks generic false-positive allowlist (working-tree scans only;
   # staged-scan gate runs the full default rule set)

@@ -131,6 +131,20 @@ else
   pipe_skip "state-dir · A-09" "suite absent"
 fi
 
+# TASK-002 — every commit names its backlog item (DoD §1b rule 1). ~0.3s.
+if [ -f tests/commit-msg-gate/test.sh ]; then
+  _st_cmsg(){
+    bash tests/commit-msg-gate/test.sh || {
+      echo "❌ tests/commit-msg-gate/test.sh failed (TASK-002)."
+      echo "   The commit-msg hook must reject a subject that names no item."
+      return 1
+    }
+  }
+  pipe_stage "commit-msg-gate · TASK-002" _st_cmsg
+else
+  pipe_skip "commit-msg-gate · TASK-002" "suite absent"
+fi
+
 # Relative links under docs/ must resolve. Files move through the lifecycle
 # constantly and every move breaks the references pointing at the old location —
 # 13 were broken on 2026-08-03, one of them wrong across two relocations. ~0.2s.

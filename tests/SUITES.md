@@ -61,6 +61,7 @@ fails a test instead of passing unnoticed.
 | `state-dir` | both | Cross-project log contamination returns (A-09) | Cheap, and guards a mechanism every project shares |
 | `baton-durability` | both | A branch operation silently kills a live dispatch (BUG-019) | Every change here is a branch, which is the condition that made the bug routine; a race needs real elapsed time to test, and that time buys the only assertion that distinguishes a lost dispatch from a slow one |
 | `lifecycle-index` | both | A fix lands, is never listed as waiting, and is never accepted — invisible to the founder | Cheap, and it guards the one document the acceptance decision is made from; it caught nine missing items on its first run |
+| `doc-links` | both | A doc moves, references keep pointing at the old path, and readers hit dead links until someone opens one | Cheap, and lifecycle moves break links constantly by design; 13 were already broken when it was written, one wrong across two relocations |
 | `roster` | both | Persona identity stops following the roster (BUG-010) | Ships to every project; the live-supervisor case runs here |
 | `pre-push-secrets` | both | Secrets ride out in commits nothing scanned (A-03) | The repo is public — a pushed secret is world-readable before CI starts |
 | `a2bp-contamination` | both | One project's host paths and name reach every other project (BUG-002, A-09) | Guards the door both contamination incidents came through |

@@ -3,9 +3,11 @@
 The source of truth for "what has been delivered" (not "what has been merged").
 Items only land here on explicit founder acceptance.
 
-`CHANGES.md` holds the chronological log of accepted forward features (newest
-at top). `BUGS.md` holds accepted bug fixes (also newest at top). Multi-file
-epics (folders) sit alongside.
+`BUGS.md` holds accepted bug fixes (newest at top) and is always here.
+`CHANGES.md` — the chronological log of accepted forward features — is
+created on first use; its absence means none has been accepted yet.
+Multi-file epics (folders) sit alongside, and `tests/lifecycle-index/` #3
+fails the push if one is stranded in a folder its row has left.
 
 Items here are **decision records** — they document the final shipped form
 and travel with their plans, mockups, and review artefacts so future agents

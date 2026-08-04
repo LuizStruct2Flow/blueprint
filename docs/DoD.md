@@ -58,6 +58,114 @@ in an explicit **grooming pass** — a founder-led session that triages
 parked items and pulls a handful into `doing/` (see storm2flow's
 `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent for the format).
 
+## §1b Work intake — the path every change takes
+
+Eight rules. They are sequential: each step is the gate to the next.
+
+**1. All work refers to a backlog item.** A `TASK-`, `FEATURE-` or `BUG-`
+number, with a row in [`docs/backlog/`](../docs/backlog/). **No exceptions** —
+including a defect you trip over mid-session. "I was already in the file" is how
+work becomes untraceable, and it is exactly what happened the day this rule was
+written: two bugs found live were registered straight into `doing/`, which left
+no record that they had ever been triaged rather than merely noticed.
+
+**2. Promote it to `doing/` BEFORE starting.** Not after, not at commit time.
+The folder answers "what is being worked on right now", and it can only answer
+that if the move precedes the work. If `doing/BACKLOG.md` does not exist yet,
+this promotion creates it.
+
+**3. Implement, and commit.** Product and runtime bug fixes land as two commits
+— failing reproducer first, then the fix (§2). Commit messages carry the item
+number and say *why* (`CLAUDE.md` §"Team Workflow").
+
+**4. A review by an agent of the OTHER provider.** Work implemented by one
+provider is reviewed by a different one — Claude Code's work reviewed by Codex,
+Codex's by Claude Code. **The item does not move on without it.**
+
+Why cross-provider and not merely "someone else": a reviewer sharing the
+implementer's blind spots confirms rather than checks. This is not theoretical
+for this repo — across two changes the cross-provider reviewer raised fifteen
+findings, every one real, including four the implementer had looked straight at.
+Two of them were guards that passed because they watched the wrong thing, which
+is precisely the error the author cannot see by definition.
+
+**5. All gates green.** The pre-push gate must pass in full — no demotions, no
+`--no-verify`, no "CI will catch it" (§4).
+
+**6. Land it.** The landing step is the one thing that differs by repo type, and
+getting it wrong is a known failure mode in both directions:
+
+| Repo | How it lands |
+|---|---|
+| **Product / derived project** | Trunk-based: push to `main`. No branches. |
+| **The blueprint itself** | Branch + pull request + merge. **Never** a direct push to `main`. |
+
+The asymmetry is deliberate. The blueprint's `main` is what every derived
+project pulls from, so anything landing there fans out to all of them — see
+`CLAUDE.md` §"Never push to the blueprint's `main`", which also lists the three
+arguments agents have used to talk themselves past it.
+
+**7. Landing moves it to `waiting-acceptance/`.** For a product repo that is the
+push; for the blueprint it is the **merge**, not the branch push. An item whose
+PR is still open is waiting on review, not on the founder, and stays in `doing/`.
+
+**8. Artefacts always travel with their parent item.** Plans, review documents,
+mockups, spike code, outputs — the whole folder moves through
+`backlog/` → `doing/` → `waiting-acceptance/` → `done/` together, in the same
+commit as the row.
+
+This is the half that gets forgotten, because a row is one line and a folder is
+not: on 2026-08-03 fourteen rows were promoted to `done/` and every one of their
+folders was left behind, spotted only by a human reading a directory listing.
+[`tests/lifecycle-index/`](../tests/lifecycle-index/test.sh) #3 now fails the
+push instead.
+
+## §1c Lifecycle management pass (`lcm`)
+
+When the founder says `lcm` (or "lifecycle management"), reconcile every
+lifecycle folder against reality — a read-only audit plus the non-gated moves it
+implies. Walk this checklist:
+
+1. **Each item is in the right folder for its TRUE state.** A row/plan marked
+   "defer" or "someday" stranded in `doing/` belongs in `backlog/` (with a
+   re-open trigger). A landed deliverable belongs in `waiting-acceptance/`, and
+   **its plan/folder moves with it** (§1b rule 8).
+2. **The live baton matches the folders.** If the `Task` field claims artefacts
+   are waiting, `ls docs/waiting-acceptance/` must show them.
+3. **`backlog/` carries triggers.** Every parked item has a re-open trigger or
+   an `OBSOLETE` marker; flag any that don't.
+4. **`done/` is founder-accepted only.** Nothing auto-promoted there.
+5. **The lifecycle DOCUMENTS say something true** — not merely that membership
+   is right. This point exists because points 1–4 were the whole checklist on
+   2026-08-03 and three of that day's four findings fell outside them:
+
+   - `waiting-acceptance/INDEX.md` listed **5** items while `BUGS.md` held
+     **14** — nine fixes invisible to the only person who can accept them.
+   - `doing/BUGS.md` carried status prose that had gone false, including a line
+     telling the next session a decision was still pending on an item accepted
+     that morning.
+   - Tables carried empty placeholder rows, which render as real rows and so
+     claimed items that did not exist; and thirteen relative links pointed at
+     files that had moved, one wrong across two relocations.
+
+   Every one is the same defect: **two records of one fact, kept in step by
+   memory.** Folder membership is authoritative and cannot drift from itself;
+   prose describing it can only drift. So: do not narrate status where the
+   folders already answer it, and where a second record is genuinely wanted
+   (the per-item "what to test" prose an index carries, which a bug row cannot),
+   a test must hold the two together.
+
+   Enforced by [`tests/lifecycle-index/`](../tests/lifecycle-index/test.sh) and
+   [`tests/doc-links/`](../tests/doc-links/test.sh) rather than by remembering —
+   the same conclusion this repo reached for the pre-push gate, fixture
+   isolation and command chaining.
+
+The pass performs the **non-founder-gated** moves itself (`doing/`↔`backlog/`,
+`doing/`→`waiting-acceptance/` on landing) and only *surfaces* the gated ones
+(→`done/` on acceptance, reopen) for the founder to confirm. It is the
+between-grooming hygiene check; grooming is the heavier `backlog/`↔`doing/`
+re-prioritisation session.
+
 ## §2 Bug management
 
 Every bug — minor or major — follows this:

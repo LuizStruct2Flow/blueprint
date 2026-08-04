@@ -293,26 +293,17 @@ in the next session — it's `doing/`. The grooming pass (an explicit founder
 session — see storm2flow's `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent)
 is what moves items between them.
 
-**Lifecycle management pass (`lcm`):** when the founder says `lcm` (or
-"lifecycle management"), reconcile every lifecycle folder against reality —
-a read-only audit plus the non-gated moves it implies. Walk this checklist:
+**Work intake and the lifecycle management pass (`lcm`) are specified in
+[docs/DoD.md](docs/DoD.md) §1b and §1c** — the eight rules every change follows
+(backlog item first, promote before starting, cross-provider review, gates,
+land, artefacts travel with their parent) and the `lcm` checklist the founder
+triggers by saying `lcm`.
 
-1. **Each item is in the right folder for its TRUE state.** A row/plan
-   marked "defer" or "someday" stranded in `doing/` belongs in `backlog/`
-   (with a re-open trigger). A deliverable pushed to `main` belongs in
-   `waiting-acceptance/`, and **its plan/folder moves with it** (plans
-   travel with the work — see §"Major Bug Process").
-2. **The live baton matches the folders.** If the `Task` field claims
-   artefacts are waiting, `ls docs/waiting-acceptance/` must show them.
-3. **`backlog/` carries triggers.** Every parked item has a re-open
-   trigger or an `OBSOLETE` marker; flag any that don't.
-4. **`done/` is user-accepted only.** Nothing auto-promoted there.
-
-The pass performs the **non-founder-gated** moves itself (`doing/`↔`backlog/`,
-`doing/`→`waiting-acceptance/` on push) and only *surfaces* the gated ones
-(→`done/` on acceptance, reopen) for the founder to confirm. It is the
-between-grooming hygiene check; grooming is the heavier `backlog/`↔`doing/`
-re-prioritisation session.
+They live there rather than here for the same reason the handoff checklist does:
+this file states the rules, the DoD is the operational gate that enforces them.
+The `lcm` checklist in particular belongs beside the lifecycle it audits (§1) —
+it was in this file while the invariants it checks were in that one, and it
+drifted to cover less than it needed to.
 
 ## Bug Management
 

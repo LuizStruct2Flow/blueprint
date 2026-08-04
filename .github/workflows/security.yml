@@ -145,6 +145,7 @@ jobs:
           bash tests/lifecycle-index/test.sh
           bash tests/doc-links/test.sh
           bash tests/commit-msg-gate/test.sh
+          bash tests/branch-guard/test.sh
           bash tests/roster/test.sh
           bash tests/pipeline/test.sh
           # Added 2026-08-02 — tests/manifest found these running NOWHERE.

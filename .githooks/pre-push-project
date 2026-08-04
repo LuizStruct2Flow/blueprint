@@ -145,6 +145,22 @@ else
   pipe_skip "commit-msg-gate · TASK-002" "suite absent"
 fi
 
+# TASK-003 — no commit or push on the BLUEPRINT's main, and the guard stays
+# INERT in derived projects, which are trunk-based. ~0.5s.
+if [ -f tests/branch-guard/test.sh ]; then
+  _st_bguard(){
+    bash tests/branch-guard/test.sh || {
+      echo "❌ tests/branch-guard/test.sh failed (TASK-003)."
+      echo "   Either the blueprint's main is open, or the guard fires in derived"
+      echo "   projects — which would break every trunk-based project that pulls it."
+      return 1
+    }
+  }
+  pipe_stage "branch-guard · TASK-003" _st_bguard
+else
+  pipe_skip "branch-guard · TASK-003" "suite absent"
+fi
+
 # Relative links under docs/ must resolve. Files move through the lifecycle
 # constantly and every move breaks the references pointing at the old location —
 # 13 were broken on 2026-08-03, one of them wrong across two relocations. ~0.2s.

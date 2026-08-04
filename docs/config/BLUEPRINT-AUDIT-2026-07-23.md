@@ -82,15 +82,15 @@ than inspection. Records in [`../done/`](../done/):
 
 **STILL OPEN — everything else in the register below.** The live ones:
 
-- **A-22** → tracked as **[BUG-004](BUGS.md)**. **REOPENED (rejected at
+- **A-22** → tracked as **[BUG-004](../done/BUGS.md)**. **REOPENED (rejected at
   acceptance).** Needs a founder decision on server-side enforcement (the option
   costed as **A-37** §4c), not another local mechanism. Details above.
-- **A-08** → tracked as **[BUG-006](BUGS.md)**. **NEXT.** `LWA_FEED_*` in
+- **A-08** → tracked as **[BUG-006](../done/BUGS.md)**. **NEXT.** `LWA_FEED_*` in
   `scripts/log-activity.sh`: BUG-002's contamination in env-var-namespace form.
 
 Two findings raised on 2026-07-30 do **not** belong to this audit and were
 briefly misfiled into its numbering as `A-38`/`A-39`. They are
-**[BUG-005](BUGS.md)** — the pre-push gate at its 30 s ceiling, and the coverage
+**[BUG-005](../done/BUGS.md)** — the pre-push gate at its 30 s ceiling, and the coverage
 it has already displaced.
 
 Closed in the "guard the pipe" order, kept here for traceability:

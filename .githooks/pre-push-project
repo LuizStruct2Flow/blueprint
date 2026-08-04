@@ -131,6 +131,22 @@ else
   pipe_skip "state-dir · A-09" "suite absent"
 fi
 
+# Relative links under docs/ must resolve. Files move through the lifecycle
+# constantly and every move breaks the references pointing at the old location —
+# 13 were broken on 2026-08-03, one of them wrong across two relocations. ~0.2s.
+if [ -f tests/doc-links/test.sh ]; then
+  _st_doclinks(){
+    bash tests/doc-links/test.sh || {
+      echo "❌ tests/doc-links/test.sh failed."
+      echo "   A doc moved and something still points at where it used to be."
+      return 1
+    }
+  }
+  pipe_stage "doc-links" _st_doclinks
+else
+  pipe_skip "doc-links" "suite absent"
+fi
+
 # The acceptance INDEX must list every item actually waiting. Found by an lcm
 # pass on 2026-08-03: the index listed 5 while BUGS.md held 14, so nine fixes
 # were invisible to the only person who can accept them. Two records of one

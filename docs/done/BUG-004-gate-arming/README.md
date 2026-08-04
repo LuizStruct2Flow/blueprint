@@ -16,7 +16,7 @@ nowhere.
 
 So: **`BUG-004` is the work item. `A-22` is the finding it came from.** Same
 thing, two namespaces, and only the first one is a lifecycle ID. Full rule in
-[`../BLUEPRINT-AUDIT-2026-07-23.md`](../BLUEPRINT-AUDIT-2026-07-23.md).
+[`../BLUEPRINT-AUDIT-2026-07-23.md`](../../config/BLUEPRINT-AUDIT-2026-07-23.md).
 
 ## The short version
 

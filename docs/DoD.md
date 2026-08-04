@@ -74,9 +74,21 @@ The folder answers "what is being worked on right now", and it can only answer
 that if the move precedes the work. If `doing/BACKLOG.md` does not exist yet,
 this promotion creates it.
 
-**3. Implement, and commit.** Product and runtime bug fixes land as two commits
-— failing reproducer first, then the fix (§2). Commit messages carry the item
-number and say *why* (`CLAUDE.md` §"Team Workflow").
+**3. Implement, and commit — ONE ITEM PER COMMIT.** The subject names the item
+(`BUG#20:`, `FEATURE#3:`, `TASK#1:`) and `.githooks/commit-msg` refuses anything
+else. Product and runtime bug fixes land as two commits — failing reproducer
+first, then the fix (§2) — and the body says *why*, since the diff already says
+what.
+
+**A commit that serves two items is two commits.** The hook cannot check this:
+it reads the subject, so a commit titled `TASK#2:` that also carries TASK-003's
+work passes. That happened the day this rule was written — TASK-003 landed
+inside a `TASK#2:` commit and was invisible in `git log`, spotted by the founder
+asking "you committed tasks 001, 002 and 003?".
+
+Splitting afterwards is cheap on a topic branch and the diff is unchanged; the
+cost of not splitting is permanent, because history is the only place that
+answers "what did this item actually change?".
 
 **4. A review by an agent of the OTHER provider.** Work implemented by one
 provider is reviewed by a different one — Claude Code's work reviewed by Codex,

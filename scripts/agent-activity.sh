@@ -447,7 +447,9 @@ watcher_liveness_line(){
     *) dead_last=""; return 0 ;;   # mic is not handed out; nothing to compare
   esac
 
-  live="$(bp_watch_liveness "$repo_root" "$state" 2>/dev/null)"
+  # From the baton's own directory, so the feed and the watcher rendezvous on
+  # the mic rather than on a repo root they might each resolve differently.
+  live="$(bp_watch_liveness "$(dirname "$signal_file")" "$state" 2>/dev/null)"
   if [ "$live" = dead ]; then
     if [ "$dead_last" != "$state" ]; then
       dead_last="$state"

@@ -161,6 +161,22 @@ else
   pipe_skip "commit-msg-gate · TASK-002" "suite absent"
 fi
 
+# TASK-002 (reopened) — the rule is checked where the commit actually lands.
+# The hook above is client-side; this pins the shared rule, the CI wiring, and
+# the PR-title check that covers the squash-merge door. ~0.4s.
+if [ -f tests/commit-subjects/test.sh ]; then
+  _st_csubj(){
+    bash tests/commit-subjects/test.sh || {
+      echo "❌ tests/commit-subjects/test.sh failed (TASK-002)."
+      echo "   The hook and CI must share ONE rule, and CI must check the PR title."
+      return 1
+    }
+  }
+  pipe_stage "commit-subjects · TASK-002" _st_csubj
+else
+  pipe_skip "commit-subjects · TASK-002" "suite absent"
+fi
+
 # TASK-003 — no commit or push on the BLUEPRINT's main, and the guard stays
 # INERT in derived projects, which are trunk-based. ~0.5s.
 if [ -f tests/branch-guard/test.sh ]; then

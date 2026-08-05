@@ -134,10 +134,14 @@ else
   fail "#4 the hook does not source the shared rule — two copies will drift"
 fi
 
-if [ "$(grep -c 'BUG|FEATURE|TASK)#\[0-9\]' "$HOOK" 2>/dev/null || echo 0)" -eq 0 ]; then
-  pass "#4 the hook no longer carries its own copy of the pattern"
-else
+# grep -F, and -q rather than -c: `grep -c` prints "0" AND exits 1 on no match,
+# so `$(grep -c … || echo 0)` yields "0\n0" and `[ … -eq 0 ]` dies on it. That
+# bug was in this file's first draft and made the assertion report an error
+# instead of a verdict — a check that cannot say pass or fail is worse than none.
+if grep -qF '(BUG|FEATURE|TASK)#[0-9]' "$HOOK" 2>/dev/null; then
   fail "#4 the hook still carries a second copy of the pattern"
+else
+  pass "#4 the hook no longer carries its own copy of the pattern"
 fi
 
 # ===========================================================================
@@ -167,6 +171,43 @@ if grep -q 'edited' "$WF" 2>/dev/null; then
 else
   fail "#5 editing the title after a green run would bypass the check"
 fi
+
+# ===========================================================================
+# 6. Both files TRAVEL, and the hook fails closed without its rule.
+#    The hook gained a dependency in this change. A project that pulled the
+#    hook but not the library would have a gate that cannot load its rule —
+#    which must refuse, never pass. "Could not check" rendering as "passed" is
+#    the BUG-018 failure, twice taught.
+# ===========================================================================
+BP="$ROOT/scripts/blueprint"
+for f in scripts/lib/commit-subject.sh scripts/check-commit-subjects.sh; do
+  if grep -qF "\"$f\"" "$BP" 2>/dev/null; then
+    pass "#6 $f is blueprint-managed"
+  else
+    fail "#6 $f does not travel — derived projects get a hook that cannot load its rule"
+  fi
+done
+
+T6="$(mktemp -d)"
+mkdir -p "$T6/.githooks"
+cp "$ROOT/.githooks/commit-msg" "$T6/.githooks/commit-msg"
+chmod +x "$T6/.githooks/commit-msg"
+git -C "$T6" init -q
+git -C "$T6" config core.hooksPath .githooks
+git -C "$T6" config user.email t@e.com
+git -C "$T6" config user.name t
+echo x > "$T6/f.txt"
+git -C "$T6" add -A
+git -C "$T6" commit -q -m 'root' >/dev/null 2>&1
+echo y > "$T6/g.txt"
+git -C "$T6" add -A
+# No scripts/lib/commit-subject.sh in this repo — the hook must REFUSE.
+if git -C "$T6" commit -q -m 'TASK#2: valid subject, missing rule' >/dev/null 2>&1; then
+  fail "#6 the hook PASSED a commit while unable to load its rule"
+else
+  pass "#6 the hook fails closed when its rule is missing"
+fi
+rm -rf "$T6"
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: TASK-002 — the item rule is checked where the commit is actually made."

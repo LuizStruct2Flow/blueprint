@@ -212,8 +212,8 @@ The shipped code is only as good as the tests that gate it.
 1. **Every bug fix has a regression test** (unit / integration / E2E).
    The bug number is in the test name (§2.3).
 2. **Two-commit pattern** for product/runtime bug fixes:
-   - `test(BUG-XXX): minimal reproducer (failing)`
-   - `fix(BUG-XXX): <fix>`
+   - `BUG#XX: minimal reproducer (failing)`
+   - `BUG#XX: <fix>`
 
    The reproducer must **fail** on the parent commit. Verify by stashing
    the fix, running the test, restoring the fix — `git log` must show

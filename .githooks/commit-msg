@@ -52,11 +52,22 @@ if [ -z "$subject" ]; then
   exit 1
 fi
 
-case "$subject" in
-  "Merge "*|"Revert "*|"fixup!"*|"squash!"*|"amend!"*)
-    exit 0
-    ;;
-esac
+# THE RULE ITSELF lives in scripts/lib/commit-subject.sh, shared with
+# scripts/check-commit-subjects.sh (which CI points at the PR title, where this
+# hook cannot reach). It used to live here, and that meant CI had to copy the
+# regex — two copies of a rule are two rules that drift silently while each
+# keeps passing its own tests.
+#
+# FAILS CLOSED if the library is missing: a hook that cannot load its rule has
+# checked nothing, and must not report a pass.
+_cs_lib="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/lib/commit-subject.sh"
+if [ ! -r "$_cs_lib" ]; then
+  echo "commit-msg: cannot read scripts/lib/commit-subject.sh — refusing." >&2
+  echo "  Restore it with: blueprint pull scripts/lib/commit-subject.sh" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/commit-subject.sh
+. "$_cs_lib"
 
 # THE ROOT COMMIT is exempt. A repository's first commit creates the repository;
 # it is not work on an item, and it CANNOT name one because no backlog exists
@@ -70,27 +81,13 @@ if ! git rev-parse --verify -q HEAD >/dev/null 2>&1; then
   exit 0
 fi
 
-if printf '%s' "$subject" | grep -qE '^(BUG|FEATURE|TASK)#[0-9]+: .+'; then
+if commit_subject_ok "$subject"; then
   exit 0
 fi
 
-cat >&2 <<EOF
-commit-msg: REJECTED — the subject must start with its backlog item.
-
-  got:      $subject
-
-  expected: <TYPE>#<number>: <subject>
-
-              BUG#20: a refused pull exits non-zero
-              FEATURE#3: the gate renders as a pipeline
-              TASK#1: move the lcm checklist into the DoD
-
-  TYPE is BUG, FEATURE or TASK.
-
-Every change refers to a backlog item (docs/DoD.md §1b rule 1). If this work has
-no item yet, it is not ready to commit: add a row under docs/backlog/, promote it
-to docs/doing/, then commit.
-
-Merge, revert and fixup!/squash! commits are exempt.
-EOF
+echo "commit-msg: REJECTED — the subject must start with its backlog item." >&2
+echo "" >&2
+echo "  got:      $subject" >&2
+echo "" >&2
+commit_subject_help >&2
 exit 1

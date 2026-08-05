@@ -224,9 +224,18 @@ because that would be right often enough to be trusted and silently wrong for
 anyone tracking a fork.
 
 `blueprint a2bp --dry-run <file>` resolves the base and shows the diff without
-pushing. `blueprint prs` shows what is currently asked of the owner, including
-pushed branches with no PR — and says the list is *incomplete* if the API call
-fails, rather than printing an empty one that reads as "nothing pending".
+pushing. `blueprint prs` shows what is currently asked of the owner — and says
+the list is *incomplete* if the API call fails, rather than printing an empty one
+that reads as "nothing pending".
+
+It does **not** currently surface pushed branches that have no PR, though this
+paragraph used to claim it did. Observed 2026-07-31 from linkedin-watcher-agent: <!-- a2bp-allow: incident record naming the reporting project, not a live path -->
+`a2bp` pushed `a2bp/<project>/<hash>`, printed `✓ request already open: null`,
+and exited 3 ("filed") without ever creating a PR; `blueprint prs` then reported
+`No open a2bp requests` — precisely the branch-without-PR state the sentence
+promised to catch. Both halves are bugs, and the dangerous one is `a2bp`'s: a
+green checkmark and a "filed" exit status over a request that does not exist.
+Until they are fixed, confirm a filing landed by its PR URL, not by exit code.
 
 Filing returns a **non-zero** status on purpose: filed is not landed, and no
 script may read "PR opened" as "the blueprint has this".

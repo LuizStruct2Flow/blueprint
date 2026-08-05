@@ -118,9 +118,14 @@ sh "$HOOK" "$TMP/msg" >/dev/null 2>&1 \
 #    hook that existed, was correct, and never ran because it lost its exec bit.
 # ===========================================================================
 W="$TMP/repo"
-mkdir -p "$W/.githooks"
+mkdir -p "$W/.githooks" "$W/scripts/lib"
 cp "$HOOK" "$W/.githooks/commit-msg"
 chmod +x "$W/.githooks/commit-msg"
+# The hook reads the RULE from scripts/lib/commit-subject.sh, shared with the CI
+# checker so the two cannot drift. A real project has both files — bootstrap
+# ships the whole tracked tree — so a fixture with only the hook models a
+# repository that does not exist, and the hook correctly fails closed in it.
+cp "$ROOT/scripts/lib/commit-subject.sh" "$W/scripts/lib/"
 git -C "$W" init -q
 git -C "$W" config core.hooksPath .githooks
 git -C "$W" config user.email t@example.com

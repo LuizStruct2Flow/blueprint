@@ -16,6 +16,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # `edited` is NOT a default activity type, and it is the one that matters
+    # here: a squash merge takes its subject from the PR TITLE, so a title
+    # changed after a green run would land unchecked. Re-run on every edit.
+    types: [opened, synchronize, reopened, edited]
   schedule:
     # Nightly osv-scanner re-scan for new CVEs landing on already-pinned deps.
     # 03:17 UTC chosen to avoid the usual cron-storm windows.
@@ -119,6 +123,47 @@ jobs:
           fi
           echo "osv-scanner: no MEDIUM+ vulnerabilities. PASS."
 
+  commit-subjects:
+    name: commit subjects name their item
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0 # the range below needs the base commit, not a shallow tip
+      - name: The PR title becomes the squash-merge subject
+        # THE load-bearing check. `.githooks/commit-msg` is client-side, so it
+        # cannot run where GitHub composes the squash commit — and it composes it
+        # from this title. 5fe89e0 landed on main through exactly this gap, after
+        # the hook had shipped.
+        #
+        # The title goes through the ENVIRONMENT, never interpolated into the
+        # script: it is attacker-controlled text on a fork PR, and `${{ }}` inside
+        # a `run:` block is string substitution before the shell ever sees it.
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash scripts/check-commit-subjects.sh --subject "$PR_TITLE"
+      - name: Every commit on the branch
+        # Belt and braces: catches commits made in a checkout whose
+        # core.hooksPath was never armed — a fresh clone does not have it, which
+        # is the same gap A-22 found for the pre-push gate.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check-commit-subjects.sh --range "$BASE_SHA..$HEAD_SHA"
+      - name: What actually landed on main
+        # Detection, not prevention — by here it is merged. It exists so a
+        # violation that slips through some future path is VISIBLE rather than
+        # discovered months later by reading the log, which is how this one was
+        # found.
+        if: github.event_name == 'push'
+        run: bash scripts/check-commit-subjects.sh --range "HEAD~1..HEAD"
+
   shell-tests:
     name: shell regression suites (full)
     runs-on: ubuntu-latest
@@ -145,6 +190,7 @@ jobs:
           bash tests/lifecycle-docs/test.sh
           bash tests/doc-links/test.sh
           bash tests/commit-msg-gate/test.sh
+          bash tests/commit-subjects/test.sh
           bash tests/branch-guard/test.sh
           bash tests/dod-gate/test.sh
           bash tests/roster/test.sh

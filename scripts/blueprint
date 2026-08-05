@@ -113,6 +113,13 @@ MANAGED_FILES=(
   # Sourced by .githooks/pre-push-project to render the DoD as stages. Without
   # it the checklist silently drops four stages in every derived project.
   "scripts/lib/dod-gate.sh"
+  # THE definition of "a subject names its item", shared by .githooks/commit-msg
+  # and scripts/check-commit-subjects.sh. MUST ship with the hook: the hook fails
+  # closed without it, and a second copy of the rule is two rules that drift.
+  "scripts/lib/commit-subject.sh"
+  # Checks REAL subjects — a range, or the PR title that becomes a squash-merge
+  # commit. The hook is client-side and cannot reach that door (TASK-002).
+  "scripts/check-commit-subjects.sh"
   # THE activity-feed appender, shared by the gate renderer and the CI watcher.
   # MUST ship: it owns the inode-preserving rotation, and a second copy of that
   # rule is how a rotation orphans the feed supervisor's open handle.

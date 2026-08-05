@@ -115,6 +115,28 @@ start_watch(){
   WATCH_PID=$!
 }
 
+# Wait for the real watcher to hold its fixture-scoped liveness lock.  The old
+# cases slept a whole settle unit before every first edit, although startup —
+# not settling — was the condition they needed.  The lock is the production
+# readiness fact (BUG-022), so wait for that fact directly.
+#
+# Through bp_watch_liveness rather than an inline flock: the lock's path and the
+# meaning of "held" are owned by scripts/lib/watcher-lock.sh, and a second copy
+# here would drift from it silently while both kept passing their own tests.
+# That is the failure TASK-005, TASK-002 and BUG-021 each landed on this week.
+# shellcheck source=scripts/lib/watcher-lock.sh
+. "$ROOT/scripts/lib/watcher-lock.sh"
+await_watch_ready(){
+  local tries=0
+  while [ "$tries" -lt 50 ]; do
+    [ "$(bp_watch_liveness "$WORK" OVER_TO_CODEX 2>/dev/null)" = alive ] && return 0
+    kill -0 "$WATCH_PID" 2>/dev/null || return 1
+    tries=$((tries + 1))
+    sleep "$POLL"
+  done
+  return 1
+}
+
 stop_watch(){
   [ -n "${WATCH_PID:-}" ] || return 0
   kill "$WATCH_PID" 2>/dev/null
@@ -137,11 +159,16 @@ await_hits(){
   return 0
 }
 
-# quiet [units] — the NEGATIVE half, which is not pollable. "No further
-# dispatch happened" can only be established by waiting, so this is the one
-# place real time is spent on purpose. Two settle windows: long enough that a
-# pending dispatch would have fired.
-quiet(){ sleep "$(u "${1:-2}")"; }
+# quiet — the NEGATIVE half, which is not pollable. "No further dispatch
+# happened" needs one complete settle window after the final publication, plus
+# two polls so the watcher can observe both ends. Two full settle windows were
+# redundant: a pending candidate is decidable after the first one.
+quiet(){ sleep "$(awk -v s="$SETTLE" -v p="$POLL" 'BEGIN{ printf "%.2f", s + 2*p }')"; }
+
+# Let the watcher observe a hand-back before the next round. This wait is about
+# its poll cadence, not its settle window, so expressing it in settle units hid
+# an unrelated multi-second delay in every case.
+observe_tick(){ sleep "$(awk -v p="$POLL" 'BEGIN{ printf "%.2f", 2*p }')"; }
 
 # ===========================================================================
 # 1. THE REPRODUCER — the mic is flipped BEFORE the Task is written.
@@ -152,20 +179,16 @@ quiet(){ sleep "$(u "${1:-2}")"; }
 # ===========================================================================
 write_signal ACTIVE "task-one"
 start_watch
-(
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "task-one"      # round 1 — legitimate
-  sleep "$(u 2)"
-  write_signal ACTIVE "task-one"             # agent hands back
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "task-one"      # WRONG ORDER: mic flipped first…
-  sleep "$(fu 0.4)"                          # SHORTER than settle, so the two
-  write_signal OVER_TO_CODEX "task-two"      # …edits coalesce into one publication
-) &
-WRITER_PID=$!
-wait "$WRITER_PID" 2>/dev/null
+await_watch_ready || fail "#1 watcher did not become ready"
+write_signal OVER_TO_CODEX "task-one"        # round 1 — legitimate
+await_hits 1 || true
+write_signal ACTIVE "task-one"               # agent hands back
+observe_tick
+write_signal OVER_TO_CODEX "task-one"        # WRONG ORDER: mic flipped first…
+sleep "$(fu 0.4)"                            # SHORTER than settle, so the two
+write_signal OVER_TO_CODEX "task-two"        # …edits coalesce into one publication
 await_hits 2 || true
-quiet 2                                       # nothing further may arrive
+quiet                                          # nothing further may arrive
 stop_watch
 
 if grep -qx 'task-one' "$HITS" 2>/dev/null && [ "$(grep -cx 'task-one' "$HITS")" -gt 1 ]; then
@@ -183,16 +206,12 @@ fi
 # ===========================================================================
 write_signal ACTIVE "task-one"
 start_watch
-(
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "task-one"
-  sleep "$(u 2)"
-  write_signal ACTIVE "task-one"
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "task-TWO"      # a genuinely new instruction
-) &
-WRITER_PID=$!
-wait "$WRITER_PID" 2>/dev/null
+await_watch_ready || fail "#2 watcher did not become ready"
+write_signal OVER_TO_CODEX "task-one"
+await_hits 1 || true
+write_signal ACTIVE "task-one"
+observe_tick
+write_signal OVER_TO_CODEX "task-TWO"        # a genuinely new instruction
 await_hits 2 || true
 stop_watch
 
@@ -215,16 +234,12 @@ fi
 # ===========================================================================
 write_signal ACTIVE "same-task"
 start_watch
-(
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "same-task"     # round 1
-  sleep "$(u 3)"
-  write_signal ACTIVE "same-task"            # hand back
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "same-task"     # round 2 — deliberately identical
-) &
-WRITER_PID=$!
-wait "$WRITER_PID" 2>/dev/null
+await_watch_ready || fail "#3 watcher did not become ready"
+write_signal OVER_TO_CODEX "same-task"       # round 1
+await_hits 1 || true
+write_signal ACTIVE "same-task"              # hand back
+observe_tick
+write_signal OVER_TO_CODEX "same-task"       # round 2 — deliberately identical
 await_hits 2 || true
 stop_watch
 
@@ -241,12 +256,8 @@ fi
 # ===========================================================================
 write_signal ACTIVE "later-task"
 start_watch
-(
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "later-task"
-) &
-WRITER_PID=$!
-wait "$WRITER_PID" 2>/dev/null
+await_watch_ready || fail "#4 watcher did not become ready"
+write_signal OVER_TO_CODEX "later-task"
 await_hits 1 || true
 stop_watch
 
@@ -266,20 +277,16 @@ fi
 # ===========================================================================
 write_signal ACTIVE "old-task"
 start_watch
-(
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "old-task"      # round 1
-  sleep "$(u 2)"
-  write_signal ACTIVE "old-task"
-  sleep "$(u 1)"
-  write_signal OVER_TO_CODEX "old-task"      # State first…
-  sleep "$(u 3)"                             # …a pause LONGER than settle
-  write_signal OVER_TO_CODEX "new-task"
-) &
-WRITER_PID=$!
-wait "$WRITER_PID" 2>/dev/null
+await_watch_ready || fail "#5 watcher did not become ready"
+write_signal OVER_TO_CODEX "old-task"        # round 1
+await_hits 1 || true
+write_signal ACTIVE "old-task"
+observe_tick
+write_signal OVER_TO_CODEX "old-task"        # State first…
+await_hits 2 || true                          # stale publication became decisive
+write_signal OVER_TO_CODEX "new-task"
 await_hits 3 || true
-quiet 2                                       # the trace must be exactly three
+quiet                                          # the trace must be exactly three
 stop_watch
 
 # CHARACTERIZATION, asserted exactly. An earlier version of this case passed
@@ -308,20 +315,16 @@ if [ ! -x "$SETTER" ]; then
 else
   write_signal ACTIVE "old-task"
   start_watch
-  (
-    sleep "$(u 1)"
-    bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-one" >/dev/null
-    sleep "$(u 2)"
-    bash "$SETTER" --file "$SIG" --holder Eto --state ACTIVE --task "round-one" >/dev/null
-    sleep "$(u 1)"
-    # One indivisible publication: State and Task change together. There is no
-    # window in which the new State sits beside the old Task, at ANY pause.
-    bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-two" >/dev/null
-  ) &
-  WRITER_PID=$!
-  wait "$WRITER_PID" 2>/dev/null
+  await_watch_ready || fail "#6 watcher did not become ready"
+  bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-one" >/dev/null
+  await_hits 1 || true
+  bash "$SETTER" --file "$SIG" --holder Eto --state ACTIVE --task "round-one" >/dev/null
+  observe_tick
+  # One indivisible publication: State and Task change together. There is no
+  # window in which the new State sits beside the old Task, at ANY pause.
+  bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task "round-two" >/dev/null
   await_hits 2 || true
-  quiet 2                                     # exactly two, no torn extra
+  quiet                                        # exactly two, no torn extra
   stop_watch
 
   if grep -qx 'old-task' "$HITS" 2>/dev/null; then

@@ -135,6 +135,31 @@ else
   fail "#4b a TASK was required to have a regression test: $(cat "$TMP/out")"
 fi
 
+# A bug PARKED in backlog/ has no fix, so it can have no regression test.
+# Requiring one makes FILING a bug impossible — the stage blocked exactly that
+# on 2026-08-05 when BUG-021 and BUG-022 were parked from a downstream project.
+build 4c
+printf '| **BUG-099** | parked | S3 | KEEP | d |\n' >> "$W/docs/backlog/BUGS.md"
+echo e > "$W/e.txt"; git -C "$W" add -A
+git -C "$W" commit -q -m 'BUG#99: park a bug found downstream'
+if run_stage dod_stage_bugtests "$BASE..HEAD"; then
+  pass "#4c a BUG parked in backlog/ needs no regression test"
+else
+  fail "#4c parking a bug was blocked for having no test: $(cat "$TMP/out")"
+fi
+
+# The exemption must key on PARKED specifically, not on "a row exists". Moving
+# the very same row to doing/ has to restore the requirement, or the stage has
+# been disabled rather than corrected.
+git -C "$W" mv docs/backlog/BUGS.md docs/backlog/BUGS.keep -f 2>/dev/null || true
+printf '| # | Bug | Sev | Status | Detail |\n|---|---|---|---|---|\n' > "$W/docs/backlog/BUGS.md"
+printf '| **BUG-099** | now active | S3 | open | d |\n' >> "$W/docs/doing/BUGS.md"
+if run_stage dod_stage_bugtests "$BASE..HEAD"; then
+  fail "#4c the same BUG in doing/ with no test PASSED — the exemption is too broad"
+else
+  pass "#4c moving that BUG to doing/ restores the test requirement"
+fi
+
 # ===========================================================================
 # 5. §7G — a malformed or missing baton FAILS.
 # ===========================================================================

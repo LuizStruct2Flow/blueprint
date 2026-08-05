@@ -114,10 +114,24 @@ dod_stage_bugtests() {
     return 0
   fi
   _dg_untested=""
+  _dg_parked=""
+  _dg_tested=""
   for _dg_n in $_dg_bugs; do
     _dg_n="$(printf '%s' "$_dg_n" | sed 's/^0*//')"
-    grep -rqE "BUG-0*${_dg_n}\b" tests/ 2>/dev/null || _dg_untested="$_dg_untested BUG-$_dg_n"
+    # A bug PARKED in backlog/ has no fix yet, so it can have no regression
+    # test — the test arrives with the fix. Demanding one here would make
+    # FILING a bug impossible, which trains people not to file them.
+    if [ "$(dod_find_row "BUG-$_dg_n" 2>/dev/null)" = backlog ]; then
+      _dg_parked="$_dg_parked BUG-$_dg_n"
+      continue
+    fi
+    if grep -rqE "BUG-0*${_dg_n}\b" tests/ 2>/dev/null; then
+      _dg_tested="$_dg_tested BUG-$_dg_n"
+    else
+      _dg_untested="$_dg_untested BUG-$_dg_n"
+    fi
   done
+  [ -n "$_dg_parked" ] && pipe_note "parked, no fix to test yet:$_dg_parked"
   if [ -n "$_dg_untested" ]; then
     echo "No test under tests/ names:$_dg_untested"
     echo ""
@@ -126,7 +140,13 @@ dod_stage_bugtests() {
     echo "than trust."
     return 1
   fi
-  printf 'regression tests found for: %s\n' "$(printf '%s' "$_dg_bugs" | tr '\n' ' ' | sed 's/[0-9][0-9]*/BUG-&/g')"
+  # Names only what it actually checked. Reporting the parked ones here as
+  # "tests found" would be the stage lying about its own coverage.
+  if [ -n "$_dg_tested" ]; then
+    printf 'regression tests found for:%s\n' "$_dg_tested"
+  else
+    echo "every BUG in this push is parked — nothing to test yet"
+  fi
 }
 
 # --- §7G — the live baton is well-formed -------------------------------------

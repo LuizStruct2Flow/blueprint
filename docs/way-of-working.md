@@ -367,7 +367,7 @@ The point isn't dogma. It's that the *most expensive layer to get wrong*
 
 ```
 backlog/  →  doing/  →  waiting-acceptance/  →  done/
-          promote     push to main          founder accepts
+          promote      it LANDS             founder accepts
 ```
 
 | State | What lives here |
@@ -386,7 +386,32 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
 - **`done/` is founder-only** — agents never auto-promote
 - **Reopen path:** rejected acceptance → row goes back to `doing/`
 - **Grooming pass:** founder-led session pulls parked items into `doing/`
-- **`lcm` pass:** founder says `lcm` → agent reconciles every folder against reality (right state, signal matches folders, triggers present), performs the non-gated moves, surfaces the gated ones
+- **`lcm` pass:** founder says `lcm` → agent reconciles every folder against reality (right state, signal matches folders, triggers present, **and the lifecycle documents say something true**), performs the non-gated moves, surfaces the gated ones
+
+The fifth check exists because four passes in one day found stale prose, an
+index listing 5 of 14 items, tables claiming rows that did not exist, and
+thirteen links to moved files. Folder membership is authoritative; prose
+describing it can only ever drift.
+
+---
+
+# 2 · Lifecycle — how a change actually travels
+
+Eight rules, each the gate to the next (`docs/DoD.md` §1b):
+
+1. **All work refers to a backlog item** — `TASK-`, `FEATURE-` or `BUG-`. No exceptions, including a defect found mid-session
+2. **Promote to `doing/` BEFORE starting** — the folder answers "what is being worked on", which only works if the move precedes the work
+3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`)
+4. **A review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude
+5. **All gates green** — no demotions, no bypass flags
+6. **Land it** — trunk-based push for a product repo; branch + PR + merge for the blueprint, whose `main` every project pulls from
+7. **Landing moves it to `waiting-acceptance/`**
+8. **Artefacts always travel with their parent item** — the half that gets forgotten, because a row is one line and a folder is not
+
+> Rule 4 is not a preference. Across two changes the cross-provider reviewer
+> raised **15 findings, every one real** — including two guards that passed
+> because they watched the wrong thing, which is the error an author cannot
+> see by definition.
 
 > The lifecycle answers **"what has been delivered?"** —
 > not "what has been merged?" Those are different questions.

@@ -136,3 +136,35 @@ clone rather than a referendum on trunk-based development.
 
 Costing for the server-side option is in the review documents here (raised as
 **A-37** §4c).
+
+---
+
+## Why BUG-004 (then A-22) was rejected — worth reading even if you skip the rest
+
+`arm_gate` genuinely works: the feed and `blueprint drift` both arm an unarmed
+clone, and `tests/gate-arming/` proves it. But the acceptance boundary was never
+"the arming paths work" — it was **"a human must not be able to clone and push
+without ever invoking them."** QA-2 tested that directly rather than restating
+the caveat: a fresh clone, a newly generated high-entropy token committed,
+`origin` redirected to a throwaway bare repo, and a real push executed.
+
+```text
+fresh_clone_hooksPath=UNSET
+real_ungated_push_rc=0
+secret_commit_reached_destination=yes
+```
+
+So the secret gate delivered as A-03 is real, **and** it is not a property of a
+clone. Both are true. A pre-push hook is advisory by construction — repo-local,
+absent on a clone, defeated by `--no-verify` — so this is not closable by
+another local hook. Enforcement is server-side, which is available here at the
+policy cost set out in **A-37**: required checks do block direct pushes to a
+protected branch, but a SHA must exist on some ref for checks to run before it
+reaches `main`, and this repo is trunk-based with no branches. That is a
+founder trade, not an impossibility.
+
+*(Moved here from `waiting-acceptance/INDEX.md` on 2026-08-03. One line in it
+is now historical rather than current: "this repo is trunk-based with no
+branches" was true when written on 2026-07-29 — the blueprint moved to
+branch+PR on 2026-08-02. Derived projects remain trunk-based. Left as written
+because it records the argument as it stood.)*

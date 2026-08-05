@@ -11,7 +11,7 @@ useful once already.
 
 ## Two namespaces, and only one of them is a work item
 
-**`BUG-XXX` / `FEATURE-XXX` are the only lifecycle IDs.** They are what the
+**`BUG-XXX` / `FEATURE-XXX` / `TASK-XXX` are the lifecycle IDs.** They are what the
 commit convention, the regression-test naming rule and these lifecycle folders
 key off (CLAUDE.md §"Bug Management", §"Team Workflow").
 

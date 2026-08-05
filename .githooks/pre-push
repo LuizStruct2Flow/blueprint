@@ -141,6 +141,25 @@ push_log_opts() {
 _pp_head="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 _pp_n="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo '?')"
 _pp_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+# TASK-003 — refuse a push from the blueprint's main, BEFORE spending two
+# minutes of gate on something that must not land anyway. pre-commit is the
+# primary catch ("commit on a branch, or do not commit yet"); this is the door
+# it cannot cover — an existing branchless commit, or a checkout where the
+# commit hook was bypassed.
+#
+# Shared implementation with pre-commit so the two cannot drift. Derived
+# projects are trunk-based and are NOT affected: the guard keys off
+# .blueprint-root.
+if [ -f "$_pp_top/scripts/lib/branch-guard.sh" ]; then
+  # shellcheck source=scripts/lib/branch-guard.sh
+  . "$_pp_top/scripts/lib/branch-guard.sh"
+  bp_branch_guard push || exit 1
+elif [ -f "$_pp_top/.blueprint-root" ]; then
+  echo "pre-push: scripts/lib/branch-guard.sh is missing in a blueprint checkout — refusing." >&2
+  exit 1
+fi
+
 pipe_init "pre-push gate" "${_pp_top##*/} · $_pp_n commit(s) · $_pp_head"
 
 # --- Security: gitleaks + Semgrep + osv-scanner (docs/SECURITY.md cross-recipe rules) ---

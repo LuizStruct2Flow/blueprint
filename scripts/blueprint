@@ -107,6 +107,12 @@ MANAGED_FILES=(
   # derived project without it falls back to divergent paths and re-opens the
   # A-09 cross-project log contamination.
   "scripts/lib/state-dir.sh"
+  # Sourced by BOTH .githooks/pre-commit and .githooks/pre-push — if it does
+  # not travel, both hooks fail closed in every derived project (BUG-015).
+  "scripts/lib/branch-guard.sh"
+  # Sourced by .githooks/pre-push-project to render the DoD as stages. Without
+  # it the checklist silently drops four stages in every derived project.
+  "scripts/lib/dod-gate.sh"
   # THE activity-feed appender, shared by the gate renderer and the CI watcher.
   # MUST ship: it owns the inode-preserving rotation, and a second copy of that
   # rule is how a rotation orphans the feed supervisor's open handle.
@@ -162,6 +168,15 @@ MANAGED_FILES=(
   # .githooks/ — generic gate
   ".githooks/pre-push"
   ".githooks/pre-push-project.example"
+  # commit-msg: every commit names its backlog item (DoD §1b rule 1). Generic —
+  # the rule applies to every project, blueprint or derived.
+  ".githooks/commit-msg"
+  # pre-commit: refuses a commit on the BLUEPRINT's main. It ships everywhere
+  # because the hook must exist to run, but it keys off .blueprint-root, so it
+  # is inert in a derived project — which is trunk-based and commits to main by
+  # design. MUST ship together with scripts/lib/branch-guard.sh below: a hook
+  # that arrives without the lib it sources is BUG-015 repeated.
+  ".githooks/pre-commit"
 
   # gitleaks generic false-positive allowlist (working-tree scans only;
   # staged-scan gate runs the full default rule set)

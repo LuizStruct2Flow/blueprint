@@ -39,28 +39,88 @@
 
 ## 0. STATUS
 
-- **`origin/main` = `270b248`. Nothing open: no bugs, no branches, no PRs.**
-  `doing/` 0, `waiting-acceptance/` 0, `done/` **16**.
-- **All 14 items were accepted.** The founder delegated acceptance to Codex for
-  every ticket needing no founder judgement; it verified each claim
-  **empirically against the tree** rather than re-reading the rows. That
-  distinction produced the one rejection, so it earned itself.
-- **BUG-018 was REJECTED, re-fixed, and re-accepted.** The no-TTY guard stopped
-  the crash and printed the right advice — then returned **0**, so a caller read
-  "sync succeeded" while nothing was pulled. Its regression could not catch it:
-  the check was an `elif` that only fired when rc was non-zero, so on the exact
-  defect its failure branch was unreachable. Now: a refusal exits 7, an in-sync
-  pull still exits 0, and three independent assertions replace one compound one.
-  Second-round verification also confirmed **nothing calls `blueprint pull` and
-  checks its status**, so the new non-zero exit breaks no flow.
-- **THE SHAPE THAT KEEPS RECURRING, now three times in this repo:** BUG-016 (a
-  partial pull claiming a full sync), BUG-011 (`a2bp` reporting FILED with
-  nothing filed), BUG-018 (a refusal reporting success). ***A command that
-  declines to act must not report success for declining.*** Every one was found
-  by someone else checking, never by the code.
-- **BUG-004 accepted on a read-only API check** — `secret_scanning=enabled`,
-  `secret_scanning_push_protection=enabled`. No test secret was pushed: a secret
-  in a public repo's history is not undone by deleting the branch.
+**Deliberately short. Klaus (PO) reviewed this file on 2026-08-03 and named it
+the repo's single biggest ceremony surface — 426 lines narrating state that
+`git log`, `git status` and the four lifecycle folders already answer, and it
+had already gone stale once. Shrinking it is a founder decision, not taken yet.
+Until then: only facts a command cannot give you.**
+
+- **Branch `docs/lifecycle-rules` is PUSHED** and 14 commits ahead of
+  `origin/main`. **No PR is open yet** — nothing has landed, and merging is the
+  founder's call. Working tree clean apart from gitignored `.scratch/`.
+- **The push is no longer blocked.** `PIPE_FEED_TAG` → `AGENT_FEED_TAG` was
+  renamed with the founder's go; the full gate passes at 42 stages. Two things
+  it surfaced on the way through, both fixed on this branch: §2 was demanding a
+  regression test for *parked* bugs, which made filing a bug impossible; and its
+  success line named bugs it had not checked.
+- **The gate now runs over its own SLO** — 186.7 s against a 180 s warning, with
+  `signal-dispatch` at 74.8 s the slowest stage. Non-blocking and nothing is
+  demoted (that is the point of BUG-005), but it is the first run to trip it.
+
+### IMMEDIATE NEXT ACTION
+
+The mic is free (`OVER_TO_CLAUDE`). Both flow reviews are IN — Klaus (PO) and
+Alexis (BA). Alexis's verdict is preserved at `logs/state/codex-last-message.md`,
+which is **overwritten by the next Codex dispatch**, so read it before dispatching
+anyone.
+
+Two things are open, in this order:
+
+1. **Open the PR** for `docs/lifecycle-rules` (14 commits, pushed, none landed).
+   Rule 6 route for the blueprint is branch → PR → merge, and merging is the
+   founder's.
+2. **Fold three inputs into ONE revision** of
+   `docs/backlog/PLAN-FEATURE-003-session-snapshot.md` — see "open threads".
+
+### EPHEMERAL STATE — died with the session, re-establish it
+
+| What | How |
+|---|---|
+| Activity feed daemon | `bash scripts/agent-activity.sh --daemon` (check `--status`). **It TRUNCATES `logs/agent-activity.log` on start** — restarting it destroys any replay window |
+| Mic monitor | persistent `Monitor` on `logs/state/signal.md`, emit only on Holder/State change |
+| `blueprint` on PATH | NOT on PATH here — use `bash scripts/blueprint …` |
+| Klaus (PO) | review COMPLETE, verdict relayed to the founder |
+| Alexis (BA) | review COMPLETE — verdict in `logs/state/codex-last-message.md`, **overwritten by the next Codex dispatch** |
+
+### OPEN THREADS
+
+- **FEATURE-003** (parked, `backlog/`) — HANDOVER as snapshot + event replay.
+  Three inputs to fold into one plan revision: the founder's `<hash>`…`</hash>`
+  open/close markers (they detect a STALE handover, not just a truncated log);
+  the stash-don't-discard rule for uncommitted work under an untrusted snapshot;
+  and Klaus's reshape — **derive the resume report from git + folders rather
+  than authoring it**, promote the reader, park the writer.
+- **Klaus's findings awaiting a founder decision** — WIP limit on `doing/`
+  instead of an approval step; `Origin:` as a row FIELD rather than a folder
+  trip for live defects; cross-provider review per LANDING rather than per item;
+  three flow metrics; and two ceremony cuts (this file, and the
+  `§D·F·H judgement` stage inflating the gate's stage count).
+- **Alexis's findings** — she converges with Klaus on all of the above
+  independently, which is the strongest signal in either review. One thing only
+  she found: **§1b rule 7 is structurally broken for the blueprint.** Moving the
+  row to `waiting-acceptance/` inside the PR claims "merged" before the merge;
+  moving it after needs a second PR for a folder move. So the rule guarantees
+  either a stale `doing/` or an unsanctioned direct commit — it needs post-merge
+  automation, or a lifecycle state that can honestly say "approved, PR open".
+- **`doing/` holds 6 rows** (TASK-001/002/003/005/006/007), all finished and
+  committed on this branch. Founder ruled they stay. **Nothing new enters
+  `doing/` without the founder's explicit go** — six were self-promoted today
+  and that is the process breach this session is correcting.
+
+### GOTCHAS THAT BIT THIS SESSION
+
+- **The system clock jumped BACKWARDS** — feed entries stamped `19:47` sit
+  earlier in the file than ones stamped `14:39`, and the feed has no date.
+  Never order that log by its timestamps.
+- **`new-project.sh` copies with `git archive HEAD`** — bootstrap tests exercise
+  the COMMITTED tree, so a fix to a shipped file cannot be verified until it is
+  committed.
+- **`codex-signal-watch.sh` exports `AGENT_SIGNAL_FILE`**, so anything run
+  inside a dispatch inherits a pointer to the REAL baton. Fixtures must
+  `unset AGENT_SIGNAL_FILE AGENT_STATE_HOME` or they write live state.
+- **`.scratch/` is gitignored**, so a dozen scratch scripts are invisible to
+  `git status` — including one written and deliberately NOT run.
+
 - **BUG-019 CHANGED HOW THE MIC WORKS — read this before coordinating.** The
   live baton is `logs/state/signal.md`: untracked, per-checkout, written ONLY by
   `scripts/signal-set.sh`. `AGENT_SIGNAL.md` is now the protocol document and
@@ -172,7 +232,7 @@ stream should not arm it — a monitor on a file nobody writes is pure overhead.
 
 | Item | What is needed |
 |---|---|
-| **Acceptance** | Five items sit in `waiting-acceptance/`: BUG-004, BUG-012, BUG-013, BUG-014, BUG-015. Per-item tests are in [INDEX.md](../waiting-acceptance/INDEX.md). |
+| **Acceptance** | Nothing is waiting — all 16 items are founder-accepted in [`../done/BUGS.md`](../done/BUGS.md). "What to test" is a COLUMN in the `BUGS.md` row now; the separate `INDEX.md` was dissolved on 2026-08-03 because it was a second record of the same membership. |
 | **ai-server-blueprint** | Still undecided: it has **zero** struct2flow marker files, so adopting it is a full bootstrap, not a repair. Is it a struct2flow project at all? |
 
 **Nothing else is blocked on a decision.** BUG-004 and BUG-005, which sat here

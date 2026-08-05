@@ -225,9 +225,11 @@ git push origin main
 ```
 
 Commit message conventions:
-- **Conventional Commits prefix**: `feat(<scope>):`, `fix(<scope>):`,
-  `docs(<scope>):`, `chore(<scope>):`.
-- **Scope**: the concern or layer touched (`security`, `docs`, `iac`, `agents`, `sync`).
+- **The subject STARTS with the backlog item**: `BUG#20:`, `FEATURE#3:`,
+  `TASK#1:`. `.githooks/commit-msg` enforces it. Implementing a
+  back-propagation means giving it an item in THIS repo first — the request
+  arrives as a proposal, and the blueprint tracks the work of adopting it.
+  (This replaces the Conventional Commits form previously prescribed here.)
 - **Cite the originating request** — the project it came from and the PR number
   ("requested by acme-flow in #42; derived from a real incident in its <X>
   path"). The request is the provenance; a commit that drops it makes the

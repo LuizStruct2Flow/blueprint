@@ -355,3 +355,23 @@ The delivered guard blocks a real contaminated back-propagation end to end.
 **Eight rows ACCEPT; A-22 REJECT.** No item was promoted to `done/`.
 `docs/way-of-working.pdf` was excluded from defect consideration exactly as the
 founder directed.
+
+---
+
+## Previously dispositioned
+
+The 2026-07-29 QA pass dispositioned everything before this:
+
+- **Eight items ACCEPTED** and promoted to this folder — BUG-001,
+  BUG-002, BUG-003, A-01/A-12/A-14, A-05/A-27, A-09, A-03, A-07. Each work-item
+  folder travelled with its row, so the Codex review trail sits beside the
+  thing it reviewed.
+- **A-22 REJECTED** and reopened as **BUG-004** in
+  [`BUG-004-gate-arming/`](BUG-004-gate-arming/).
+
+The verdicts and their evidence are in
+this document.
+
+*(Moved here from `waiting-acceptance/INDEX.md` on 2026-08-03 when that file
+was dissolved — it is a record of ACCEPTED work, so it belongs beside the
+work rather than in the folder for things still waiting.)*

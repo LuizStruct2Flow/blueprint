@@ -1,0 +1,33 @@
+#!/bin/sh
+# .githooks/pre-commit — refuse a commit on the blueprint's main.
+#
+# The rule and the reasoning live in scripts/lib/branch-guard.sh, sourced by
+# this hook AND by pre-push, so the two doors cannot drift apart. One
+# implementation, never two that agree only by coincidence.
+#
+# FAILS CLOSED: if the guard cannot be sourced, the commit is refused. A gate
+# that cannot run has checked nothing, and "could not check" must never render
+# as "passed" — the lesson BUG-018 taught twice in one day.
+set -u
+
+_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$_root" ]; then
+  echo "pre-commit: not inside a git work tree — refusing." >&2
+  exit 1
+fi
+
+# Only the blueprint ships this hook's subject matter, but the hook itself
+# travels: a derived project that has no guard lib should not be blocked by its
+# absence, because the guard has nothing to say there anyway.
+if [ ! -f "$_root/scripts/lib/branch-guard.sh" ]; then
+  [ -f "$_root/.blueprint-root" ] || exit 0
+  echo "pre-commit: scripts/lib/branch-guard.sh is missing in a blueprint checkout — refusing." >&2
+  echo "  Restore it, or the main-branch guard is silently absent." >&2
+  exit 1
+fi
+
+# shellcheck source=scripts/lib/branch-guard.sh
+. "$_root/scripts/lib/branch-guard.sh"
+bp_branch_guard commit || exit 1
+
+exit 0

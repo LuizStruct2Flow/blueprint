@@ -45,11 +45,17 @@ the repo's single biggest ceremony surface — 426 lines narrating state that
 had already gone stale once. Shrinking it is a founder decision, not taken yet.
 Until then: only facts a command cannot give you.**
 
-- **Six TASK items are accepted and in `done/`.** PRs #21–#24 merged.
-- **`doing/` holds three promoted items** (founder go, 2026-08-05): **BUG-021**
-  (done, on this branch), **BUG-022** (not started), **FEATURE-003 reader** (not
-  started). TASK-009 is APPROVED but deliberately left parked — approval is not
-  capacity, and a WIP limit was approved in the same breath.
+- **PRs #21–#26 merged.** Six TASK items accepted in `done/`; **BUG-021 and
+  BUG-022 are in `waiting-acceptance/`** with what-to-test written out.
+- **`doing/` holds ONE item: the FEATURE-003 reader**, not started. TASK-009 is
+  APPROVED but deliberately parked — approval is not capacity, and a WIP limit
+  was approved in the same breath.
+- **BLUEPRINT PRs DO NOT NEED FOUNDER AUTHORIZATION** (Luiz, 2026-08-05): *"the
+  PRs are only necessary due to the a2bp command"*. Open it, wait for the gate
+  and CI, merge it. **The exception is a2bp**: a back-propagation from a derived
+  project is a *request*, and merging it is a distinct decision (CLAUDE.md
+  §"Back-propagating"). Accepting a work ITEM is still the founder's — a merge
+  moves a row to `waiting-acceptance/`, never to `done/`.
 - **BUG-021's real lesson was found by the gate, not by design.** Sourcing two
   libs in the Codex wake command made them hard dependencies of *dispatching*,
   so a tree without them stopped dispatching entirely. The label now fails OPEN.
@@ -79,17 +85,10 @@ Alexis (BA). Alexis's verdict is preserved at `logs/state/codex-last-message.md`
 which is **overwritten by the next Codex dispatch**, so read it before dispatching
 anyone.
 
-**Two promoted items are NOT started.** These are assigned — the founder gave
-the go on 2026-08-05 — so continue them rather than waiting:
+**ONE promoted item is NOT started.** It is assigned — the founder gave the go on
+2026-08-05 — so continue it rather than waiting:
 
-1. **BUG-022 — dead-watcher detection.** An edge-triggered check in the feed,
-   which already polls and already reads the mic, so the comparison is free.
-   **Liveness from the LOCK RECORD, never `pgrep`** — every process-table check
-   written during redcare's incident matched the checking shell's own command
-   line. Scope honestly: it proves the process EXISTS, not that it is healthy; a
-   wedged watcher still reads alive, and closing that needs a heartbeat in every
-   dispatcher, which is out of scope.
-2. **FEATURE-003 reader** — `scripts/session-resume.sh`, per
+1. **FEATURE-003 reader** — `scripts/session-resume.sh`, per
    [`PLAN-FEATURE-003-session-snapshot.md`](PLAN-FEATURE-003-session-snapshot.md)
    §4. The requirement it stands or falls on: an INCOMPLETE replay must be LOUD.
 

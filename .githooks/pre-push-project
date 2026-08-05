@@ -679,7 +679,7 @@ if [ -f scripts/lib/dod-gate.sh ]; then
   . ./scripts/lib/dod-gate.sh
   _dod_ranges="$(push_log_opts)"
 
-  PIPE_FEED_TAG="DoD-Gate"
+  AGENT_FEED_TAG="DoD-Gate"
 
   _st_dod_rows(){ dod_stage_rows "$_dod_ranges"; }
   pipe_stage "§1b·1 every item has a backlog row" _st_dod_rows
@@ -693,7 +693,7 @@ if [ -f scripts/lib/dod-gate.sh ]; then
   _st_dod_judgement(){ dod_stage_judgement; }
   pipe_stage "§D·F·H judgement — printed, not verified" _st_dod_judgement
 
-  PIPE_FEED_TAG="GATE"
+  AGENT_FEED_TAG="GATE"
 else
   # Fails LOUD rather than silently dropping four stages: a shorter run is
   # exactly the signal the founder watches for, so it must carry its reason.

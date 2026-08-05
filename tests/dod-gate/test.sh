@@ -179,7 +179,7 @@ fi
 #    BUG-008 is about.
 # ===========================================================================
 H="$ROOT/.githooks/pre-push-project"
-if grep -q 'PIPE_FEED_TAG="DoD-Gate"' "$H"; then
+if grep -q 'AGENT_FEED_TAG="DoD-Gate"' "$H"; then
   pass "#7 the DoD stages are tagged [DoD-Gate] in the feed"
 else
   fail "#7 the DoD stages are not tagged — they would be indistinguishable from suite stages"
@@ -190,7 +190,7 @@ if [ "$n" -ge 4 ]; then
 else
   fail "#7 only $n DoD stage(s) wired — expected at least 4"
 fi
-if grep -q 'PIPE_FEED_TAG="GATE"' "$H"; then
+if grep -q 'AGENT_FEED_TAG="GATE"' "$H"; then
   pass "#7 the tag is restored afterwards, so later stages are not mislabelled"
 else
   fail "#7 the feed tag is never restored — every stage after the DoD block would read [DoD-Gate]"

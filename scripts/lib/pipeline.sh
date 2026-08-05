@@ -151,7 +151,7 @@ _pipe_line(){ # STATUS LABEL RIGHT
 # merely present.
 _pipe_feed(){
   command -v feed_append >/dev/null 2>&1 || return 0
-  feed_append "[${PIPE_FEED_TAG:-GATE}] $1"
+  feed_append "[${AGENT_FEED_TAG:-GATE}] $1"
 }
 
 # --- the stage runner -------------------------------------------------------

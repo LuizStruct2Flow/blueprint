@@ -119,10 +119,15 @@ cp "$ROOT/AGENT_ROSTER.example.md" "$REPO/" 2>/dev/null
 SIG="$STATE/signal.md"
 mkdir -p "$(dirname "$SIG")"
 LOG="$REPO/logs/agent-activity.log"
-CODEXLOG="$STATE/codex-runs.log"
-: >"$CODEXLOG"
+# The instrumented source for every reader assertion below. It is the GEMINI
+# run log, not the Codex one: BUG-021 stopped the feed pumping codex-runs.log,
+# because Codex's launcher now labels its own lines with the persona holding
+# the mic — a fact the feed cannot know. Nothing here is about Codex; these
+# assertions are about byte-exact delta reads, so any pumped log serves.
+RUNLOG="$STATE/gemini-runs.log"
+: >"$RUNLOG"
 # Content written BEFORE the feed ever starts — #16 asserts it is not replayed.
-printf 'PRE-EXISTING-must-not-replay\n' >>"$CODEXLOG"
+printf 'PRE-EXISTING-must-not-replay\n' >>"$RUNLOG"
 
 write_signal(){ # $1 = task text
   cat >"$SIG" <<EOF
@@ -207,7 +212,7 @@ else fail "#16 pre-existing transcript content was replayed"; fi
 #     next-tick delivery is not a contract this suite pins — saying "next tick"
 #     while polling ~8 ticks would claim more than it measures.
 # ===========================================================================
-printf 'SOLO-RECORD\n' >>"$CODEXLOG"
+printf 'SOLO-RECORD\n' >>"$RUNLOG"
 # What matters is that it is emitted at all without a successor or force-flush.
 if wait_for "SOLO-RECORD" 2; then
   [ "$(count_in_log "SOLO-RECORD")" -eq 1 ] \
@@ -215,7 +220,7 @@ if wait_for "SOLO-RECORD" 2; then
     || fail "#17 lone record emitted $(count_in_log "SOLO-RECORD") times, expected exactly 1"
   # Offset really advanced: a second record must follow, and the first must not
   # be re-emitted. A stalled offset would either re-emit or swallow this.
-  printf 'SOLO-NEXT\n' >>"$CODEXLOG"
+  printf 'SOLO-NEXT\n' >>"$RUNLOG"
   if wait_for "SOLO-NEXT" 3 && [ "$(count_in_log "SOLO-RECORD")" -eq 1 ]; then
     pass "#17 offset advanced by the record (successor emitted, no re-emission)"
   else fail "#17 offset did not advance correctly after a lone record"; fi
@@ -238,11 +243,11 @@ else
   SKIPPED=$((SKIPPED+1))
   FRAG='SPLIT-ascii-only'; CASE='#11'; KIND=''
 fi
-printf '%s' "$FRAG" >>"$CODEXLOG"
+printf '%s' "$FRAG" >>"$RUNLOG"
 sleep 1
 if [ "$(count_in_log "$FRAG")" -eq 0 ]; then pass "$CASE incomplete ${KIND}record withheld"
 else fail "$CASE an incomplete record was emitted before its newline (R4: byte/char mismatch, locale=${UTF8_LOCALE:-none})"; fi
-printf -- '-TAIL\n' >>"$CODEXLOG"
+printf -- '-TAIL\n' >>"$RUNLOG"
 if wait_for "${FRAG}-TAIL" 8; then
   [ "$(count_in_log "${FRAG}-TAIL")" -eq 1 ] \
     && pass "$CASE completed ${KIND}record emitted exactly once, intact" \
@@ -254,7 +259,7 @@ else fail "$CASE completed ${KIND}record never emitted"; fi
 #     The rev-1 pool design would have evicted this file.
 # ===========================================================================
 sleep 1.5
-printf 'AFTER-IDLE\n' >>"$CODEXLOG"
+printf 'AFTER-IDLE\n' >>"$RUNLOG"
 if wait_for "AFTER-IDLE" 8; then pass "#3 quiet-then-active file still emits (never evicted)"
 else fail "#3 a file that went quiet stopped being followed"; fi
 
@@ -263,17 +268,17 @@ else fail "#3 a file that went quiet stopped being followed"; fi
 # ===========================================================================
 stop_feed >/dev/null 2>&1; wait_sup 0
 MAXFRAG=64 start_feed >/dev/null 2>&1; wait_sup 1
-printf 'X%.0s' $(seq 1 200) >>"$CODEXLOG"
+printf 'X%.0s' $(seq 1 200) >>"$RUNLOG"
 if wait_for "force-flushed" 8; then
   sleep 1
   n="$(count_in_log "force-flushed")"
   [ "$n" -eq 1 ] && pass "#12 oversized newline-less line force-flushed exactly once" \
                  || fail "#12 force-flush fired $n times — the offset did not advance past the fragment (re-read loop)"
-  printf 'AFTER-FLUSH\n' >>"$CODEXLOG"
+  printf 'AFTER-FLUSH\n' >>"$RUNLOG"
   wait_for "AFTER-FLUSH" 4 && pass "#12 stream continues after a force-flush" \
                            || fail "#12 stream stalled after the force-flush"
 else fail "#12 MAX_FRAGMENT force-flush never fired; a newline-less writer would re-read forever"; fi
-printf '\n' >>"$CODEXLOG"; stop_feed >/dev/null 2>&1; wait_sup 0
+printf '\n' >>"$RUNLOG"; stop_feed >/dev/null 2>&1; wait_sup 0
 unset MAXFRAG; start_feed >/dev/null 2>&1; wait_sup 1
 
 # ===========================================================================
@@ -295,15 +300,15 @@ else fail "#9b a same-size in-place signal edit was invisible (size+inode used a
 # ===========================================================================
 # #8 Truncation resets the offset; subsequent writes still emit.
 # ===========================================================================
-: >"$CODEXLOG"; sleep 0.5
-printf 'AFTER-TRUNCATE\n' >>"$CODEXLOG"
+: >"$RUNLOG"; sleep 0.5
+printf 'AFTER-TRUNCATE\n' >>"$RUNLOG"
 if wait_for "AFTER-TRUNCATE" 8; then pass "#8 truncation handled; stream resumes"
 else fail "#8 after truncation the file stopped emitting"; fi
 
 # ===========================================================================
 # #8b Rotation (new inode, same path) resets the offset.
 # ===========================================================================
-mv "$CODEXLOG" "$CODEXLOG.old"; printf 'AFTER-ROTATE\n' >"$CODEXLOG"
+mv "$RUNLOG" "$RUNLOG.old"; printf 'AFTER-ROTATE\n' >"$RUNLOG"
 if wait_for "AFTER-ROTATE" 8; then pass "#8b rotation handled (inode change resets offset)"
 else fail "#8b after rotation the new file was not picked up"; fi
 
@@ -390,11 +395,11 @@ else fail "#14 could not start a supervisor for the identity cases"; fi
 # ===========================================================================
 # #7 Paths containing spaces.
 # ===========================================================================
-SPACEY="$WORK/state dir with spaces"; mkdir -p "$SPACEY"; : >"$SPACEY/codex-runs.log"
+SPACEY="$WORK/state dir with spaces"; mkdir -p "$SPACEY"; : >"$SPACEY/gemini-runs.log"
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$SPACEY" AGENT_FEED_TICK="${TICKVAL:-0.25}" \
   bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 wait_sup 1
-printf 'SPACED-PATH-OK\n' >>"$SPACEY/codex-runs.log"
+printf 'SPACED-PATH-OK\n' >>"$SPACEY/gemini-runs.log"
 if wait_for "SPACED-PATH-OK" 8; then pass "#7 state dir containing spaces handled"
 else fail "#7 a path with spaces broke the reader (word splitting)"; fi
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$SPACEY" bash scripts/agent-activity.sh --stop ) >/dev/null 2>&1
@@ -423,15 +428,15 @@ if skip "#10 append-during-read, #18 short sink, foreground mode (all run in CI)
 #     long skips.
 # ===========================================================================
 stop_feed >/dev/null 2>&1; wait_sup 0
-: >"$CODEXLOG"
+: >"$RUNLOG"
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   AGENT_FEED_TEST_SLOW_READ=1 bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 if wait_sup 1; then
-  printf 'RACE-A\n' >>"$CODEXLOG"     # in the snapshot
+  printf 'RACE-A\n' >>"$RUNLOG"     # in the snapshot
   sleep 0.3
-  printf 'RACE-B\n' >>"$CODEXLOG"     # lands DURING the slowed read
+  printf 'RACE-B\n' >>"$RUNLOG"     # lands DURING the slowed read
   sleep 0.3
-  printf 'RACE-C\n' >>"$CODEXLOG"
+  printf 'RACE-C\n' >>"$RUNLOG"
   wait_for RACE-C 6; sleep 1
   a="$(count_in_log RACE-A)"; b="$(count_in_log RACE-B)"; c="$(count_in_log RACE-C)"
   if [ "$a" -eq 1 ] && [ "$b" -eq 1 ] && [ "$c" -eq 1 ]; then
@@ -446,12 +451,12 @@ stop_feed >/dev/null 2>&1; wait_sup 0
 #     once the sink behaves. Cleared mid-run on the SAME supervisor, because a
 #     restart would legitimately re-seed at EOF and mask the property.
 # ===========================================================================
-: >"$CODEXLOG"
+: >"$RUNLOG"
 SENTINEL="$WORK/short-sink-active"; : >"$SENTINEL"
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   AGENT_FEED_TEST_SHORT_SINK="$SENTINEL" bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 if wait_sup 1; then
-  printf 'SHORTSINK-PAYLOAD\n' >>"$CODEXLOG"
+  printf 'SHORTSINK-PAYLOAD\n' >>"$RUNLOG"
   sleep 1.5
   if [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 0 ]; then
     pass "#18 short sink emits nothing and consumes nothing"
@@ -469,7 +474,7 @@ stop_feed >/dev/null 2>&1; wait_sup 0
 # #5f/#15f Foreground mode (R-3): must BLOCK, hold exactly one resident
 #     process, spawn no `tee`, and write BOTH stdout and the log itself.
 # ===========================================================================
-: >"$CODEXLOG"
+: >"$RUNLOG"
 FGOUT="$WORK/fg.out"
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   bash scripts/agent-activity.sh >"$FGOUT" 2>&1 ) & fgjob=$!
@@ -483,7 +488,7 @@ kids="$(ps -eo ppid,args 2>/dev/null | awk -v P="$fgpid" '$1==P' | grep -c '[t]e
 if [ "$kids" -eq 0 ]; then pass "#15f foreground spawns no 'tee' (supervisor writes both sinks)"
 else fail "#15f foreground spawned a 'tee' — the one-resident-process contract is false"; fi
 
-printf 'FOREGROUND-LINE\n' >>"$CODEXLOG"
+printf 'FOREGROUND-LINE\n' >>"$RUNLOG"
 sleep 1.5
 if grep -qF "FOREGROUND-LINE" "$FGOUT" 2>/dev/null; then pass "#5f foreground writes to stdout"
 else fail "#5f foreground did not write to stdout"; fi

@@ -177,6 +177,20 @@ else
   pipe_skip "commit-subjects · TASK-002" "suite absent"
 fi
 
+# BUG-021 — Codex output carries the persona that produced it. ~0.3s.
+if [ -f tests/codex-persona-label/test.sh ]; then
+  _st_cplabel(){
+    bash tests/codex-persona-label/test.sh || {
+      echo "❌ tests/codex-persona-label/test.sh failed (BUG-021)."
+      echo "   The launcher must label its own output from the shared roster lookup."
+      return 1
+    }
+  }
+  pipe_stage "codex-persona-label · BUG-021" _st_cplabel
+else
+  pipe_skip "codex-persona-label · BUG-021" "suite absent"
+fi
+
 # TASK-003 — no commit or push on the BLUEPRINT's main, and the guard stays
 # INERT in derived projects, which are trunk-based. ~0.5s.
 if [ -f tests/branch-guard/test.sh ]; then

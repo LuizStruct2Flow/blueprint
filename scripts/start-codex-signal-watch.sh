@@ -97,9 +97,42 @@ STATE_DIR="$(agent_state_dir "$ROOT")"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/codex-runs.log"
 OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
+
+# THE FEED LABEL, built here and nowhere else (BUG-021).
+#
+# The persona is a per-dispatch fact: AGENT_SIGNAL_HOLDER is exported fresh for
+# each trigger, and this is the only point in the system where it is known
+# alongside the output it produced. The feed reads a long-lived log and binds
+# its labels once at daemon start, so it stamped every Codex line `[CODEX]`
+# regardless of who held the mic — 103 such lines against 5 labelled ones in
+# linkedin-watcher-agent before this changed.
+#
+# bp_roster_label is the SAME function the feed uses for its mic-flip lines, so
+# the two cannot drift into different formats.
+#
+# FAILS OPEN, unlike .githooks/commit-msg which fails closed — and the asymmetry
+# is the point. There the check IS the work, so being unable to check must stop
+# the commit. Here the label is decoration on top of the work: a missing lib must
+# cost a nice label, never the dispatch. Sourcing these unguarded aborted the
+# whole wake command in any tree without them, which tests/state-dir caught as a
+# dispatch that never happened at all. feed.sh states the same rule for itself —
+# "a feed line is worth having; it is never worth failing a push over".
+FEED_LABEL="Codex"
+if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
+  . "$ROOT/scripts/lib/roster.sh"
+  __label="$(bp_roster_label "$ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" 2>/dev/null)"
+  [ -n "$__label" ] && FEED_LABEL="$__label"
+fi
+if [ -r "$ROOT/scripts/lib/feed.sh" ]; then
+  . "$ROOT/scripts/lib/feed.sh"
+else
+  feed_append(){ :; }
+fi
+
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 # --json + codex-feed-filter.sh keeps the activity feed at one concise line per
 # action (codex prose, commands, file changes) instead of echoing every file
 # codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
@@ -110,9 +143,15 @@ echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
   --skip-git-repo-check \
   --output-last-message "$OUTPUT_LAST" \
   "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. Commit your changes if appropriate." \
-  2>>"$RUN_LOG" | bash "$ROOT/scripts/codex-feed-filter.sh" >>"$RUN_LOG"
+  2>>"$RUN_LOG" \
+  | bash "$ROOT/scripts/codex-feed-filter.sh" \
+  | while IFS= read -r __line; do
+      printf "%s\n" "$__line" >>"$RUN_LOG"
+      [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
+    done
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
 '
 
 exec "${ROOT}/scripts/codex-signal-watch.sh" "$@"

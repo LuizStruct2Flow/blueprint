@@ -45,9 +45,16 @@ the repo's single biggest ceremony surface — 426 lines narrating state that
 had already gone stale once. Shrinking it is a founder decision, not taken yet.
 Until then: only facts a command cannot give you.**
 
-- **Nothing is in flight.** PRs #21, #22 and #23 are merged. Five TASK items are
-  in `done/`, TASK-002 sits in `waiting-acceptance/` after its re-fix, and
-  `doing/` holds only this file.
+- **Six TASK items are accepted and in `done/`.** PRs #21–#24 merged.
+- **`doing/` holds three promoted items** (founder go, 2026-08-05): **BUG-021**
+  (done, on this branch), **BUG-022** (not started), **FEATURE-003 reader** (not
+  started). TASK-009 is APPROVED but deliberately left parked — approval is not
+  capacity, and a WIP limit was approved in the same breath.
+- **BUG-021's real lesson was found by the gate, not by design.** Sourcing two
+  libs in the Codex wake command made them hard dependencies of *dispatching*,
+  so a tree without them stopped dispatching entirely. The label now fails OPEN.
+  `commit-msg` fails CLOSED. Both are right: there the check IS the work, here
+  the label is decoration on top of it.
 - **The squash-merge door is closed and PROVEN closed.** CI now checks the PR
   title (which is what a squash merge turns into a subject), the branch's
   commits, and what lands on `main`, all through one rule shared with the hook.
@@ -72,22 +79,28 @@ Alexis (BA). Alexis's verdict is preserved at `logs/state/codex-last-message.md`
 which is **overwritten by the next Codex dispatch**, so read it before dispatching
 anyone.
 
-**Nothing is assigned.** Everything below waits on a founder decision — do not
-start any of it unprompted. Six items were self-promoted on 2026-08-03 and that
-is the breach this stretch of work has been correcting.
+**Two promoted items are NOT started.** These are assigned — the founder gave
+the go on 2026-08-05 — so continue them rather than waiting:
 
-1. **Accept or reject TASK-002** — `waiting-acceptance/BACKLOG.md` carries what
-   to test, including the two CI run IDs that prove the check bites.
-2. **Five flow decisions** from Klaus and Alexis — see "open threads". The
-   rule-7 one is load-bearing; the others are ceremony cuts.
-3. **FEATURE-003** — whether to promote the reader (both reviewers say yes) and
-   leave the writer parked. `docs/backlog/PLAN-FEATURE-003-session-snapshot.md`
-   §6 lists the four open questions.
-4. **BUG-021 / BUG-022** (parked) — both fixed and running in the redcare
-   blueprint; back-propagating them is a decision, not a copy.
-5. **The gate SLO** — 188 s against a 180 s warning on every recent run. Either
-   optimise `signal-dispatch` or raise the threshold deliberately; leaving a
-   warning permanently on trains everyone to ignore it.
+1. **BUG-022 — dead-watcher detection.** An edge-triggered check in the feed,
+   which already polls and already reads the mic, so the comparison is free.
+   **Liveness from the LOCK RECORD, never `pgrep`** — every process-table check
+   written during redcare's incident matched the checking shell's own command
+   line. Scope honestly: it proves the process EXISTS, not that it is healthy; a
+   wedged watcher still reads alive, and closing that needs a heartbeat in every
+   dispatcher, which is out of scope.
+2. **FEATURE-003 reader** — `scripts/session-resume.sh`, per
+   [`PLAN-FEATURE-003-session-snapshot.md`](PLAN-FEATURE-003-session-snapshot.md)
+   §4. The requirement it stands or falls on: an INCOMPLETE replay must be LOUD.
+
+Waiting on the founder, not on us:
+
+- **TASK-009** (parked, approved) — the five flow changes. Sequence after the
+  two above.
+- **The gate SLO** — 188 s against a 180 s warning on every recent run.
+  **TASK-008 is parked for this.** Either optimise `signal-dispatch` or raise
+  the threshold deliberately; a warning permanently on trains everyone to
+  ignore it.
 
 ### EPHEMERAL STATE — died with the session, re-establish it
 

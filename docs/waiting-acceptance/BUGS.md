@@ -14,10 +14,17 @@ the two files in step. That is the wrong repair: two records of one fact drift
 by construction, and a guard only tells you afterwards. One record cannot
 disagree with itself.
 
+**Put the acceptance command in the CHAT, not only in this column.** BUG-022
+shipped with `scripts/accept-bug-022.sh` and a pointer in its row, and the
+founder still had no idea how to accept it — because this column lives in a file
+he would have to open first. Klaus and Alexis both said acceptance instructions
+belong where the decision happens.
+
 | # | Bug | Severity | Status | What to test | Detail |
 |---|---|---|---|---|---|
-| **BUG-022** | A dispatch to a dead watcher failed silently | S2 | fixed, on `main` (#26) | **Run `bash scripts/accept-bug-022.sh`** — it stages the incident in a throwaway repo and prints what it observed. Safe: it touches no live state and dispatches nothing. Read the three checks it prints. To see it on the real repo instead, the manual recipe is in that script's header comment. | The mic state and the dispatcher's liveness are unremarkable alone and conclusive together; nothing compared them. Liveness comes from an `flock` the watcher holds for its lifetime — released by the kernel on death, so no stale pid — and never from the process table, which matches the checking shell's own command line. Proves the process EXISTS, not that it is healthy: a wedged watcher still reads alive. **Follow-up before acceptance (#28):** the lock was first derived from the repo ROOT, so the real watcher run by `tests/signal-dispatch` against a *fixture* baton took the LIVE repo's lock — leaving a record that made a checkout which never ran a watcher report `dead` forever, and refusing any genuine watcher started while that suite ran. It now derives from the BATON's own directory, so isolation falls out of the path rather than being remembered. |
-| **BUG-021** | Codex output was labelled `[CODEX]`, never `[Persona - Codex]` | S3 | fixed, on `main` (#25) | Dispatch a Codex persona and watch `logs/agent-activity.log` — its lines must read `[<Persona> - Codex]`, not `[CODEX]`. Check the label follows a roster **rename** without restarting anything. Then delete `scripts/lib/roster.sh` in a scratch copy and confirm the dispatch STILL happens, unlabelled: the label fails open. | The persona is a per-dispatch fact, so the feed could never know it — a label there is bound once at daemon start. The launcher now builds it from `bp_roster_label`, the same lookup the feed uses for mic flips, and writes through the shared appender. |
+
+*(Empty — BUG-021 and BUG-022 were accepted on 2026-08-05 and moved to
+[`../done/BUGS.md`](../done/BUGS.md).)*
 
 The 2026-07-29 QA pass dispositioned the earlier bugs: BUG-001, BUG-002 and
 BUG-003 are all ACCEPTED and live in [`../done/BUGS.md`](../done/BUGS.md) with

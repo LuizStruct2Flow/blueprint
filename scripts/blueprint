@@ -113,6 +113,10 @@ MANAGED_FILES=(
   # Sourced by .githooks/pre-push-project to render the DoD as stages. Without
   # it the checklist silently drops four stages in every derived project.
   "scripts/lib/dod-gate.sh"
+  # The watcher-liveness oracle: the dispatchers TAKE this lock, the feed TESTS
+  # it. MUST ship with either side — a project with the watcher but not this lib
+  # loses the dead-watcher warning silently, which is the bug itself (BUG-022).
+  "scripts/lib/watcher-lock.sh"
   # THE definition of "a subject names its item", shared by .githooks/commit-msg
   # and scripts/check-commit-subjects.sh. MUST ship with the hook: the hook fails
   # closed without it, and a second copy of the rule is two rules that drift.

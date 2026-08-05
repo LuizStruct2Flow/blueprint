@@ -72,6 +72,13 @@ if command -v bp_watch_liveness >/dev/null 2>&1; then
 
   lock="$(bp_watch_lock_path "$T" OVER_TO_CODEX)"
   mkdir -p "$(dirname "$lock")"
+  # The path is derived from the BATON'S directory, not a repo root. Asserted
+  # because deriving it from a root is what let a test's watcher take the LIVE
+  # repo's lock: the fixture baton was elsewhere, but the lock was not.
+  case "$lock" in
+    "$T"/*) : ;;
+    *) fail "#2 the lock is not beside the baton dir it was given: $lock" ;;
+  esac
 
   # (b) A lock file that exists but is UNHELD → "dead". A watcher claimed this
   #     mic at some point and is gone. This is the incident.
@@ -255,6 +262,44 @@ if command -v flock >/dev/null 2>&1; then
   wait "$h2" 2>/dev/null
 fi
 rm -rf "$E2E"
+
+# ===========================================================================
+# 7. A WATCHER POINTED AT A FIXTURE BATON LEAVES NOTHING IN THIS REPO.
+#
+#    This is the assertion that was missing. tests/signal-dispatch runs the REAL
+#    watcher against a fixture baton, and while the lock was derived from the
+#    repo ROOT the watcher happily took the LIVE repo's lock — leaving a record
+#    that made a checkout which never ran a watcher report `dead` forever, and
+#    refusing any genuine watcher started while the suite ran.
+#
+#    Isolation is not a property a fixture can be careful enough to have. It has
+#    to fall out of where the path comes from.
+# ===========================================================================
+FIX="$(mktemp -d)"
+mkdir -p "$FIX/state"
+printf '| Field | Value |\n|---|---|\n| Holder | X |\n| State | ACTIVE |\n| Task | t |\n' \
+  > "$FIX/state/signal.md"
+live_lock="$ROOT/logs/state/.watch-over_to_codex.lock"
+had_live_lock=0
+[ -e "$live_lock" ] && had_live_lock=1
+
+( AGENT_SIGNAL_SETTLE=0 timeout 3 bash "$ROOT/scripts/codex-signal-watch.sh" \
+    --file "$FIX/state/signal.md" --poll 1 --log "$FIX/signal.log" -- true ) \
+  >/dev/null 2>&1 || true
+
+if [ "$had_live_lock" -eq 0 ] && [ -e "$live_lock" ]; then
+  fail "#7 the watcher created a lock in the LIVE repo while watching a fixture baton"
+  rm -f "$live_lock"
+else
+  pass "#7 a watcher on a fixture baton leaves no lock in this repo"
+fi
+
+if [ -e "$FIX/state/.watch-over_to_codex.lock" ]; then
+  pass "#7 it put the lock beside the baton it was actually watching"
+else
+  fail "#7 no lock beside the fixture baton — the watcher took none, so #7 proves nothing"
+fi
+rm -rf "$FIX"
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-022 — a dispatch into silence is visible."

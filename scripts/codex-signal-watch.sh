@@ -321,7 +321,11 @@ refresh_signal_file() {
 if [[ "$ONCE" -ne 1 ]] && [[ -r "$ROOT/scripts/lib/watcher-lock.sh" ]]; then
   # shellcheck source=scripts/lib/watcher-lock.sh
   . "$ROOT/scripts/lib/watcher-lock.sh"
-  if ! bp_watch_hold "$ROOT" "$TARGET_STATE" 7; then
+  # Beside the BATON this watcher is watching, not beside the checkout it was
+  # launched from. `--file` can point anywhere, and a lock derived from $ROOT
+  # meant a fixture baton was guarded by a lock in the real repo — which left a
+  # record there and would refuse a genuine watcher while a suite ran.
+  if ! bp_watch_hold "$(dirname "$SIGNAL_FILE")" "$TARGET_STATE" 7; then
     echo "codex-signal-watch: another watcher already holds $TARGET_STATE — refusing." >&2
     echo "  Two watchers on one state race the same baton and dispatch twice." >&2
     exit 1

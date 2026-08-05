@@ -119,6 +119,24 @@ EOF
 # --- name -> backing agent --------------------------------------------------
 # The label half. The Backing agent column is free text by design (Claude Code,
 # Codex, Gemini, Copilot, Qwen, …), so this returns it verbatim.
+# bp_roster_label SRC NAME → "<Name> - <Backing>", or "<Name>" if unrostered.
+#
+# THE one way a persona is rendered into the activity feed. It lived inside
+# scripts/agent-activity.sh as a local `persona_label`, which meant anything
+# outside that file — notably the Codex launcher, the only place that knows who
+# holds the mic for a given dispatch — had to copy it. Two copies of a rule are
+# two rules: they pass their own tests and disagree in the log (BUG-021).
+#
+# Degrades to the bare NAME rather than failing. A feed line with no label is
+# worse than an unqualified one; bp_roster_backing_for_name already warns once
+# per unresolved name, so the miss is reported without being fatal.
+bp_roster_label(){
+  local src="${1:-.}" name="${2:-}" backing
+  [ -n "$name" ] || return 1
+  backing="$(bp_roster_backing_for_name "$src" "$name" 2>/dev/null)"
+  printf '%s%s' "$name" "${backing:+ - $backing}"
+}
+
 bp_roster_backing_for_name(){
   local src="${1:-.}" want="${2:-}" role name backing
   [ -n "$want" ] || return 1

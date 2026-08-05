@@ -97,9 +97,15 @@ if command -v bp_watch_liveness >/dev/null 2>&1; then
       fail "#2 expected 'alive' while the lock was held, got '$got'"
     fi
 
+    # Kill the CHILD too. `flock file cmd` forks rather than execs, so `sleep`
+    # inherits the open fd and keeps the lock held after its parent dies. That
+    # is not a quirk to route around — it is exactly how a real watcher's
+    # children behave, and a test that killed only the parent would assert
+    # something the production case never does.
+    pkill -9 -P "$holder" 2>/dev/null
     kill -9 "$holder" 2>/dev/null
     wait "$holder" 2>/dev/null
-    sleep 0.3
+    sleep 0.5
     # SIGKILL leaves no chance to clean up. The kernel releases the lock anyway,
     # which is the entire reason this is a lock and not a pid file.
     got="$(bp_watch_liveness "$T" OVER_TO_CODEX 2>/dev/null)"
@@ -123,7 +129,11 @@ fi
 # up, and it was in this file's first draft.
 if [ ! -f "$LIB" ]; then
   fail "#3 cannot check for process-table use — the lib does not exist"
-elif grep -qE 'pgrep|pidof|ps -ef|ps -eo' "$LIB" 2>/dev/null; then
+elif sed 's/#.*//' "$LIB" | grep -qE 'pgrep|pidof|ps -ef|ps -eo'; then
+  # Comments stripped first: the lib NAMES pgrep in the comment explaining why it
+  # must never be used, and a check that cannot tell an explanation from a call
+  # would force that explanation to be deleted to stay green — removing the one
+  # place a future reader learns why.
   fail "#3 the lib consults the process table — it will match its own command line"
 else
   pass "#3 the lib never greps the process table"
@@ -161,6 +171,90 @@ if grep -q 'dead_last' "$FEED" 2>/dev/null; then
 else
   fail "#5 no edge tracking — a per-poll warning trains the operator to ignore it"
 fi
+
+# ===========================================================================
+# 6. END TO END, in a real feed. #4 and #5 are greps: they prove the code says
+#    the right thing, not that a running supervisor emits the warning. That
+#    distinction is the entire subject of this bug — a check nothing invokes
+#    looks exactly like a check that passed.
+#
+#    Also pins the path derivation. The lock lives under agent_state_dir, so
+#    AGENT_STATE_HOME must move it for BOTH sides; a hardcoded logs/state in
+#    either would have the watcher and the feed disagree about whether a watcher
+#    exists, each working perfectly alone (A-09's defect).
+# ===========================================================================
+E2E="$(mktemp -d)"
+
+# An ISOLATED repo, never $ROOT. The feed writes to "$repo_root/logs" and ignores
+# any env override, so running it here would append to the real feed and, worse,
+# read the real baton — a suite mutating the repository under test is BUG-014,
+# and one that dispatches off the live baton nearly cost a live Codex run once.
+# The whole lib dir is copied rather than named files, so the next lib the feed
+# sources cannot silently break this fixture (the same reasoning as
+# tests/agent-activity-bound).
+e2e_repo(){ # $1 = name → echoes the repo path
+  _r="$E2E/$1"
+  mkdir -p "$_r/scripts/lib" "$_r/logs" "$E2E/home" "$_r/state"
+  cp "$ROOT/scripts/agent-activity.sh" "$_r/scripts/"
+  cp -R "$ROOT/scripts/lib/." "$_r/scripts/lib/" 2>/dev/null
+  cp "$ROOT/AGENT_ROSTER.example.md" "$_r/" 2>/dev/null
+  printf '| Field | Value |\n|---|---|\n| Holder | Codexy |\n| State | OVER_TO_CODEX |\n| Task | t |\n| Last update | 2026-08-05 |\n' \
+    > "$_r/state/signal.md"
+  printf '%s' "$_r"
+}
+
+run_feed(){ # $1 = repo, $2 = seconds
+  ( cd "$1" \
+    && HOME="$E2E/home" AGENT_STATE_HOME="$1/state" AGENT_FEED_TICK=0.25 \
+       timeout "$2" bash scripts/agent-activity.sh >/dev/null 2>&1 ) &
+  _feedjob=$!
+}
+
+R1="$(e2e_repo dead)"
+# An unheld lock: a watcher claimed this state and is gone. Exactly the incident.
+: >"$R1/state/.watch-over_to_codex.lock"
+run_feed "$R1" 5
+sleep 3.5
+
+if grep -q 'NO watcher is listening' "$R1/logs/agent-activity.log" 2>/dev/null; then
+  pass "#6 a running feed warns that the mic is held with nobody listening"
+else
+  fail "#6 the feed emitted no warning: $(tail -2 "$R1/logs/agent-activity.log" 2>/dev/null)"
+fi
+
+n="$(grep -c 'NO watcher is listening' "$R1/logs/agent-activity.log" 2>/dev/null | head -1)"
+if [ "${n:-0}" -eq 1 ]; then
+  pass "#6 it fires exactly once across many polls, not per tick"
+else
+  fail "#6 the warning appeared ${n:-0} times — a per-poll warning gets ignored"
+fi
+wait "$_feedjob" 2>/dev/null
+
+# NON-VACUITY, and it is load-bearing: an implementation that warned
+# unconditionally would satisfy both assertions above. It must also prove the
+# feed was AWAKE, or "no warning" cannot be told from "never ran".
+R2="$(e2e_repo alive)"
+lock2="$R2/state/.watch-over_to_codex.lock"
+: >"$lock2"
+if command -v flock >/dev/null 2>&1; then
+  flock "$lock2" sleep 9 &
+  h2=$!
+  sleep 0.4
+  run_feed "$R2" 5
+  sleep 3.5
+  if grep -q 'NO watcher is listening' "$R2/logs/agent-activity.log" 2>/dev/null; then
+    fail "#6 the feed warned while the lock was HELD — it warns unconditionally"
+  elif [ -s "$R2/logs/agent-activity.log" ]; then
+    pass "#6 a live watcher produces no warning, and the feed WAS running"
+  else
+    fail "#6 the feed produced nothing at all — silence here proves nothing"
+  fi
+  wait "$_feedjob" 2>/dev/null
+  pkill -9 -P "$h2" 2>/dev/null
+  kill -9 "$h2" 2>/dev/null
+  wait "$h2" 2>/dev/null
+fi
+rm -rf "$E2E"
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-022 — a dispatch into silence is visible."

@@ -172,7 +172,7 @@ stream should not arm it — a monitor on a file nobody writes is pure overhead.
 
 | Item | What is needed |
 |---|---|
-| **Acceptance** | Five items sit in `waiting-acceptance/`: BUG-004, BUG-012, BUG-013, BUG-014, BUG-015. Per-item tests are in [INDEX.md](../waiting-acceptance/INDEX.md). |
+| **Acceptance** | Nothing is waiting — all 16 items are founder-accepted in [`../done/BUGS.md`](../done/BUGS.md). "What to test" is a COLUMN in the `BUGS.md` row now; the separate `INDEX.md` was dissolved on 2026-08-03 because it was a second record of the same membership. |
 | **ai-server-blueprint** | Still undecided: it has **zero** struct2flow marker files, so adopting it is a full bootstrap, not a repair. Is it a struct2flow project at all? |
 
 **Nothing else is blocked on a decision.** BUG-004 and BUG-005, which sat here

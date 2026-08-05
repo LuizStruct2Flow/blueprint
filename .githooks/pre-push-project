@@ -177,21 +177,22 @@ else
   pipe_skip "doc-links" "suite absent"
 fi
 
-# The acceptance INDEX must list every item actually waiting. Found by an lcm
-# pass on 2026-08-03: the index listed 5 while BUGS.md held 14, so nine fixes
-# were invisible to the only person who can accept them. Two records of one
-# fact, kept in step by memory. ~0.1s.
-if [ -f tests/lifecycle-index/test.sh ]; then
-  _st_lcindex(){
-    bash tests/lifecycle-index/test.sh || {
-      echo "❌ tests/lifecycle-index/test.sh failed."
-      echo "   docs/waiting-acceptance/INDEX.md and BUGS.md disagree on membership."
+# The lifecycle documents must say something true: artefacts sit with their row,
+# and no table carries a phantom placeholder. Smaller than it was — the
+# index-vs-rows half went away with INDEX.md, because one record cannot disagree
+# with itself. ~0.1s.
+if [ -f tests/lifecycle-docs/test.sh ]; then
+  _st_lcdocs(){
+    bash tests/lifecycle-docs/test.sh || {
+      echo "❌ tests/lifecycle-docs/test.sh failed."
+      echo "   An artefact is stranded away from its row, or a table claims an"
+      echo "   item that does not exist."
       return 1
     }
   }
-  pipe_stage "lifecycle-index" _st_lcindex
+  pipe_stage "lifecycle-docs" _st_lcdocs
 else
-  pipe_skip "lifecycle-index" "suite absent"
+  pipe_skip "lifecycle-docs" "suite absent"
 fi
 
 # BUG-019 — a branch operation must not destroy a live dispatch. The baton used

@@ -45,17 +45,18 @@ the repo's single biggest ceremony surface — 426 lines narrating state that
 had already gone stale once. Shrinking it is a founder decision, not taken yet.
 Until then: only facts a command cannot give you.**
 
-- **Branch `docs/lifecycle-rules` is PUSHED** and 14 commits ahead of
-  `origin/main`. **No PR is open yet** — nothing has landed, and merging is the
-  founder's call. Working tree clean apart from gitignored `.scratch/`.
-- **The push is no longer blocked.** `PIPE_FEED_TAG` → `AGENT_FEED_TAG` was
-  renamed with the founder's go; the full gate passes at 42 stages. Two things
-  it surfaced on the way through, both fixed on this branch: §2 was demanding a
-  regression test for *parked* bugs, which made filing a bug impossible; and its
-  success line named bugs it had not checked.
-- **The gate now runs over its own SLO** — 186.7 s against a 180 s warning, with
-  `signal-dispatch` at 74.8 s the slowest stage. Non-blocking and nothing is
+- **PR #21 is MERGED** (`5fe89e0` on `main`) — the six TASK items landed and
+  their rows are now in `waiting-acceptance/BACKLOG.md`, awaiting the founder's
+  accept/reject. `doing/BACKLOG.md` is deleted, per the convention that its
+  absence means nothing is promoted.
+- **The gate now runs over its own SLO** — 186 s against a 180 s warning, with
+  `signal-dispatch` at 74 s the slowest stage. Non-blocking and nothing is
   demoted (that is the point of BUG-005), but it is the first run to trip it.
+- **§1b rule 7 costs a whole PR per landing, and this is the proof.** Alexis
+  predicted it; moving those six rows required its own branch and pull request,
+  because the merge is the trigger and the blueprint's `main` takes no direct
+  commits. It is not a bug to fix inside the rule — it needs post-merge
+  automation or a lifecycle state that can say "approved, PR open".
 
 ### IMMEDIATE NEXT ACTION
 
@@ -64,13 +65,20 @@ Alexis (BA). Alexis's verdict is preserved at `logs/state/codex-last-message.md`
 which is **overwritten by the next Codex dispatch**, so read it before dispatching
 anyone.
 
-Two things are open, in this order:
+**Nothing is mid-flight.** `doing/` holds only this file; six rows sit in
+`waiting-acceptance/` for the founder to accept or reject.
 
-1. **Open the PR** for `docs/lifecycle-rules` (14 commits, pushed, none landed).
-   Rule 6 route for the blueprint is branch → PR → merge, and merging is the
-   founder's.
-2. **Fold three inputs into ONE revision** of
-   `docs/backlog/PLAN-FEATURE-003-session-snapshot.md` — see "open threads".
+What is waiting on the founder, in rough order of consequence:
+
+1. **Accept or reject the six landed TASK items** (`waiting-acceptance/BACKLOG.md`
+   carries what to test).
+2. **Five flow decisions** from Klaus and Alexis — see "open threads". The
+   rule-7 one is load-bearing; the others are ceremony cuts.
+3. **FEATURE-003** — whether to promote the reader (both reviewers say yes) and
+   leave the writer parked. `docs/backlog/PLAN-FEATURE-003-session-snapshot.md`
+   §6 lists the four open questions.
+4. **BUG-021 / BUG-022** (parked) — both fixed and running in the redcare
+   blueprint; back-propagating them is a decision, not a copy.
 
 ### EPHEMERAL STATE — died with the session, re-establish it
 
@@ -85,7 +93,10 @@ Two things are open, in this order:
 ### OPEN THREADS
 
 - **FEATURE-003** (parked, `backlog/`) — HANDOVER as snapshot + event replay.
-  Three inputs to fold into one plan revision: the founder's `<hash>`…`</hash>`
+  **The three inputs are folded in** (`e31b251`): the design now splits into a
+  reader to promote and a writer to park, and the writer survives only as a
+  marker append. Remaining decisions are in §6 of the plan. Original context:
+  the founder's `<hash>`…`</hash>`
   open/close markers (they detect a STALE handover, not just a truncated log);
   the stash-don't-discard rule for uncommitted work under an untrusted snapshot;
   and Klaus's reshape — **derive the resume report from git + folders rather

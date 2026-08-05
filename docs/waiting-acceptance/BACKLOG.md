@@ -1,12 +1,10 @@
-# Backlog rows promoted into active work
+# Landed rows awaiting founder acceptance
 
-Rows pulled from [`../backlog/BACKLOG.md`](../backlog/BACKLOG.md) and being
-implemented now. They travel on to `waiting-acceptance/` when the work lands,
-and their artefacts (plans, reviews) travel with them.
+Rows whose work is **on `main`** and which are waiting for the founder to accept
+("done") or reject ("reopen"). See [README.md](README.md) for the triggers.
 
-**This file did not exist until the first promotion** — see
-[README.md](README.md). Its absence means nothing has been promoted; it is not
-a missing file.
+**This file appears when the first promoted row lands** — its absence means none
+have, not that it is missing.
 
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
@@ -16,3 +14,15 @@ a missing file.
 | **TASK-003** | Refuse a commit (and a push) on `main` in a BLUEPRINT checkout. CLAUDE.md §"Never push to the blueprint's `main`" says "commit on a branch, or do not commit yet" and neither door was guarded. Must NOT fire in derived projects — they are trunk-based and commit to `main` by design. | — | KEEP | Founder asked for it 2026-08-03; promoted the same day. |
 | **TASK-002** | A `commit-msg` hook that REJECTS a commit whose subject does not start with its backlog item (`BUG#20:`, `FEATURE#3:`, `TASK#1:`). Makes §1b rule 1 enforced rather than remembered — the same move as the no-chain guard and the fixture-isolation check. | — | KEEP | Founder asked for it 2026-08-03; promoted the same day. |
 | **TASK-001** | Write the concrete work-intake rules into `docs/DoD.md` (§1b) and move the `lcm` checklist there from CLAUDE.md, adding the fifth point today's passes showed was missing — that the lifecycle DOCUMENTS say something true, not just that folder membership is right. Establishes `TASK-XXX` as a third lifecycle ID alongside `BUG-`/`FEATURE-`. | — | KEEP | Founder asked for it 2026-08-03; promoted the same day. |
+
+All six landed together in PR #21 (`5fe89e0`), which is why they arrive as one
+move rather than six.
+
+## What to test
+
+- `git commit -m 'no item'` in this checkout is **refused**; `TASK#1: x` is accepted.
+- A commit attempt on `main` here is **refused**; the same guard is inert in a
+  derived project (it keys on `.blueprint-root`).
+- A push prints four `[DoD-Gate]` stages, and a parked bug does **not** trip the
+  regression-test stage while the same row in `doing/` does.
+- `waiting-acceptance/INDEX.md` is gone and nothing references it.

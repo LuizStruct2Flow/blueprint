@@ -43,24 +43,34 @@
 # Named after the STATE rather than the agent, so an arbitrary dispatcher works
 # without this file carrying a list of them. A list is a second place to forget
 # something.
-# The directory comes from agent_state_dir, NEVER from a hardcoded logs/state.
-# AGENT_STATE_HOME overrides that path, so a hardcoded one puts the watcher's
-# lock somewhere the feed does not look — the two sides would then disagree
-# about whether a watcher exists while both worked in isolation. That is A-09's
-# defect exactly (feed and dispatchers must share one derivation), and it was in
-# this file's first draft.
+# bp_watch_lock_path BATON_DIR STATE → the lock file for a mic state.
+#
+# THE FIRST ARGUMENT IS THE DIRECTORY HOLDING THE BATON, not a repo root, and
+# that distinction is the whole correctness argument.
+#
+# A lock belongs to the MIC it guards, not to the checkout the script was
+# launched from. Resolving it from a root is resolving from the caller's
+# position — the mistake this repo has now made four times (BUG-020's baked
+# paths, A-09's split derivation, BUG-013's `.blueprint-root`, and this).
+#
+# It shipped that way for one commit and did real damage immediately:
+# tests/signal-dispatch runs the REAL watcher against a FIXTURE baton, so the
+# watcher resolved its root to the live blueprint and took the live repo's lock —
+# leaving a record behind that made a checkout which had never run a watcher
+# report `dead` forever, defeating the `none` case that exists to prevent exactly
+# that false alarm. Worse, while the suite ran, a genuine watcher starting up
+# would have been REFUSED by a lock a test was holding.
+#
+# Deriving from the baton's own directory makes isolation fall out rather than
+# being bolted on: a fixture pointing `--file` at its own baton gets its own
+# lock, with nothing to remember and no env var to set.
 bp_watch_lock_path() {
-  _wl_root="${1:-.}"
+  _wl_dir="${1:-.}"
   _wl_state="$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '_')"
-  if command -v agent_state_dir >/dev/null 2>&1; then
-    _wl_dir="$(agent_state_dir "$_wl_root")"
-  else
-    _wl_dir="${AGENT_STATE_HOME:-$_wl_root/logs/state}"
-  fi
   printf '%s/.watch-%s.lock' "$_wl_dir" "$_wl_state"
 }
 
-# bp_watch_liveness ROOT STATE → prints `none`, `alive` or `dead`.
+# bp_watch_liveness BATON_DIR STATE → prints `none`, `alive` or `dead`.
 #
 #   none   no lock file — no watcher ever claimed this state here. Says nothing,
 #          because a project without watchers must never be warned about one it
@@ -74,6 +84,7 @@ bp_watch_lock_path() {
 # ignore the one warning this exists to raise.
 bp_watch_liveness() {
   _wl_file="$(bp_watch_lock_path "${1:-.}" "${2:-}")"
+
   [ -e "$_wl_file" ] || { printf 'none\n'; return 0; }
   command -v flock >/dev/null 2>&1 || { printf 'none\n'; return 0; }
 
@@ -87,7 +98,7 @@ bp_watch_liveness() {
   fi
 }
 
-# bp_watch_hold ROOT STATE FD → claim the lock for this process's lifetime.
+# bp_watch_hold BATON_DIR STATE FD → claim the lock for this process's lifetime.
 #
 # The caller passes its own fd number and never closes it: the lock is released
 # when the process exits, by the kernel, whatever kills it. Returns non-zero if
@@ -95,6 +106,7 @@ bp_watch_liveness() {
 # second is how two dispatchers race one baton.
 bp_watch_hold() {
   _wl_file="$(bp_watch_lock_path "${1:-.}" "${2:-}")"
+
   _wl_fd="${3:-7}"
   mkdir -p "$(dirname "$_wl_file")" 2>/dev/null || return 1
   command -v flock >/dev/null 2>&1 || return 0   # no flock: proceed unguarded

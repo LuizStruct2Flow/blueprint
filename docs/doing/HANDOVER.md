@@ -45,11 +45,23 @@ the repo's single biggest ceremony surface — 426 lines narrating state that
 had already gone stale once. Shrinking it is a founder decision, not taken yet.
 Until then: only facts a command cannot give you.**
 
-- **PRs #21–#26 merged.** Six TASK items accepted in `done/`; **BUG-021 and
-  BUG-022 are in `waiting-acceptance/`** with what-to-test written out.
-- **`doing/` holds ONE item: the FEATURE-003 reader**, not started. TASK-009 is
-  APPROVED but deliberately parked — approval is not capacity, and a WIP limit
-  was approved in the same breath.
+- **PRs #21–#29 merged.** Six TASK items plus **BUG-021 and BUG-022 accepted**
+  and in `done/`. TASK-008 is in `waiting-acceptance/`.
+- **`doing/` holds ONE item: the FEATURE-003 reader**, not started. TASK-009 and
+  FEATURE-004 are parked — approval is not capacity, and a WIP limit was
+  approved in the same breath.
+- **The gate is under its SLO again: 159 s** (was 198.6 s), `signal-dispatch`
+  32.5 s (was 74.9 s). CI dropped 4m00s → 2m59s. The SLO line no longer prints,
+  which is the point — it can mean something again.
+- **A STALE WATCHER DOUBLE-DISPATCHED, and this can recur.** On 2026-08-05 a
+  `codex-signal-watch.sh` orphaned at `ppid 1` for 3h42m fired alongside a fresh
+  one: **two Codex agents, same task, same tree**. Duplicate metered spend, and
+  it poisoned the new agent's test baseline with failures that were pure
+  concurrency. BUG-022's lock refuses a second watcher **only if the first one
+  took a lock** — so any watcher started before that fix is invisible to it, on
+  every checkout, until each is restarted once. Check before dispatching:
+  `ps -eo pid,ppid,etime,args | grep signal-watch` and look for `ppid 1` with a
+  long age. FEATURE-004 is the parked fix.
 - **BLUEPRINT PRs DO NOT NEED FOUNDER AUTHORIZATION** (Luiz, 2026-08-05): *"the
   PRs are only necessary due to the a2bp command"*. Open it, wait for the gate
   and CI, merge it. **The exception is a2bp**: a back-propagation from a derived

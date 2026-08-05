@@ -33,7 +33,9 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
-| **BUG-022** | A dispatch to a dead watcher fails silently | S2 | open | Edge-triggered check in the feed comparing the mic against the dispatcher's LOCK RECORD — never `pgrep`, which matches the checking shell's own command line. Proven in redcare as their BUG-033. |
+
+*(Empty — no bugs are being implemented. This is a good state, not a missing
+section.)*
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

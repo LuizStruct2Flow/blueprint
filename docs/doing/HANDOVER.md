@@ -45,27 +45,32 @@ the repo's single biggest ceremony surface — 426 lines narrating state that
 had already gone stale once. Shrinking it is a founder decision, not taken yet.
 Until then: only facts a command cannot give you.**
 
-- **`origin/main` = `270b248`.** This checkout is on branch
-  `docs/lifecycle-rules`, **EIGHT commits ahead, NOTHING PUSHED**, no PR open.
-  Working tree clean apart from gitignored `.scratch/`.
-- **THE PUSH IS BLOCKED, correctly.** `tests/env-namespace` (BUG-006) rejects
-  `PIPE_FEED_TAG` in `scripts/lib/pipeline.sh` — a MANAGED file, so a bare name
-  ships to every project. Fix is a rename to `AGENT_FEED_TAG` in 3 files
-  (pipeline.sh, .githooks/pre-push-project, tests/dod-gate/test.sh).
-  **The founder halted that rename. Do not redo it without asking.**
+- **Branch `docs/lifecycle-rules` is PUSHED** and 14 commits ahead of
+  `origin/main`. **No PR is open yet** — nothing has landed, and merging is the
+  founder's call. Working tree clean apart from gitignored `.scratch/`.
+- **The push is no longer blocked.** `PIPE_FEED_TAG` → `AGENT_FEED_TAG` was
+  renamed with the founder's go; the full gate passes at 42 stages. Two things
+  it surfaced on the way through, both fixed on this branch: §2 was demanding a
+  regression test for *parked* bugs, which made filing a bug impossible; and its
+  success line named bugs it had not checked.
+- **The gate now runs over its own SLO** — 186.7 s against a 180 s warning, with
+  `signal-dispatch` at 74.8 s the slowest stage. Non-blocking and nothing is
+  demoted (that is the point of BUG-005), but it is the first run to trip it.
 
 ### IMMEDIATE NEXT ACTION
 
-Alexis (BA, Codex) holds the mic on a flow review. **Do not flip the baton
-while `State = OVER_TO_CODEX`** — that is BUG-019's exact scenario and it kills
-a live dispatch silently. Wait for `OVER_TO_CLAUDE`, then read her verdict:
+The mic is free (`OVER_TO_CLAUDE`). Both flow reviews are IN — Klaus (PO) and
+Alexis (BA). Alexis's verdict is preserved at `logs/state/codex-last-message.md`,
+which is **overwritten by the next Codex dispatch**, so read it before dispatching
+anyone.
 
-```bash
-cat logs/state/codex-last-message.md
-```
+Two things are open, in this order:
 
-Then fold BOTH reviews into `docs/backlog/PLAN-FEATURE-003-session-snapshot.md`
-as ONE revision (see "open threads").
+1. **Open the PR** for `docs/lifecycle-rules` (14 commits, pushed, none landed).
+   Rule 6 route for the blueprint is branch → PR → merge, and merging is the
+   founder's.
+2. **Fold three inputs into ONE revision** of
+   `docs/backlog/PLAN-FEATURE-003-session-snapshot.md` — see "open threads".
 
 ### EPHEMERAL STATE — died with the session, re-establish it
 
@@ -74,8 +79,8 @@ as ONE revision (see "open threads").
 | Activity feed daemon | `bash scripts/agent-activity.sh --daemon` (check `--status`). **It TRUNCATES `logs/agent-activity.log` on start** — restarting it destroys any replay window |
 | Mic monitor | persistent `Monitor` on `logs/state/signal.md`, emit only on Holder/State change |
 | `blueprint` on PATH | NOT on PATH here — use `bash scripts/blueprint …` |
-| Klaus (PO) | review COMPLETE, verdict already relayed to the founder |
-| Alexis (BA) | dispatched, **still running** as of this snapshot |
+| Klaus (PO) | review COMPLETE, verdict relayed to the founder |
+| Alexis (BA) | review COMPLETE — verdict in `logs/state/codex-last-message.md`, **overwritten by the next Codex dispatch** |
 
 ### OPEN THREADS
 
@@ -90,6 +95,13 @@ as ONE revision (see "open threads").
   trip for live defects; cross-provider review per LANDING rather than per item;
   three flow metrics; and two ceremony cuts (this file, and the
   `§D·F·H judgement` stage inflating the gate's stage count).
+- **Alexis's findings** — she converges with Klaus on all of the above
+  independently, which is the strongest signal in either review. One thing only
+  she found: **§1b rule 7 is structurally broken for the blueprint.** Moving the
+  row to `waiting-acceptance/` inside the PR claims "merged" before the merge;
+  moving it after needs a second PR for a folder move. So the rule guarantees
+  either a stale `doing/` or an unsanctioned direct commit — it needs post-merge
+  automation, or a lifecycle state that can honestly say "approved, PR open".
 - **`doing/` holds 6 rows** (TASK-001/002/003/005/006/007), all finished and
   committed on this branch. Founder ruled they stay. **Nothing new enters
   `doing/` without the founder's explicit go** — six were self-promoted today

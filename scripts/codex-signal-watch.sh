@@ -304,6 +304,30 @@ refresh_signal_file() {
   # special cases in dispatch identity are what Codex rejected once before.
 }
 
+# --- claim the mic state, so its absence is detectable (BUG-022) -------------
+#
+# The lock is held on fd 7 for this process's lifetime and never closed: the
+# kernel releases it on exit, including SIGKILL, so there is no cleanup path to
+# get wrong and no stale pid to disambiguate.
+#
+# Its PURPOSE is not mutual exclusion, though it provides that too. It is the
+# record that a watcher was EXPECTED on this state, which is the fact
+# scripts/agent-activity.sh needs to tell "nobody is listening" apart from "an
+# agent is thinking". Without a lock file the feed reports `none` and says
+# nothing — correct for a project that runs no watchers.
+#
+# --once is exempt. A one-shot probe is not a listener, and a lock it drops
+# milliseconds later would leave a file that reads as a dead watcher forever.
+if [[ "$ONCE" -ne 1 ]] && [[ -r "$ROOT/scripts/lib/watcher-lock.sh" ]]; then
+  # shellcheck source=scripts/lib/watcher-lock.sh
+  . "$ROOT/scripts/lib/watcher-lock.sh"
+  if ! bp_watch_hold "$ROOT" "$TARGET_STATE" 7; then
+    echo "codex-signal-watch: another watcher already holds $TARGET_STATE — refusing." >&2
+    echo "  Two watchers on one state race the same baton and dispatch twice." >&2
+    exit 1
+  fi
+fi
+
 while true; do
   refresh_signal_file
   if [[ -f "$SIGNAL_FILE" ]] && trigger_if_needed && [[ "$ONCE" -eq 1 ]]; then

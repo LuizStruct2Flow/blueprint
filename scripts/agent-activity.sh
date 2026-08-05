@@ -95,6 +95,12 @@ state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
 # project (same class as BUG-002).
 . "$repo_root/scripts/lib/roster.sh"
 
+# The watcher-liveness oracle, shared with scripts/codex-signal-watch.sh which
+# takes the lock this tests (BUG-022). Guarded rather than sourced outright: a
+# project that has pulled the feed but not this lib must keep its feed, and lose
+# only the dead-watcher warning. watcher_liveness_line no-ops without it.
+[ -r "$repo_root/scripts/lib/watcher-lock.sh" ] && . "$repo_root/scripts/lib/watcher-lock.sh"
+
 #
 # Re-resolvable ON PURPOSE. The supervisor is long-lived and the roster is a
 # live config file, so resolving identity once at startup makes the feed report
@@ -417,6 +423,44 @@ signal_line(){
   emit "$(ts) [$(persona_label "${holder:-?}")] ${state:-?} — $task"
 }
 
+# --- is anyone actually holding the mic? (BUG-022) --------------------------
+#
+# The mic state and the dispatcher's liveness are unremarkable alone and
+# conclusive together, and nothing compared them — so `State = OVER_TO_CODEX`
+# with no watcher alive looked exactly like an agent thinking. This feed is the
+# right place precisely because it already polls on a timer and already reads
+# the baton, so the comparison costs one file check per tick.
+#
+# EDGE-TRIGGERED. A line every poll would train the operator to skim past the
+# feed, which is the failure this is meant to prevent rather than cause. It
+# fires on the transition into `dead` and again only after recovery.
+#
+# `dead_last` is the edge memory; it is deliberately keyed on the STATE too, so
+# a mic that moves from one dead dispatcher to another re-warns.
+dead_last=""
+watcher_liveness_line(){
+  local state live
+  command -v bp_watch_liveness >/dev/null 2>&1 || return 0
+  state=$(field State)
+  case "$state" in
+    OVER_TO_*) ;;
+    *) dead_last=""; return 0 ;;   # mic is not handed out; nothing to compare
+  esac
+
+  live="$(bp_watch_liveness "$repo_root" "$state" 2>/dev/null)"
+  if [ "$live" = dead ]; then
+    if [ "$dead_last" != "$state" ]; then
+      dead_last="$state"
+      emit "$(ts) [feed] ⚠ $state is held but NO watcher is listening — the dispatch is going nowhere."
+      emit "$(ts) [feed]   restart it, or hand the mic back with scripts/signal-set.sh."
+    fi
+  else
+    # Covers `alive` and `none` alike. `none` means no watcher ever claimed this
+    # state here, which is a project that runs none — never a warning.
+    dead_last=""
+  fi
+}
+
 supervise(){
   exec 9>"$lock_file"
   if ! flock -n 9; then
@@ -485,6 +529,10 @@ supervise_body(){
       if [ -n "$sig_now" ] && [ "$sig_now" != "$sig_last" ]; then
         sig_last="$sig_now"; signal_line
       fi
+      # OUTSIDE the change guard, deliberately. The dangerous case is a baton
+      # that has NOT changed for a long time while its listener died under it —
+      # exactly what a change-triggered check would never see (BUG-022).
+      watcher_liveness_line
     fi
 
     # Codex is NOT merged here. Its launcher appends to the feed itself, with

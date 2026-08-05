@@ -191,6 +191,21 @@ else
   pipe_skip "codex-persona-label · BUG-021" "suite absent"
 fi
 
+# BUG-022 — a dispatch into silence is visible. ~8s (it runs real supervisors).
+if [ -f tests/watcher-liveness/test.sh ]; then
+  _st_wlive(){
+    bash tests/watcher-liveness/test.sh || {
+      echo "❌ tests/watcher-liveness/test.sh failed (BUG-022)."
+      echo "   The feed must warn when the mic is held with no watcher alive —"
+      echo "   from the LOCK, never the process table."
+      return 1
+    }
+  }
+  pipe_stage "watcher-liveness · BUG-022" _st_wlive
+else
+  pipe_skip "watcher-liveness · BUG-022" "suite absent"
+fi
+
 # TASK-003 — no commit or push on the BLUEPRINT's main, and the guard stays
 # INERT in derived projects, which are trunk-based. ~0.5s.
 if [ -f tests/branch-guard/test.sh ]; then

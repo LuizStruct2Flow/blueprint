@@ -153,10 +153,12 @@ ts(){ date +%H:%M:%S; }
 # — never matched, and the miss was indistinguishable from "no roster", so it
 # degraded in silence (BUG-010, half 2). The shared parser trims fields and
 # warns once per unresolved name.
+# Delegates to bp_roster_label, which is shared with scripts/start-codex-signal-
+# watch.sh. It used to build the string here, which is why the Codex launcher
+# had no way to produce the same label and every Codex line arrived as a bare
+# [CODEX] (BUG-021).
 persona_label(){
-  local name="$1" b
-  b="$(bp_roster_backing_for_name "$repo_root" "$name")"
-  printf '%s%s' "$name" "${b:+ - $b}"
+  bp_roster_label "$repo_root" "$1"
 }
 
 # Resolve once now; the supervisor re-resolves whenever the roster changes.
@@ -457,7 +459,9 @@ supervise_body(){
   sig_last="$(signal_token)"
   ros_last="$(roster_token)"
 
-  seed_offset "$state_dir/codex-runs.log"
+  # No seed for codex-runs.log — nothing pumps it any more (BUG-021). Seeding a
+  # log this loop never reads would leave a dead offset that later reads as
+  # "already caught up" if the pump were ever restored.
   seed_offset "$state_dir/gemini-runs.log"
 
   while [ "$stop" -eq 0 ]; do
@@ -483,7 +487,14 @@ supervise_body(){
       fi
     fi
 
-    pump "$state_dir/codex-runs.log"  raw   "CODEX"
+    # Codex is NOT merged here. Its launcher appends to the feed itself, with
+    # the persona that holds the mic for that dispatch — a fact this loop cannot
+    # know, because a label chosen here is bound once at daemon start while the
+    # mic changes hands many times under it (BUG-021).
+    #
+    # Gemini still routes through its run log: it has no launcher doing
+    # per-dispatch labelling, so dropping this pump would lose its lines rather
+    # than improve them.
     pump "$state_dir/gemini-runs.log" raw   "GEMINI"
 
     if command -v jq >/dev/null 2>&1; then

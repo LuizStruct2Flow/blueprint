@@ -45,8 +45,14 @@ fi
 # 2. It resolves a persona to "<Name> - <Backing>" from a real roster file.
 # ===========================================================================
 T="$(mktemp -d)"
+# The heading matters: bp_roster_rows reads ONLY a `## Members` table, so that an
+# unrelated table elsewhere in the roster cannot shadow a real member. A fixture
+# with any other heading resolves nothing — which is what this suite's first
+# draft did, and it looked exactly like the bug it was written to catch.
 cat > "$T/AGENT_ROSTER.md" <<'EOF'
 # Roster
+
+## Members
 
 | Role | Name | Backing agent |
 |---|---|---|

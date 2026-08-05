@@ -97,9 +97,27 @@ STATE_DIR="$(agent_state_dir "$ROOT")"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/codex-runs.log"
 OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
+
+# THE FEED LABEL, built here and nowhere else (BUG-021).
+#
+# The persona is a per-dispatch fact: AGENT_SIGNAL_HOLDER is exported fresh for
+# each trigger, and this is the only point in the system where it is known
+# alongside the output it produced. The feed reads a long-lived log and binds
+# its labels once at daemon start, so it stamped every Codex line `[CODEX]`
+# regardless of who held the mic — 103 such lines against 5 labelled ones in
+# linkedin-watcher-agent before this changed.
+#
+# bp_roster_label is the SAME function the feed uses for its mic-flip lines, so
+# the two cannot drift into different formats.
+. "$ROOT/scripts/lib/roster.sh"
+. "$ROOT/scripts/lib/feed.sh"
+FEED_LABEL="$(bp_roster_label "$ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" 2>/dev/null)"
+[ -n "$FEED_LABEL" ] || FEED_LABEL="Codex"
+
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 # --json + codex-feed-filter.sh keeps the activity feed at one concise line per
 # action (codex prose, commands, file changes) instead of echoing every file
 # codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
@@ -110,9 +128,15 @@ echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
   --skip-git-repo-check \
   --output-last-message "$OUTPUT_LAST" \
   "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. Commit your changes if appropriate." \
-  2>>"$RUN_LOG" | bash "$ROOT/scripts/codex-feed-filter.sh" >>"$RUN_LOG"
+  2>>"$RUN_LOG" \
+  | bash "$ROOT/scripts/codex-feed-filter.sh" \
+  | while IFS= read -r __line; do
+      printf "%s\n" "$__line" >>"$RUN_LOG"
+      [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
+    done
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
 '
 
 exec "${ROOT}/scripts/codex-signal-watch.sh" "$@"

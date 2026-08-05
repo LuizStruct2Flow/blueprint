@@ -42,6 +42,11 @@ make_repo() { # $1 = path, $2 = "blueprint" | "derived"
   cp "$ROOT/.githooks/pre-commit" "$1/.githooks/"
   cp "$ROOT/.githooks/commit-msg" "$1/.githooks/" 2>/dev/null || true
   cp "$ROOT/scripts/lib/branch-guard.sh" "$1/scripts/lib/"
+  # commit-msg reads its rule from here and fails closed without it. Copying the
+  # hook and not the rule builds a repository that cannot exist — bootstrap ships
+  # the whole tracked tree — and every blocked commit would then be misread by
+  # this suite as the BRANCH guard firing.
+  cp "$ROOT/scripts/lib/commit-subject.sh" "$1/scripts/lib/" 2>/dev/null || true
   chmod +x "$1/.githooks/pre-commit" "$1/.githooks/commit-msg" 2>/dev/null || true
   [ "$2" = blueprint ] && touch "$1/.blueprint-root"
   git -C "$1" init -q -b main

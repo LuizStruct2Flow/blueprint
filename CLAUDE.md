@@ -293,26 +293,17 @@ in the next session — it's `doing/`. The grooming pass (an explicit founder
 session — see storm2flow's `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent)
 is what moves items between them.
 
-**Lifecycle management pass (`lcm`):** when the founder says `lcm` (or
-"lifecycle management"), reconcile every lifecycle folder against reality —
-a read-only audit plus the non-gated moves it implies. Walk this checklist:
+**Work intake and the lifecycle management pass (`lcm`) are specified in
+[docs/DoD.md](docs/DoD.md) §1b and §1c** — the eight rules every change follows
+(backlog item first, promote before starting, cross-provider review, gates,
+land, artefacts travel with their parent) and the `lcm` checklist the founder
+triggers by saying `lcm`.
 
-1. **Each item is in the right folder for its TRUE state.** A row/plan
-   marked "defer" or "someday" stranded in `doing/` belongs in `backlog/`
-   (with a re-open trigger). A deliverable pushed to `main` belongs in
-   `waiting-acceptance/`, and **its plan/folder moves with it** (plans
-   travel with the work — see §"Major Bug Process").
-2. **The live baton matches the folders.** If the `Task` field claims
-   artefacts are waiting, `ls docs/waiting-acceptance/` must show them.
-3. **`backlog/` carries triggers.** Every parked item has a re-open
-   trigger or an `OBSOLETE` marker; flag any that don't.
-4. **`done/` is user-accepted only.** Nothing auto-promoted there.
-
-The pass performs the **non-founder-gated** moves itself (`doing/`↔`backlog/`,
-`doing/`→`waiting-acceptance/` on push) and only *surfaces* the gated ones
-(→`done/` on acceptance, reopen) for the founder to confirm. It is the
-between-grooming hygiene check; grooming is the heavier `backlog/`↔`doing/`
-re-prioritisation session.
+They live there rather than here for the same reason the handoff checklist does:
+this file states the rules, the DoD is the operational gate that enforces them.
+The `lcm` checklist in particular belongs beside the lifecycle it audits (§1) —
+it was in this file while the invariants it checks were in that one, and it
+drifted to cover less than it needed to.
 
 ## Bug Management
 
@@ -350,8 +341,8 @@ per the normal team workflow below.
 - Use agents for all non-trivial work — even small bug fixes should be
   delegated rather than quick-fixed inline
 - Every bug fix needs a numbered entry in `docs/doing/BUGS.md` + a regression test
-- **Commit-message convention.** Every commit subject is prefixed with the bug or feature number it serves (`fix(BUG-XXX):` / `feat(FEATURE-YYY):` / `test(BUG-XXX):`), and the body explains *why* the change is being made, not just what changed. The "what" is in the diff; the "why" is the reason the diff exists, and is what a future reader (or `git blame`) actually needs. Commits with no associated number (chore, tooling) still carry a why in the body.
-- **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `test(BUG-XXX): minimal reproducer (failing)` → `fix(BUG-XXX): <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
+- **Commit-message convention — ENFORCED.** Every commit subject STARTS with the backlog item it serves: `BUG#20:`, `FEATURE#3:`, `TASK#1:`. `.githooks/commit-msg` rejects anything else, so this is a gate rather than a habit. **One item per commit** — a commit serving two items is two commits, which the hook cannot check and DoD §1b rule 3 states. The body explains *why*, not what: the "what" is in the diff, and the "why" is what a future reader (or `git blame`) actually needs. There is no such thing as a commit with no item — if work has no backlog row it is not ready to commit (DoD §1b rule 1). This REPLACES the Conventional Commits form (`fix(BUG-XXX):`) that this file used to prescribe; that form does not start with the item and is now refused.
+- **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `BUG#XX: minimal reproducer (failing)` → `BUG#XX: <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
 - Trunk-based development only — no branches, use feature toggles instead.
   **This governs PRODUCT repos. It does NOT apply to the blueprint**, where
   every contribution is a branch + pull request — see §"Never push to the

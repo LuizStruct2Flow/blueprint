@@ -9,11 +9,25 @@ Triggers:
 - **Founder acceptance** → move to `done/`.
 - **Founder rejection / regression** → move back to `doing/`.
 
-`BUGS.md` and `INDEX.md` are always here. `CHANGES.md` is created on first
-use: it holds *forward features* and behaviour changes with no underlying
-defect (CLAUDE.md §Lifecycle). Its absence means none has shipped yet.
+`BUGS.md` is always here. `BACKLOG.md` appears when a promoted row lands, and
+`CHANGES.md` on first use — it holds *forward features* and behaviour changes
+with no underlying defect (CLAUDE.md §Lifecycle). Absence means none yet, not a
+missing file.
 
-`INDEX.md` carries the per-item "what to test" prose that a bug row cannot —
-it is what the founder reads to decide what to try. `tests/lifecycle-index/`
-fails the push if it and `BUGS.md` disagree on which items are waiting, after
-it listed 5 of 14 on 2026-08-03.
+**Two record files travel the whole lifecycle**: `BACKLOG.md` and `BUGS.md`,
+`backlog/` → `doing/` → here → `done/`. Anything else in this folder is either a
+per-item artefact (a plan, a review, a work-item folder) travelling with its
+row, or it does not belong.
+
+**"What to test" lives in the BUGS row itself**, not in a separate index.
+There was an `INDEX.md` carrying a second copy of the membership; it drifted to
+5 rows against 14 real ones, and the first response was a test to hold the two
+in step — which is the wrong repair for two records of one fact. One record
+cannot disagree with itself.
+
+## How acceptance works on this project
+
+Acceptance for agent-protocol and repo-infrastructure work is **delegated to
+QA-2** (founder decision 2026-07-29). Scope, conditions, and the stated
+independence limitation are in `project_config_dod.md` §"Acceptance authority".
+User-surface work is explicitly excluded and still needs the founder's eye.

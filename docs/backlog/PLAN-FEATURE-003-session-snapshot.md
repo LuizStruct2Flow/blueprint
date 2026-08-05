@@ -1,0 +1,228 @@
+# PLAN-FEATURE-003 — HANDOVER as a snapshot, the logs as the event stream
+
+**Status: PARKED in `backlog/`. Not started, not promoted.** Promotion into
+`doing/` is the founder's call (`backlog/README.md` §"What triggers a grooming
+pass").
+
+**Origin:** founder, 2026-08-03 — *"I have a very bad connectivity at the
+moment, so the session can drop every second. The handover could be like
+transactions or snapshots in event driven architectures: you don't have to read
+all events, you read the last snapshot and all events after the last
+snapshot."*
+
+---
+
+## 1. The problem
+
+A session can die at any moment. Today's wake cost real time because
+`HANDOVER.md` was stale — it claimed `doing/ 0, done/ 16` while `doing/` held
+six rows and `done/` seventeen — so the waking session had to reconstruct state
+from `git log`, folder counts and the baton by hand.
+
+DoD §10 already demands the resume doc be current *"whenever you finish a
+meaningful unit of work"*, and treats staleness as lying. That rule is correct
+and it is not enough: it depends on remembering, at exactly the moment a
+connection is about to drop. It is the shape this repo has now rejected six
+times.
+
+## 2. The proposal
+
+Event-sourcing's snapshot pattern:
+
+```
+HANDOVER.md  =  the SNAPSHOT   (last known-good state, machine-readable header)
+logs/        =  the EVENT LOG  (what happened since)
+
+wake  =  read snapshot  +  replay events after its marker
+```
+
+**Revised 2026-08-05** after the founder's marker refinement and flow reviews
+from Klaus (PO) and Alexis (BA). The reviews reached the same verdict
+independently, and it changes what gets built:
+
+> An authored `HANDOVER.md` snapshot is a **second bookkeeping surface** and will
+> go stale for the same reason the present one did. Atomic publication only
+> guarantees a *coherent* stale snapshot; it does not make its claims true.
+> — Alexis (BA)
+
+The evidence arrived while this plan sat parked: `HANDOVER.md` was rewritten to
+be true on 2026-08-05, and **went stale again within the same working session** —
+four false claims, including a dispatch it said was still running which had
+finished hours earlier. Twice in one day is not a discipline problem to solve
+with more discipline.
+
+So the feature splits, and the halves get **opposite verdicts**:
+
+| Half | Verdict | Why |
+|---|---|---|
+| **Reader** (`session-resume`) | **promote** | derives state from git, folders, baton, journal — cannot go stale, because it holds nothing |
+| **Writer** (authored snapshot prose) | **park** | until a fact is demonstrated that no command can derive |
+
+What survives of the writer is not prose at all: **a marker append**. That is an
+*event* — it records that a handoff happened at a point in the stream — and no
+amount of deriving can reconstruct an event nobody wrote down. It is also
+immune to the failure above, because a marker has no claims in it to be wrong.
+
+## 3. What the investigation found — this changes the design
+
+**The obvious implementation is wrong in two ways**, both verified against this
+repo rather than assumed.
+
+### 3a. The activity feed is VOLATILE
+
+`scripts/agent-activity.sh:450` does `: >"$out"` — **the daemon truncates
+`logs/agent-activity.log` every time it starts.** The daemon was restarted twice
+on 2026-08-03 alone.
+
+So a replay built on the feed silently loses every event before the last daemon
+start. Worse, it loses them in the shape this repo keeps getting burned by: an
+empty replay is indistinguishable from "nothing happened since the snapshot".
+
+`logs/state/signal-history.log` is append-only and nothing truncates it
+(`signal-set.sh` only ever `>>`). **That is the durable stream.**
+
+### 3b. Timestamps are not orderable here
+
+- The feed writes `HH:MM:SS` with **no date**.
+- **The system clock jumped BACKWARDS during 2026-08-03** — feed entries stamped
+  `19:47` sit *earlier in the file* than entries stamped `14:39`.
+
+So "everything after timestamp T" is wrong twice: it cannot span midnight, and
+it mis-orders whenever the clock moves. **Use a MARKER LINE, not a timestamp
+comparison** — a marker is a position in an append-only file, which is exactly
+what the feed supervisor already does with byte offsets (BUG-001).
+
+### 3c. A single marker cannot tell "nothing happened" from "nobody wrote it down"
+
+The founder's refinement, 2026-08-05:
+
+> *"We can use hashes, for instance `<kldsfo234jfdsffsw>`. As soon as we update
+> the handover, we can log `</kldsfo234jfdsffsw>` and a new one with the new
+> hash."*
+
+**Paired open/close markers, and the pairing is the whole point.** One marker
+per snapshot answers "what happened since?" but is silent on the question that
+actually bit us twice today: *is this snapshot still describing reality?*
+
+With `<id>` written when a handoff opens and `</id>` when the next one closes it:
+
+| Journal state | What it means |
+|---|---|
+| `<X>` … `</X>` … `<Y>` open | normal — Y is the live window, replay after `<Y>` |
+| `<X>` open, header says X | normal — replay after `<X>` |
+| `<X>` open, **header says Y** | the file and the journal **disagree** — one was written without the other |
+| `<X>` open, N events after, N large | not corrupt, but **aging** — quantified rather than boolean |
+
+The third row is the staleness detector, and it is *cheap*: it compares two
+independent writes that must agree, rather than trying to verify prose against
+the world. The fourth is what a boolean `stale: true` could never express.
+
+**The founder named this design's hard limit before it was built** — *"if the
+logging fails, it fails. There is no way around this, isn't?"* — and that is
+correct and worth writing down rather than engineering around. If the marker
+append fails, the window is lost. What the design owes in return is that the
+loss is **loud**: an unpaired or missing marker prints a warning, never a clean
+empty replay. A failure that announces itself is a different thing from one
+that looks like success, and that distinction is the whole subject of §5.
+
+## 4. Design
+
+**The reader is the feature. The writer is one append.**
+
+1. **`scripts/session-resume.sh` — DERIVES, holds nothing.** Reports, in order:
+   `git status` + branch + ahead/behind, the four lifecycle folder counts, the
+   live baton, and the journal events since the last open marker. Every one of
+   these is read at run time from the thing that owns it, so none can be stale —
+   which is the property the authored snapshot could never have.
+2. **Marker into the DURABLE journal.** A handoff appends `</previous-id>` then
+   `<new-id> head=<sha>` to `logs/state/signal-history.log`. It survives daemon
+   restarts because nothing truncates that file (`signal-set.sh` only ever
+   `>>`), unlike the feed (§3a).
+3. **`HANDOVER.md` shrinks to what cannot be derived** — the current `id`, and
+   free prose reserved for *exceptional context a command cannot produce*:
+   a halted rename, a fixture that writes live state, a deliberate omission.
+   Everything the four folders and `git log` already answer comes out. Both
+   reviewers named this file the repo's single biggest ceremony surface.
+4. **THE CRITICAL BEHAVIOUR — an incomplete replay must be LOUD.** Three cases,
+   three distinct warnings, never a quiet short output:
+
+   > `⚠ the activity feed was truncated after this snapshot; N journal events
+   > are shown but tool-level detail is GONE.`
+
+   > `⚠ HANDOVER says <Y> but the journal's open marker is <X> — the two were
+   > written independently. Trust git and the folders, not the prose.`
+
+   > `⚠ no snapshot marker found. This is a fresh clone or the journal was
+   > lost; nothing is being replayed.`
+
+   This is the requirement the feature stands or falls on — the lesson of
+   BUG-004, BUG-018, and every guard fixed this week.
+5. **Uncommitted work is STASHED, never discarded.** When the snapshot cannot be
+   trusted, the founder's instinct was to roll back — *"the safest action would
+   be rollback it if you cannot understand what the previous agents were
+   doing"* — and the safe form of that is `git stash push` with a labelled
+   message, not `checkout --`. Both clear the tree; only one is reversible when
+   the judgement was wrong. An untrusted snapshot is *low confidence about the
+   work*, which is precisely when destroying it is least defensible.
+
+## 5. Tests
+
+- A marker written, feed truncated, resume run → **must warn**, not return
+  quietly. This is the reproducer; it fails on any naive implementation.
+- **Header and journal disagree** (`HANDOVER` says `<Y>`, journal's open marker
+  is `<X>`) → resume warns and says which source to trust. This is the case that
+  went undetected twice on 2026-08-05.
+- Two snapshots → resume replays only events after the LATER open marker.
+- Clock moved backwards between snapshot and events → replay is still correct
+  (proves the marker, not the timestamp, is what orders it).
+- No marker at all (fresh clone) → resume says so rather than printing empty.
+- **Uncommitted work under an untrusted snapshot is recoverable** — assert
+  `git stash list` is non-empty and the content round-trips, so a future
+  "simplification" to `checkout --` fails loudly.
+- Non-vacuity: a control where events DO exist and are replayed, so an
+  always-empty implementation cannot pass.
+
+## 6. Open questions for the founder
+
+1. **Promote the reader alone?** Both reviewers say yes: build
+   `session-resume.sh` + the marker append, leave the authored snapshot parked
+   until a fact appears that no command can derive. The counter-argument is that
+   §0 prose has genuinely carried things worth having (a halted rename, a
+   fixture that wrote live state) — the reviewers' answer is that those are
+   *exceptional context*, which the shrunken file still holds.
+2. **Snapshot cadence.** Every handoff only, or also after each push? More
+   markers mean shorter replays but more journal noise.
+3. **Does the feed stop truncating?** Making `--daemon` append instead of
+   truncate would make the rich stream durable too — but the feed is designed as
+   a live tail, and an unbounded log needs rotation, which reintroduces the
+   inode problem the supervisor already had to solve.
+4. **Scope.** Blueprint-only, or `MANAGED_FILES` so every project gets it? It is
+   generic, so probably the latter — but that is a decision about what `pull`
+   writes into every project.
+
+## 7. What the reviews changed, and what they did not
+
+Recorded because a plan that quietly absorbs its reviews cannot be audited later.
+
+**Changed:** the writer went from "author a snapshot atomically" to "append a
+marker" (§2, §4); the reader became the deliverable rather than the consumer of
+a snapshot (§4.1); paired markers replaced the single marker (§3c); stash-don't-
+discard became an explicit requirement with a test (§4.5, §5).
+
+**Not changed and deliberately so:** the durable journal remains the event
+stream, not the feed (§3a); ordering remains positional, never by timestamp
+(§3b); and the loud-incomplete-replay rule stayed the feature's load-bearing
+requirement — the reviews reinforced it rather than softening it.
+
+**Still the founder's call:** everything in §6. Nothing here promotes the item;
+it stays in `backlog/`.
+
+## 8. Rollback
+
+Additive: one new script (`session-resume.sh`), a marker append at handoff, and
+an `id` in `HANDOVER.md`. Nothing existing changes behaviour, so reverting is
+deleting them. The marker lines are inert to every current reader of the journal,
+and the `id` is a comment block.
+
+Smaller than the original plan's rollback surface, because the writer is no
+longer being built.

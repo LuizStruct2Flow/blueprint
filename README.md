@@ -111,6 +111,8 @@ blueprint/
 ├── .gitignore                      ← generic node + agent ignores
 ├── .githooks/
 │   ├── pre-push                    ← generic security + build/lint/format/coverage gate
+│   ├── commit-msg                  ← rejects a commit that does not name its backlog item
+│   ├── pre-commit                  ← refuses a commit on the BLUEPRINT's main (inert in derived projects)
 │   └── pre-push-project.example    ← copy → edit for project-specific guards
 ├── .claude/
 │   └── settings.json               ← generic AWS / git / shell permission allow-list
@@ -134,7 +136,7 @@ blueprint/
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── backlog/
     │   ├── README.md               ← parked-state lifecycle + categories (KEEP/DEFER/OBSOLETE)
-    │   ├── BACKLOG.md              ← stub: parked feature / polish rows
+    │   ├── BACKLOG.md              ← parked rows, each with a re-open trigger
     │   └── BUGS.md                 ← stub: parked bugs awaiting re-open triggers
     ├── doing/
     │   ├── README.md
@@ -277,7 +279,7 @@ it. Current contents:
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`, `way-of-working.md`
 - **`scripts/`:** `codex-signal-watch.sh`, `start-codex-signal-watch.sh`,
   `new-project.sh`, `blueprint` itself
-- **`.githooks/`:** `pre-push`, `pre-push-project.example`
+- **`.githooks/`:** `pre-push`, `commit-msg`, `pre-commit`, `pre-push-project.example`
 - **`.claude/`:** `settings.json` (host-specific bits live in
   `settings.local.json`, gitignored)
 - **Folder skeleton READMEs:** every `README.md` under `docs/` and `config/`
@@ -335,7 +337,7 @@ different speeds:
   links, doc improvements, bug fixes in the agent scripts or the
   pre-push gate. Open a PR with a [Conventional
   Commits](https://www.conventionalcommits.org/) message
-  (`fix(scripts): …`, `docs(dod): …`); CI runs the pre-push gate
+  (`BUG#20: …`, `TASK#1: …` — enforced by `.githooks/commit-msg`); CI runs the pre-push gate
   locally so make sure `brew bundle && .githooks/pre-push` passes
   before opening the PR.
 - **Slower track — new capabilities or new concerns.** The blueprint

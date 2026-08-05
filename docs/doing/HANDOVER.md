@@ -45,21 +45,20 @@ the repo's single biggest ceremony surface — 426 lines narrating state that
 had already gone stale once. Shrinking it is a founder decision, not taken yet.
 Until then: only facts a command cannot give you.**
 
-- **Five TASK items ACCEPTED, TASK-002 REJECTED** (founder, 2026-08-05). PRs #21
-  and #22 are merged; `waiting-acceptance/` is empty again and `doing/` holds
-  TASK-002 alone.
-- **THE ACTIVE DEFECT — the commit-msg gate does not cover the squash merge.**
-  The hook is client-side, so it fires on `git commit` and nowhere else. CI runs
-  `tests/commit-msg-gate/test.sh`, which exercises the hook against *fixtures*
-  and never reads this repository's actual commits. GitHub composes the squash
-  commit from the PR title on its own servers. So the one path every blueprint
-  change takes — branch → PR → squash merge — is unchecked, and `5fe89e0`
-  proves it: it landed **after** the gate shipped, with a subject the hook
-  rejects. A gate that passes on fixtures while the real artefact violates it is
-  the exact failure mode this repo keeps finding.
-- **The gate now runs over its own SLO** — 186 s against a 180 s warning, with
-  `signal-dispatch` at 74 s the slowest stage. Non-blocking and nothing is
-  demoted (that is the point of BUG-005), but it is the first run to trip it.
+- **Nothing is in flight.** PRs #21, #22 and #23 are merged. Five TASK items are
+  in `done/`, TASK-002 sits in `waiting-acceptance/` after its re-fix, and
+  `doing/` holds only this file.
+- **The squash-merge door is closed and PROVEN closed.** CI now checks the PR
+  title (which is what a squash merge turns into a subject), the branch's
+  commits, and what lands on `main`, all through one rule shared with the hook.
+  Verified by setting #23's title to a violating one: run `31022182435` failed
+  naming it, `31022539412` passed once restored. A check only ever seen passing
+  proves nothing, which is how the original gate looked green while `5fe89e0`
+  went past it.
+- **The gate runs over its own SLO** — 188 s against a 180 s warning, five runs
+  running, `signal-dispatch` at 75 s. Non-blocking and nothing is demoted (that
+  is the point of BUG-005). Worth a decision soon: a warning that is always on
+  stops being read.
 - **§1b rule 7 costs a whole PR per landing, and this is the proof.** Alexis
   predicted it; moving those six rows required its own branch and pull request,
   because the merge is the trigger and the blueprint's `main` takes no direct
@@ -73,20 +72,22 @@ Alexis (BA). Alexis's verdict is preserved at `logs/state/codex-last-message.md`
 which is **overwritten by the next Codex dispatch**, so read it before dispatching
 anyone.
 
-**TASK-002 is the one live item.** Fix the squash-merge hole above: a CI check
-that reads the ACTUAL commit subjects on the PR head — and the merge result —
-rather than running the hook against fixtures. Needs a reproducer that fails on
-`5fe89e0`, which is a real violation sitting in history to test against.
+**Nothing is assigned.** Everything below waits on a founder decision — do not
+start any of it unprompted. Six items were self-promoted on 2026-08-03 and that
+is the breach this stretch of work has been correcting.
 
-What is waiting on the founder, in rough order of consequence:
-
-1. **Five flow decisions** from Klaus and Alexis — see "open threads". The
+1. **Accept or reject TASK-002** — `waiting-acceptance/BACKLOG.md` carries what
+   to test, including the two CI run IDs that prove the check bites.
+2. **Five flow decisions** from Klaus and Alexis — see "open threads". The
    rule-7 one is load-bearing; the others are ceremony cuts.
 3. **FEATURE-003** — whether to promote the reader (both reviewers say yes) and
    leave the writer parked. `docs/backlog/PLAN-FEATURE-003-session-snapshot.md`
    §6 lists the four open questions.
 4. **BUG-021 / BUG-022** (parked) — both fixed and running in the redcare
    blueprint; back-propagating them is a decision, not a copy.
+5. **The gate SLO** — 188 s against a 180 s warning on every recent run. Either
+   optimise `signal-dispatch` or raise the threshold deliberately; leaving a
+   warning permanently on trains everyone to ignore it.
 
 ### EPHEMERAL STATE — died with the session, re-establish it
 

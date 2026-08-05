@@ -115,6 +115,25 @@ else
 fi
 
 # ===========================================================================
+# 4b. The label FAILS OPEN. Unlike .githooks/commit-msg, which must refuse when
+#     it cannot load its rule, a missing lib here may cost the label and must
+#     never cost the DISPATCH. Sourcing these unguarded aborted the whole wake
+#     command in any tree without them — tests/state-dir caught it as a dispatch
+#     that simply never happened, which is far worse than a bare label.
+# ===========================================================================
+if grep -q '\[ -r "\$ROOT/scripts/lib/roster.sh" \]' "$LAUNCHER" 2>/dev/null; then
+  pass "#4b the roster lib is sourced only if readable"
+else
+  fail "#4b the launcher sources roster.sh unguarded — a tree without it loses the dispatch"
+fi
+
+if grep -q 'feed_append(){ :; }' "$LAUNCHER" 2>/dev/null; then
+  pass "#4b feed_append degrades to a no-op rather than an unbound command"
+else
+  fail "#4b no fallback for feed_append — the dispatch dies where feed.sh is absent"
+fi
+
+# ===========================================================================
 # 5. Gemini is untouched. It routes through its own run log and has no launcher
 #    doing per-dispatch labelling, so removing ITS pump would silently drop the
 #    lines entirely. Scope discipline: fix the one that has a fix.

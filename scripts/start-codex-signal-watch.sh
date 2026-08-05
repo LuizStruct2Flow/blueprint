@@ -109,10 +109,25 @@ OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 #
 # bp_roster_label is the SAME function the feed uses for its mic-flip lines, so
 # the two cannot drift into different formats.
-. "$ROOT/scripts/lib/roster.sh"
-. "$ROOT/scripts/lib/feed.sh"
-FEED_LABEL="$(bp_roster_label "$ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" 2>/dev/null)"
-[ -n "$FEED_LABEL" ] || FEED_LABEL="Codex"
+#
+# FAILS OPEN, unlike .githooks/commit-msg which fails closed — and the asymmetry
+# is the point. There the check IS the work, so being unable to check must stop
+# the commit. Here the label is decoration on top of the work: a missing lib must
+# cost a nice label, never the dispatch. Sourcing these unguarded aborted the
+# whole wake command in any tree without them, which tests/state-dir caught as a
+# dispatch that never happened at all. feed.sh states the same rule for itself —
+# "a feed line is worth having; it is never worth failing a push over".
+FEED_LABEL="Codex"
+if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
+  . "$ROOT/scripts/lib/roster.sh"
+  __label="$(bp_roster_label "$ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" 2>/dev/null)"
+  [ -n "$__label" ] && FEED_LABEL="$__label"
+fi
+if [ -r "$ROOT/scripts/lib/feed.sh" ]; then
+  . "$ROOT/scripts/lib/feed.sh"
+else
+  feed_append(){ :; }
+fi
 
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"

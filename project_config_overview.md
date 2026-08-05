@@ -46,6 +46,43 @@ struct2flow agent protocol; this file holds what's specific to
 - **CI:** {{pipeline}}
 - **Data:** {{databases / stores}}
 
+## Host facts that bite
+
+Moved out of `docs/doing/HANDOVER.md` on 2026-08-05: that file is for work an
+agent must TAKE OVER, and these are standing properties of this machine. They
+belong to the project, not to a session.
+
+- **Scanners** — gitleaks / semgrep / osv-scanner / trivy live in `~/.local/bin`
+  (no brew on this Ubuntu host). **`jq` is REQUIRED** by the SAST step and the
+  gate fails closed without it.
+- **semgrep's parallel engine dies here** with
+  `io_uring_queue_init: Cannot allocate memory` under `RLIMIT_MEMLOCK=8192 KB`,
+  despite ~48 GB free. The gate retries `--jobs 1`, which succeeds. **Not a code
+  fault — do not "fix" it by weakening the gate.**
+- **codex CLI must stay ≥ 0.145.** A 0.144.6 binary reading a 0.145-written
+  `~/.codex/models_cache.json` spams `failed to renew cache TTL: missing field
+  supports_reasoning_summaries`. Root cause was two installs, with `~/.local/bin`
+  shadowing `/usr/local/bin`.
+- **`blueprint` is not on PATH in this checkout** — use `bash scripts/blueprint …`.
+
+## Standing founder decisions
+
+Also moved out of `HANDOVER.md`. These are settled and should not be re-raised
+each session.
+
+- **`docs/way-of-working.pdf` is DEFERRED** (2026-07-29). The PDF is weeks behind
+  the `.md`, and `scripts/build-deck.sh` cannot run here (marp-cli needs a
+  browser). The founder regenerates it from their Mac. **Not a doc-sync
+  violation.**
+- **The other machine does not matter** (2026-07-30): *"I can clone all projects
+  again there."* Do not spend effort keeping host paths portable.
+- **Blueprint PRs need no founder authorization** (2026-08-05): *"the PRs are
+  only necessary due to the a2bp command."* Open, gate, merge. **The exception is
+  `a2bp`** — a back-propagation from a derived project is a request, and merging
+  it is a distinct decision (CLAUDE.md §"Back-propagating"). Accepting a work
+  ITEM is still the founder's: a merge moves a row to `waiting-acceptance/`,
+  never to `done/`.
+
 ## Observability stack
 
 Implements the blueprint's §6.1 observability rule (CLAUDE.md

@@ -570,9 +570,10 @@ visibility):
       `FEATURES.md`, `ACCEPTANCE_TESTS.md`, `findings.md` (with
       `Status: Fixed`), `PLAN-*.md` lifecycle move, threat-model
       entry, ADR (if architectural), runbook (if new alert).
-- [ ] **`HANDOVER.md` current** — per §10. A fresh prompt reading
-      only `HANDOVER.md` + `AGENT_SIGNAL.md` + `CLAUDE.md` + `MEMORY.md`
-      can resume.
+- [ ] **`HANDOVER.md` current** — per §10, which means **WIP, ephemeral
+      state and live hazards only**. A fresh prompt reading it plus the
+      lifecycle folders and `git log` can resume. If you added anything a
+      command already answers, take it back out.
 
 For every push that **changes a blueprint-level concern** (this repo:
 blueprint only):
@@ -701,11 +702,14 @@ Walk every box. If any is unchecked, finish it; do **not** flip
       I did
 - [ ] If state is `OVER_TO_USER`, the things the founder needs to test
       are concretely listed (and findable in `waiting-acceptance/`)
-- [ ] **`docs/doing/HANDOVER.md` is current (§10).** A fresh prompt
-      reading only `HANDOVER.md` + `AGENT_SIGNAL.md` + `CLAUDE.md` +
-      `MEMORY.md` can resume with zero other context — including the
-      EPHEMERAL state (running monitors, pending pipeline gates) that
-      does NOT survive a prompt switch.
+- [ ] **`docs/doing/HANDOVER.md` is current (§10)** — carrying **WIP,
+      EPHEMERAL state and live hazards ONLY**. The ephemeral half is the
+      part that matters: running monitors and pending pipeline gates do
+      NOT survive a prompt switch and no command can reconstruct them.
+- [ ] **Nothing was added to `HANDOVER.md` that a command already
+      answers.** Folder counts, `git status`, what just shipped — those
+      belong to `ls` and `git log`, and prose copies of them are what
+      made this file go stale three times in one day.
 
 ### H. Self-audit (the cheap step that catches everything)
 - [ ] `ls docs/waiting-acceptance/` shows the artefacts the `Task`
@@ -758,20 +762,36 @@ must be updated whenever you finish a meaningful unit of work — after a
 push, after starting/stopping a monitor, after a pipeline gate, after a
 founder decision. Treat it like the signal: stale = lying.
 
-### The sleep-time handover check (run when the founder says "sleep" / before any handoff)
-Before going dormant, **verify `HANDOVER.md` lets a cold prompt resume with
-zero other context**, then confirm "ready to sleep". It must contain:
-1. **Live state** — `main` HEAD vs `origin`; `git status` clean or what's
-   uncommitted/held; what just shipped.
-2. **Immediate next action** — the single most important thing the waking
-   prompt should do first, with the exact command.
-3. **EPHEMERAL state that died with the session** — running `Monitor`
-   tasks (and how to re-establish them, e.g. the orchestration watcher
-   `scripts/start-codex-signal-watch.sh`), and any **pending pipeline
-   gate** awaiting manual approval (with the approve command + how to get
-   the token). This is the #1 thing a woken prompt misses.
-4. **Open threads / priorities** — what's in flight and what's next.
-5. **Gotchas** — traps that bit this session.
+### What belongs in it — and what must NOT
+
+**Founder rule, 2026-08-05:** *"the file should only contain the data needed for
+the next agents that will take something over that is open / wip, all other
+things should be documented in the tasks/bugs || commits || md files."*
+
+It is a **take-over brief**, not a status report and not a history. Three things
+earn their place, and nothing else does:
+
+1. **WIP** — what is open, and the constraints on it that are easy to lose
+   between reading the plan and typing. Not *that* it is open (the folders say
+   so) — what a person picking it up would otherwise get wrong.
+2. **EPHEMERAL state that died with the session** — running `Monitor` tasks and
+   how to re-arm them, the activity feed, a pipeline gate awaiting approval.
+   This is the #1 thing a woken prompt misses, and it is the one category no
+   command can reconstruct.
+3. **Live hazards** — a trap that is still armed *right now*, with the command
+   to check it. Not a war story: a thing the next agent can still walk into.
+
+**Anything derivable from a command is FORBIDDEN.** Folder counts, `git status`,
+branch/ahead-behind, what just shipped, which items are where — `ls` and
+`git log` already answer those, and they cannot go stale the way prose does.
+This section previously *required* that content, and the file it produced went
+stale three times in a single day, twice within one working session, before
+being cut from 530 lines to under 80.
+
+**Reasoning belongs in the commit that made the change; lessons belong in the
+item's own row.** Both are permanent and both travel with what they describe. A
+copy here is a second record of one fact — the duplication TASK-005 deleted once
+already.
 
 ### The wake side
 On "wake" (or any new prompt), **read `HANDOVER.md` first**, then

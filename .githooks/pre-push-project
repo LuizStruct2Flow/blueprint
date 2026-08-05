@@ -131,6 +131,22 @@ else
   pipe_skip "state-dir · A-09" "suite absent"
 fi
 
+# TASK-007 — the DoD stages themselves must fail when they should. Four extra
+# greens that check nothing would be worse than no stages at all, because the
+# stage COUNT is what signals a skipped step. ~1s.
+if [ -f tests/dod-gate/test.sh ]; then
+  _st_dodgate(){
+    bash tests/dod-gate/test.sh || {
+      echo "❌ tests/dod-gate/test.sh failed (TASK-007)."
+      echo "   A DoD stage stopped catching what it claims to."
+      return 1
+    }
+  }
+  pipe_stage "dod-gate · TASK-007" _st_dodgate
+else
+  pipe_skip "dod-gate · TASK-007" "suite absent"
+fi
+
 # TASK-002 — every commit names its backlog item (DoD §1b rule 1). ~0.3s.
 if [ -f tests/commit-msg-gate/test.sh ]; then
   _st_cmsg(){
@@ -640,4 +656,46 @@ if [ -f tests/bootstrap-identity/test.sh ]; then
   pipe_stage "bootstrap-identity" _st_bootstrap_identity
 else
   pipe_skip "bootstrap-identity" "suite absent"
+fi
+
+# ============================================================================
+# DoD handoff checklist — rendered as STAGES, tagged [DoD-Gate] in the feed.
+#
+# The founder's reason, which is stronger than "it checks things": these print,
+# so a run that SKIPPED them is visible. "If I see things moving without this,
+# I know that at least one step was forgotten." The stage COUNT is the checksum
+# — fewer stages than usual means a step did not run — and pipe_skip requires a
+# reason, so a legitimate skip announces itself rather than vanishing.
+#
+# Tagged distinctly because "which steps ran" is only answerable if they are
+# distinguishable from the suite stages around them.
+#
+# Unlocked by TASK-002: every commit subject now starts with its backlog item,
+# so the gate can derive which items this push serves. `push_log_opts` (defined
+# in .githooks/pre-push for the secret scan) gives the outgoing range.
+# ============================================================================
+if [ -f scripts/lib/dod-gate.sh ]; then
+  # shellcheck source=scripts/lib/dod-gate.sh
+  . ./scripts/lib/dod-gate.sh
+  _dod_ranges="$(push_log_opts)"
+
+  PIPE_FEED_TAG="DoD-Gate"
+
+  _st_dod_rows(){ dod_stage_rows "$_dod_ranges"; }
+  pipe_stage "§1b·1 every item has a backlog row" _st_dod_rows
+
+  _st_dod_bugtests(){ dod_stage_bugtests "$_dod_ranges"; }
+  pipe_stage "§2 every BUG has a regression test" _st_dod_bugtests
+
+  _st_dod_signal(){ dod_stage_signal; }
+  pipe_stage "§7G the live baton is well-formed" _st_dod_signal
+
+  _st_dod_judgement(){ dod_stage_judgement; }
+  pipe_stage "§D·F·H judgement — printed, not verified" _st_dod_judgement
+
+  PIPE_FEED_TAG="GATE"
+else
+  # Fails LOUD rather than silently dropping four stages: a shorter run is
+  # exactly the signal the founder watches for, so it must carry its reason.
+  pipe_skip "DoD checklist" "scripts/lib/dod-gate.sh absent — run: blueprint pull scripts/lib/dod-gate.sh"
 fi

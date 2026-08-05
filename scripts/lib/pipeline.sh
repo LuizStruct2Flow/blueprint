@@ -144,9 +144,14 @@ _pipe_line(){ # STATUS LABEL RIGHT
 
 # Guarded so pipeline.sh still works if feed.sh is absent — a missing log must
 # never be the reason a gate cannot render, let alone cannot run.
+# The tag is a VARIABLE so a group of stages can announce itself distinctly in
+# the feed. The DoD stages use [DoD-Gate], because the founder watches the feed
+# to tell a run that did the work from one that skipped it — and "which steps
+# ran" is only answerable if the steps are distinguishable from each other, not
+# merely present.
 _pipe_feed(){
   command -v feed_append >/dev/null 2>&1 || return 0
-  feed_append "[GATE] $1"
+  feed_append "[${PIPE_FEED_TAG:-GATE}] $1"
 }
 
 # --- the stage runner -------------------------------------------------------

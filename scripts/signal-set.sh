@@ -204,9 +204,20 @@ mv "$TMP" "$SIGNAL"
 trap - EXIT INT TERM
 
 # Journal the flip. This replaces `git log -p AGENT_SIGNAL.md` as the hand-off
-# history, and is better on one axis: it records flips that were never
-# committed, which git could not show. Written only here — a second writer that
-# agrees with this one by coincidence is the A-09 defect one level up.
+# history, and is better on one axis: it records flips that were never committed,
+# which git could not show.
+#
+# TWO WRITERS APPEND HERE, and pretending otherwise is how the last two bugs
+# happened. This one writes the flips; `session-resume.sh --mark` writes the
+# window markers around them. That is A-09's hazard by construction, so the
+# rules that keep it safe are worth stating rather than assuming:
+#
+#   * both APPEND ONLY. Neither rewrites, truncates or rotates the file.
+#   * each writes its record in ONE `printf`, so a small O_APPEND write cannot
+#     be interleaved by the other. `--mark` rolls close-and-open together for
+#     exactly this reason — as two appends, a flip could land between them and
+#     belong to no replay window.
+#   * neither swallows a failed append (below, and BUG-023).
 #
 # BUG-023 — IT IS NO LONGER A BACKSTOP, AND THE FAILURE IS NO LONGER SWALLOWED.
 #

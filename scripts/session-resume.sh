@@ -34,13 +34,25 @@
 # exactly the right advice and returned 0, so its caller read "sync succeeded"
 # while nothing had been pulled.
 #
-# WHAT MAKES THAT CHEAP: THE REPLAY SOURCE IS DURABLE.
+# WHAT MAKES THAT CHEAP: THE REPLAY SOURCE IS DURABLE — AND WHY THAT IS NOT FREE.
 #
-# Events are replayed from `logs/state/signal-history.log`, which is append-only
-# and which nothing truncates — `signal-set.sh` only ever `>>`s to it. So a
-# replay cannot be silently short. "Incomplete" reduces to two states, both
-# checked below and both loud: there is NO MARKER (a fresh clone, or the journal
-# was lost), or the PROSE AND THE JOURNAL DISAGREE about which window is live.
+# Events are replayed from `logs/state/signal-history.log`. Nothing truncates or
+# rotates it, so "incomplete" reduces to two states, both checked below and both
+# loud: there is NO MARKER (a fresh clone, or the journal was lost), or the PROSE
+# AND THE JOURNAL DISAGREE about which window is live.
+#
+# That reduction is EARNED, not inherent, and an earlier version of this comment
+# claimed it as inherent — "append-only, so a replay cannot be silently short".
+# Append-only does not mean complete: a file nothing truncates still has holes if
+# a writer drops a record. It had one, and Codex found it (BUG-023).
+#
+# TWO writers append here — `signal-set.sh` (the flips) and this script's
+# `--mark` (the window markers around them). Three rules hold the reduction up,
+# and breaking any one of them silently shortens a replay:
+#
+#   * append only — no rewrite, no truncation, no rotation;
+#   * one `printf` per record, so a small O_APPEND write cannot be interleaved;
+#   * a failed append is never swallowed (signal-set exits 8, --mark exits 1).
 #
 # DO NOT ADD A PROBE INTO THE ACTIVITY FEED. One existed, survived six review
 # rounds, and guarded a file this script never reads — while firing on the

@@ -107,6 +107,12 @@ HANDOVER="$DATA_ROOT/docs/doing/HANDOVER.md"
 OPEN_RE='^\[[^]]*\] <[0-9a-f][0-9a-f]*> '
 CLOSE_RE='^\[[^]]*\] </[0-9a-f][0-9a-f]*>'
 
+# The probe's full prefix, matched as a FIXED STRING. A bare `<id>` match was the
+# first version and it was wrong in a way that mattered: any feed line that
+# merely MENTIONED the id — a dispatch task quoting it, for instance — read as
+# proof the window was intact. Codex demonstrated exactly that.
+PROBE_TAG='[RESUME] snapshot'
+
 WARNINGS=0
 warn(){ printf '⚠ %s\n' "$1" >&2; WARNINGS=$((WARNINGS + 1)); }
 
@@ -144,15 +150,32 @@ if [ "$MODE" = "mark" ]; then
   [ -n "$new_id" ] || new_id="$(printf '%08x' $(( $$ + $(date +%s) )) )"
 
   head_sha="$(git_head)"
-  printf '[%s] <%s> head=%s\n' "$(now_utc)" "$new_id" "$head_sha" >>"$JOURNAL"
 
   # A probe into the feed, NOT a second source of truth. Its ABSENCE at read
   # time is the signal — that is how the reader learns the feed was truncated or
   # rotated past this window, without asking a timestamp anything.
+  #
+  # The probe is written BEFORE the journal marker, because the marker records
+  # where the probe landed. Reversing them would record a position that does not
+  # exist yet.
   AGENT_FEED_LOG="$FEED"; export AGENT_FEED_LOG
   # shellcheck source=scripts/lib/feed.sh
   . "$_bp_root/scripts/lib/feed.sh"
-  feed_append "[RESUME] snapshot <$new_id> head=$head_sha"
+  feed_append "$PROBE_TAG <$new_id> head=$head_sha"
+
+  # WHICH feed, and WHERE IN IT. Presence of the id alone proved far too little
+  # — Codex R1 demonstrated three false cleans against it: an unrelated line that
+  # merely mentioned the id, a stale $AGENT_FEED_LOG pointing at a different
+  # feed that happened to carry an old probe, and a feed trimmed after the
+  # marker. Recording the path and the line number turns "the id occurs
+  # somewhere" into two checkable facts.
+  feed_ref="$FEED"
+  case "$FEED" in "$DATA_ROOT"/*) feed_ref="${FEED#"$DATA_ROOT"/}" ;; esac
+  feed_line="$(wc -l <"$FEED" 2>/dev/null | tr -d ' ')"
+  [ -n "$feed_line" ] || feed_line=0
+
+  printf '[%s] <%s> head=%s feed=%s feedline=%s\n' \
+    "$(now_utc)" "$new_id" "$head_sha" "$feed_ref" "$feed_line" >>"$JOURNAL"
 
   if [ -f "$HANDOVER" ]; then
     tmp="$(mktemp "${HANDOVER}.XXXXXX")"
@@ -307,10 +330,36 @@ else
   # `agent-activity.sh --daemon` truncates the log on every start, and
   # scripts/lib/feed.sh trims it on rotation. Both are normal; a silent short
   # replay is not.
-  if [ ! -f "$FEED" ]; then
+  #
+  # WHAT THIS PROVES, EXACTLY — stated because the first version overclaimed it
+  # and Codex R1 broke it three ways. It proves that THE FEED WE ARE READING is
+  # the one this snapshot was marked against, that the probe line written at mark
+  # time is still in it, and that nothing was removed from IN FRONT of the probe.
+  #
+  # It does NOT prove that nothing was removed from AFTER the probe. Nothing
+  # records how many lines there should be by now, so that is not derivable — and
+  # no mechanism in this repo does it (the daemon truncates the whole file, and
+  # lib/feed.sh rotation keeps the TAIL, dropping only what precedes). Saying so
+  # is better than a check that implies a guarantee it cannot make.
+  mark_feed="$(printf '%s' "$marker" | sed -n 's/.* feed=\([^ ]*\).*/\1/p')"
+  mark_line="$(printf '%s' "$marker" | sed -n 's/.* feedline=\([0-9]*\).*/\1/p')"
+  case "$mark_feed" in
+    ''|/*) ;;
+    *) mark_feed="$DATA_ROOT/$mark_feed" ;;
+  esac
+
+  if [ -n "$mark_feed" ] && [ "$mark_feed" != "$FEED" ]; then
+    warn "this snapshot was marked against $mark_feed but the feed being read is $FEED (\$AGENT_FEED_LOG, or a different checkout). A probe found in the wrong feed proves nothing about this window."
+  elif [ ! -f "$FEED" ]; then
     warn "the activity feed ($FEED) does not exist, so the tool-level detail for <$open_id> is GONE. The journal events below are all that survives."
-  elif ! grep -q "<$open_id>" "$FEED" 2>/dev/null; then
-    warn "the activity feed no longer carries marker <$open_id> — it was truncated by a daemon restart or trimmed by rotation. The journal events below are ALL that survives of this window; do not read a short replay as a quiet one."
+  else
+    probe_at="$(grep -nF "$PROBE_TAG <$open_id>" "$FEED" 2>/dev/null | tail -1)"
+    probe_at="${probe_at%%:*}"
+    if [ -z "$probe_at" ]; then
+      warn "the activity feed no longer carries the probe for <$open_id> — it was truncated by a daemon restart or trimmed past this window by rotation. The journal events below are ALL that survives; do not read a short replay as a quiet one."
+    elif [ -n "$mark_line" ] && [ "$probe_at" -lt "$mark_line" ] 2>/dev/null; then
+      warn "the activity feed has been TRIMMED: the probe for <$open_id> sat at line $mark_line and now sits at line $probe_at, so $((mark_line - probe_at)) line(s) that preceded this window are gone. What follows the probe is intact."
+    fi
   fi
 
   # Header vs journal. Two independent writes that must agree; when they do not,
@@ -323,7 +372,17 @@ else
     if [ -z "$hid" ]; then
       warn "HANDOVER.md carries no session marker while the journal's open marker is <$open_id> — the two were written independently. TRUST git and the lifecycle folders above, not the prose."
     elif [ "$hid" != "$open_id" ]; then
-      warn "HANDOVER.md says <$hid> but the journal's open marker is <$open_id> — they disagree, so one was written without the other. TRUST git and the lifecycle folders above, not the prose."
+      # Two very different situations, and telling them apart is what keeps this
+      # warning from being noise. A branch switch routinely brings in a HANDOVER
+      # committed under an EARLIER marker — that id is in this journal's history,
+      # the prose simply predates the live window, and one command re-syncs it.
+      # An id that appears NOWHERE was written by something that never marked,
+      # which is the staleness this check exists for.
+      if grep -qE "^\[[^]]*\] <$hid> " "$JOURNAL" 2>/dev/null; then
+        warn "HANDOVER.md carries the OLDER snapshot id <$hid>; the live window is <$open_id>. The prose predates it — that is what a branch switch looks like. Re-run 'session-resume.sh --mark' to re-sync, and until then trust git and the lifecycle folders above."
+      else
+        warn "HANDOVER.md says <$hid>, which appears NOWHERE in this journal, while the open marker is <$open_id>. The two were written independently, so one of them is a claim nobody backed. TRUST git and the lifecycle folders above, not the prose."
+      fi
     fi
   fi
 

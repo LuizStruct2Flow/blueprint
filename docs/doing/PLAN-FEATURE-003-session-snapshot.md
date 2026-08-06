@@ -225,20 +225,57 @@ replacing it, so the questions and their answers can be read against each other.
 
 **Settled by building it:**
 
-- **The feed probe is the truncation detector.** §4.4's first warning needed a
-  mechanism and the plan did not name one. `--mark` writes the open marker into
-  the durable journal *and* a matching line into the feed; the feed line's
-  ABSENCE at read time is the proof that the window was lost. It asks no
-  timestamp anything, which is what §3b demands, and it covers rotation as well
-  as truncation without having to tell them apart.
+- **The feed probe is the truncation detector — and what it proves is narrow.**
+  §4.4's first warning needed a mechanism and the plan did not name one. `--mark`
+  writes the open marker into the durable journal *and* a matching line into the
+  feed; the feed line's ABSENCE at read time is the proof that the window was
+  lost. It asks no timestamp anything, which is what §3b demands.
+
+  **The first version overclaimed it and Codex R1 broke it three ways**, each a
+  FALSE CLEAN — a tidy replay, no warning, exit 0, against a genuinely untrusted
+  window. The check was `grep -q "<id>" "$FEED"`, which proves only that the id
+  occurs somewhere in whatever file `$FEED` points at:
+
+  | Codex's case | What it demonstrated |
+  |---|---|
+  | `unrelated_mention` | any feed line MENTIONING the id satisfied it |
+  | `stale_override` | `$AGENT_FEED_LOG` aimed at another feed carrying an old probe satisfied it |
+  | `retained_marker_only` | a feed trimmed after the marker satisfied it |
+
+  Fixed by recording two more facts in the marker — **which** feed and **where in
+  it** — and matching the probe's full prefix as a fixed string. The three cases
+  are now regression tests #11–#13, verified red against the pre-fix script.
+
+  **The honest limit, stated rather than implied.** It proves the feed being read
+  is the one that was marked, that the probe survives in it, and that nothing was
+  removed from IN FRONT of the probe. It does NOT prove nothing was removed from
+  AFTER it — nothing records how many lines there should be by now, so that is
+  not derivable. No mechanism here does it either (the daemon truncates the whole
+  file; `lib/feed.sh` rotation keeps the tail), which is why the gap is
+  documented instead of engineered around.
 - **Every warning exits 9.** §4.4 said "loud" and meant prose. Prose alone is
   the BUG-018 shape — the right advice beside exit 0, which a caller reads as
   success. The converse is asserted too: an intact feed must be silent and exit
   0, or the tool gets muted and a woken session is as blind as before.
 - **The id stays in the TRACKED `HANDOVER.md`**, against the grain of BUG-019.
   The check is "was the prose written without the journal being marked?", and
-  only the authored surface can answer it. BUG-019's hazard does not transfer: a
-  checkout that rewrites the id yields a loud disagreement, not silence.
+  only the authored surface can answer it. Codex confirmed BUG-019's exact
+  silent-dispatch failure does not transfer — but raised the operational cost:
+  a routine branch switch leaves a warning standing on every wake until someone
+  re-marks, and **a tool that warns on every wake gets muted**. So the two cases
+  are now distinguished: an id this journal has seen before is reported as
+  *older prose, re-run `--mark`*, and an id it has never seen is reported as
+  *a claim nobody backed*. Same severity, different advice (#14).
+
+**Still unverified, and recorded as such rather than assumed:**
+
+- **Partial `git stash push` failure.** Codex could not manufacture one, so
+  "every stash failure leaves the tree unchanged" is untested. Mid-merge and
+  unborn-repo failures WERE exercised and both preserved the tree.
+- **Marker-shaped lines in the journal are trusted as real markers.** The journal
+  is local state written only by `signal-set.sh` and this script, so a forged
+  marker means someone edited it by hand — but the parser does not distinguish
+  them, and that surface has no coverage.
 
 **Still open, and both are the founder's:**
 

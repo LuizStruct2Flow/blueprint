@@ -152,7 +152,7 @@ out="$(resume "$p")"
 rc="$(resume_rc "$p")"
 if ! printf '%s' "$out" | grep -q 'deadbeef'; then
   fail "#2 the disagreement did not name the id HANDOVER.md claims: [$out]"
-elif ! printf '%s' "$out" | grep -qi 'disagree\|does not match\|but the journal'; then
+elif ! printf '%s' "$out" | grep -qi 'independently\|disagree\|does not match'; then
   fail "#2 the two markers disagree and nothing said so: [$out]"
 elif ! printf '%s' "$out" | grep -qi 'trust'; then
   fail "#2 the warning does not say which source to trust: [$out]"
@@ -328,6 +328,96 @@ if [ "$sum_before" != "$sum_after" ]; then
   fail "#10 a plain resume modified the tree it was reporting on"
 else
   pass "#10 reporting is read-only — nothing in the tree changed"
+fi
+
+# ===========================================================================
+# CODEX ROUND 1 — three demonstrated FALSE CLEANS. Each produced a tidy replay,
+# no warning and exit 0 against a genuinely untrusted window. A completeness
+# check that can be satisfied by an unrelated line is worse than no check at
+# all, because it is trusted.
+#
+# The first version asked only `grep -q "<$open_id>" "$FEED"`. That proves the
+# id OCCURS somewhere in whatever file $FEED points at. It proves nothing about
+# which feed, or about the window.
+# ===========================================================================
+
+# 11. UNRELATED MENTION. A feed line that merely names the id — a dispatch task
+#     quoting it, for instance — is not the probe. The match must be the probe's
+#     full prefix, as a fixed string.
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+: >"$p/logs/agent-activity.log"                      # the real probe is gone
+mid="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1)"
+printf '10:05:00 [Jesko - Codex] investigating marker %s in the journal\n' "$mid" \
+  >>"$p/logs/agent-activity.log"
+rc="$(resume_rc "$p")"
+out="$(resume "$p")"
+if [ "$rc" = "0" ]; then
+  fail "#11 a line merely MENTIONING $mid was accepted as proof the window is intact — false clean"
+elif ! printf '%s' "$out" | grep -q '⚠'; then
+  fail "#11 the truncated feed produced no warning: [$out]"
+else
+  pass "#11 an unrelated mention of the id is not the probe (Codex R1-1)"
+fi
+
+# 12. THE WRONG FEED. $AGENT_FEED_LOG can point somewhere else entirely — a
+#     stale feed, another checkout's. A probe found in the wrong file proves
+#     nothing about this window, so the marker records WHICH feed it was written
+#     to and the reader refuses to be satisfied by another.
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+cp "$p/logs/agent-activity.log" "$WORK/stale-feed.log"
+: >"$p/logs/agent-activity.log"
+rc="$(AGENT_FEED_LOG="$WORK/stale-feed.log" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
+out="$(AGENT_FEED_LOG="$WORK/stale-feed.log" bash "$RESUME" --root "$p" 2>&1)"
+if [ "$rc" = "0" ]; then
+  fail "#12 a probe found in a DIFFERENT feed was accepted as proof — false clean"
+elif ! printf '%s' "$out" | grep -qi 'marked against'; then
+  fail "#12 the feed mismatch was not named: [$out]"
+else
+  pass "#12 a probe in the wrong feed proves nothing (Codex R1-3)"
+fi
+
+# 13. TRIMMED FEED. Rotation drops what precedes the probe. That is not fatal —
+#     what follows the marker is what this window is — but it IS lost detail and
+#     must be said, with the count, rather than passed over in silence.
+p="$(fixture)"
+printf '10:00:00 [x] older activity\n10:00:01 [x] older activity\n10:00:02 [x] older activity\n' \
+  >>"$p/logs/agent-activity.log"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+tail -1 "$p/logs/agent-activity.log" >"$WORK/trim" && cp "$WORK/trim" "$p/logs/agent-activity.log"
+rc="$(resume_rc "$p")"
+out="$(resume "$p")"
+if [ "$rc" = "0" ]; then
+  fail "#13 a feed trimmed back to the probe reported clean — false clean"
+elif ! printf '%s' "$out" | grep -qi 'trimmed'; then
+  fail "#13 the trim was not reported: [$out]"
+else
+  pass "#13 a trimmed feed is reported with the count of lost lines (Codex R1-2)"
+fi
+
+# 14. NOISE CONTROL. A branch switch routinely brings in a HANDOVER committed
+#     under an EARLIER marker. That must be distinguishable from prose written
+#     by something that never marked at all — same severity, very different
+#     advice, and the tool gets muted if it cannot tell them apart.
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+old="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1 | tr -d '<>')"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+sed -i "s/session-marker: [0-9a-f]*/session-marker: $old/" "$p/docs/doing/HANDOVER.md"
+out="$(resume "$p")"
+if ! printf '%s' "$out" | grep -qi 'older snapshot id'; then
+  fail "#14 a known PAST id was reported as an unbacked claim: [$out]"
+elif ! printf '%s' "$out" | grep -q -- '--mark'; then
+  fail "#14 the warning does not name the one-command fix: [$out]"
+else
+  sed -i 's/session-marker: [0-9a-f]*/session-marker: cafebabe/' "$p/docs/doing/HANDOVER.md"
+  out="$(resume "$p")"
+  if ! printf '%s' "$out" | grep -qi 'appears NOWHERE'; then
+    fail "#14 an id from no known mark was not distinguished from an older one: [$out]"
+  else
+    pass "#14 an older id and an unbacked id get different, accurate advice"
+  fi
 fi
 
 echo

@@ -42,25 +42,10 @@
 # checked below and both loud: there is NO MARKER (a fresh clone, or the journal
 # was lost), or the PROSE AND THE JOURNAL DISAGREE about which window is live.
 #
-# WHY THERE IS NO FEED PROBE — the version before this one had an elaborate one,
-# and it was wrong twice over.
-#
-# It wrote a probe line into `logs/agent-activity.log` at mark time and warned
-# when that line was gone, reasoning that the feed's loss meant the window's rich
-# detail was gone. Six review rounds hardened it: the path it was written to, the
-# line it landed on, authentication by position, symlink resolution, read-back
-# verification. Ten defects, four of them false alarms.
-#
-# All of it guarded a file this script never reads. The replay comes from the
-# journal (see REPLAY below); the feed was only ever the thing being checked.
-#
-# And the check could not have worked anyway. `agent-activity.sh` truncates the
-# feed on every daemon start, and the daemon starts on every wake — so the probe
-# was guaranteed to be missing by the time anyone read it. A warning that fires
-# on the ordinary path is noise, noise gets muted, and a muted tool detects
-# nothing at all. That is structural, not a bug that more rounds would have found.
-#
-# The founder named it: "I think you both may be overcomplicating this."
+# DO NOT ADD A PROBE INTO THE ACTIVITY FEED. One existed, survived six review
+# rounds, and guarded a file this script never reads — while firing on the
+# ordinary path, because the daemon truncates that feed on every wake. The full
+# post-mortem is in PLAN-FEATURE-003 §8b.
 #
 # Usage:
 #   scripts/session-resume.sh                 # report (read-only)
@@ -99,7 +84,22 @@ MODE="report"
 # (a fixture, or a second worktree).
 DATA_ROOT="$_bp_root"
 
-usage(){ sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; }
+# A HERE-DOC, not a line range out of the header. This was `sed -n '2,50p' "$0"`,
+# and the header outgrew it — `--help` printed no usage at all, just commentary
+# cut off mid-sentence. A doc that drifts when the file above it changes is worse
+# than no doc, because it still looks like one.
+usage(){
+  cat <<'EOF'
+session-resume.sh — where is this session, and how much of it can I see?
+
+  session-resume.sh                 report (read-only)
+  session-resume.sh --mark          close the open window, open a new one
+  session-resume.sh --rollback      stash uncommitted work, labelled
+  session-resume.sh --root DIR      report on another checkout
+
+Exit: 0 complete and trusted · 9 incomplete or untrusted · 2 usage.
+EOF
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -153,8 +153,10 @@ if [ "$MODE" = "mark" ]; then
 
   # 8 hex characters. Enough to be unambiguous in one project's journal, short
   # enough to read aloud — this is a correlation key, not a security token.
+  # No fallback: every POSIX host has /dev/urandom, and inventing an id from
+  # $$ + the clock on a host that somehow lacks it is a worse answer than saying so.
   new_id="$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
-  [ -n "$new_id" ] || new_id="$(printf '%08x' $(( $$ + $(date +%s) )) )"
+  [ -n "$new_id" ] || { echo "FATAL: cannot read /dev/urandom to mint a snapshot id." >&2; exit 1; }
 
   head_sha="$(git_head)"
 
@@ -246,32 +248,17 @@ printf 'SESSION RESUME · %s · %s\n\n' "${DATA_ROOT##*/}" "$(now_utc)"
 # --- git ---------------------------------------------------------------------
 echo "GIT"
 if git -C "$DATA_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-  branch="$(git -C "$DATA_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null)"
-  [ -n "$branch" ] || branch="(detached)"
-  upstream="$(git -C "$DATA_ROOT" rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)"
-  rel=""
-  if [ -n "$upstream" ]; then
-    counts="$(git -C "$DATA_ROOT" rev-list --left-right --count "$upstream...HEAD" 2>/dev/null || true)"
-    behind="$(printf '%s' "$counts" | awk '{print $1+0}')"
-    ahead="$(printf '%s' "$counts" | awk '{print $2+0}')"
-    if [ "${behind:-0}" -eq 0 ] && [ "${ahead:-0}" -eq 0 ]; then
-      rel="level with $upstream"
-    else
-      rel="$ahead ahead / $behind behind $upstream"
-    fi
-  else
-    rel="no upstream"
-  fi
-  printf '  branch    %s  (%s)\n' "$branch" "$rel"
+  # git's own shorthand — `main...origin/main [ahead 1, behind 2]` — instead of
+  # fourteen lines re-deriving it into prose. It is the line every developer
+  # already reads, no upstream shows as a bare branch name, and a detached HEAD
+  # says so itself.
+  printf '  branch    %s\n' "$(git -C "$DATA_ROOT" status -sb 2>/dev/null | sed -n '1s/^## //p')"
   printf '  head      %s\n' "$(git -C "$DATA_ROOT" log -1 --format='%h  %s' 2>/dev/null || echo 'no commits')"
-  porcelain="$(git -C "$DATA_ROOT" status --porcelain 2>/dev/null)"
-  if [ -z "$porcelain" ]; then
+  dirty="$(git -C "$DATA_ROOT" status --porcelain 2>/dev/null | grep -c .)"
+  if [ "${dirty:-0}" -eq 0 ]; then
     printf '  tree      clean\n'
   else
-    untracked="$(printf '%s\n' "$porcelain" | grep -c '^??')"
-    changed="$(printf '%s\n' "$porcelain" | grep -c .)"
-    printf '  tree      %s changed, %s untracked — see --rollback (stashes, never discards)\n' \
-      "$((changed - untracked))" "$untracked"
+    printf '  tree      %s uncommitted path(s) — see --rollback (stashes, never discards)\n' "$dirty"
   fi
 else
   printf '  (not a git checkout)\n'
@@ -283,12 +270,8 @@ echo
 # another agent, the founder by hand — is visible on the next run without anybody
 # telling this tool about it.
 lifecycle_ids(){
-  d="$DATA_ROOT/docs/$1"
-  [ -d "$d" ] || return 0
-  for f in "$d"/*.md; do
-    [ -f "$f" ] || continue
-    grep -oE '^\|[[:space:]]*\*\*[A-Z]+-[0-9]+\*\*' "$f" 2>/dev/null
-  done | grep -oE '[A-Z]+-[0-9]+' | sort -u
+  grep -hoE '^\|[[:space:]]*\*\*[A-Z]+-[0-9]+\*\*' "$DATA_ROOT/docs/$1"/*.md 2>/dev/null \
+    | grep -oE '[A-Z]+-[0-9]+' | sort -u
 }
 
 echo "LIFECYCLE"

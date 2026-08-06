@@ -4,24 +4,25 @@
 # FEATURE-003 — a woken session must be able to DERIVE where it is, and an
 # INCOMPLETE replay must be LOUD.
 #
-# The load-bearing requirement is not that the report is useful. It is that a
-# replay which cannot see everything says so. The activity feed is truncated on
-# every daemon start (scripts/agent-activity.sh) and trimmed on rotation
-# (scripts/lib/feed.sh), so a missing window is NORMAL — and a short replay that
-# reads like a quiet one is precisely the failure this feature exists to
-# prevent. That is the same defect BUG-018 shipped (a refusal that returned 0,
-# so a caller read "sync succeeded" while nothing was pulled) and the same one
-# BUG-004 shipped (a tracked hook that was never armed, indistinguishable from a
-# gate that passed).
-#
-# So every case below asserts BOTH halves: the warning text a human reads, and a
+# Every case that can be wrong asserts BOTH halves: the text a human reads, and a
 # non-zero exit a script can branch on. A warning printed beside exit 0 is the
-# BUG-018 shape and is not accepted here.
+# BUG-018 shape (a refusal that returned 0, so a caller read "sync succeeded"
+# while nothing had been pulled) and is not accepted here.
 #
-# Ordering is POSITIONAL, never by timestamp. The feed writes HH:MM:SS with no
-# date, and this host's clock jumped BACKWARDS during 2026-08-03 — entries
-# stamped 19:47 sit earlier in the file than entries stamped 14:39. Case #4
-# pins that.
+# WHAT "INCOMPLETE" CAN MEAN, which is less than it sounds. Events are replayed
+# from logs/state/signal-history.log, which is append-only and which nothing
+# truncates. So a replay cannot be silently short, and "incomplete" reduces to
+# two states: NO MARKER (#5), or the prose and the journal DISAGREE (#2, #11).
+#
+# This suite used to be twice this size, and the other half guarded a probe
+# written into the activity feed. That probe is gone: the replay never read the
+# feed, and the feed is truncated on every daemon start — so the probe's warning
+# fired on the ordinary path, which is noise, and noise gets muted. #1 now
+# asserts the opposite of what it once did.
+#
+# Ordering is POSITIONAL, never by timestamp. This host's clock jumped BACKWARDS
+# during 2026-08-03 — entries stamped 19:47 sit earlier in the file than entries
+# stamped 14:39. Case #4 pins that.
 #
 # Run from the blueprint repo root:  bash tests/session-resume/test.sh
 # Exit codes: 0 = pass; non-zero = fail.
@@ -97,45 +98,37 @@ resume(){ bash "$RESUME" --root "$1" 2>&1; }
 resume_rc(){ bash "$RESUME" --root "$1" >/dev/null 2>&1; echo "$?"; }
 
 # ===========================================================================
-# 1. THE REPRODUCER. A marker is written, the feed is then truncated (exactly
-#    what `agent-activity.sh --daemon` does on every start), and resume runs.
-#    It MUST warn and MUST exit non-zero. A naive implementation reads the
-#    journal, finds the events, prints a tidy report and returns 0 — which is
-#    the whole failure: the tool-level detail is gone and nothing said so.
+# 1. A HEALTHY RESUME IS SILENT AND EXITS 0 — including after the activity feed
+#    has been truncated, which `agent-activity.sh --daemon` does on EVERY start,
+#    and the daemon starts on every wake.
+#
+#    This case is the inverse of what it used to assert. The first design wrote a
+#    probe into the feed and warned when it was gone, on the reasoning that the
+#    feed's loss meant the window's rich detail was lost. Two things were wrong
+#    with that, and no amount of hardening would have fixed either:
+#
+#      * the replay is read from the JOURNAL, which nothing truncates, so the
+#        feed was never the data source — only the thing being checked;
+#      * the feed is truncated on every wake, so the warning fired on the
+#        ORDINARY path. A warning that always fires is noise, noise gets muted,
+#        and a muted tool detects nothing.
+#
+#    So a truncated feed is now correctly a NON-EVENT, and this asserts it.
 # ===========================================================================
 p="$(fixture)"
 bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
 journal "$p" "Holder=Jesko State=OVER_TO_CODEX Task=review the plan"
-: >"$p/logs/agent-activity.log"          # the daemon restarted
-out="$(resume "$p")"
-rc="$(resume_rc "$p")"
-if ! printf '%s' "$out" | grep -qi 'feed'; then
-  fail "#1 a truncated feed produced no warning about the feed: [$out]"
-elif ! printf '%s' "$out" | grep -q '⚠'; then
-  fail "#1 the incomplete replay was not marked as a warning: [$out]"
-elif [ "$rc" = "0" ]; then
-  fail "#1 warned about an incomplete replay but still exited 0 — the BUG-018 shape"
-else
-  pass "#1 a truncated feed warns AND exits non-zero (rc=$rc)"
-fi
-
-# ===========================================================================
-# 1b. THE CONVERSE. An intact feed must NOT warn and must exit 0. Without this,
-#     "always warn" passes #1 — and a tool that cries wolf on every wake gets
-#     muted, which leaves the session exactly as blind as having no tool.
-# ===========================================================================
-p="$(fixture)"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-journal "$p" "Holder=Jesko State=OVER_TO_CODEX Task=review the plan"
-printf '10:05:00 [Jesko - Codex] working\n' >>"$p/logs/agent-activity.log"
+: >"$p/logs/agent-activity.log"          # the daemon restarted, as it always does
 out="$(resume "$p")"
 rc="$(resume_rc "$p")"
 if printf '%s' "$out" | grep -q '⚠'; then
-  fail "#1b an intact feed produced a warning — the tool cries wolf: [$out]"
+  fail "#1 a healthy resume warned after an ordinary daemon restart — the tool cries wolf: [$out]"
 elif [ "$rc" != "0" ]; then
-  fail "#1b an intact, complete replay exited $rc instead of 0"
+  fail "#1 a healthy, complete replay exited $rc instead of 0"
+elif ! printf '%s' "$out" | grep -q 'review the plan'; then
+  fail "#1 the journal events were not replayed: [$out]"
 else
-  pass "#1b an intact feed is silent and exits 0 (so #1 is not 'always warn')"
+  pass "#1 a truncated feed is a non-event: silent, exit 0, journal replayed"
 fi
 
 # ===========================================================================
@@ -331,75 +324,15 @@ else
 fi
 
 # ===========================================================================
-# CODEX ROUND 1 — three demonstrated FALSE CLEANS. Each produced a tidy replay,
-# no warning and exit 0 against a genuinely untrusted window. A completeness
-# check that can be satisfied by an unrelated line is worse than no check at
-# all, because it is trusted.
-#
-# The first version asked only `grep -q "<$open_id>" "$FEED"`. That proves the
-# id OCCURS somewhere in whatever file $FEED points at. It proves nothing about
-# which feed, or about the window.
-# ===========================================================================
-
-# 11. UNRELATED MENTION. A feed line that merely names the id — a dispatch task
-#     quoting it, for instance — is not the probe. The match must be the probe's
-#     full prefix, as a fixed string.
-p="$(fixture)"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-: >"$p/logs/agent-activity.log"                      # the real probe is gone
-mid="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1)"
-printf '10:05:00 [Jesko - Codex] investigating marker %s in the journal\n' "$mid" \
-  >>"$p/logs/agent-activity.log"
-rc="$(resume_rc "$p")"
-out="$(resume "$p")"
-if [ "$rc" = "0" ]; then
-  fail "#11 a line merely MENTIONING $mid was accepted as proof the window is intact — false clean"
-elif ! printf '%s' "$out" | grep -q '⚠'; then
-  fail "#11 the truncated feed produced no warning: [$out]"
-else
-  pass "#11 an unrelated mention of the id is not the probe (Codex R1-1)"
-fi
-
-# 12. THE WRONG FEED. $AGENT_FEED_LOG can point somewhere else entirely — a
-#     stale feed, another checkout's. A probe found in the wrong file proves
-#     nothing about this window, so the marker records WHICH feed it was written
-#     to and the reader refuses to be satisfied by another.
-p="$(fixture)"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-cp "$p/logs/agent-activity.log" "$WORK/stale-feed.log"
-: >"$p/logs/agent-activity.log"
-rc="$(AGENT_FEED_LOG="$WORK/stale-feed.log" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
-out="$(AGENT_FEED_LOG="$WORK/stale-feed.log" bash "$RESUME" --root "$p" 2>&1)"
-if [ "$rc" = "0" ]; then
-  fail "#12 a probe found in a DIFFERENT feed was accepted as proof — false clean"
-elif ! printf '%s' "$out" | grep -qi 'marked against'; then
-  fail "#12 the feed mismatch was not named: [$out]"
-else
-  pass "#12 a probe in the wrong feed proves nothing (Codex R1-3)"
-fi
-
-# 13. TRIMMED FEED. Rotation drops what precedes the probe. That is not fatal —
-#     what follows the marker is what this window is — but it IS lost detail and
-#     must be said, with the count, rather than passed over in silence.
-p="$(fixture)"
-printf '10:00:00 [x] older activity\n10:00:01 [x] older activity\n10:00:02 [x] older activity\n' \
-  >>"$p/logs/agent-activity.log"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-tail -1 "$p/logs/agent-activity.log" >"$WORK/trim" && cp "$WORK/trim" "$p/logs/agent-activity.log"
-rc="$(resume_rc "$p")"
-out="$(resume "$p")"
-if [ "$rc" = "0" ]; then
-  fail "#13 a feed trimmed back to the probe reported clean — false clean"
-elif ! printf '%s' "$out" | grep -qi 'trimmed'; then
-  fail "#13 the trim was not reported: [$out]"
-else
-  pass "#13 a trimmed feed is reported with the count of lost lines (Codex R1-2)"
-fi
-
-# 14. NOISE CONTROL. A branch switch routinely brings in a HANDOVER committed
+# 11. NOISE CONTROL. A branch switch routinely brings in a HANDOVER committed
 #     under an EARLIER marker. That must be distinguishable from prose written
 #     by something that never marked at all — same severity, very different
 #     advice, and the tool gets muted if it cannot tell them apart.
+#
+#     Kept from the Codex review (R2). Most of that review's cases went with the
+#     feed probe they guarded; this one and #12 outlive it because they are about
+#     the journal and the prose, which is all the tool reads now.
+# ===========================================================================
 p="$(fixture)"
 bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
 old="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1 | tr -d '<>')"
@@ -407,210 +340,31 @@ bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
 sed -i "s/session-marker: [0-9a-f]*/session-marker: $old/" "$p/docs/doing/HANDOVER.md"
 out="$(resume "$p")"
 if ! printf '%s' "$out" | grep -qi 'older snapshot id'; then
-  fail "#14 a known PAST id was reported as an unbacked claim: [$out]"
+  fail "#11 a known PAST id was reported as an unbacked claim: [$out]"
 elif ! printf '%s' "$out" | grep -q -- '--mark'; then
-  fail "#14 the warning does not name the one-command fix: [$out]"
+  fail "#11 the warning does not name the one-command fix: [$out]"
 else
   sed -i 's/session-marker: [0-9a-f]*/session-marker: cafebabe/' "$p/docs/doing/HANDOVER.md"
   out="$(resume "$p")"
   if ! printf '%s' "$out" | grep -qi 'appears NOWHERE'; then
-    fail "#14 an id from no known mark was not distinguished from an older one: [$out]"
+    fail "#11 an id from no known mark was not distinguished from an older one: [$out]"
   else
-    pass "#14 an older id and an unbacked id get different, accurate advice"
+    pass "#11 an older id and an unbacked id get different, accurate advice"
   fi
 fi
 
 # ===========================================================================
-# CODEX ROUND 2 — two more false cleans, and two FALSE ALARMS. The false alarms
-# matter as much: a tool that warns on a healthy feed gets muted, and then the
-# false-clean findings stop mattering because nobody reads the output.
-# ===========================================================================
-
-# 15. IMPERSONATION. The feed carries dispatch task text verbatim, so a task
-#     quoting a probe line IS a probe line to any content check. Authentication
-#     is by RECORDED POSITION: the marker says where the probe landed, and a
-#     later copy cannot answer for that line.
-p="$(fixture)"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-mid="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1)"
-: >"$p/logs/agent-activity.log"                          # the genuine probe is gone
-printf '10:05:00 [x] noise\n10:05:01 [Jesko] quoting: [RESUME] snapshot %s head=abc1234\n' "$mid" \
-  >>"$p/logs/agent-activity.log"
-rc="$(resume_rc "$p")"
-out="$(resume "$p")"
-if [ "$rc" = "0" ]; then
-  fail "#15 a COPY of the probe text was accepted as the probe — false clean"
-elif ! printf '%s' "$out" | grep -qi 'copy\|recorded position'; then
-  fail "#15 the impersonation was not named: [$out]"
-else
-  pass "#15 the probe is authenticated by recorded position, not by its text (Codex R2-1)"
-fi
-
-# 16. AN OLDER MARKER, with no feed provenance. Falling back to a content-only
-#     check here silently restores the exact behaviour the provenance fields
-#     were added to remove. An upgrade path that gives back the old bug is worse
-#     than one that refuses.
-p="$(fixture)"
-printf '[2026-08-06T10:00:00Z] <0badc0de> head=abc1234\n' >>"$p/logs/state/signal-history.log"
-printf '10:05:00 [RESUME] snapshot <0badc0de> head=abc1234\n' >>"$p/logs/agent-activity.log"
-printf '<!-- session-marker: 0badc0de -->\n' >>"$p/docs/doing/HANDOVER.md"
-rc="$(resume_rc "$p")"
-out="$(resume "$p")"
-if [ "$rc" = "0" ]; then
-  fail "#16 a marker with no feed provenance passed unchecked — false clean on the upgrade path"
-elif ! printf '%s' "$out" | grep -qi 'older version\|no feed provenance'; then
-  fail "#16 the unverifiable marker was not named as such: [$out]"
-else
-  pass "#16 a pre-provenance marker refuses rather than reverting to the old check (Codex R2-2)"
-fi
-
-# 17. FALSE ALARM — a feed path containing a SPACE. Nothing is wrong with this
-#     feed; it simply could not round-trip through a space-separated marker
-#     field. An intact window warned.
-p="$(fixture)"
-mkdir -p "$WORK/feed dir"
-spacefeed="$WORK/feed dir/agent-activity.log"
-: >"$spacefeed"
-AGENT_FEED_LOG="$spacefeed" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-printf '10:05:00 [x] still alive\n' >>"$spacefeed"
-rc="$(AGENT_FEED_LOG="$spacefeed" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
-out="$(AGENT_FEED_LOG="$spacefeed" bash "$RESUME" --root "$p" 2>&1)"
-if [ "$rc" != "0" ]; then
-  fail "#17 a healthy feed under a path with a space exited $rc — false alarm: [$out]"
-else
-  pass "#17 a feed path containing a space round-trips (Codex R2-3)"
-fi
-
-# 18. FALSE ALARM — a RELATIVE $AGENT_FEED_LOG. It was recorded relative to the
-#     marking process's cwd and read back relative to the data root, so a
-#     perfectly healthy feed compared unequal to itself.
-p="$(fixture)"
-(
-  cd "$p" || exit 1
-  AGENT_FEED_LOG="logs/agent-activity.log" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-  printf '10:05:00 [x] still alive\n' >>"$p/logs/agent-activity.log"
-)
-rc="$(cd "$p" && AGENT_FEED_LOG="logs/agent-activity.log" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
-out="$(cd "$p" && AGENT_FEED_LOG="logs/agent-activity.log" bash "$RESUME" --root "$p" 2>&1)"
-if [ "$rc" != "0" ]; then
-  fail "#18 a healthy feed named relatively exited $rc — false alarm: [$out]"
-else
-  pass "#18 a relative AGENT_FEED_LOG resolves identically on both sides (Codex R2-4)"
-fi
-
-# ===========================================================================
-# CODEX ROUND 3.
-# ===========================================================================
-
-# 19. FALSE ALARM — a SYMLINKED FEED FILE. Marking through `link.log` and reading
-#     through `real.log` is one inode under two names. Canonicalising only the
-#     directory left them as two values, and a perfectly healthy feed reported a
-#     mismatch.
-p="$(fixture)"
-mv "$p/logs/agent-activity.log" "$p/logs/real.log"
-ln -s real.log "$p/logs/agent-activity.log"
-AGENT_FEED_LOG="$p/logs/agent-activity.log" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-printf '10:05:00 [x] still alive\n' >>"$p/logs/real.log"
-rc="$(AGENT_FEED_LOG="$p/logs/real.log" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
-out="$(AGENT_FEED_LOG="$p/logs/real.log" bash "$RESUME" --root "$p" 2>&1)"
-if [ "$rc" != "0" ]; then
-  fail "#19 one feed inode under two names reported a mismatch — false alarm: [$out]"
-else
-  pass "#19 a symlinked feed file resolves to one value on both sides (Codex R3-1)"
-fi
-
-# 20. THE SCOPE, PINNED. Silence means nothing was lost BY ITSELF. It does not
-#     mean nobody rewrote the record — the journal and feed are local untracked
-#     state, so anyone able to edit them can write a whole marker from nothing,
-#     and no check here can be stronger than the files it reads.
+# 12. AN UNWRITABLE JOURNAL. --mark used to exit 0 and stamp a NEW id into
+#     HANDOVER.md for a window the journal never recorded. The next read then
+#     reports prose disagreeing with the journal — the exact staleness this tool
+#     exists to detect, manufactured by the tool itself.
 #
-#     What IS guaranteed is that INCONSISTENT corruption is caught. Codex's clean
-#     forgery needed TWO coordinated edits — move the probe AND repoint the
-#     metadata. #15 pins the first half. This pins the second, so a future change
-#     cannot widen the hole from "consistent tampering" to "any stray edit".
-#
-#     Note what is deliberately NOT asserted: a stray COPY of the probe appended
-#     while the genuine one still sits at its recorded line is correctly CLEAN.
-#     Nothing was lost, and warning there would be a false alarm.
-p="$(fixture)"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-sed -i 's/feedline=[0-9]*/feedline=999/' "$p/logs/state/signal-history.log"
-rc_meta="$(resume_rc "$p")"
-if [ "$rc_meta" = "0" ]; then
-  fail "#20 position metadata pointing at nothing still produced a clean report"
-else
-  pass "#20 repointed metadata alone is loud — only CONSISTENT tampering is out of scope"
-fi
-
+#     Kept from the Codex review (R6-1), and it matters MORE now: the journal is
+#     the only thing written, so an unverified write there is the whole failure
+#     rather than one of two.
 # ===========================================================================
-# CODEX ROUND 4.
-#
-# 21. A SYMLINK CYCLE must FAIL, not pass quietly. Bounding the walk was not
-#     enough: on a cycle it ran out of hops, returned the still-symlinked path,
-#     and `--mark` wrote a probe into nothing — feed_append is deliberately never
-#     fatal — then exited 0 with no warning. A tool whose entire purpose is that
-#     failure announces itself must not have a silent failure of its own, and
-#     this one is the worst kind: the marker lands, the probe does not, and the
-#     window it opens will read as clean forever after.
-# ===========================================================================
-p="$(fixture)"
-rm -f "$p/logs/agent-activity.log"
-ln -s cycle-b.log "$p/logs/cycle-a.log"
-ln -s cycle-a.log "$p/logs/cycle-b.log"
-rc="$(AGENT_FEED_LOG="$p/logs/cycle-a.log" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1; echo "$?")"
-out="$(AGENT_FEED_LOG="$p/logs/cycle-a.log" bash "$RESUME" --root "$p" --mark 2>&1)"
-if [ "$rc" = "0" ]; then
-  fail "#21 --mark through a symlink CYCLE exited 0 — it opened a window whose probe went nowhere"
-elif ! printf '%s' "$out" | grep -qi 'cycle'; then
-  fail "#21 the cycle was not named: [$out]"
-elif grep -qE '^\[[^]]+\] <[0-9a-f]+>' "$p/logs/state/signal-history.log" 2>/dev/null; then
-  fail "#21 it refused but still wrote an open marker — the window exists with no probe"
-else
-  pass "#21 a symlink cycle refuses before opening a window (Codex R4-1)"
-fi
-
-# ===========================================================================
-# CODEX ROUND 5 — the GENERAL form of #21.
-#
-# 22. A FEED THAT SWALLOWS THE WRITE. `feed_append` is deliberately never fatal
-#     (a logging failure must not block a push), so it returns 0 whether or not
-#     a byte landed. Refusing only on the symlink cycle fixed ONE INSTANCE of a
-#     class: /dev/null, a full disk, a read-only file, a FIFO with no reader. In
-#     every one the marker was written with nothing behind it, and the window it
-#     opened would read as CLEAN forever after.
-#
-#     The guard is therefore the general one: read the probe back at its recorded
-#     position, and only then write the journal. A refusal must leave the journal
-#     BYTE-IDENTICAL — a close with no matching open is a worse state than never
-#     having tried.
-# ===========================================================================
-p="$(fixture)"
-bash "$RESUME" --root "$p" --mark >/dev/null 2>&1          # a real first window
-before="$(cksum <"$p/logs/state/signal-history.log")"
-rc="$(AGENT_FEED_LOG=/dev/null bash "$RESUME" --root "$p" --mark >/dev/null 2>&1; echo "$?")"
-out="$(AGENT_FEED_LOG=/dev/null bash "$RESUME" --root "$p" --mark 2>&1)"
-after="$(cksum <"$p/logs/state/signal-history.log")"
-if [ "$rc" = "0" ]; then
-  fail "#22 --mark into /dev/null exited 0 — it opened a window whose probe went nowhere"
-elif [ "$before" != "$after" ]; then
-  fail "#22 it refused but still wrote to the journal — a close with no open is worse than nothing"
-elif ! printf '%s' "$out" | grep -qi 'could not be read back'; then
-  fail "#22 the unwritable feed was not named: [$out]"
-else
-  pass "#22 a feed that swallows the write refuses and leaves the journal untouched (Codex R5)"
-fi
-
-# ===========================================================================
-# CODEX ROUND 6 — the same class, from both ends.
-# ===========================================================================
-
-# 23. AN UNWRITABLE JOURNAL. The feed write was verified and the journal write
-#     was not, and that asymmetry had no defence: --mark exited 0 and stamped a
-#     NEW id into HANDOVER.md for a window that was never opened. The next read
-#     then reports prose disagreeing with the journal — the exact staleness this
-#     tool exists to detect, manufactured by the tool itself.
 if [ "$(id -u)" = "0" ]; then
-  echo "  -- #23 skipped: running as root, where a read-only file is still writable"
+  echo "  -- #12skipped: running as root, where a read-only file is still writable"
 else
   p="$(fixture)"
   bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
@@ -623,51 +377,16 @@ else
   ha="$(cksum <"$p/docs/doing/HANDOVER.md")"
   ja="$(cksum <"$p/logs/state/signal-history.log")"
   if [ "$rc" = "0" ]; then
-    fail "#23 --mark with an unwritable journal exited 0"
+    fail "#12 --mark with an unwritable journal exited 0"
   elif [ "$hb" != "$ha" ]; then
-    fail "#23 HANDOVER.md was stamped with an id the journal never recorded"
+    fail "#12 HANDOVER.md was stamped with an id the journal never recorded"
   elif [ "$jb" != "$ja" ]; then
-    fail "#23 the journal changed despite being unwritable"
+    fail "#12 the journal changed despite being unwritable"
   elif ! printf '%s' "$out" | grep -qi 'could not be read back'; then
-    fail "#23 the unwritable journal was not named: [$out]"
+    fail "#12 the unwritable journal was not named: [$out]"
   else
-    pass "#23 an unwritable journal refuses and leaves HANDOVER untouched (Codex R6-1)"
+    pass "#12 an unwritable journal refuses and leaves HANDOVER untouched (Codex R6-1)"
   fi
-fi
-
-# 24. FALSE ALARM UNDER CONCURRENCY. The probe's line was taken as `wc -l` after
-#     appending, which is only true if nothing else wrote in between — and the
-#     activity daemon appends to this very file continuously. Codex measured 7 of
-#     100 ordinary marks REFUSING. Searching for the freshly-minted id instead is
-#     race-free by construction: exactly one line carries it, wherever concurrent
-#     writers have pushed it to.
-#     Reproduced by holding a writer on the feed for the whole run rather than by
-#     hoping to land in the window: the old code's gap is between its append and
-#     its `wc -l`, so sustained pressure hits it repeatedly. 100 marks, as Codex
-#     measured it.
-p="$(fixture)"
-noise_stop="$WORK/noise.stop"
-rm -f "$noise_stop"
-(
-  i=0
-  while [ ! -f "$noise_stop" ]; do
-    printf '10:00:00 [noise] concurrent write %s\n' "$i" >>"$p/logs/agent-activity.log"
-    i=$((i + 1))
-  done
-) &
-noise_pid=$!
-fails=0
-i=0
-while [ "$i" -lt 100 ]; do
-  bash "$RESUME" --root "$p" --mark >/dev/null 2>&1 || fails=$((fails + 1))
-  i=$((i + 1))
-done
-: >"$noise_stop"
-wait "$noise_pid" 2>/dev/null
-if [ "$fails" -gt 0 ]; then
-  fail "#24 $fails of 100 ordinary marks refused while the feed was being appended to — false alarm"
-else
-  pass "#24 100 marks under sustained concurrent feed writes all succeeded (Codex R6-2)"
 fi
 
 echo

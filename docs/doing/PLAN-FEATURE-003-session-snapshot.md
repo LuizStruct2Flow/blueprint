@@ -223,6 +223,43 @@ it stays in `backlog/`.
 Recorded on 2026-08-06, when the reader was built. Kept beside §6 rather than
 replacing it, so the questions and their answers can be read against each other.
 
+**THE FEED PROBE IS GONE (2026-08-06, founder: "I think you both may be
+overcomplicating this").** Everything in the three subsections below describes a
+mechanism that no longer exists. It is kept, unedited, because *how* it was wrong
+is the useful part — six review rounds and ten defects went into hardening it, and
+none of that work could have found the thing wrong with it.
+
+Two facts, either of which was fatal:
+
+1. **The replay never read the feed.** Events come from the journal (§3a said so
+   from the start: *"that is the durable stream"*). The feed was only ever the
+   thing being checked — a probe guarding a data source the tool does not use.
+2. **The check could not have worked.** `agent-activity.sh:498` truncates the feed
+   on every daemon start, and the daemon starts on every wake. So the probe was
+   *guaranteed* missing by the time anyone read it: the warning fired on the
+   ordinary path. A warning that always fires is noise, noise gets muted, and a
+   muted tool detects nothing. **Structural, not a bug more rounds would have
+   found** — R2 and R3 each fixed an individual false alarm without either of us
+   asking why the mechanism produced so many.
+
+With the feed gone, "incomplete" reduces to two states, both still loud: **no
+marker**, and **prose disagreeing with the journal**. The marker is `<id>
+head=<sha>`; `--mark` writes it, reads it back, then updates `HANDOVER.md`.
+
+**−544 lines, +95.** Twelve of twenty-four test cases went with it — every one
+guarded the probe. Two survive because they are about the journal and the prose:
+the older-id/unbacked-id distinction (R2) and the unwritable-journal refusal
+(R6-1), which matters *more* now that the journal is the only thing written.
+
+The lesson worth keeping is not "we over-engineered". It is that **a review loop
+optimises the thing in front of it.** Codex found ten real defects and every fix
+was correct; the loop had no step that asked whether the mechanism should exist.
+The founder's one sentence did what six adversarial rounds structurally could not.
+
+---
+
+*What follows describes the removed probe. Kept as the record of how it failed.*
+
 **Settled by building it:**
 
 - **The feed probe is the truncation detector — and what it proves is narrow.**

@@ -29,37 +29,38 @@
 #
 # THE ONE REQUIREMENT THIS STANDS OR FALLS ON
 #
-# An INCOMPLETE replay must be LOUD. The activity feed is truncated on every
-# daemon start and trimmed on rotation, so a lost window is ordinary — and a
-# short replay that reads like a quiet one is the failure the whole feature
-# exists to prevent. Every warning below therefore comes with a NON-ZERO EXIT, so
-# a script can branch on it and not only a human reading prose. BUG-018 is the
-# precedent: a guard that printed exactly the right advice and returned 0, so its
-# caller read "sync succeeded" while nothing had been pulled.
+# An INCOMPLETE replay must be LOUD, with a NON-ZERO EXIT and not only prose, so
+# a script can branch on it. BUG-018 is the precedent: a guard that printed
+# exactly the right advice and returned 0, so its caller read "sync succeeded"
+# while nothing had been pulled.
 #
-# The founder named this design's hard limit before it was built — "if the
-# logging fails, it fails. There is no way around this, isn't?" — and that is
-# correct. If the marker append fails, the window is lost. What the design owes
-# in return is that the loss ANNOUNCES ITSELF rather than looking like success.
+# WHAT MAKES THAT CHEAP: THE REPLAY SOURCE IS DURABLE.
 #
-# WHAT IT DETECTS, AND WHAT IT CANNOT — the scope, stated because a reader will
-# otherwise assume the stronger one.
+# Events are replayed from `logs/state/signal-history.log`, which is append-only
+# and which nothing truncates — `signal-set.sh` only ever `>>`s to it. So a
+# replay cannot be silently short. "Incomplete" reduces to two states, both
+# checked below and both loud: there is NO MARKER (a fresh clone, or the journal
+# was lost), or the PROSE AND THE JOURNAL DISAGREE about which window is live.
 #
-# It detects LOSS: a truncated feed, a rotated one, the wrong feed, a marker with
-# no provenance, prose that predates the window. Every one of those happens by
-# itself, routinely, which is exactly why they need detecting.
+# WHY THERE IS NO FEED PROBE — the version before this one had an elaborate one,
+# and it was wrong twice over.
 #
-# It does NOT detect TAMPERING. Codex demonstrated a clean report built by
-# copying the probe to another feed line AND editing `feedline=` in the journal
-# to match — two coordinated hand-edits. That is not a hole to be closed here: the
-# journal and the feed are local untracked state, and anyone able to edit them can
-# equally write a whole marker from nothing, so no check this script performs can
-# be stronger than the files it reads. A digest would not help either, since the
-# same hand recomputes it.
+# It wrote a probe line into `logs/agent-activity.log` at mark time and warned
+# when that line was gone, reasoning that the feed's loss meant the window's rich
+# detail was gone. Six review rounds hardened it: the path it was written to, the
+# line it landed on, authentication by position, symlink resolution, read-back
+# verification. Ten defects, four of them false alarms.
 #
-# So the promise is deliberately narrow: SILENCE MEANS NOTHING WAS LOST BY ITSELF.
-# It does not mean nobody rewrote the record. Making it mean that needs an
-# append-only authenticated log, which is a different feature.
+# All of it guarded a file this script never reads. The replay comes from the
+# journal (see REPLAY below); the feed was only ever the thing being checked.
+#
+# And the check could not have worked anyway. `agent-activity.sh` truncates the
+# feed on every daemon start, and the daemon starts on every wake — so the probe
+# was guaranteed to be missing by the time anyone read it. A warning that fires
+# on the ordinary path is noise, noise gets muted, and a muted tool detects
+# nothing at all. That is structural, not a bug that more rounds would have found.
+#
+# The founder named it: "I think you both may be overcomplicating this."
 #
 # Usage:
 #   scripts/session-resume.sh                 # report (read-only)
@@ -117,57 +118,6 @@ SIGNAL="$(agent_signal_file "$DATA_ROOT")"
 JOURNAL="$(dirname "$SIGNAL")/signal-history.log"
 HANDOVER="$DATA_ROOT/docs/doing/HANDOVER.md"
 
-# ABSOLUTE, canonical, and resolved the SAME WAY on both sides. A relative
-# $AGENT_FEED_LOG used to be recorded relative to the marking process's cwd and
-# read back relative to $DATA_ROOT, so a perfectly healthy feed compared unequal
-# and warned (Codex R2-4).
-#
-# Canonicalises the directory AND follows a symlinked feed FILE. Doing only the
-# directory left two names for one inode — mark through `logs/link.log`, read
-# through `logs/real.log`, and a perfectly healthy feed reported a mismatch
-# (Codex R3-1).
-#
-# RETURNS NON-ZERO on an unresolvable chain. Bounding the walk was not enough:
-# on a cycle it ran out of hops and returned the still-symlinked path, `--mark`
-# wrote a probe into nothing (feed_append is deliberately never fatal) and exited
-# 0 with no warning (Codex R4-1). A tool whose whole point is that failure
-# announces itself must not have a silent one of its own.
-norm_path(){
-  _np="$1"
-  case "$_np" in /*) ;; *) _np="$PWD/$_np" ;; esac
-  _np_hops=0
-  while [ "$_np_hops" -lt 40 ]; do
-    _np_dir="${_np%/*}"
-    [ -n "$_np_dir" ] || _np_dir="/"
-    if [ -d "$_np_dir" ]; then
-      _np_abs="$(cd -P "$_np_dir" && pwd)"
-      case "$_np_abs" in
-        /) _np="/${_np##*/}" ;;
-        *) _np="$_np_abs/${_np##*/}" ;;
-      esac
-    fi
-    [ -L "$_np" ] || break
-    _np_t="$(readlink "$_np")"
-    case "$_np_t" in
-      /*) _np="$_np_t" ;;
-      *)  _np="${_np%/*}/$_np_t" ;;
-    esac
-    _np_hops=$((_np_hops + 1))
-  done
-  if [ -L "$_np" ]; then
-    printf '%s' "$_np"
-    return 1
-  fi
-  printf '%s' "$_np"
-}
-if ! FEED="$(norm_path "${AGENT_FEED_LOG:-$DATA_ROOT/logs/agent-activity.log}")"; then
-  echo "FATAL: the feed path resolves through a symlink chain that never ends — a cycle." >&2
-  echo "  last hop: $FEED" >&2
-  echo "  Refusing rather than writing a probe into nothing: a marker whose feed" >&2
-  echo "  cannot be written is a window that will read as clean and be empty." >&2
-  exit 1
-fi
-
 # Markers are POSITIONS in an append-only file, never timestamps. The feed writes
 # HH:MM:SS with no date, and this host's clock has moved BACKWARDS mid-day —
 # entries stamped 19:47 sitting earlier in the file than entries stamped 14:39.
@@ -175,12 +125,6 @@ fi
 # it mis-orders whenever the clock jumps.
 OPEN_RE='^\[[^]]*\] <[0-9a-f][0-9a-f]*> '
 CLOSE_RE='^\[[^]]*\] </[0-9a-f][0-9a-f]*>'
-
-# The probe's full prefix, matched as a FIXED STRING. A bare `<id>` match was the
-# first version and it was wrong in a way that mattered: any feed line that
-# merely MENTIONED the id — a dispatch task quoting it, for instance — read as
-# proof the window was intact. Codex demonstrated exactly that.
-PROBE_TAG='[RESUME] snapshot'
 
 WARNINGS=0
 warn(){ printf '⚠ %s\n' "$1" >&2; WARNINGS=$((WARNINGS + 1)); }
@@ -214,72 +158,20 @@ if [ "$MODE" = "mark" ]; then
 
   head_sha="$(git_head)"
 
-  # A probe into the feed, NOT a second source of truth. Its ABSENCE at read
-  # time is the signal — that is how the reader learns the feed was truncated or
-  # rotated past this window, without asking a timestamp anything.
-  #
-  # The probe goes FIRST, before anything touches the journal, because the marker
-  # records where the probe landed and because a mark that cannot write its probe
-  # must leave NO trace at all.
-  AGENT_FEED_LOG="$FEED"; export AGENT_FEED_LOG
-  # shellcheck source=scripts/lib/feed.sh
-  . "$_bp_root/scripts/lib/feed.sh"
-  feed_append "$PROBE_TAG <$new_id> head=$head_sha"
-
-  # WHICH feed, and WHERE IN IT. Presence of the id alone proved far too little
-  # — Codex R1 demonstrated three false cleans against it: an unrelated line that
-  # merely mentioned the id, a stale $AGENT_FEED_LOG pointing at a different
-  # feed that happened to carry an old probe, and a feed trimmed after the
-  # marker. Recording the path and the line number turns "the id occurs
-  # somewhere" into two checkable facts.
-  feed_ref="$FEED"
-  case "$FEED" in "$DATA_ROOT"/*) feed_ref="${FEED#"$DATA_ROOT"/}" ;; esac
-
-  # FIND the probe rather than ASSUMING where it landed (Codex R6-2).
-  #
-  # This used to take `wc -l` after the append and call that the probe's line.
-  # That is only true if nothing else wrote in between — and the activity daemon
-  # is appending to this very file continuously. Codex measured **7 of 100
-  # ordinary marks refusing** because of it: a healthy mark, failing, which is the
-  # false-alarm failure mode that gets a tool muted.
-  #
-  # Searching for the id is race-free by construction. The id is freshly minted,
-  # so exactly one line carries it, wherever concurrent writers have pushed it to.
-  # It also SUBSUMES the read-back check (Codex R5): if the probe cannot be found,
-  # it was never stored — `/dev/null`, a full disk, a read-only file, a FIFO with
-  # no reader all land here. `feed_append` is deliberately never fatal, so its
-  # return value proves nothing and this is the only honest evidence.
-  probe_at="$(grep -nF "$PROBE_TAG <$new_id>" "$FEED" 2>/dev/null | tail -1)"
-  feed_line="${probe_at%%:*}"
-  if [ -z "$feed_line" ]; then
-    echo "FATAL: the probe for <$new_id> could not be read back from $FEED." >&2
-    echo "  The feed accepted the write without storing it — /dev/null, a full disk," >&2
-    echo "  a read-only file, or an unreadable link are all this shape." >&2
-    echo "  NOTHING was written to the journal: opening a window whose probe went" >&2
-    echo "  nowhere would make it read as complete forever after." >&2
-    exit 1
-  fi
-
   prev="$(open_marker_line)"
   if [ -n "$prev" ]; then
     prev_id="$(marker_id_of "$prev")"
     printf '[%s] </%s>\n' "$(now_utc)" "$prev_id" >>"$JOURNAL"
   fi
 
-  # `feed=` goes LAST and is parsed to end-of-line, because a feed path may
-  # legitimately contain spaces and the fields are space-separated. With it in
-  # the middle, a healthy feed under a path with a space simply could not round
-  # trip, and an intact window warned (Codex R2-3).
-  printf '[%s] <%s> head=%s feedline=%s feed=%s\n' \
-    "$(now_utc)" "$new_id" "$head_sha" "$feed_line" "$feed_ref" >>"$JOURNAL"
+  printf '[%s] <%s> head=%s\n' "$(now_utc)" "$new_id" "$head_sha" >>"$JOURNAL"
 
-  # THE JOURNAL GETS THE SAME TREATMENT AS THE FEED (Codex R6-1).
+  # READ THE MARKER BACK BEFORE TOUCHING HANDOVER (Codex R6-1).
   #
-  # The feed write was verified and the journal write was not, and that asymmetry
-  # had no defence: an unwritable journal let `--mark` exit 0 and stamp a NEW id
-  # into HANDOVER.md for a window that was never opened. The next read then sees
-  # prose claiming an id the journal has never heard of — the very disagreement
-  # this tool reports, manufactured by the tool itself.
+  # An unwritable journal used to let `--mark` exit 0 and stamp a NEW id into
+  # HANDOVER.md for a window that was never opened. The next read then sees prose
+  # claiming an id the journal has never heard of — the very disagreement this
+  # tool reports, manufactured by the tool itself.
   #
   # HANDOVER is written only after this passes, so a refusal leaves both records
   # exactly as they were.
@@ -439,66 +331,6 @@ else
   # open marker is never closed. If it is, one of the two appends did not happen.
   if awk -v n="$open_no" 'NR>n' "$JOURNAL" 2>/dev/null | grep -qE "$CLOSE_RE"; then
     warn "snapshot <$open_id> is CLOSED and no later one was opened — the close append landed and the open did not. There is no live window."
-  fi
-
-  # The feed probe. Its absence means the window's tool-level detail is gone:
-  # `agent-activity.sh --daemon` truncates the log on every start, and
-  # scripts/lib/feed.sh trims it on rotation. Both are normal; a silent short
-  # replay is not.
-  #
-  # WHAT THIS PROVES, EXACTLY — stated because the first version overclaimed it
-  # and Codex R1 broke it three ways. It proves that THE FEED WE ARE READING is
-  # the one this snapshot was marked against, that the probe line written at mark
-  # time is still in it, and that nothing was removed from IN FRONT of the probe.
-  #
-  # It does NOT prove that nothing was removed from AFTER the probe. Nothing
-  # records how many lines there should be by now, so that is not derivable — and
-  # no mechanism in this repo does it (the daemon truncates the whole file, and
-  # lib/feed.sh rotation keeps the TAIL, dropping only what precedes). Saying so
-  # is better than a check that implies a guarantee it cannot make.
-  mark_line="$(printf '%s' "$marker" | sed -n 's/.* feedline=\([0-9]*\).*/\1/p')"
-  mark_feed="$(printf '%s' "$marker" | sed -n 's/.* feed=\(.*\)$/\1/p')"
-  case "$mark_feed" in
-    ''|/*) ;;
-    *) mark_feed="$DATA_ROOT/$mark_feed" ;;
-  esac
-  [ -z "$mark_feed" ] || mark_feed="$(norm_path "$mark_feed")"
-
-  if [ -z "$mark_feed" ] || [ -z "$mark_line" ]; then
-    # A marker written before the provenance fields existed. Falling through to
-    # a content-only check here re-created the very false clean those fields were
-    # added to close (Codex R2-2) — an upgrade path that silently gives back the
-    # old behaviour is worse than one that refuses.
-    warn "the marker for <$open_id> carries no feed provenance — it was written by an older version of this tool. Its window cannot be checked at all. Re-run 'session-resume.sh --mark' to open one that can be."
-  elif [ "$mark_feed" != "$FEED" ]; then
-    warn "this snapshot was marked against $mark_feed but the feed being read is $FEED (\$AGENT_FEED_LOG, or a different checkout). A probe found in the wrong feed proves nothing about this window."
-  elif [ ! -f "$FEED" ]; then
-    warn "the activity feed ($FEED) does not exist, so the tool-level detail for <$open_id> is GONE. The journal events below are all that survives."
-  else
-    # AUTHENTICATE BY POSITION, not by text. Matching the probe's wording alone
-    # was still forgeable: the feed carries dispatch task text verbatim, so a
-    # task that quotes a probe line IS a probe line to a content check — and
-    # taking the last match meant the forgery won (Codex R2-1). The marker
-    # records WHERE the probe landed, so the question becomes "is the recorded
-    # line still the probe?", which a later copy cannot answer for it.
-    at_recorded=""
-    [ -n "$mark_line" ] && at_recorded="$(sed -n "${mark_line}p" "$FEED" 2>/dev/null)"
-    probe_at="$(grep -nF "$PROBE_TAG <$open_id>" "$FEED" 2>/dev/null | head -1)"
-    probe_at="${probe_at%%:*}"
-
-    case "$at_recorded" in
-      *"$PROBE_TAG <$open_id>"*)
-        : ;;                       # the recorded position still holds the probe
-      *)
-        if [ -z "$probe_at" ]; then
-          warn "the activity feed no longer carries the probe for <$open_id> — it was truncated by a daemon restart or trimmed past this window by rotation. The journal events below are ALL that survives; do not read a short replay as a quiet one."
-        elif [ "$probe_at" -lt "$mark_line" ] 2>/dev/null; then
-          warn "the activity feed has been TRIMMED: the probe for <$open_id> sat at line $mark_line and now sits at line $probe_at, so $((mark_line - probe_at)) line(s) that preceded this window are gone. What follows the probe is intact."
-        else
-          warn "the feed carries the probe text for <$open_id> at line $probe_at, but the marker recorded line $mark_line and that line is something else. The recorded position no longer holds the probe, so this text is a COPY and proves nothing about the window."
-        fi
-        ;;
-    esac
   fi
 
   # Header vs journal. Two independent writes that must agree; when they do not,

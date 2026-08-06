@@ -21,28 +21,37 @@ and it cannot go stale the way this file has, three times in one day.
 
 ---
 
-## 1. WIP — the only open item
+## 1. WIP — nothing is open
 
-**FEATURE-003, the reader half.** Promoted 2026-08-05, **not started**. Build
-`scripts/session-resume.sh`, which *derives* where a woken session is instead of
-reading an authored snapshot. Plan:
-[`PLAN-FEATURE-003-session-snapshot.md`](PLAN-FEATURE-003-session-snapshot.md) §4.
+`doing/` is empty. Everything is parked or waiting on the founder — see
+`docs/backlog/` and `docs/waiting-acceptance/`.
 
-Two things the plan states that are easy to lose between reading it and typing:
+**Start every wake with `bash scripts/session-resume.sh`** (landed 2026-08-06,
+#32). It derives the git state, the four lifecycle folders, the baton, and the
+journal events since the last handoff, so it cannot be stale the way this file
+has been. Exit 9 means the report is incomplete or the snapshot untrusted, and
+the warning says which. Roll the window at handoff with `--mark`.
 
-- **An incomplete replay must be LOUD.** The feed is truncated on every daemon
-  start, so a missing marker is normal — and a short replay that reads like a
-  quiet one is the failure this whole feature exists to prevent.
-- **The writer stays parked.** Only the marker append survives of it. Both flow
-  reviewers reached that independently; do not quietly build the snapshot.
+Two things it does NOT do, so you do not go looking:
 
-Everything else is parked or waiting on the founder — see `docs/backlog/` and
-`docs/waiting-acceptance/`.
+- **It does not read the activity feed.** A probe into that feed existed,
+  survived six review rounds, and was deleted — it guarded a file the tool never
+  reads and fired on every wake. Do not re-add one; the post-mortem is in
+  `waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md` §8b.
+- **It does not detect tampering**, only loss. Silence means nothing was lost by
+  itself, not that nobody rewrote the record.
 
 ## 2. LIVE HAZARD — check before dispatching anyone
 
-**No watcher is running.** Stopped deliberately at the end of 2026-08-05. Start
-one before flipping the mic to Codex, or the dispatch goes nowhere:
+**A watcher IS running** as of 2026-08-06, started for the FEATURE-003 review
+rounds. Check before starting another — a second one double-dispatches:
+
+```bash
+ps -eo pid,ppid,etime,args | grep signal-watch    # expect exactly one
+```
+
+If none is running, start one before flipping the mic to Codex or the dispatch
+goes nowhere:
 `setsid bash scripts/start-codex-signal-watch.sh >> logs/state/watcher-boot.log 2>&1 < /dev/null &`
 
 **A stale watcher will double-dispatch, and the fix cannot see it.**

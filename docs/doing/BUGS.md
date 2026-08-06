@@ -33,7 +33,9 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
-| **BUG-023** | `signal-set.sh` swallows a failed journal append, so a mic flip can succeed while its event is silently lost | S2 | Fixing | The journal was a BACKSTOP "read by nothing that makes a decision", and `\|\| true` was correct under that contract. FEATURE-003 made it the replay's SOURCE and did not update the writer. Found by Jesko (Codex) R7: a flip published, its append failed, a later flip succeeded, and `session-resume` reported one event with no warning and exit 0. Durable is not the same as complete — an append-only file nothing truncates can still have holes if its writer treats them as acceptable. |
+
+*(Empty — BUG-023 landed on 2026-08-06 in #32 and is in
+[`../waiting-acceptance/BUGS.md`](../waiting-acceptance/BUGS.md).)*
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

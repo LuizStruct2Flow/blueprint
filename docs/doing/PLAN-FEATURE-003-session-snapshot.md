@@ -1,8 +1,9 @@
 # PLAN-FEATURE-003 — HANDOVER as a snapshot, the logs as the event stream
 
-**Status: PARKED in `backlog/`. Not started, not promoted.** Promotion into
-`doing/` is the founder's call (`backlog/README.md` §"What triggers a grooming
-pass").
+**Status: the READER is built (2026-08-06). The writer stays parked.** Promoted
+into `doing/` by the founder on 2026-08-05 ("3. ok"), reader-only, on Klaus's and
+Alexis's converging recommendation. What the build settled and what §6 still owes
+is in §8b — read that against §6 rather than instead of it.
 
 **Origin:** founder, 2026-08-03 — *"I have a very bad connectivity at the
 moment, so the session can drop every second. The handover could be like
@@ -216,6 +217,207 @@ requirement — the reviews reinforced it rather than softening it.
 
 **Still the founder's call:** everything in §6. Nothing here promotes the item;
 it stays in `backlog/`.
+
+## 8b. What the build settled, and what §6 still owes the founder
+
+Recorded on 2026-08-06, when the reader was built. Kept beside §6 rather than
+replacing it, so the questions and their answers can be read against each other.
+
+**THE FEED PROBE IS GONE (2026-08-06, founder: "I think you both may be
+overcomplicating this").** Everything in the three subsections below describes a
+mechanism that no longer exists. It is kept, unedited, because *how* it was wrong
+is the useful part — six review rounds and ten defects went into hardening it, and
+none of that work could have found the thing wrong with it.
+
+Two facts, either of which was fatal:
+
+1. **The replay never read the feed.** Events come from the journal (§3a said so
+   from the start: *"that is the durable stream"*). The feed was only ever the
+   thing being checked — a probe guarding a data source the tool does not use.
+2. **The check could not have worked.** `agent-activity.sh:498` truncates the feed
+   on every daemon start, and the daemon starts on every wake. So the probe was
+   *guaranteed* missing by the time anyone read it: the warning fired on the
+   ordinary path. A warning that always fires is noise, noise gets muted, and a
+   muted tool detects nothing. **Structural, not a bug more rounds would have
+   found** — R2 and R3 each fixed an individual false alarm without either of us
+   asking why the mechanism produced so many.
+
+With the feed gone, "incomplete" reduces to two states, both still loud: **no
+marker**, and **prose disagreeing with the journal**. The marker is `<id>
+head=<sha>`; `--mark` writes it, reads it back, then updates `HANDOVER.md`.
+
+**−544 lines, +95.** Twelve of twenty-four test cases went with it — every one
+guarded the probe. Two survive because they are about the journal and the prose:
+the older-id/unbacked-id distinction (R2) and the unwritable-journal refusal
+(R6-1), which matters *more* now that the journal is the only thing written.
+
+The lesson worth keeping is not "we over-engineered". It is that **a review loop
+optimises the thing in front of it.** Codex found ten real defects and every fix
+was correct; the loop had no step that asked whether the mechanism should exist.
+The founder's one sentence did what six adversarial rounds structurally could not.
+
+---
+
+*What follows describes the removed probe. Kept as the record of how it failed.*
+
+**Settled by building it:**
+
+- **The feed probe is the truncation detector — and what it proves is narrow.**
+  §4.4's first warning needed a mechanism and the plan did not name one. `--mark`
+  writes the open marker into the durable journal *and* a matching line into the
+  feed; the feed line's ABSENCE at read time is the proof that the window was
+  lost. It asks no timestamp anything, which is what §3b demands.
+
+  **The first version overclaimed it and Codex R1 broke it three ways**, each a
+  FALSE CLEAN — a tidy replay, no warning, exit 0, against a genuinely untrusted
+  window. The check was `grep -q "<id>" "$FEED"`, which proves only that the id
+  occurs somewhere in whatever file `$FEED` points at:
+
+  | Codex's case | What it demonstrated |
+  |---|---|
+  | `unrelated_mention` | any feed line MENTIONING the id satisfied it |
+  | `stale_override` | `$AGENT_FEED_LOG` aimed at another feed carrying an old probe satisfied it |
+  | `retained_marker_only` | a feed trimmed after the marker satisfied it |
+
+  Fixed by recording two more facts in the marker — **which** feed and **where in
+  it** — and matching the probe's full prefix as a fixed string. The three cases
+  are now regression tests #11–#13, verified red against the pre-fix script.
+
+  **R2 found the fix still forgeable, and the repair changed the question.** The
+  feed carries dispatch task text verbatim, so a task that *quotes* a probe line
+  IS a probe line to any content check — and taking the last match meant the
+  forgery won. Authentication is now by **recorded position**: the marker says
+  which line the probe landed on, so the question is "does the recorded line
+  still hold the probe?", which a later copy cannot answer for it. R2 also found
+  that a marker predating the provenance fields fell through to the old
+  content-only check, silently restoring the bug those fields were added to
+  close — an upgrade path that gives back the old behaviour now refuses instead.
+
+  **And it found the opposite failure twice, which matters as much.** A feed path
+  containing a space could not round-trip through a space-separated field, and a
+  relative `$AGENT_FEED_LOG` was recorded against the marking process's cwd but
+  read against the data root. Both made a *healthy* feed warn. A tool that cries
+  wolf gets muted, and then the false-clean findings stop mattering because
+  nobody reads the output. `feed=` now goes last and is parsed to end-of-line;
+  both sides normalise the path through one function.
+
+  **The honest limit, stated rather than implied.** It proves the feed being read
+  is the one that was marked, that the recorded line still holds the probe, and
+  that nothing was removed from IN FRONT of it. It does NOT prove nothing was
+  removed from AFTER it — nothing records how many lines there should be by now,
+  so that is not derivable. No mechanism here does it either (the daemon
+  truncates the whole file; `lib/feed.sh` rotation keeps the tail), and Codex
+  independently confirmed both halves of that: no code path removes only
+  post-probe lines, and no current metadata would detect it. The gap is
+  documented rather than engineered around.
+- **Every warning exits 9.** §4.4 said "loud" and meant prose. Prose alone is
+  the BUG-018 shape — the right advice beside exit 0, which a caller reads as
+  success. The converse is asserted too: an intact feed must be silent and exit
+  0, or the tool gets muted and a woken session is as blind as before.
+- **The id stays in the TRACKED `HANDOVER.md`**, against the grain of BUG-019.
+  The check is "was the prose written without the journal being marked?", and
+  only the authored surface can answer it. Codex confirmed BUG-019's exact
+  silent-dispatch failure does not transfer — but raised the operational cost:
+  a routine branch switch leaves a warning standing on every wake until someone
+  re-marks, and **a tool that warns on every wake gets muted**. So the two cases
+  are now distinguished: an id this journal has seen before is reported as
+  *older prose, re-run `--mark`*, and an id it has never seen is reported as
+  *a claim nobody backed*. Same severity, different advice (#14).
+
+**R3 settled the scope, which is the part a reader will otherwise assume wrong.**
+One more false alarm (a symlinked feed FILE — `norm_path` canonicalised the
+directory but not the final link, so one inode under two names compared unequal)
+and one finding that is **not fixable inside this design**: Codex built a clean
+report by copying the probe to another feed line *and* editing `feedline=` to
+match. Two coordinated hand-edits.
+
+That is not a hole to close. The journal and the feed are local untracked state,
+so anyone able to edit them can equally write a whole marker from nothing — no
+check this script performs can be stronger than the files it reads, and a digest
+would not help because the same hand recomputes it. Closing it needs an
+append-only authenticated log, which is a different feature.
+
+So the promise is stated narrowly, in the script header and here: **silence means
+nothing was lost by itself. It does not mean nobody rewrote the record.** What is
+guaranteed is that *inconsistent* corruption is loud — either half of that
+forgery alone is caught (#15, #20). Codex's own summary is the fair one: he would
+not trust the silence while journal metadata alone can manufacture a clean
+result. Correct, and now written on the tin rather than discovered later.
+
+**R4 accepted the scope and found the tool's own silent failure.** Codex confirmed
+the loss-only promise is "honest and defensible", and that stronger tamper
+detection would need an external authenticated append-only anchor — a local
+digest is insufficient, which is what I had argued. He also confirmed the R3-1
+symlink fix and that neither false alarm returned.
+
+Then he found the one that matters most for a tool built around loud failure:
+**`--mark` through a two-node symlink cycle exited 0 with no warning.** Bounding
+the walk was not enough — on a cycle it ran out of hops and returned the
+still-symlinked path, `feed_append` swallowed the write because it is deliberately
+never fatal, and the marker landed with no probe behind it. That window would have
+read as CLEAN forever after. `norm_path` now returns non-zero on an unresolvable
+chain and the script refuses before opening anything (#21).
+
+**R5 generalised it, and the prescription was better than the R4 fix.** Refusing
+on the symlink cycle had fixed ONE INSTANCE of a class: `AGENT_FEED_LOG=/dev/null`
+did the same thing — `--mark` exited 0 and opened a window with `feedline=0` and
+no probe behind it. So do a full disk, a read-only file, and a FIFO with no
+reader. Codex named the general guard exactly: **verify the probe at its recorded
+position before appending any journal marker.**
+
+That is now the guard, and the refusal leaves the journal **byte-identical** —
+no close, no open. A close with no matching open is a worse state than never
+having tried, and the close used to be written first (#22).
+
+**R6 closed the class from both ends.** The feed write was verified and the
+JOURNAL write was not — an asymmetry with no defence: an unwritable journal let
+`--mark` exit 0 and stamp a new id into `HANDOVER.md` for a window that was never
+opened, so the next read would report prose disagreeing with the journal. *The
+tool manufacturing the exact staleness it exists to detect.* Both records are now
+read back, and `HANDOVER` is written last, so a refusal leaves everything as it
+was (#23).
+
+And the R5 fix carried a false alarm of its own: it took `wc -l` after appending
+as the probe's line, which is only true if nothing else wrote in between — while
+the activity daemon appends to that file continuously. Codex measured **7 of 100
+ordinary marks refusing**. Searching for the freshly-minted id instead is
+race-free by construction and subsumes the read-back check. Under sustained
+concurrent writes the old code fails **100 of 100**; the fix passes 100 of 100
+(#24).
+
+**Six rounds, eleven findings, ten of them defects** — including four false
+alarms, which cost as much as false cleans because a muted tool detects nothing.
+Four of the last six came through one door, and it is the lesson worth keeping:
+`feed_append` is correctly never fatal, and that correctness is exactly what lets
+a marker land with nothing behind it.
+
+**Still unverified, and recorded as such rather than assumed:**
+
+- **Partial `git stash push` failure.** Codex could not manufacture one, so
+  "every stash failure leaves the tree unchanged" is untested. Mid-merge and
+  unborn-repo failures WERE exercised and both preserved the tree.
+- **Marker-shaped lines in the journal are trusted as real markers.** The journal
+  is local state written only by `signal-set.sh` and this script, so a forged
+  marker means someone edited it by hand — but the parser does not distinguish
+  them, and that surface has no coverage.
+
+**Still open, and both are the founder's:**
+
+- **§6.2 cadence.** `--mark` is deliberately NOT wired into `signal-set.sh`, so
+  markers are placed by hand at handoff. Auto-marking every mic flip is the
+  harder-to-reverse choice and it multiplies journal markers; wiring it later is
+  one line, unwiring it after every checkout has flips in its journal is not.
+- **§6.4 scope.** Not in `MANAGED_FILES`. It is generic and §6.4 leans to
+  shipping it, but CLAUDE.md §"The blueprint is derived, not designed" applies
+  here too: it proves itself in this checkout first. That is also why neither
+  `CLAUDE.md` nor `docs/DoD.md` names it yet — both travel, and instructing a
+  derived project to run a command it does not have is worse than silence.
+
+**§6.3 (does the feed stop truncating?) is answered NO by the design**, not
+deferred: the probe makes truncation *detectable*, which is what the feature
+needed. Making the feed append-only would trade a solved problem for an
+unbounded log needing rotation — and rotation reintroduces the inode hazard the
+supervisor already had to solve.
 
 ## 8. Rollback
 

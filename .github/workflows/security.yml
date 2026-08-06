@@ -188,6 +188,7 @@ jobs:
           bash tests/state-dir/test.sh
           bash tests/baton-durability/test.sh
           bash tests/lifecycle-docs/test.sh
+          bash tests/session-resume/test.sh
           bash tests/doc-links/test.sh
           bash tests/commit-msg-gate/test.sh
           bash tests/commit-subjects/test.sh

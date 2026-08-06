@@ -205,10 +205,32 @@ trap - EXIT INT TERM
 
 # Journal the flip. This replaces `git log -p AGENT_SIGNAL.md` as the hand-off
 # history, and is better on one axis: it records flips that were never
-# committed, which git could not show. It is a BACKSTOP — append-only, written
-# only here, and read by nothing that makes a decision. A second writer that
+# committed, which git could not show. Written only here — a second writer that
 # agrees with this one by coincidence is the A-09 defect one level up.
-printf '[%s] Holder=%s State=%s Task=%s\n' \
-  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOLDER" "$STATE" "$TASK" >> "$JOURNAL" 2>/dev/null || true
-
+#
+# BUG-023 — IT IS NO LONGER A BACKSTOP, AND THE FAILURE IS NO LONGER SWALLOWED.
+#
+# This line used to end `2>/dev/null || true`, and the comment above it called
+# the journal "read by nothing that makes a decision". Both were correct: a
+# logging failure had no business failing a mic flip.
+#
+# FEATURE-003 made this file the REPLAY'S SOURCE — `session-resume.sh` reads it
+# to decide what happened since the last handoff — and did not update the writer.
+# So a flip could publish, lose its event, and the next session would replay a
+# short history with nothing to warn it. Durable is not complete: a file nothing
+# truncates still has holes if its writer treats them as acceptable.
+#
+# EXIT 8 — "published, but not journalled". A distinct status, because the baton
+# IS published by this point (publication is one atomic rename, already done) and
+# a caller that read a plain failure and retried would publish twice.
 echo "signal-set: published Holder=$HOLDER State=$STATE (atomic) → $SIGNAL"
+
+if ! printf '[%s] Holder=%s State=%s Task=%s\n' \
+     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOLDER" "$STATE" "$TASK" >> "$JOURNAL" 2>/dev/null; then
+  echo "signal-set: the baton IS published — do NOT retry, that would publish twice." >&2
+  echo "signal-set: but the journal append FAILED → $JOURNAL" >&2
+  echo "  This flip is missing from the hand-off history, so the next session's" >&2
+  echo "  'session-resume.sh' will replay one event fewer and cannot know it." >&2
+  echo "  Fix the journal (permissions, disk, filesystem) before the next handoff." >&2
+  exit 8
+fi

@@ -42,6 +42,14 @@ orphan went unnoticed and why stopping it meant reading `ps` output by eye. A
 per-project `--status` is a prerequisite for the machine-wide view being
 trustworthy anyway.
 
+**And a distinction the stop path must preserve.** `dead` should mean
+*unexpectedly* gone. A watcher killed deliberately leaves its lock file behind,
+so the next session is greeted by a warning about a watcher nobody wanted — the
+false alarm the `none` state exists to prevent. A clean `--stop` should REMOVE
+the lock (state returns to `none`); only a crash should leave it (`dead`). Found
+on 2026-08-05 while shutting down for the night, and worked around by hand with
+`rm`.
+
 ## Where these came from
 
 The five `A-NN` rows were parked on 2026-08-03, when an `lcm` pass asked whether

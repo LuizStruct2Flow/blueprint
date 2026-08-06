@@ -41,6 +41,10 @@ Everything else is parked or waiting on the founder — see `docs/backlog/` and
 
 ## 2. LIVE HAZARD — check before dispatching anyone
 
+**No watcher is running.** Stopped deliberately at the end of 2026-08-05. Start
+one before flipping the mic to Codex, or the dispatch goes nowhere:
+`setsid bash scripts/start-codex-signal-watch.sh >> logs/state/watcher-boot.log 2>&1 < /dev/null &`
+
 **A stale watcher will double-dispatch, and the fix cannot see it.**
 
 On 2026-08-05 a `codex-signal-watch.sh` orphaned at `ppid 1` for 3h42m fired

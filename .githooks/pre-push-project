@@ -222,6 +222,26 @@ else
   pipe_skip "branch-guard · TASK-003" "suite absent"
 fi
 
+# FEATURE-003 — a woken session must be able to derive where it is, and an
+# INCOMPLETE replay must be LOUD. The guarded failure is SILENCE: the activity
+# feed is truncated on every daemon start, so a replay that cannot see its whole
+# window is the ordinary case, and a short one reads exactly like a quiet one.
+# Nothing about that is visible without a test, which is why it blocks a push
+# rather than reporting after it. ~1s.
+if [ -f tests/session-resume/test.sh ]; then
+  _st_session_resume(){
+    bash tests/session-resume/test.sh || {
+      echo "❌ tests/session-resume/test.sh failed (FEATURE-003)."
+      echo "   An incomplete replay must warn AND exit non-zero, ordering must stay"
+      echo "   positional, and --rollback must stash rather than discard."
+      return 1
+    }
+  }
+  pipe_stage "session-resume · FEATURE-003" _st_session_resume
+else
+  pipe_skip "session-resume · FEATURE-003" "suite absent"
+fi
+
 # Relative links under docs/ must resolve. Files move through the lifecycle
 # constantly and every move breaks the references pointing at the old location —
 # 13 were broken on 2026-08-03, one of them wrong across two relocations. ~0.2s.

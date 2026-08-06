@@ -64,6 +64,22 @@ FEATURE-004 (parked) is the fix. Until it exists this is manual.
 
 ## 3. EPHEMERAL — died with the session, re-establish it
 
+**Start with `bash scripts/session-resume.sh`.** It derives the git state, the
+four lifecycle folders, the live baton and the journal events since the last
+snapshot marker — so it cannot go stale the way this file has. Exit **9** means
+the report is INCOMPLETE or the snapshot is UNTRUSTED, and the warnings say
+which. Do not read a short replay as a quiet one.
+
+Close the window and open a new one at handoff with `--mark`; if the tree is
+untrusted, `--rollback` stashes uncommitted work (never `checkout --`).
+
+> The snapshot id lives in this file, which is TRACKED — deliberately, and
+> against the grain of BUG-019. The check it enables is "was the prose written
+> without the journal being marked?", and that can only be answered against the
+> authored surface. The BUG-019 hazard does not transfer: a checkout that
+> rewrites the id produces a loud disagreement warning, not the silent
+> nothing-to-claim that bug was about.
+
 | What | How |
 |---|---|
 | Activity feed | `bash scripts/agent-activity.sh --daemon`, watch with `tail -f logs/agent-activity.log`. **It truncates the log on start** — restarting destroys any replay window. |

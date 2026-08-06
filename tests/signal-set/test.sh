@@ -206,6 +206,48 @@ else
   pass "#5 a refused publish leaves the previous baton byte-identical"
 fi
 
+# ===========================================================================
+# 6. BUG-023 — A FAILED JOURNAL APPEND MUST BE LOUD.
+#
+#    The journal was a BACKSTOP: append-only, written only here, and read by
+#    nothing that makes a decision. Under that contract `|| true` was right — a
+#    logging failure had no business failing a mic flip.
+#
+#    FEATURE-003 made the journal the REPLAY'S SOURCE and did not update this
+#    writer. So a flip could publish successfully, lose its event, and the next
+#    session's resume would report a short replay with no warning and exit 0.
+#    Durable is not complete: a file nothing truncates still has holes if its
+#    writer treats them as acceptable.
+#
+#    The baton IS still published — publication is atomic and already done by
+#    this point, and refusing after the fact is not available. So the contract is
+#    "published, but not journalled", and it needs its own exit status: a caller
+#    that retried on a plain failure would double-publish.
+# ===========================================================================
+if [ "$(id -u)" = "0" ]; then
+  echo "  -- #6 skipped: running as root, where a read-only file is still writable"
+else
+  mkdir -p "$WORK/j"
+  JSIG="$WORK/j/signal.md"
+  printf '| Field | Value |\n|---|---|\n| Holder | OLD |\n| State | OLD |\n| Task | old |\n| Last update | 1970-01-01 |\n' >"$JSIG"
+  : >"$WORK/j/signal-history.log"
+  chmod 444 "$WORK/j/signal-history.log"
+  out="$(bash "$SETTER" --file "$JSIG" --holder NEW --state NEWSTATE --task 'flip' 2>&1)"
+  rc=$?
+  chmod 644 "$WORK/j/signal-history.log"
+  if [ "$rc" -eq 0 ]; then
+    fail "#6 a lost journal event exited 0 — the next resume reports a short replay and cannot know"
+  elif ! grep -q '^| Holder | NEW |$' "$JSIG"; then
+    fail "#6 the baton was NOT published, so the failure was reported at the wrong layer"
+  elif ! printf '%s' "$out" | grep -qi 'journal'; then
+    fail "#6 the failure does not name the journal: [$out]"
+  elif ! printf '%s' "$out" | grep -qi 'published'; then
+    fail "#6 the message does not say the baton IS published — a caller may retry and double-publish: [$out]"
+  else
+    pass "#6 a failed journal append is loud, and says the baton was still published (BUG-023)"
+  fi
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: the baton publishes atomically and survives pipes, backslashes and newlines."

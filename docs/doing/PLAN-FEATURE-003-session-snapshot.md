@@ -1,8 +1,9 @@
 # PLAN-FEATURE-003 — HANDOVER as a snapshot, the logs as the event stream
 
-**Status: PARKED in `backlog/`. Not started, not promoted.** Promotion into
-`doing/` is the founder's call (`backlog/README.md` §"What triggers a grooming
-pass").
+**Status: the READER is built (2026-08-06). The writer stays parked.** Promoted
+into `doing/` by the founder on 2026-08-05 ("3. ok"), reader-only, on Klaus's and
+Alexis's converging recommendation. What the build settled and what §6 still owes
+is in §8b — read that against §6 rather than instead of it.
 
 **Origin:** founder, 2026-08-03 — *"I have a very bad connectivity at the
 moment, so the session can drop every second. The handover could be like
@@ -216,6 +217,46 @@ requirement — the reviews reinforced it rather than softening it.
 
 **Still the founder's call:** everything in §6. Nothing here promotes the item;
 it stays in `backlog/`.
+
+## 8b. What the build settled, and what §6 still owes the founder
+
+Recorded on 2026-08-06, when the reader was built. Kept beside §6 rather than
+replacing it, so the questions and their answers can be read against each other.
+
+**Settled by building it:**
+
+- **The feed probe is the truncation detector.** §4.4's first warning needed a
+  mechanism and the plan did not name one. `--mark` writes the open marker into
+  the durable journal *and* a matching line into the feed; the feed line's
+  ABSENCE at read time is the proof that the window was lost. It asks no
+  timestamp anything, which is what §3b demands, and it covers rotation as well
+  as truncation without having to tell them apart.
+- **Every warning exits 9.** §4.4 said "loud" and meant prose. Prose alone is
+  the BUG-018 shape — the right advice beside exit 0, which a caller reads as
+  success. The converse is asserted too: an intact feed must be silent and exit
+  0, or the tool gets muted and a woken session is as blind as before.
+- **The id stays in the TRACKED `HANDOVER.md`**, against the grain of BUG-019.
+  The check is "was the prose written without the journal being marked?", and
+  only the authored surface can answer it. BUG-019's hazard does not transfer: a
+  checkout that rewrites the id yields a loud disagreement, not silence.
+
+**Still open, and both are the founder's:**
+
+- **§6.2 cadence.** `--mark` is deliberately NOT wired into `signal-set.sh`, so
+  markers are placed by hand at handoff. Auto-marking every mic flip is the
+  harder-to-reverse choice and it multiplies journal markers; wiring it later is
+  one line, unwiring it after every checkout has flips in its journal is not.
+- **§6.4 scope.** Not in `MANAGED_FILES`. It is generic and §6.4 leans to
+  shipping it, but CLAUDE.md §"The blueprint is derived, not designed" applies
+  here too: it proves itself in this checkout first. That is also why neither
+  `CLAUDE.md` nor `docs/DoD.md` names it yet — both travel, and instructing a
+  derived project to run a command it does not have is worse than silence.
+
+**§6.3 (does the feed stop truncating?) is answered NO by the design**, not
+deferred: the probe makes truncation *detectable*, which is what the feature
+needed. Making the feed append-only would trade a solved problem for an
+unbounded log needing rotation — and rotation reintroduces the inode hazard the
+supervisor already had to solve.
 
 ## 8. Rollback
 

@@ -246,13 +246,33 @@ replacing it, so the questions and their answers can be read against each other.
   it** — and matching the probe's full prefix as a fixed string. The three cases
   are now regression tests #11–#13, verified red against the pre-fix script.
 
+  **R2 found the fix still forgeable, and the repair changed the question.** The
+  feed carries dispatch task text verbatim, so a task that *quotes* a probe line
+  IS a probe line to any content check — and taking the last match meant the
+  forgery won. Authentication is now by **recorded position**: the marker says
+  which line the probe landed on, so the question is "does the recorded line
+  still hold the probe?", which a later copy cannot answer for it. R2 also found
+  that a marker predating the provenance fields fell through to the old
+  content-only check, silently restoring the bug those fields were added to
+  close — an upgrade path that gives back the old behaviour now refuses instead.
+
+  **And it found the opposite failure twice, which matters as much.** A feed path
+  containing a space could not round-trip through a space-separated field, and a
+  relative `$AGENT_FEED_LOG` was recorded against the marking process's cwd but
+  read against the data root. Both made a *healthy* feed warn. A tool that cries
+  wolf gets muted, and then the false-clean findings stop mattering because
+  nobody reads the output. `feed=` now goes last and is parsed to end-of-line;
+  both sides normalise the path through one function.
+
   **The honest limit, stated rather than implied.** It proves the feed being read
-  is the one that was marked, that the probe survives in it, and that nothing was
-  removed from IN FRONT of the probe. It does NOT prove nothing was removed from
-  AFTER it — nothing records how many lines there should be by now, so that is
-  not derivable. No mechanism here does it either (the daemon truncates the whole
-  file; `lib/feed.sh` rotation keeps the tail), which is why the gap is
-  documented instead of engineered around.
+  is the one that was marked, that the recorded line still holds the probe, and
+  that nothing was removed from IN FRONT of it. It does NOT prove nothing was
+  removed from AFTER it — nothing records how many lines there should be by now,
+  so that is not derivable. No mechanism here does it either (the daemon
+  truncates the whole file; `lib/feed.sh` rotation keeps the tail), and Codex
+  independently confirmed both halves of that: no code path removes only
+  post-probe lines, and no current metadata would detect it. The gap is
+  documented rather than engineered around.
 - **Every warning exits 9.** §4.4 said "loud" and meant prose. Prose alone is
   the BUG-018 shape — the right advice beside exit 0, which a caller reads as
   success. The converse is asserted too: an intact feed must be silent and exit

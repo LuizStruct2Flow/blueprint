@@ -96,8 +96,25 @@ DATA_ROOT="$(cd -P "$DATA_ROOT" && pwd)"
 
 SIGNAL="$(agent_signal_file "$DATA_ROOT")"
 JOURNAL="$(dirname "$SIGNAL")/signal-history.log"
-FEED="${AGENT_FEED_LOG:-$DATA_ROOT/logs/agent-activity.log}"
 HANDOVER="$DATA_ROOT/docs/doing/HANDOVER.md"
+
+# ABSOLUTE, canonical, and resolved the SAME WAY on both sides. A relative
+# $AGENT_FEED_LOG used to be recorded relative to the marking process's cwd and
+# read back relative to $DATA_ROOT, so a perfectly healthy feed compared unequal
+# and warned (Codex R2-4). The directory is canonicalised with `cd -P` so a
+# symlinked path and its target are one value rather than two.
+norm_path(){
+  _np="$1"
+  case "$_np" in /*) ;; *) _np="$PWD/$_np" ;; esac
+  _np_dir="${_np%/*}"
+  [ -n "$_np_dir" ] || _np_dir="/"
+  if [ -d "$_np_dir" ]; then
+    printf '%s/%s' "$(cd -P "$_np_dir" && pwd)" "${_np##*/}"
+  else
+    printf '%s' "$_np"
+  fi
+}
+FEED="$(norm_path "${AGENT_FEED_LOG:-$DATA_ROOT/logs/agent-activity.log}")"
 
 # Markers are POSITIONS in an append-only file, never timestamps. The feed writes
 # HH:MM:SS with no date, and this host's clock has moved BACKWARDS mid-day —
@@ -174,8 +191,12 @@ if [ "$MODE" = "mark" ]; then
   feed_line="$(wc -l <"$FEED" 2>/dev/null | tr -d ' ')"
   [ -n "$feed_line" ] || feed_line=0
 
-  printf '[%s] <%s> head=%s feed=%s feedline=%s\n' \
-    "$(now_utc)" "$new_id" "$head_sha" "$feed_ref" "$feed_line" >>"$JOURNAL"
+  # `feed=` goes LAST and is parsed to end-of-line, because a feed path may
+  # legitimately contain spaces and the fields are space-separated. With it in
+  # the middle, a healthy feed under a path with a space simply could not round
+  # trip, and an intact window warned (Codex R2-3).
+  printf '[%s] <%s> head=%s feedline=%s feed=%s\n' \
+    "$(now_utc)" "$new_id" "$head_sha" "$feed_line" "$feed_ref" >>"$JOURNAL"
 
   if [ -f "$HANDOVER" ]; then
     tmp="$(mktemp "${HANDOVER}.XXXXXX")"
@@ -341,25 +362,49 @@ else
   # no mechanism in this repo does it (the daemon truncates the whole file, and
   # lib/feed.sh rotation keeps the TAIL, dropping only what precedes). Saying so
   # is better than a check that implies a guarantee it cannot make.
-  mark_feed="$(printf '%s' "$marker" | sed -n 's/.* feed=\([^ ]*\).*/\1/p')"
   mark_line="$(printf '%s' "$marker" | sed -n 's/.* feedline=\([0-9]*\).*/\1/p')"
+  mark_feed="$(printf '%s' "$marker" | sed -n 's/.* feed=\(.*\)$/\1/p')"
   case "$mark_feed" in
     ''|/*) ;;
     *) mark_feed="$DATA_ROOT/$mark_feed" ;;
   esac
+  [ -z "$mark_feed" ] || mark_feed="$(norm_path "$mark_feed")"
 
-  if [ -n "$mark_feed" ] && [ "$mark_feed" != "$FEED" ]; then
+  if [ -z "$mark_feed" ] || [ -z "$mark_line" ]; then
+    # A marker written before the provenance fields existed. Falling through to
+    # a content-only check here re-created the very false clean those fields were
+    # added to close (Codex R2-2) — an upgrade path that silently gives back the
+    # old behaviour is worse than one that refuses.
+    warn "the marker for <$open_id> carries no feed provenance — it was written by an older version of this tool. Its window cannot be checked at all. Re-run 'session-resume.sh --mark' to open one that can be."
+  elif [ "$mark_feed" != "$FEED" ]; then
     warn "this snapshot was marked against $mark_feed but the feed being read is $FEED (\$AGENT_FEED_LOG, or a different checkout). A probe found in the wrong feed proves nothing about this window."
   elif [ ! -f "$FEED" ]; then
     warn "the activity feed ($FEED) does not exist, so the tool-level detail for <$open_id> is GONE. The journal events below are all that survives."
   else
-    probe_at="$(grep -nF "$PROBE_TAG <$open_id>" "$FEED" 2>/dev/null | tail -1)"
+    # AUTHENTICATE BY POSITION, not by text. Matching the probe's wording alone
+    # was still forgeable: the feed carries dispatch task text verbatim, so a
+    # task that quotes a probe line IS a probe line to a content check — and
+    # taking the last match meant the forgery won (Codex R2-1). The marker
+    # records WHERE the probe landed, so the question becomes "is the recorded
+    # line still the probe?", which a later copy cannot answer for it.
+    at_recorded=""
+    [ -n "$mark_line" ] && at_recorded="$(sed -n "${mark_line}p" "$FEED" 2>/dev/null)"
+    probe_at="$(grep -nF "$PROBE_TAG <$open_id>" "$FEED" 2>/dev/null | head -1)"
     probe_at="${probe_at%%:*}"
-    if [ -z "$probe_at" ]; then
-      warn "the activity feed no longer carries the probe for <$open_id> — it was truncated by a daemon restart or trimmed past this window by rotation. The journal events below are ALL that survives; do not read a short replay as a quiet one."
-    elif [ -n "$mark_line" ] && [ "$probe_at" -lt "$mark_line" ] 2>/dev/null; then
-      warn "the activity feed has been TRIMMED: the probe for <$open_id> sat at line $mark_line and now sits at line $probe_at, so $((mark_line - probe_at)) line(s) that preceded this window are gone. What follows the probe is intact."
-    fi
+
+    case "$at_recorded" in
+      *"$PROBE_TAG <$open_id>"*)
+        : ;;                       # the recorded position still holds the probe
+      *)
+        if [ -z "$probe_at" ]; then
+          warn "the activity feed no longer carries the probe for <$open_id> — it was truncated by a daemon restart or trimmed past this window by rotation. The journal events below are ALL that survives; do not read a short replay as a quiet one."
+        elif [ "$probe_at" -lt "$mark_line" ] 2>/dev/null; then
+          warn "the activity feed has been TRIMMED: the probe for <$open_id> sat at line $mark_line and now sits at line $probe_at, so $((mark_line - probe_at)) line(s) that preceded this window are gone. What follows the probe is intact."
+        else
+          warn "the feed carries the probe text for <$open_id> at line $probe_at, but the marker recorded line $mark_line and that line is something else. The recorded position no longer holds the probe, so this text is a COPY and proves nothing about the window."
+        fi
+        ;;
+    esac
   fi
 
   # Header vs journal. Two independent writes that must agree; when they do not,

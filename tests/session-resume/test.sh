@@ -420,6 +420,84 @@ else
   fi
 fi
 
+# ===========================================================================
+# CODEX ROUND 2 — two more false cleans, and two FALSE ALARMS. The false alarms
+# matter as much: a tool that warns on a healthy feed gets muted, and then the
+# false-clean findings stop mattering because nobody reads the output.
+# ===========================================================================
+
+# 15. IMPERSONATION. The feed carries dispatch task text verbatim, so a task
+#     quoting a probe line IS a probe line to any content check. Authentication
+#     is by RECORDED POSITION: the marker says where the probe landed, and a
+#     later copy cannot answer for that line.
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+mid="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1)"
+: >"$p/logs/agent-activity.log"                          # the genuine probe is gone
+printf '10:05:00 [x] noise\n10:05:01 [Jesko] quoting: [RESUME] snapshot %s head=abc1234\n' "$mid" \
+  >>"$p/logs/agent-activity.log"
+rc="$(resume_rc "$p")"
+out="$(resume "$p")"
+if [ "$rc" = "0" ]; then
+  fail "#15 a COPY of the probe text was accepted as the probe — false clean"
+elif ! printf '%s' "$out" | grep -qi 'copy\|recorded position'; then
+  fail "#15 the impersonation was not named: [$out]"
+else
+  pass "#15 the probe is authenticated by recorded position, not by its text (Codex R2-1)"
+fi
+
+# 16. AN OLDER MARKER, with no feed provenance. Falling back to a content-only
+#     check here silently restores the exact behaviour the provenance fields
+#     were added to remove. An upgrade path that gives back the old bug is worse
+#     than one that refuses.
+p="$(fixture)"
+printf '[2026-08-06T10:00:00Z] <0badc0de> head=abc1234\n' >>"$p/logs/state/signal-history.log"
+printf '10:05:00 [RESUME] snapshot <0badc0de> head=abc1234\n' >>"$p/logs/agent-activity.log"
+printf '<!-- session-marker: 0badc0de -->\n' >>"$p/docs/doing/HANDOVER.md"
+rc="$(resume_rc "$p")"
+out="$(resume "$p")"
+if [ "$rc" = "0" ]; then
+  fail "#16 a marker with no feed provenance passed unchecked — false clean on the upgrade path"
+elif ! printf '%s' "$out" | grep -qi 'older version\|no feed provenance'; then
+  fail "#16 the unverifiable marker was not named as such: [$out]"
+else
+  pass "#16 a pre-provenance marker refuses rather than reverting to the old check (Codex R2-2)"
+fi
+
+# 17. FALSE ALARM — a feed path containing a SPACE. Nothing is wrong with this
+#     feed; it simply could not round-trip through a space-separated marker
+#     field. An intact window warned.
+p="$(fixture)"
+mkdir -p "$WORK/feed dir"
+spacefeed="$WORK/feed dir/agent-activity.log"
+: >"$spacefeed"
+AGENT_FEED_LOG="$spacefeed" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+printf '10:05:00 [x] still alive\n' >>"$spacefeed"
+rc="$(AGENT_FEED_LOG="$spacefeed" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
+out="$(AGENT_FEED_LOG="$spacefeed" bash "$RESUME" --root "$p" 2>&1)"
+if [ "$rc" != "0" ]; then
+  fail "#17 a healthy feed under a path with a space exited $rc — false alarm: [$out]"
+else
+  pass "#17 a feed path containing a space round-trips (Codex R2-3)"
+fi
+
+# 18. FALSE ALARM — a RELATIVE $AGENT_FEED_LOG. It was recorded relative to the
+#     marking process's cwd and read back relative to the data root, so a
+#     perfectly healthy feed compared unequal to itself.
+p="$(fixture)"
+(
+  cd "$p" || exit 1
+  AGENT_FEED_LOG="logs/agent-activity.log" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+  printf '10:05:00 [x] still alive\n' >>"$p/logs/agent-activity.log"
+)
+rc="$(cd "$p" && AGENT_FEED_LOG="logs/agent-activity.log" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
+out="$(cd "$p" && AGENT_FEED_LOG="logs/agent-activity.log" bash "$RESUME" --root "$p" 2>&1)"
+if [ "$rc" != "0" ]; then
+  fail "#18 a healthy feed named relatively exited $rc — false alarm: [$out]"
+else
+  pass "#18 a relative AGENT_FEED_LOG resolves identically on both sides (Codex R2-4)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: FEATURE-003 — resume derives its report, and an incomplete replay is loud."

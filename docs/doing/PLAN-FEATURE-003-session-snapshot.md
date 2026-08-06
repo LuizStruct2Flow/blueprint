@@ -321,8 +321,21 @@ never fatal, and the marker landed with no probe behind it. That window would ha
 read as CLEAN forever after. `norm_path` now returns non-zero on an unresolvable
 chain and the script refuses before opening anything (#21).
 
-**Four rounds, eight findings, seven of them defects** — including two false
+**R5 generalised it, and the prescription was better than the R4 fix.** Refusing
+on the symlink cycle had fixed ONE INSTANCE of a class: `AGENT_FEED_LOG=/dev/null`
+did the same thing — `--mark` exited 0 and opened a window with `feedline=0` and
+no probe behind it. So do a full disk, a read-only file, and a FIFO with no
+reader. Codex named the general guard exactly: **verify the probe at its recorded
+position before appending any journal marker.**
+
+That is now the guard, and the refusal leaves the journal **byte-identical** —
+no close, no open. A close with no matching open is a worse state than never
+having tried, and the close used to be written first (#22).
+
+**Five rounds, nine findings, eight of them defects** — including two false
 alarms, which cost as much as false cleans because a muted tool detects nothing.
+The last two came through the same door: `feed_append` is correctly never fatal,
+and that correctness is what let a marker land with nothing behind it.
 
 **Still unverified, and recorded as such rather than assumed:**
 

@@ -207,12 +207,6 @@ git_head(){ git -C "$DATA_ROOT" rev-parse --short HEAD 2>/dev/null || printf 'un
 if [ "$MODE" = "mark" ]; then
   mkdir -p "$(dirname "$JOURNAL")" 2>/dev/null || true
 
-  prev="$(open_marker_line)"
-  if [ -n "$prev" ]; then
-    prev_id="$(marker_id_of "$prev")"
-    printf '[%s] </%s>\n' "$(now_utc)" "$prev_id" >>"$JOURNAL"
-  fi
-
   # 8 hex characters. Enough to be unambiguous in one project's journal, short
   # enough to read aloud — this is a correlation key, not a security token.
   new_id="$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
@@ -224,9 +218,9 @@ if [ "$MODE" = "mark" ]; then
   # time is the signal — that is how the reader learns the feed was truncated or
   # rotated past this window, without asking a timestamp anything.
   #
-  # The probe is written BEFORE the journal marker, because the marker records
-  # where the probe landed. Reversing them would record a position that does not
-  # exist yet.
+  # The probe goes FIRST, before anything touches the journal, because the marker
+  # records where the probe landed and because a mark that cannot write its probe
+  # must leave NO trace at all.
   AGENT_FEED_LOG="$FEED"; export AGENT_FEED_LOG
   # shellcheck source=scripts/lib/feed.sh
   . "$_bp_root/scripts/lib/feed.sh"
@@ -242,6 +236,39 @@ if [ "$MODE" = "mark" ]; then
   case "$FEED" in "$DATA_ROOT"/*) feed_ref="${FEED#"$DATA_ROOT"/}" ;; esac
   feed_line="$(wc -l <"$FEED" 2>/dev/null | tr -d ' ')"
   [ -n "$feed_line" ] || feed_line=0
+
+  # READ THE PROBE BACK BEFORE COMMITTING TO ANYTHING (Codex R5).
+  #
+  # `feed_append` is deliberately never fatal — a logging failure must not block
+  # a push — so it returns 0 whether or not a byte landed. Refusing only on the
+  # symlink cycle (R4) fixed one instance of a whole class: `/dev/null`, a full
+  # disk, a read-only file, a FIFO with no reader. In every one the marker was
+  # written with nothing behind it, and the window it opened would read as CLEAN
+  # forever after — silently, which is the one thing this tool must never be.
+  #
+  # So the general form of the guard is the one Codex prescribed: verify the
+  # probe is at its recorded position, and only then write the journal. A refusal
+  # leaves the journal BYTE-IDENTICAL — no close, no open — because a close with
+  # no matching open is a worse state than never having tried.
+  probe_back=""
+  [ "${feed_line:-0}" -gt 0 ] 2>/dev/null && probe_back="$(sed -n "${feed_line}p" "$FEED" 2>/dev/null)"
+  case "$probe_back" in
+    *"$PROBE_TAG <$new_id>"*) ;;
+    *)
+      echo "FATAL: the probe for <$new_id> could not be read back from $FEED." >&2
+      echo "  The feed accepted the write without storing it — /dev/null, a full disk," >&2
+      echo "  a read-only file, or an unreadable link are all this shape." >&2
+      echo "  NOTHING was written to the journal: opening a window whose probe went" >&2
+      echo "  nowhere would make it read as complete forever after." >&2
+      exit 1
+      ;;
+  esac
+
+  prev="$(open_marker_line)"
+  if [ -n "$prev" ]; then
+    prev_id="$(marker_id_of "$prev")"
+    printf '[%s] </%s>\n' "$(now_utc)" "$prev_id" >>"$JOURNAL"
+  fi
 
   # `feed=` goes LAST and is parsed to end-of-line, because a feed path may
   # legitimately contain spaces and the fields are space-separated. With it in

@@ -569,6 +569,37 @@ else
   pass "#21 a symlink cycle refuses before opening a window (Codex R4-1)"
 fi
 
+# ===========================================================================
+# CODEX ROUND 5 — the GENERAL form of #21.
+#
+# 22. A FEED THAT SWALLOWS THE WRITE. `feed_append` is deliberately never fatal
+#     (a logging failure must not block a push), so it returns 0 whether or not
+#     a byte landed. Refusing only on the symlink cycle fixed ONE INSTANCE of a
+#     class: /dev/null, a full disk, a read-only file, a FIFO with no reader. In
+#     every one the marker was written with nothing behind it, and the window it
+#     opened would read as CLEAN forever after.
+#
+#     The guard is therefore the general one: read the probe back at its recorded
+#     position, and only then write the journal. A refusal must leave the journal
+#     BYTE-IDENTICAL — a close with no matching open is a worse state than never
+#     having tried.
+# ===========================================================================
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1          # a real first window
+before="$(cksum <"$p/logs/state/signal-history.log")"
+rc="$(AGENT_FEED_LOG=/dev/null bash "$RESUME" --root "$p" --mark >/dev/null 2>&1; echo "$?")"
+out="$(AGENT_FEED_LOG=/dev/null bash "$RESUME" --root "$p" --mark 2>&1)"
+after="$(cksum <"$p/logs/state/signal-history.log")"
+if [ "$rc" = "0" ]; then
+  fail "#22 --mark into /dev/null exited 0 — it opened a window whose probe went nowhere"
+elif [ "$before" != "$after" ]; then
+  fail "#22 it refused but still wrote to the journal — a close with no open is worse than nothing"
+elif ! printf '%s' "$out" | grep -qi 'could not be read back'; then
+  fail "#22 the unwritable feed was not named: [$out]"
+else
+  pass "#22 a feed that swallows the write refuses and leaves the journal untouched (Codex R5)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: FEATURE-003 — resume derives its report, and an incomplete replay is loud."

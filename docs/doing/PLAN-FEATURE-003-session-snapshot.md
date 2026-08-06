@@ -332,10 +332,27 @@ That is now the guard, and the refusal leaves the journal **byte-identical** —
 no close, no open. A close with no matching open is a worse state than never
 having tried, and the close used to be written first (#22).
 
-**Five rounds, nine findings, eight of them defects** — including two false
+**R6 closed the class from both ends.** The feed write was verified and the
+JOURNAL write was not — an asymmetry with no defence: an unwritable journal let
+`--mark` exit 0 and stamp a new id into `HANDOVER.md` for a window that was never
+opened, so the next read would report prose disagreeing with the journal. *The
+tool manufacturing the exact staleness it exists to detect.* Both records are now
+read back, and `HANDOVER` is written last, so a refusal leaves everything as it
+was (#23).
+
+And the R5 fix carried a false alarm of its own: it took `wc -l` after appending
+as the probe's line, which is only true if nothing else wrote in between — while
+the activity daemon appends to that file continuously. Codex measured **7 of 100
+ordinary marks refusing**. Searching for the freshly-minted id instead is
+race-free by construction and subsumes the read-back check. Under sustained
+concurrent writes the old code fails **100 of 100**; the fix passes 100 of 100
+(#24).
+
+**Six rounds, eleven findings, ten of them defects** — including four false
 alarms, which cost as much as false cleans because a muted tool detects nothing.
-The last two came through the same door: `feed_append` is correctly never fatal,
-and that correctness is what let a marker land with nothing behind it.
+Four of the last six came through one door, and it is the lesson worth keeping:
+`feed_append` is correctly never fatal, and that correctness is exactly what lets
+a marker land with nothing behind it.
 
 **Still unverified, and recorded as such rather than assumed:**
 

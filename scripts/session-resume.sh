@@ -234,35 +234,31 @@ if [ "$MODE" = "mark" ]; then
   # somewhere" into two checkable facts.
   feed_ref="$FEED"
   case "$FEED" in "$DATA_ROOT"/*) feed_ref="${FEED#"$DATA_ROOT"/}" ;; esac
-  feed_line="$(wc -l <"$FEED" 2>/dev/null | tr -d ' ')"
-  [ -n "$feed_line" ] || feed_line=0
 
-  # READ THE PROBE BACK BEFORE COMMITTING TO ANYTHING (Codex R5).
+  # FIND the probe rather than ASSUMING where it landed (Codex R6-2).
   #
-  # `feed_append` is deliberately never fatal — a logging failure must not block
-  # a push — so it returns 0 whether or not a byte landed. Refusing only on the
-  # symlink cycle (R4) fixed one instance of a whole class: `/dev/null`, a full
-  # disk, a read-only file, a FIFO with no reader. In every one the marker was
-  # written with nothing behind it, and the window it opened would read as CLEAN
-  # forever after — silently, which is the one thing this tool must never be.
+  # This used to take `wc -l` after the append and call that the probe's line.
+  # That is only true if nothing else wrote in between — and the activity daemon
+  # is appending to this very file continuously. Codex measured **7 of 100
+  # ordinary marks refusing** because of it: a healthy mark, failing, which is the
+  # false-alarm failure mode that gets a tool muted.
   #
-  # So the general form of the guard is the one Codex prescribed: verify the
-  # probe is at its recorded position, and only then write the journal. A refusal
-  # leaves the journal BYTE-IDENTICAL — no close, no open — because a close with
-  # no matching open is a worse state than never having tried.
-  probe_back=""
-  [ "${feed_line:-0}" -gt 0 ] 2>/dev/null && probe_back="$(sed -n "${feed_line}p" "$FEED" 2>/dev/null)"
-  case "$probe_back" in
-    *"$PROBE_TAG <$new_id>"*) ;;
-    *)
-      echo "FATAL: the probe for <$new_id> could not be read back from $FEED." >&2
-      echo "  The feed accepted the write without storing it — /dev/null, a full disk," >&2
-      echo "  a read-only file, or an unreadable link are all this shape." >&2
-      echo "  NOTHING was written to the journal: opening a window whose probe went" >&2
-      echo "  nowhere would make it read as complete forever after." >&2
-      exit 1
-      ;;
-  esac
+  # Searching for the id is race-free by construction. The id is freshly minted,
+  # so exactly one line carries it, wherever concurrent writers have pushed it to.
+  # It also SUBSUMES the read-back check (Codex R5): if the probe cannot be found,
+  # it was never stored — `/dev/null`, a full disk, a read-only file, a FIFO with
+  # no reader all land here. `feed_append` is deliberately never fatal, so its
+  # return value proves nothing and this is the only honest evidence.
+  probe_at="$(grep -nF "$PROBE_TAG <$new_id>" "$FEED" 2>/dev/null | tail -1)"
+  feed_line="${probe_at%%:*}"
+  if [ -z "$feed_line" ]; then
+    echo "FATAL: the probe for <$new_id> could not be read back from $FEED." >&2
+    echo "  The feed accepted the write without storing it — /dev/null, a full disk," >&2
+    echo "  a read-only file, or an unreadable link are all this shape." >&2
+    echo "  NOTHING was written to the journal: opening a window whose probe went" >&2
+    echo "  nowhere would make it read as complete forever after." >&2
+    exit 1
+  fi
 
   prev="$(open_marker_line)"
   if [ -n "$prev" ]; then
@@ -276,6 +272,25 @@ if [ "$MODE" = "mark" ]; then
   # trip, and an intact window warned (Codex R2-3).
   printf '[%s] <%s> head=%s feedline=%s feed=%s\n' \
     "$(now_utc)" "$new_id" "$head_sha" "$feed_line" "$feed_ref" >>"$JOURNAL"
+
+  # THE JOURNAL GETS THE SAME TREATMENT AS THE FEED (Codex R6-1).
+  #
+  # The feed write was verified and the journal write was not, and that asymmetry
+  # had no defence: an unwritable journal let `--mark` exit 0 and stamp a NEW id
+  # into HANDOVER.md for a window that was never opened. The next read then sees
+  # prose claiming an id the journal has never heard of — the very disagreement
+  # this tool reports, manufactured by the tool itself.
+  #
+  # HANDOVER is written only after this passes, so a refusal leaves both records
+  # exactly as they were.
+  if ! grep -qF "<$new_id> head=$head_sha" "$JOURNAL" 2>/dev/null; then
+    echo "FATAL: the marker for <$new_id> could not be read back from $JOURNAL." >&2
+    echo "  The journal is unwritable, full, or on a read-only filesystem." >&2
+    echo "  HANDOVER.md was NOT updated: an id in the prose for a window the" >&2
+    echo "  journal never recorded is exactly the disagreement this tool exists" >&2
+    echo "  to report, and it must not be the one manufacturing it." >&2
+    exit 1
+  fi
 
   if [ -f "$HANDOVER" ]; then
     tmp="$(mktemp "${HANDOVER}.XXXXXX")"

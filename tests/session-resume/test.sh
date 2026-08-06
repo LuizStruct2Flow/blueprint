@@ -600,6 +600,76 @@ else
   pass "#22 a feed that swallows the write refuses and leaves the journal untouched (Codex R5)"
 fi
 
+# ===========================================================================
+# CODEX ROUND 6 — the same class, from both ends.
+# ===========================================================================
+
+# 23. AN UNWRITABLE JOURNAL. The feed write was verified and the journal write
+#     was not, and that asymmetry had no defence: --mark exited 0 and stamped a
+#     NEW id into HANDOVER.md for a window that was never opened. The next read
+#     then reports prose disagreeing with the journal — the exact staleness this
+#     tool exists to detect, manufactured by the tool itself.
+if [ "$(id -u)" = "0" ]; then
+  echo "  -- #23 skipped: running as root, where a read-only file is still writable"
+else
+  p="$(fixture)"
+  bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+  hb="$(cksum <"$p/docs/doing/HANDOVER.md")"
+  jb="$(cksum <"$p/logs/state/signal-history.log")"
+  chmod 444 "$p/logs/state/signal-history.log"
+  rc="$(bash "$RESUME" --root "$p" --mark >/dev/null 2>&1; echo "$?")"
+  out="$(bash "$RESUME" --root "$p" --mark 2>&1)"
+  chmod 644 "$p/logs/state/signal-history.log"
+  ha="$(cksum <"$p/docs/doing/HANDOVER.md")"
+  ja="$(cksum <"$p/logs/state/signal-history.log")"
+  if [ "$rc" = "0" ]; then
+    fail "#23 --mark with an unwritable journal exited 0"
+  elif [ "$hb" != "$ha" ]; then
+    fail "#23 HANDOVER.md was stamped with an id the journal never recorded"
+  elif [ "$jb" != "$ja" ]; then
+    fail "#23 the journal changed despite being unwritable"
+  elif ! printf '%s' "$out" | grep -qi 'could not be read back'; then
+    fail "#23 the unwritable journal was not named: [$out]"
+  else
+    pass "#23 an unwritable journal refuses and leaves HANDOVER untouched (Codex R6-1)"
+  fi
+fi
+
+# 24. FALSE ALARM UNDER CONCURRENCY. The probe's line was taken as `wc -l` after
+#     appending, which is only true if nothing else wrote in between — and the
+#     activity daemon appends to this very file continuously. Codex measured 7 of
+#     100 ordinary marks REFUSING. Searching for the freshly-minted id instead is
+#     race-free by construction: exactly one line carries it, wherever concurrent
+#     writers have pushed it to.
+#     Reproduced by holding a writer on the feed for the whole run rather than by
+#     hoping to land in the window: the old code's gap is between its append and
+#     its `wc -l`, so sustained pressure hits it repeatedly. 100 marks, as Codex
+#     measured it.
+p="$(fixture)"
+noise_stop="$WORK/noise.stop"
+rm -f "$noise_stop"
+(
+  i=0
+  while [ ! -f "$noise_stop" ]; do
+    printf '10:00:00 [noise] concurrent write %s\n' "$i" >>"$p/logs/agent-activity.log"
+    i=$((i + 1))
+  done
+) &
+noise_pid=$!
+fails=0
+i=0
+while [ "$i" -lt 100 ]; do
+  bash "$RESUME" --root "$p" --mark >/dev/null 2>&1 || fails=$((fails + 1))
+  i=$((i + 1))
+done
+: >"$noise_stop"
+wait "$noise_pid" 2>/dev/null
+if [ "$fails" -gt 0 ]; then
+  fail "#24 $fails of 100 ordinary marks refused while the feed was being appended to — false alarm"
+else
+  pass "#24 100 marks under sustained concurrent feed writes all succeeded (Codex R6-2)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: FEATURE-003 — resume derives its report, and an incomplete replay is loud."

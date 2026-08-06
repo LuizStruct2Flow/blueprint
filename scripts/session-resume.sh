@@ -160,13 +160,25 @@ if [ "$MODE" = "mark" ]; then
 
   head_sha="$(git_head)"
 
+  # ONE APPEND, closing the old window and opening the new one together.
+  #
+  # BUG: this used to be two appends, which made the gap between them a place a
+  # concurrent `signal-set.sh` flip could land — after `</old>`, before `<new>`.
+  # An event there belongs to NO replay window: past the close of one, before the
+  # open of the next. Silent, and it drops exactly what this feature exists to
+  # preserve. Found by Codex R8; it is A-09's "two writers to one file" one level
+  # up, and this script became the second writer.
+  #
+  # A lock would work and is not needed: a single small `printf` to a file opened
+  # O_APPEND is one write(), and no other appender can interleave inside it.
   prev="$(open_marker_line)"
   if [ -n "$prev" ]; then
-    prev_id="$(marker_id_of "$prev")"
-    printf '[%s] </%s>\n' "$(now_utc)" "$prev_id" >>"$JOURNAL"
+    roll="$(printf '[%s] </%s>\n[%s] <%s> head=%s' \
+      "$(now_utc)" "$(marker_id_of "$prev")" "$(now_utc)" "$new_id" "$head_sha")"
+  else
+    roll="$(printf '[%s] <%s> head=%s' "$(now_utc)" "$new_id" "$head_sha")"
   fi
-
-  printf '[%s] <%s> head=%s\n' "$(now_utc)" "$new_id" "$head_sha" >>"$JOURNAL"
+  printf '%s\n' "$roll" >>"$JOURNAL"
 
   # READ THE MARKER BACK BEFORE TOUCHING HANDOVER (Codex R6-1).
   #

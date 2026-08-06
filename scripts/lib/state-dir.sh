@@ -88,9 +88,24 @@ agent_signal_file() {
 }
 
 # agent_signal_journal [repo_root]
-#   Append-only record of every flip. A BACKSTOP, never a second writer: only
-#   signal-set.sh appends, and nothing reads it to decide anything. Two writers
-#   that agree by coincidence is the A-09 defect one level up.
+#   Append-only record of every flip.
+#
+#   THIS IS NO LONGER A BACKSTOP (FEATURE-003). It used to say "only
+#   signal-set.sh appends, and nothing reads it to decide anything", and all
+#   three clauses are now false: `session-resume.sh` READS it to decide what to
+#   replay since the last handoff, and its `--mark` APPENDS the window markers.
+#
+#   Two consequences, both of which were bugs before they were documented:
+#     * a failed append is no longer swallowed — signal-set.sh exits 8 rather
+#       than losing an event the next replay would silently omit (BUG-023);
+#     * `--mark` rolls the window in ONE append, because two appends leave a gap
+#       a concurrent flip can land in, belonging to no replay window. That is
+#       A-09's "two writers agreeing by coincidence" one level up, and this file
+#       is where the warning about it lived while it came true next door.
+#
+#   NOTHING TRUNCATES OR ROTATES IT, and the whole replay design rests on that.
+#   If you are about to add rotation here, the marker positions in
+#   session-resume.sh stop meaning anything — fix that first.
 #
 #   Derived from the BATON's directory, not independently from the repo root, so
 #   it follows $AGENT_SIGNAL_FILE wherever that points. The first version

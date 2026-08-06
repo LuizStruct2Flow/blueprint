@@ -389,6 +389,54 @@ else
   fi
 fi
 
+# ===========================================================================
+# 13. THE WINDOW ROLL IS ONE APPEND, NOT TWO.
+#
+#     `--mark` makes this script a SECOND WRITER to a file `signal-set.sh` also
+#     appends to — the A-09 shape one level up. With `</old>` and `<new>` written
+#     as two separate appends there is a gap between them, and a mic flip landing
+#     in that gap belongs to NO replay window: it is after the close of the old
+#     one and before the open of the new one, so no resume will ever show it.
+#
+#     Found by Codex R8. Silent, and it drops exactly the events this feature
+#     exists to preserve.
+#
+#     The fix is one append rather than a lock: a single small `printf` to an
+#     O_APPEND file is one write(), so no other writer can interleave inside it.
+# ===========================================================================
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+flip_stop="$WORK/flip.stop"
+rm -f "$flip_stop"
+(
+  i=0
+  while [ ! -f "$flip_stop" ]; do
+    bash "$ROOT/scripts/signal-set.sh" --file "$p/logs/state/signal.md" \
+      --holder Flipper --state ACTIVE --task "concurrent flip $i" >/dev/null 2>&1
+    i=$((i + 1))
+  done
+) &
+flip_pid=$!
+i=0
+while [ "$i" -lt 30 ]; do
+  bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+  i=$((i + 1))
+done
+: >"$flip_stop"
+wait "$flip_pid" 2>/dev/null
+
+# Any ordinary event sitting between a close and the next open fell into the gap.
+orphans="$(awk '
+  /^\[[^]]*\] <\/[0-9a-f]+>/ { gap = 1; next }
+  /^\[[^]]*\] <[0-9a-f]+> /  { gap = 0; next }
+  gap                        { print }
+' "$p/logs/state/signal-history.log" 2>/dev/null | grep -c .)"
+if [ "${orphans:-0}" -gt 0 ]; then
+  fail "#13 $orphans event(s) landed between a window close and the next open — they belong to no replay window (Codex R8)"
+else
+  pass "#13 the window roll is one append, so no flip can fall between two windows (Codex R8)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: FEATURE-003 — resume derives its report, and an incomplete replay is loud."

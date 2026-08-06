@@ -542,6 +542,33 @@ else
   pass "#20 repointed metadata alone is loud — only CONSISTENT tampering is out of scope"
 fi
 
+# ===========================================================================
+# CODEX ROUND 4.
+#
+# 21. A SYMLINK CYCLE must FAIL, not pass quietly. Bounding the walk was not
+#     enough: on a cycle it ran out of hops, returned the still-symlinked path,
+#     and `--mark` wrote a probe into nothing — feed_append is deliberately never
+#     fatal — then exited 0 with no warning. A tool whose entire purpose is that
+#     failure announces itself must not have a silent failure of its own, and
+#     this one is the worst kind: the marker lands, the probe does not, and the
+#     window it opens will read as clean forever after.
+# ===========================================================================
+p="$(fixture)"
+rm -f "$p/logs/agent-activity.log"
+ln -s cycle-b.log "$p/logs/cycle-a.log"
+ln -s cycle-a.log "$p/logs/cycle-b.log"
+rc="$(AGENT_FEED_LOG="$p/logs/cycle-a.log" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1; echo "$?")"
+out="$(AGENT_FEED_LOG="$p/logs/cycle-a.log" bash "$RESUME" --root "$p" --mark 2>&1)"
+if [ "$rc" = "0" ]; then
+  fail "#21 --mark through a symlink CYCLE exited 0 — it opened a window whose probe went nowhere"
+elif ! printf '%s' "$out" | grep -qi 'cycle'; then
+  fail "#21 the cycle was not named: [$out]"
+elif grep -qE '^\[[^]]+\] <[0-9a-f]+>' "$p/logs/state/signal-history.log" 2>/dev/null; then
+  fail "#21 it refused but still wrote an open marker — the window exists with no probe"
+else
+  pass "#21 a symlink cycle refuses before opening a window (Codex R4-1)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: FEATURE-003 — resume derives its report, and an incomplete replay is loud."

@@ -120,13 +120,18 @@ HANDOVER="$DATA_ROOT/docs/doing/HANDOVER.md"
 # ABSOLUTE, canonical, and resolved the SAME WAY on both sides. A relative
 # $AGENT_FEED_LOG used to be recorded relative to the marking process's cwd and
 # read back relative to $DATA_ROOT, so a perfectly healthy feed compared unequal
-# and warned (Codex R2-4). The directory is canonicalised with `cd -P` so a
-# symlinked path and its target are one value rather than two.
+# and warned (Codex R2-4).
+#
 # Canonicalises the directory AND follows a symlinked feed FILE. Doing only the
 # directory left two names for one inode — mark through `logs/link.log`, read
 # through `logs/real.log`, and a perfectly healthy feed reported a mismatch
-# (Codex R3-1). Bounded like every other symlink walk here: a cycle must fail,
-# not spin.
+# (Codex R3-1).
+#
+# RETURNS NON-ZERO on an unresolvable chain. Bounding the walk was not enough:
+# on a cycle it ran out of hops and returned the still-symlinked path, `--mark`
+# wrote a probe into nothing (feed_append is deliberately never fatal) and exited
+# 0 with no warning (Codex R4-1). A tool whose whole point is that failure
+# announces itself must not have a silent one of its own.
 norm_path(){
   _np="$1"
   case "$_np" in /*) ;; *) _np="$PWD/$_np" ;; esac
@@ -149,9 +154,19 @@ norm_path(){
     esac
     _np_hops=$((_np_hops + 1))
   done
+  if [ -L "$_np" ]; then
+    printf '%s' "$_np"
+    return 1
+  fi
   printf '%s' "$_np"
 }
-FEED="$(norm_path "${AGENT_FEED_LOG:-$DATA_ROOT/logs/agent-activity.log}")"
+if ! FEED="$(norm_path "${AGENT_FEED_LOG:-$DATA_ROOT/logs/agent-activity.log}")"; then
+  echo "FATAL: the feed path resolves through a symlink chain that never ends — a cycle." >&2
+  echo "  last hop: $FEED" >&2
+  echo "  Refusing rather than writing a probe into nothing: a marker whose feed" >&2
+  echo "  cannot be written is a window that will read as clean and be empty." >&2
+  exit 1
+fi
 
 # Markers are POSITIONS in an append-only file, never timestamps. The feed writes
 # HH:MM:SS with no date, and this host's clock has moved BACKWARDS mid-day —

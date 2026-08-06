@@ -307,6 +307,23 @@ forgery alone is caught (#15, #20). Codex's own summary is the fair one: he woul
 not trust the silence while journal metadata alone can manufacture a clean
 result. Correct, and now written on the tin rather than discovered later.
 
+**R4 accepted the scope and found the tool's own silent failure.** Codex confirmed
+the loss-only promise is "honest and defensible", and that stronger tamper
+detection would need an external authenticated append-only anchor — a local
+digest is insufficient, which is what I had argued. He also confirmed the R3-1
+symlink fix and that neither false alarm returned.
+
+Then he found the one that matters most for a tool built around loud failure:
+**`--mark` through a two-node symlink cycle exited 0 with no warning.** Bounding
+the walk was not enough — on a cycle it ran out of hops and returned the
+still-symlinked path, `feed_append` swallowed the write because it is deliberately
+never fatal, and the marker landed with no probe behind it. That window would have
+read as CLEAN forever after. `norm_path` now returns non-zero on an unresolvable
+chain and the script refuses before opening anything (#21).
+
+**Four rounds, eight findings, seven of them defects** — including two false
+alarms, which cost as much as false cleans because a muted tool detects nothing.
+
 **Still unverified, and recorded as such rather than assumed:**
 
 - **Partial `git stash push` failure.** Codex could not manufacture one, so

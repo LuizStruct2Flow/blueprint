@@ -287,6 +287,26 @@ replacing it, so the questions and their answers can be read against each other.
   *older prose, re-run `--mark`*, and an id it has never seen is reported as
   *a claim nobody backed*. Same severity, different advice (#14).
 
+**R3 settled the scope, which is the part a reader will otherwise assume wrong.**
+One more false alarm (a symlinked feed FILE — `norm_path` canonicalised the
+directory but not the final link, so one inode under two names compared unequal)
+and one finding that is **not fixable inside this design**: Codex built a clean
+report by copying the probe to another feed line *and* editing `feedline=` to
+match. Two coordinated hand-edits.
+
+That is not a hole to close. The journal and the feed are local untracked state,
+so anyone able to edit them can equally write a whole marker from nothing — no
+check this script performs can be stronger than the files it reads, and a digest
+would not help because the same hand recomputes it. Closing it needs an
+append-only authenticated log, which is a different feature.
+
+So the promise is stated narrowly, in the script header and here: **silence means
+nothing was lost by itself. It does not mean nobody rewrote the record.** What is
+guaranteed is that *inconsistent* corruption is loud — either half of that
+forgery alone is caught (#15, #20). Codex's own summary is the fair one: he would
+not trust the silence while journal metadata alone can manufacture a clean
+result. Correct, and now written on the tin rather than discovered later.
+
 **Still unverified, and recorded as such rather than assumed:**
 
 - **Partial `git stash push` failure.** Codex could not manufacture one, so

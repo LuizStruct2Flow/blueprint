@@ -498,6 +498,50 @@ else
   pass "#18 a relative AGENT_FEED_LOG resolves identically on both sides (Codex R2-4)"
 fi
 
+# ===========================================================================
+# CODEX ROUND 3.
+# ===========================================================================
+
+# 19. FALSE ALARM — a SYMLINKED FEED FILE. Marking through `link.log` and reading
+#     through `real.log` is one inode under two names. Canonicalising only the
+#     directory left them as two values, and a perfectly healthy feed reported a
+#     mismatch.
+p="$(fixture)"
+mv "$p/logs/agent-activity.log" "$p/logs/real.log"
+ln -s real.log "$p/logs/agent-activity.log"
+AGENT_FEED_LOG="$p/logs/agent-activity.log" bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+printf '10:05:00 [x] still alive\n' >>"$p/logs/real.log"
+rc="$(AGENT_FEED_LOG="$p/logs/real.log" bash "$RESUME" --root "$p" >/dev/null 2>&1; echo "$?")"
+out="$(AGENT_FEED_LOG="$p/logs/real.log" bash "$RESUME" --root "$p" 2>&1)"
+if [ "$rc" != "0" ]; then
+  fail "#19 one feed inode under two names reported a mismatch — false alarm: [$out]"
+else
+  pass "#19 a symlinked feed file resolves to one value on both sides (Codex R3-1)"
+fi
+
+# 20. THE SCOPE, PINNED. Silence means nothing was lost BY ITSELF. It does not
+#     mean nobody rewrote the record — the journal and feed are local untracked
+#     state, so anyone able to edit them can write a whole marker from nothing,
+#     and no check here can be stronger than the files it reads.
+#
+#     What IS guaranteed is that INCONSISTENT corruption is caught. Codex's clean
+#     forgery needed TWO coordinated edits — move the probe AND repoint the
+#     metadata. #15 pins the first half. This pins the second, so a future change
+#     cannot widen the hole from "consistent tampering" to "any stray edit".
+#
+#     Note what is deliberately NOT asserted: a stray COPY of the probe appended
+#     while the genuine one still sits at its recorded line is correctly CLEAN.
+#     Nothing was lost, and warning there would be a false alarm.
+p="$(fixture)"
+bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
+sed -i 's/feedline=[0-9]*/feedline=999/' "$p/logs/state/signal-history.log"
+rc_meta="$(resume_rc "$p")"
+if [ "$rc_meta" = "0" ]; then
+  fail "#20 position metadata pointing at nothing still produced a clean report"
+else
+  pass "#20 repointed metadata alone is loud — only CONSISTENT tampering is out of scope"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: FEATURE-003 — resume derives its report, and an incomplete replay is loud."

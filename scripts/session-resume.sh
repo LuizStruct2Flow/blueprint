@@ -42,6 +42,25 @@
 # correct. If the marker append fails, the window is lost. What the design owes
 # in return is that the loss ANNOUNCES ITSELF rather than looking like success.
 #
+# WHAT IT DETECTS, AND WHAT IT CANNOT — the scope, stated because a reader will
+# otherwise assume the stronger one.
+#
+# It detects LOSS: a truncated feed, a rotated one, the wrong feed, a marker with
+# no provenance, prose that predates the window. Every one of those happens by
+# itself, routinely, which is exactly why they need detecting.
+#
+# It does NOT detect TAMPERING. Codex demonstrated a clean report built by
+# copying the probe to another feed line AND editing `feedline=` in the journal
+# to match — two coordinated hand-edits. That is not a hole to be closed here: the
+# journal and the feed are local untracked state, and anyone able to edit them can
+# equally write a whole marker from nothing, so no check this script performs can
+# be stronger than the files it reads. A digest would not help either, since the
+# same hand recomputes it.
+#
+# So the promise is deliberately narrow: SILENCE MEANS NOTHING WAS LOST BY ITSELF.
+# It does not mean nobody rewrote the record. Making it mean that needs an
+# append-only authenticated log, which is a different feature.
+#
 # Usage:
 #   scripts/session-resume.sh                 # report (read-only)
 #   scripts/session-resume.sh --mark          # close the open window, open a new one
@@ -103,16 +122,34 @@ HANDOVER="$DATA_ROOT/docs/doing/HANDOVER.md"
 # read back relative to $DATA_ROOT, so a perfectly healthy feed compared unequal
 # and warned (Codex R2-4). The directory is canonicalised with `cd -P` so a
 # symlinked path and its target are one value rather than two.
+# Canonicalises the directory AND follows a symlinked feed FILE. Doing only the
+# directory left two names for one inode — mark through `logs/link.log`, read
+# through `logs/real.log`, and a perfectly healthy feed reported a mismatch
+# (Codex R3-1). Bounded like every other symlink walk here: a cycle must fail,
+# not spin.
 norm_path(){
   _np="$1"
   case "$_np" in /*) ;; *) _np="$PWD/$_np" ;; esac
-  _np_dir="${_np%/*}"
-  [ -n "$_np_dir" ] || _np_dir="/"
-  if [ -d "$_np_dir" ]; then
-    printf '%s/%s' "$(cd -P "$_np_dir" && pwd)" "${_np##*/}"
-  else
-    printf '%s' "$_np"
-  fi
+  _np_hops=0
+  while [ "$_np_hops" -lt 40 ]; do
+    _np_dir="${_np%/*}"
+    [ -n "$_np_dir" ] || _np_dir="/"
+    if [ -d "$_np_dir" ]; then
+      _np_abs="$(cd -P "$_np_dir" && pwd)"
+      case "$_np_abs" in
+        /) _np="/${_np##*/}" ;;
+        *) _np="$_np_abs/${_np##*/}" ;;
+      esac
+    fi
+    [ -L "$_np" ] || break
+    _np_t="$(readlink "$_np")"
+    case "$_np_t" in
+      /*) _np="$_np_t" ;;
+      *)  _np="${_np%/*}/$_np_t" ;;
+    esac
+    _np_hops=$((_np_hops + 1))
+  done
+  printf '%s' "$_np"
 }
 FEED="$(norm_path "${AGENT_FEED_LOG:-$DATA_ROOT/logs/agent-activity.log}")"
 

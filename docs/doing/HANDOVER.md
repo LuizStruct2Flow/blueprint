@@ -1,3 +1,5 @@
+<!-- session-marker: e597eb41 -->
+
 # HANDOVER — what a waking agent needs to TAKE OVER
 
 **Founder rule, 2026-08-05:** *"the file should only contain the data needed for
@@ -21,79 +23,71 @@ and it cannot go stale the way this file has, three times in one day.
 
 ---
 
-## 1. WIP — nothing is open
+## 1. START HERE
 
-`doing/` is empty. Everything is parked or waiting on the founder — see
-`docs/backlog/` and `docs/waiting-acceptance/`.
+```bash
+bash scripts/session-resume.sh
+```
 
-**Start every wake with `bash scripts/session-resume.sh`** (landed 2026-08-06,
-#32). It derives the git state, the four lifecycle folders, the baton, and the
-journal events since the last handoff, so it cannot be stale the way this file
-has been. Exit 9 means the report is incomplete or the snapshot untrusted, and
-the warning says which. Roll the window at handoff with `--mark`.
+It derives the git state, the four lifecycle folders, the live baton and the
+journal events since the last handoff marker. It holds nothing, so it cannot go
+stale the way this file has. **Exit 9** means the report is incomplete or the
+snapshot untrusted, and the warning says which — do not read a short replay as a
+quiet one. Roll the window at the next handoff with `--mark`; if the tree is
+untrusted, `--rollback` stashes (never `checkout --`).
 
 Two things it does NOT do, so you do not go looking:
 
 - **It does not read the activity feed.** A probe into that feed existed,
   survived six review rounds, and was deleted — it guarded a file the tool never
   reads and fired on every wake. Do not re-add one; the post-mortem is in
-  `waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md` §8b.
+  [`../waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md`](../waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md) §8b.
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
+**WIP: nothing.** `doing/` is empty. Everything is parked or waiting on the
+founder — `docs/backlog/` and `docs/waiting-acceptance/`.
+
 ## 2. LIVE HAZARD — check before dispatching anyone
 
-**A watcher IS running** as of 2026-08-06, started for the FEATURE-003 review
-rounds. Check before starting another — a second one double-dispatches:
+**No watcher is running.** Stopped deliberately at the end of 2026-08-07, and its
+lock removed so the next session is not met by a false dead-watcher warning.
+Start one before flipping the mic to Codex, or the dispatch goes nowhere:
 
 ```bash
-ps -eo pid,ppid,etime,args | grep signal-watch    # expect exactly one
+setsid bash scripts/start-codex-signal-watch.sh >> logs/state/watcher-boot.log 2>&1 < /dev/null &
+ps -eo pid,ppid,etime,args | grep signal-watch    # expect exactly ONE
 ```
 
-If none is running, start one before flipping the mic to Codex or the dispatch
-goes nowhere:
-`setsid bash scripts/start-codex-signal-watch.sh >> logs/state/watcher-boot.log 2>&1 < /dev/null &`
+**A stale watcher will double-dispatch, and the fix cannot see it.** On
+2026-08-05 an orphan at `ppid 1` for 3h42m fired alongside a freshly started one:
+two Codex agents, same task, same tree. Duplicate metered spend, and it poisoned
+the new agent's baseline with failures that were pure concurrency — which it then
+reported as "pre-existing".
 
-**A stale watcher will double-dispatch, and the fix cannot see it.**
+BUG-022's lock refuses a second watcher **only if the first one took a lock**. A
+watcher started before that fix holds nothing and is invisible to the check.
+FEATURE-004 (parked) is the real fix; until it exists this is manual.
 
-On 2026-08-05 a `codex-signal-watch.sh` orphaned at `ppid 1` for 3h42m fired
-alongside a freshly started one: two Codex agents, same task, same tree.
-Duplicate metered spend, and it poisoned the new agent's test baseline with
-failures that were pure concurrency — which it then reported as "pre-existing".
-
-BUG-022's lock refuses a second watcher **only if the first one took a lock**.
-Any watcher started before that fix holds nothing and is invisible to the check,
-on every checkout, until each is restarted once.
-
-```bash
-ps -eo pid,ppid,etime,args | grep signal-watch    # ppid 1 + long age = orphan
-```
-
-FEATURE-004 (parked) is the fix. Until it exists this is manual.
+`ps` **is** valid here — a dispatcher is an ordinary process. It is **not** valid
+for Monitors; see §3.
 
 ## 3. EPHEMERAL — died with the session, re-establish it
-
-**Start with `bash scripts/session-resume.sh`.** It derives the git state, the
-four lifecycle folders, the live baton and the journal events since the last
-snapshot marker — so it cannot go stale the way this file has. Exit **9** means
-the report is INCOMPLETE or the snapshot is UNTRUSTED, and the warnings say
-which. Do not read a short replay as a quiet one.
-
-Close the window and open a new one at handoff with `--mark`; if the tree is
-untrusted, `--rollback` stashes uncommitted work (never `checkout --`).
-
-> The snapshot id lives in this file, which is TRACKED — deliberately, and
-> against the grain of BUG-019. The check it enables is "was the prose written
-> without the journal being marked?", and that can only be answered against the
-> authored surface. The BUG-019 hazard does not transfer: a checkout that
-> rewrites the id produces a loud disagreement warning, not the silent
-> nothing-to-claim that bug was about.
 
 | What | How |
 |---|---|
 | Activity feed | `bash scripts/agent-activity.sh --daemon`, watch with `tail -f logs/agent-activity.log`. **It truncates the log on start** — restarting destroys any replay window. |
 | Mic monitor | persistent `Monitor` on `logs/state/signal.md`, emit **only** on `Holder`/`State` change |
 | Exchange board monitor | persistent `Monitor` on `../../agent-exchange/EXCHANGE.md`, 10s, emit only on change |
+
+**Do not check a Monitor's liveness with `ps` — it cannot see them (A-40).**
+Proven 2026-08-07: a grep for the monitor's own emit string returned nothing
+while two mic monitors were alive and emitting seconds later. An earlier sweep
+*did* show the exchange-board monitor, which is what made the check look sound.
+Believing it cost a live monitor being declared dead and a duplicate armed on top
+of it. A Monitor's silence is not evidence of anything — the only proof it lives
+is an event. FEATURE-005 (parked) replaces it with a one-shot kernel wait whose
+**exit is itself an event**, which is the property the polling loop lacks.
 
 ### Why the board monitor is declared here
 
@@ -106,3 +100,21 @@ synced, so it is the right home until that overlap is fixed.
 
 A project with **no** peer stream should not arm it: a monitor on a file nobody
 writes is pure overhead.
+
+## 4. OPEN FOR THE FOUNDER — the only things blocked on a person
+
+- **Accept or reject FEATURE-003 and BUG-023**, both in `waiting-acceptance/`.
+  Commands are in their rows. Nothing is promoted to `done/` without his word.
+- **Two calls on FEATURE-003**, in its plan §6: marker cadence (§6.2 — `--mark`
+  is deliberately not wired into `signal-set.sh`), and whether it ships to every
+  project via `MANAGED_FILES` (§6.4 — deliberately not, until it proves itself
+  here).
+- **A friction found by dogfooding `--mark`:** it writes the snapshot id into
+  THIS file, which is tracked, and the blueprint forbids committing on `main` —
+  so every handoff leaves an uncommitted change needing a PR to land. The id is
+  tracked to enable the prose-disagreement check. Having now paid the cost, the
+  check is probably not worth it and untracked state is the honest home.
+- **A fresh `git worktree` cannot push:** the DoD `§7G baton is well-formed`
+  stage fails because the baton is per-checkout untracked state (BUG-019) and a
+  new worktree has none. Seed it with `signal-set.sh` — sharp edge for exactly
+  the workflow CLAUDE.md recommends when a concurrent session holds `main`.

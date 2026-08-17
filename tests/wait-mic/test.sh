@@ -89,8 +89,14 @@ fi
 #    version accepted any failure, so a waiter that crashed on startup passed
 #    three cases while doing nothing at all. A guard that is satisfied by the
 #    thing being broken is the defect this repo keeps finding.
+#    THREE poll intervals, not five. The assertion is "it did not exit while the
+#    mic was unchanged", and three loop iterations prove that as well as five —
+#    the extra two were how long I guessed, which is the question TASK-008 asked
+#    of every sleep in the gate. Load cannot flake this: a stalled machine makes
+#    the waiter do FEWER iterations, and the only way to get a non-124 status is
+#    the waiter exiting, which is the defect itself.
 still_waiting(){   # still_waiting <case> <label>; uses $SIG, writes $WORK/out<case>
-  timeout 5 sh "$WAIT" "$SIG" >"$WORK/out$1" 2>&1
+  timeout 3 sh "$WAIT" "$SIG" >"$WORK/out$1" 2>&1
   _rc=$?
   if [ "$_rc" -eq 0 ]; then
     fail "#$1 the waiter EXITED — phantom handoff: [$(cat "$WORK/out$1")]"

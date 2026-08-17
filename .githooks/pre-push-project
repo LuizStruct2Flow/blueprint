@@ -222,6 +222,25 @@ else
   pipe_skip "branch-guard · TASK-003" "suite absent"
 fi
 
+# FEATURE-005 — the mic waiter must exit on a handoff and ONLY on a handoff. A
+# spurious exit is worse than the always-on Monitor it replaces: silence is
+# merely blind, but a phantom handoff makes the agent re-arm on an event that
+# never happened. Three of its four cases assert the negative. ~20s (they wait
+# out real timeouts, which is the only honest way to assert "did not fire").
+if [ -f tests/wait-mic/test.sh ]; then
+  _st_wait_mic(){
+    bash tests/wait-mic/test.sh || {
+      echo "❌ tests/wait-mic/test.sh failed (FEATURE-005)."
+      echo "   The waiter must fire on a real atomic publish and exit, and must"
+      echo "   NOT fire on a neighbouring file or a Task-only edit."
+      return 1
+    }
+  }
+  pipe_stage "wait-mic · FEATURE-005" _st_wait_mic
+else
+  pipe_skip "wait-mic · FEATURE-005" "suite absent"
+fi
+
 # FEATURE-003 — a woken session must be able to derive where it is, and an
 # INCOMPLETE replay must be LOUD. The guarded failure is SILENCE: the activity
 # feed is truncated on every daemon start, so a replay that cannot see its whole

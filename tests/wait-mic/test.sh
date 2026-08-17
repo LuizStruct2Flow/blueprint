@@ -43,6 +43,13 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 # real Codex on 2026-08-03).
 unset AGENT_SIGNAL_FILE AGENT_STATE_HOME AGENT_FEED_LOG
 
+# Run the waiter fast. The poll interval is latency, not correctness — nothing
+# asserted here depends on it — so a 5x tighter clock buys the same coverage in a
+# fifth of the gate time. The negatives below still span FIVE poll intervals,
+# which is more margin than the three they had at 1s.
+AGENT_WAIT_MIC_POLL=0.2
+export AGENT_WAIT_MIC_POLL
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -61,10 +68,10 @@ seed
 out="$WORK/out1"
 ( sh "$WAIT" "$SIG" >"$out" 2>&1 ) &
 waiter=$!
-sleep 1
+sleep 0.5
 bash "$SETTER" --file "$SIG" --holder Jesko --state OVER_TO_CODEX --task 'go' >/dev/null 2>&1
 wait_rc=0
-( sleep 8; kill "$waiter" 2>/dev/null ) &
+( sleep 6; kill "$waiter" 2>/dev/null ) &
 killer=$!
 wait "$waiter" 2>/dev/null || wait_rc=$?
 kill "$killer" 2>/dev/null
@@ -89,14 +96,13 @@ fi
 #    version accepted any failure, so a waiter that crashed on startup passed
 #    three cases while doing nothing at all. A guard that is satisfied by the
 #    thing being broken is the defect this repo keeps finding.
-#    THREE poll intervals, not five. The assertion is "it did not exit while the
-#    mic was unchanged", and three loop iterations prove that as well as five —
-#    the extra two were how long I guessed, which is the question TASK-008 asked
-#    of every sleep in the gate. Load cannot flake this: a stalled machine makes
-#    the waiter do FEWER iterations, and the only way to get a non-124 status is
-#    the waiter exiting, which is the defect itself.
+#    ONE SECOND against the suite's 0.2s clock — five poll intervals, and the
+#    perturbation lands at 0.4s so the waiter gets three more polls after it.
+#    Load cannot flake this: a stalled machine makes the waiter do FEWER
+#    iterations, and the only way to get a non-124 status is the waiter exiting,
+#    which is the defect itself rather than a timing artefact.
 still_waiting(){   # still_waiting <case> <label>; uses $SIG, writes $WORK/out<case>
-  timeout 3 sh "$WAIT" "$SIG" >"$WORK/out$1" 2>&1
+  timeout 1 sh "$WAIT" "$SIG" >"$WORK/out$1" 2>&1
   _rc=$?
   if [ "$_rc" -eq 0 ]; then
     fail "#$1 the waiter EXITED — phantom handoff: [$(cat "$WORK/out$1")]"
@@ -116,7 +122,7 @@ still_waiting 2 "an unchanged baton keeps the waiter waiting (no phantom handoff
 #    directory rather than the baton's CONTENT would fire on its own bookkeeping.
 # ===========================================================================
 seed
-( sleep 1; printf '[x] noise\n' >>"$WORK/signal-history.log" ) &
+( sleep 0.4; printf '[x] noise\n' >>"$WORK/signal-history.log" ) &
 noise=$!
 still_waiting 3 "a neighbouring file changing is not a handoff"
 wait "$noise" 2>/dev/null
@@ -126,7 +132,7 @@ wait "$noise" 2>/dev/null
 #    Task is payload. Waking on payload would re-arm the agent for nothing.
 # ===========================================================================
 seed
-( sleep 1; bash "$SETTER" --file "$SIG" --holder OLD --state IDLE --task 'different text' >/dev/null 2>&1 ) &
+( sleep 0.4; bash "$SETTER" --file "$SIG" --holder OLD --state IDLE --task 'different text' >/dev/null 2>&1 ) &
 edit=$!
 still_waiting 4 "only Holder/State move the mic — a Task edit does not"
 wait "$edit" 2>/dev/null
@@ -138,7 +144,7 @@ wait "$edit" 2>/dev/null
 #    while a false handoff makes the agent act on one that never happened.
 # ===========================================================================
 seed
-( sleep 1; rm -f "$SIG" ) &
+( sleep 0.4; rm -f "$SIG" ) &
 del=$!
 still_waiting 5 "a deleted baton is 'cannot see the mic', not 'the mic moved'"
 wait "$del" 2>/dev/null
@@ -154,7 +160,7 @@ wait "$del" 2>/dev/null
 #    defect in a file whose whole job is reading that table.
 # ===========================================================================
 seed
-( sleep 1; printf '| Field | Value |\n|---|---|\n|   Holder   |   OLD   |\n|  State  |  IDLE  |\n| Task | seed |\n| Last update | 1970-01-01 |\n' >"$SIG" ) &
+( sleep 0.4; printf '| Field | Value |\n|---|---|\n|   Holder   |   OLD   |\n|  State  |  IDLE  |\n| Task | seed |\n| Last update | 1970-01-01 |\n' >"$SIG" ) &
 pad=$!
 still_waiting 6 "column padding is not a mic change (values, not rendered rows)"
 wait "$pad" 2>/dev/null
@@ -174,7 +180,7 @@ wait "$pad" 2>/dev/null
 # ===========================================================================
 malformed(){       # malformed <case> <label> <body>
   seed
-  ( sleep 1; printf '%s' "$3" >"$SIG" ) &
+  ( sleep 0.4; printf '%s' "$3" >"$SIG" ) &
   _m=$!
   still_waiting "$1" "$2"
   wait "$_m" 2>/dev/null
@@ -209,9 +215,9 @@ rm -f "$SIG"
 out7="$WORK/out7"
 ( sh "$WAIT" "$SIG" >"$out7" 2>&1 ) &
 w7=$!
-sleep 1
+sleep 0.5
 seed
-( sleep 8; kill "$w7" 2>/dev/null ) &
+( sleep 6; kill "$w7" 2>/dev/null ) &
 k7=$!
 rc7=0
 wait "$w7" 2>/dev/null || rc7=$?

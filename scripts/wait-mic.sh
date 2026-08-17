@@ -92,13 +92,23 @@ mic() {
 #
 # The converse IS a real event and fires: an empty `prev` becoming a real value
 # is a fresh checkout seeding its baton, and that is the mic moving.
+# Poll cadence. 1s is latency, not correctness — nothing here depends on the
+# interval, only on comparing two readings — so the suite runs it fast rather
+# than spending 24s of gate on sleeps that assert nothing by being long.
+#
+# Precedent: `AGENT_SIGNAL_SETTLE` in the dispatcher. The difference worth noting
+# is that settle is a real timing parameter and was deliberately kept at integer
+# seconds so tests could not change production timing for convenience; this one
+# changes nothing but how often a comparison happens.
+POLL="${AGENT_WAIT_MIC_POLL:-1}"
+
 prev="$(mic)"
 while :; do
   cur="$(mic)"
   if [ -n "$cur" ] && [ "$cur" != "$prev" ]; then
     break
   fi
-  sleep 1
+  sleep "$POLL"
 done
 
 printf 'MIC: %s\n' "$cur"

@@ -108,6 +108,32 @@ else
 fi
 
 
+# ===========================================================================
+# 5. AN EMPTY TABLE MUST NOT SAY WHERE THE ITEMS WENT.
+#
+#    "*(Empty — BUG-023 landed in #32 and is in ../waiting-acceptance/)*" is a
+#    forwarding note, and a forwarding note is the duplicate record TASK-005
+#    removed, one size smaller. It goes stale the moment the item moves again —
+#    both `doing/` notes were pointing at `waiting-acceptance/` while the items
+#    sat in `done/`, and one of them was three lines above the sentence "Do not
+#    narrate status here".
+#
+#    Where an item is, is answered by which folder holds its row. Say `*(Empty.)*`
+#    and stop. Found by the founder reading the files, which is the check this
+#    replaces.
+# ===========================================================================
+forwarding=""
+for f in $(find "$DOCS" -name 'BUGS.md' -o -name 'BACKLOG.md' -o -name 'CHANGES.md' | sort); do
+  if grep -E '^\*\(Empty' "$f" | grep -qE '(BUG|FEATURE|TASK|SPIKE|SLICE)-[0-9]+'; then
+    forwarding="$forwarding ${f#"$ROOT/"}"
+  fi
+done
+if [ -n "$forwarding" ]; then
+  fail "#5 an empty table names where its items went — a forwarding note that drifts:$forwarding"
+else
+  pass "#5 no empty table forwards to where its items went"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: the lifecycle documents agree with the folders."
   exit 0

@@ -41,7 +41,7 @@ Two things it does NOT do, so you do not go looking:
 - **It does not read the activity feed.** A probe into that feed existed,
   survived six review rounds, and was deleted — it guarded a file the tool never
   reads and fired on every wake. Do not re-add one; the post-mortem is in
-  [`../waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md`](../waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md) §8b.
+  [`../done/PLAN-FEATURE-003-session-snapshot.md`](../done/PLAN-FEATURE-003-session-snapshot.md) §8b.
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 

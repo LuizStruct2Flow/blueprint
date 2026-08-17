@@ -84,14 +84,25 @@ fi
 #    exit is read as a handoff, and re-arming on a phantom is how a watcher
 #    starts lying instead of merely going quiet.
 # ===========================================================================
+#    EVERY negative case below asserts exit 124 — the timeout killing a waiter
+#    that was still waiting — and NOT merely "non-zero". Jesko's S2: the first
+#    version accepted any failure, so a waiter that crashed on startup passed
+#    three cases while doing nothing at all. A guard that is satisfied by the
+#    thing being broken is the defect this repo keeps finding.
+still_waiting(){   # still_waiting <case> <label>; uses $SIG, writes $WORK/out<case>
+  timeout 5 sh "$WAIT" "$SIG" >"$WORK/out$1" 2>&1
+  _rc=$?
+  if [ "$_rc" -eq 0 ]; then
+    fail "#$1 the waiter EXITED — phantom handoff: [$(cat "$WORK/out$1")]"
+  elif [ "$_rc" -ne 124 ]; then
+    fail "#$1 the waiter died (rc=$_rc) instead of waiting: [$(cat "$WORK/out$1")]"
+  else
+    pass "#$1 $2"
+  fi
+}
+
 seed
-if timeout 5 sh "$WAIT" "$SIG" >"$WORK/out2" 2>&1; then
-  fail "#2 the waiter exited with no change at all: [$(cat "$WORK/out2")]"
-elif [ "$?" -ne 124 ]; then
-  fail "#2 the waiter exited for some reason other than the timeout"
-else
-  pass "#2 an unchanged baton keeps the waiter waiting (no phantom handoff)"
-fi
+still_waiting 2 "an unchanged baton keeps the waiter waiting (no phantom handoff)"
 
 # ===========================================================================
 # 3. AN UNRELATED WRITE IN THE SAME DIRECTORY IS NOT A HANDOFF. The journal sits
@@ -101,11 +112,7 @@ fi
 seed
 ( sleep 1; printf '[x] noise\n' >>"$WORK/signal-history.log" ) &
 noise=$!
-if timeout 5 sh "$WAIT" "$SIG" >"$WORK/out3" 2>&1; then
-  fail "#3 a write to a neighbouring file was reported as a mic change: [$(cat "$WORK/out3")]"
-else
-  pass "#3 a neighbouring file changing is not a handoff"
-fi
+still_waiting 3 "a neighbouring file changing is not a handoff"
 wait "$noise" 2>/dev/null
 
 # ===========================================================================
@@ -115,12 +122,60 @@ wait "$noise" 2>/dev/null
 seed
 ( sleep 1; bash "$SETTER" --file "$SIG" --holder OLD --state IDLE --task 'different text' >/dev/null 2>&1 ) &
 edit=$!
-if timeout 6 sh "$WAIT" "$SIG" >"$WORK/out4" 2>&1; then
-  fail "#4 a Task-only change was reported as a mic change: [$(cat "$WORK/out4")]"
-else
-  pass "#4 only Holder/State move the mic — a Task edit does not"
-fi
+still_waiting 4 "only Holder/State move the mic — a Task edit does not"
 wait "$edit" 2>/dev/null
+
+# ===========================================================================
+# 5. A DELETED BATON IS NOT A HANDOFF. Found by Jesko (S1): the waiter exited 0
+#    and printed an empty `MIC:`. That is the worst available outcome — worse
+#    than the blindness being replaced, because silence is merely uninformed
+#    while a false handoff makes the agent act on one that never happened.
+# ===========================================================================
+seed
+( sleep 1; rm -f "$SIG" ) &
+del=$!
+still_waiting 5 "a deleted baton is 'cannot see the mic', not 'the mic moved'"
+wait "$del" 2>/dev/null
+
+# ===========================================================================
+# 6. REFORMATTING IS NOT A HANDOFF. Found by Jesko (S1): the waiter compared
+#    rendered rows, so re-aligning the table fired it while Holder and State were
+#    byte-identical.
+#
+#    This is BUG-010 exactly — a roster parser matching literal single spaces
+#    broke on a padded table, and the miss was indistinguishable from "no
+#    roster". The lesson was to compare VALUES, and I reintroduced the same
+#    defect in a file whose whole job is reading that table.
+# ===========================================================================
+seed
+( sleep 1; printf '| Field | Value |\n|---|---|\n|   Holder   |   OLD   |\n|  State  |  IDLE  |\n| Task | seed |\n| Last update | 1970-01-01 |\n' >"$SIG" ) &
+pad=$!
+still_waiting 6 "column padding is not a mic change (values, not rendered rows)"
+wait "$pad" 2>/dev/null
+
+# ===========================================================================
+# 7. NON-VACUITY — the negatives above all pass against a waiter that never
+#    exits at all. Seeding a baton that did not exist IS the mic moving, and it
+#    must still fire.
+# ===========================================================================
+rm -f "$SIG"
+out7="$WORK/out7"
+( sh "$WAIT" "$SIG" >"$out7" 2>&1 ) &
+w7=$!
+sleep 1
+seed
+( sleep 8; kill "$w7" 2>/dev/null ) &
+k7=$!
+rc7=0
+wait "$w7" 2>/dev/null || rc7=$?
+kill "$k7" 2>/dev/null
+if [ "$rc7" -ne 0 ]; then
+  fail "#7 seeding an absent baton did not fire (rc=$rc7) — the negatives above prove nothing"
+elif ! grep -q 'OLD' "$out7"; then
+  fail "#7 fired but did not report the seeded value: [$(cat "$out7")]"
+else
+  pass "#7 seeding an absent baton DOES fire (so #2-#6 are not vacuous)"
+fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then

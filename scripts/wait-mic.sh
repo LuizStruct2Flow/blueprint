@@ -43,16 +43,48 @@ if [ -z "$SIGNAL" ]; then
   exit 2
 fi
 
-# Holder and State ONLY. `Task` is payload and changes on flips that do not move
-# the mic, so waking on it re-arms the agent for nothing (tests/wait-mic #4).
-# A missing or unreadable file yields the empty string and is simply "no change
-# yet" — this is a watcher, not a validator, and refusing to start because the
-# baton has not been seeded would make a fresh checkout unwatchable.
-mic() { grep -E '^\| (Holder|State) ' "$SIGNAL" 2>/dev/null | tr '\n' ' '; }
+# Holder and State ONLY, and their VALUES — not the rendered rows.
+#
+# The first version compared `grep` output, so any reformatting of those lines
+# read as a mic move: re-align the table, pad a column, and the agent re-arms on
+# a handoff that never happened. Jesko reproduced it (S1). That is the BUG-010
+# lesson exactly — a parser that matched literal single spaces failed on a
+# padded table, and a miss was indistinguishable from "no roster".
+#
+# `Task` is excluded on purpose: it is payload, it changes on flips that do not
+# move the mic, and waking on it re-arms for nothing.
+#
+# A value containing an escaped `\|` truncates at the pipe. Harmless here and not
+# worth machinery: the truncation is STABLE across reads, so it cannot produce a
+# spurious change — which is the only property this comparison owes.
+mic() {
+  awk -F'|' '
+    /^\| *Holder *\|/ { h = $3 }
+    /^\| *State *\|/  { s = $3 }
+    END {
+      gsub(/^[ \t]+|[ \t]+$/, "", h)
+      gsub(/^[ \t]+|[ \t]+$/, "", s)
+      if (h != "" || s != "") printf "Holder=%s State=%s", h, s
+    }
+  ' "$SIGNAL" 2>/dev/null
+}
 
+# An EMPTY read is "cannot see the mic", never "the mic moved".
+#
+# Deleting the baton used to exit 0 and print an empty MIC — a phantom handoff,
+# which is worse than the blindness this replaces: silence is merely uninformed,
+# but a false handoff makes the agent act. A baton that is absent, unreadable or
+# malformed is simply not a handoff, so keep waiting.
+#
+# The converse IS a real event and fires: an empty `prev` becoming a real value
+# is a fresh checkout seeding its baton, and that is the mic moving.
 prev="$(mic)"
-while [ "$(mic)" = "$prev" ]; do
+while :; do
+  cur="$(mic)"
+  if [ -n "$cur" ] && [ "$cur" != "$prev" ]; then
+    break
+  fi
   sleep 1
 done
 
-printf 'MIC: %s\n' "$(mic)"
+printf 'MIC: %s\n' "$cur"

@@ -45,8 +45,10 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**WIP: nothing.** `doing/` is empty. Everything is parked or waiting on the
-founder — `docs/backlog/` and `docs/waiting-acceptance/`.
+**WIP: FEATURE-005**, the mic waiter — built, reviewed, PR pending only because
+GitHub's API was returning 503. Row and reasoning in
+[`BACKLOG.md`](BACKLOG.md). Everything else is parked or waiting on the founder
+— `docs/backlog/` and `docs/waiting-acceptance/`.
 
 ## 2. LIVE HAZARD — check before dispatching anyone
 

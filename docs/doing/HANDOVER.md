@@ -41,7 +41,7 @@ Two things it does NOT do, so you do not go looking:
 - **It does not read the activity feed.** A probe into that feed existed,
   survived six review rounds, and was deleted — it guarded a file the tool never
   reads and fired on every wake. Do not re-add one; the post-mortem is in
-  [`../waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md`](../waiting-acceptance/PLAN-FEATURE-003-session-snapshot.md) §8b.
+  [`../done/PLAN-FEATURE-003-session-snapshot.md`](../done/PLAN-FEATURE-003-session-snapshot.md) §8b.
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
@@ -103,8 +103,6 @@ writes is pure overhead.
 
 ## 4. OPEN FOR THE FOUNDER — the only things blocked on a person
 
-- **Accept or reject FEATURE-003 and BUG-023**, both in `waiting-acceptance/`.
-  Commands are in their rows. Nothing is promoted to `done/` without his word.
 - **Two calls on FEATURE-003**, in its plan §6: marker cadence (§6.2 — `--mark`
   is deliberately not wired into `signal-set.sh`), and whether it ships to every
   project via `MANAGED_FILES` (§6.4 — deliberately not, until it proves itself

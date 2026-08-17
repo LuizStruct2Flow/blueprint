@@ -7,10 +7,9 @@ carries the reproduction / trigger that re-opens it. See
 | # | Bug | Last seen | Re-open trigger |
 |---|---|---|---|
 
-*(Empty — BUG-021 and BUG-022 were promoted to `doing/` on 2026-08-05, when the
-founder approved back-propagating both from the redcare blueprint.)*
+*(Empty.)*
 
-The detail travelled with them. It lives in
-[`../doing/BUGS.md`](../doing/BUGS.md) and in the commits that promoted them —
-not here, because a row left behind after a promotion is the duplicate record
-TASK-005 removed once already.
+**A promoted row leaves nothing behind.** The whole row moves; no stub, no
+forwarding note. A row left behind after a promotion is the duplicate record
+TASK-005 removed once already, and a forwarding note is the same thing one size
+smaller — it goes stale the moment the item moves again.

@@ -11,5 +11,4 @@ a missing file.
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
 
-*(Empty — FEATURE-003 landed on 2026-08-06 in #32 and is in
-[`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md).)*
+*(Empty.)*

@@ -9,8 +9,7 @@ have, not that it is missing.
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
 
-*(Empty — FEATURE-003 was accepted by the founder on 2026-08-17 and moved to
-[`../done/BACKLOG.md`](../done/BACKLOG.md).)*
+*(Empty.)*
 
 **Each row's "what to test" travels WITH it** — into `done/` on acceptance, back
 into `doing/` on a rejection. It is not dropped at the boundary: a rejected item

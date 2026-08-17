@@ -103,8 +103,6 @@ writes is pure overhead.
 
 ## 4. OPEN FOR THE FOUNDER — the only things blocked on a person
 
-- **Accept or reject FEATURE-003 and BUG-023**, both in `waiting-acceptance/`.
-  Commands are in their rows. Nothing is promoted to `done/` without his word.
 - **Two calls on FEATURE-003**, in its plan §6: marker cadence (§6.2 — `--mark`
   is deliberately not wired into `signal-set.sh`), and whether it ships to every
   project via `MANAGED_FILES` (§6.4 — deliberately not, until it proves itself

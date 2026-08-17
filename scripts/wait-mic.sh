@@ -54,11 +54,21 @@ fi
 # `Task` is excluded on purpose: it is payload, it changes on flips that do not
 # move the mic, and waking on it re-arms for nothing.
 #
-# A value containing an escaped `\|` truncates at the pipe. Harmless here and not
-# worth machinery: the truncation is STABLE across reads, so it cannot produce a
-# spurious change — which is the only property this comparison owes.
 # A READING IS ALL-OR-NOTHING: exactly one Holder row and one State row, both
-# with a non-empty value, or nothing at all.
+# non-empty, neither carrying extra columns; or nothing at all. Andreas added the
+# column check and he was right — a pipe inside a mic value splits the row, and
+# accepting the fragments would compare only the prefix, so two DIFFERENT values
+# could read as identical and a real handoff would be missed.
+#
+# READABILITY, NOT VALIDITY — and that distinction is a review finding against
+# the version this replaces. It also whitelisted `State` against the protocol's
+# IDLE / ACTIVE / OVER_TO_*, which matches `AGENT_SIGNAL.md` exactly but makes
+# this the wrong place to enforce it: `signal-set.sh` will publish ANY state, so
+# a baton reading `State | DONE` is reachable, well-formed, and would leave this
+# waiter silently waiting through a real handoff. Failing closed here means
+# blindness, which is the one outcome this feature exists to remove. The check
+# belongs on the WRITER, where it fails loudly at the point of the mistake —
+# raised as its own item rather than smuggled in here.
 #
 # The first fix handled an absent FILE and stopped there. Jesko found the same
 # defect one level in (R2): a baton that is present but not readable AS A MIC —
@@ -73,12 +83,12 @@ fi
 # perpetually changing.
 mic() {
   awk -F'|' '
-    /^\| *Holder *\|/ { h = $3; nh++ }
-    /^\| *State *\|/  { s = $3; ns++ }
+    /^\| *Holder *\|/ { if (NF != 4) bad = 1; h = $3; nh++ }
+    /^\| *State *\|/  { if (NF != 4) bad = 1; s = $3; ns++ }
     END {
       gsub(/^[ \t\r]+|[ \t\r]+$/, "", h)
       gsub(/^[ \t\r]+|[ \t\r]+$/, "", s)
-      if (nh == 1 && ns == 1 && h != "" && s != "") printf "Holder=%s State=%s", h, s
+      if (!bad && nh == 1 && ns == 1 && h != "" && s != "") printf "Holder=%s State=%s", h, s
     }
   ' "$SIGNAL" 2>/dev/null
 }

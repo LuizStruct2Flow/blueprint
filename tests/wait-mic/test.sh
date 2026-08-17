@@ -207,6 +207,52 @@ malformed 10 "a whitespace-only Holder is unreadable, not a handoff" \
 '
 
 # ===========================================================================
+# 11. AN EXTRA COLUMN MAKES A ROW UNREADABLE. Andreas's finding, and it is a
+#     MISSED handoff rather than a phantom: a pipe inside a mic value splits the
+#     row, and comparing the fragments compares only the prefix — so two
+#     different values can read as identical and a real change goes unnoticed.
+# ===========================================================================
+malformed 11 "an extra column makes the row unreadable, not a handoff" \
+  '| Field | Value |
+|---|---|
+| Holder | NEW | EXTRA |
+| State | IDLE |
+'
+
+# ===========================================================================
+# 12. AN UNRECOGNISED STATE IS STILL A MIC MOVE, AND MUST FIRE.
+#
+#     This inverts what the implementer wrote, and the disagreement is the
+#     useful part. He whitelisted `State` against the protocol's IDLE / ACTIVE /
+#     OVER_TO_*, which matches AGENT_SIGNAL.md exactly — but `signal-set.sh`
+#     validates no such thing, so `State | DONE` is reachable and well-formed.
+#     Swallowing it would leave the waiter waiting through a real handoff.
+#
+#     READABILITY is this file's business; VALIDITY belongs to the writer, where
+#     it fails loudly at the point of the mistake instead of turning into silence
+#     three layers away. Failing closed here buys exactly the blindness the
+#     feature exists to remove.
+# ===========================================================================
+seed
+out12="$WORK/out12"
+( sh "$WAIT" "$SIG" >"$out12" 2>&1 ) &
+w12=$!
+sleep 0.5
+printf '| Field | Value |\n|---|---|\n| Holder | OLD |\n| State | BROKEN |\n' >"$SIG"
+( sleep 6; kill "$w12" 2>/dev/null ) &
+k12=$!
+rc12=0
+wait "$w12" 2>/dev/null || rc12=$?
+kill "$k12" 2>/dev/null
+if [ "$rc12" -ne 0 ]; then
+  fail "#12 an unrecognised State did not fire (rc=$rc12) — the waiter would sleep through it"
+elif ! grep -q 'BROKEN' "$out12"; then
+  fail "#12 fired but did not report the unrecognised State: [$(cat "$out12")]"
+else
+  pass "#12 an unrecognised State fires and is reported, not swallowed"
+fi
+
+# ===========================================================================
 # 7. NON-VACUITY — the negatives above all pass against a waiter that never
 #    exits at all. Seeding a baton that did not exist IS the mic moving, and it
 #    must still fire.

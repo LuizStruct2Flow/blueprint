@@ -34,8 +34,7 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
 
-*(Empty — BUG-023 landed on 2026-08-06 in #32 and is in
-[`../waiting-acceptance/BUGS.md`](../waiting-acceptance/BUGS.md).)*
+*(Empty.)*
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

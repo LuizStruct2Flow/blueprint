@@ -160,6 +160,47 @@ still_waiting 6 "column padding is not a mic change (values, not rendered rows)"
 wait "$pad" 2>/dev/null
 
 # ===========================================================================
+# 8-10. A BATON THAT IS PRESENT BUT NOT READABLE AS A MIC.
+#
+#    Found by Jesko (R2), and it is the deletion bug one level in: the first fix
+#    handled an absent FILE and stopped there, so a baton with a missing Holder
+#    row, two of them, or a whitespace-only value still produced a PARTIAL
+#    reading — `Holder= State=IDLE` — which compares unequal to a real one and
+#    fires.
+#
+#    These are written directly rather than through signal-set.sh, because that
+#    script refuses to publish a malformed baton. They arrive by hand-editing,
+#    which AGENT_SIGNAL.md forbids and people do anyway.
+# ===========================================================================
+malformed(){       # malformed <case> <label> <body>
+  seed
+  ( sleep 1; printf '%s' "$3" >"$SIG" ) &
+  _m=$!
+  still_waiting "$1" "$2"
+  wait "$_m" 2>/dev/null
+}
+
+malformed 8 "a baton with no Holder row is unreadable, not a handoff" \
+  '| Field | Value |
+|---|---|
+| State | IDLE |
+| Task | seed |
+'
+malformed 9 "two Holder rows are unreadable, not a handoff" \
+  '| Field | Value |
+|---|---|
+| Holder | OLD |
+| Holder | SOMEONE-ELSE |
+| State | IDLE |
+'
+malformed 10 "a whitespace-only Holder is unreadable, not a handoff" \
+  '| Field | Value |
+|---|---|
+| Holder |    |
+| State | IDLE |
+'
+
+# ===========================================================================
 # 7. NON-VACUITY — the negatives above all pass against a waiter that never
 #    exits at all. Seeding a baton that did not exist IS the mic moving, and it
 #    must still fire.

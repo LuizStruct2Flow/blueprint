@@ -57,14 +57,28 @@ fi
 # A value containing an escaped `\|` truncates at the pipe. Harmless here and not
 # worth machinery: the truncation is STABLE across reads, so it cannot produce a
 # spurious change — which is the only property this comparison owes.
+# A READING IS ALL-OR-NOTHING: exactly one Holder row and one State row, both
+# with a non-empty value, or nothing at all.
+#
+# The first fix handled an absent FILE and stopped there. Jesko found the same
+# defect one level in (R2): a baton that is present but not readable AS A MIC —
+# a missing Holder row, two of them, a value that is only whitespace — produced a
+# partial reading like `Holder= State=IDLE`, which compares unequal to a real one
+# and fires. Same phantom handoff, arriving through the parser rather than
+# through the file.
+#
+# So the rule is applied consistently instead of case by case: anything this
+# cannot read as a complete mic is "cannot see the mic", and the waiter keeps
+# waiting. `\r` is trimmed too, so a CRLF baton is read rather than seen as
+# perpetually changing.
 mic() {
   awk -F'|' '
-    /^\| *Holder *\|/ { h = $3 }
-    /^\| *State *\|/  { s = $3 }
+    /^\| *Holder *\|/ { h = $3; nh++ }
+    /^\| *State *\|/  { s = $3; ns++ }
     END {
-      gsub(/^[ \t]+|[ \t]+$/, "", h)
-      gsub(/^[ \t]+|[ \t]+$/, "", s)
-      if (h != "" || s != "") printf "Holder=%s State=%s", h, s
+      gsub(/^[ \t\r]+|[ \t\r]+$/, "", h)
+      gsub(/^[ \t\r]+|[ \t\r]+$/, "", s)
+      if (nh == 1 && ns == 1 && h != "" && s != "") printf "Holder=%s State=%s", h, s
     }
   ' "$SIGNAL" 2>/dev/null
 }

@@ -39,6 +39,7 @@
 #   bp_roster_rows            <repo-root|file>            # role<TAB>name<TAB>backing
 #   bp_roster_name_for_role   <repo-root|file> <role>
 #   bp_roster_backing_for_name <repo-root|file> <name>
+#   bp_roster_name_in_text    <repo-root|file> <free text>   # BUG-027
 
 # --- warning memo -----------------------------------------------------------
 # Deliberately a space-delimited string rather than an associative array: this
@@ -114,6 +115,45 @@ EOF
   bp_roster_warn "role:${want// /_}" \
     "no '$want' row in $(bp_roster_file "$src" 2>/dev/null || echo '<no roster>') — identity unresolved"
   return 1
+}
+
+# --- free text -> the persona it names ---------------------------------------
+# BUG-027. A Claude subagent's identity is NOT in its metadata: the agent TYPE
+# recorded there is the same string for every persona a fleet runs, so labelling
+# from it gives every dispatch one name. What DOES carry the persona is the
+# human-written dispatch description, and both readers of that string — the feed,
+# from a transcript's sibling meta file, and the hook, from its payload — must
+# agree on how to read it. Hence one function here rather than a regex in each:
+# two copies of this rule would be two rules (BUG-010, BUG-021).
+#
+# EARLIEST MENTION WINS, not first roster row. A description routinely names
+# more than one persona — "<X> implements <Y>'s prescription" is the ordinary
+# shape — and the subject comes first; resolving by table order would label the
+# run with whoever happens to sit higher in the table. Wrong, and STABLY wrong,
+# which is worse than a visible miss.
+#
+# Matching is on WHOLE WORDS via tokenisation, never substring. Rosters commonly
+# carry a short name that is a prefix of a longer one, and `index()` resolves the
+# longer to the shorter every time. Tokenising also sidesteps escaping a name
+# into a regex — names are free text and may contain anything.
+#
+# Case-insensitive; returns nothing (rc 1) when no persona is named, which is an
+# ordinary outcome and so deliberately does NOT warn.
+bp_roster_name_in_text(){
+  local src="${1:-.}" text="${2:-}" hit
+  [ -n "$text" ] || return 1
+  hit="$(bp_roster_rows "$src" 2>/dev/null | awk -F'\t' -v text="$text" '
+    BEGIN{ nw = split(tolower(text), w, /[^[:alnum:]]+/); best = 0 }
+    {
+      name = tolower($2)
+      if (name == "") next
+      for (i = 1; i <= nw; i++)
+        if (w[i] == name && (best == 0 || i < best)) { best = i; found = $2; break }
+    }
+    END{ if (best > 0) print found }
+  ')"
+  [ -n "$hit" ] || return 1
+  printf '%s' "$hit"
 }
 
 # --- name -> backing agent --------------------------------------------------

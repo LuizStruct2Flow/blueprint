@@ -40,6 +40,22 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/feed.sh
 . "$repo_root/scripts/lib/feed.sh"
 
+# BUG-027 — the persona is resolved through the ONE roster parser, shared with
+# scripts/agent-activity.sh. Sourced only if readable: a hook must never fail the
+# tool call it observes, so a tree without the lib loses the persona name and
+# keeps the line.
+# NOT SOURCED HERE. Sourcing runs the lib in THIS shell, so an `exit` anywhere in
+# it — today, or after some future edit — takes the hook down with it, and a hook
+# that dies fails the tool call it was only supposed to observe. Elias caught
+# that: absent, unreadable and non-zero-return all degraded safely, and a bare
+# `exit` did not.
+#
+# The lookup is done in a SUBSHELL at the point of use instead (see below), so
+# the lib cannot reach this process at all. Costs one fork per dispatch bookend,
+# twice per subagent, which is nothing against the risk of breaking dispatch to
+# improve logging.
+ROSTER_LIB="$repo_root/scripts/lib/roster.sh"
+
 : "${AGENT_FEED_MAX_LINES:=4000}"
 : "${AGENT_FEED_KEEP_LINES:=2000}"
 export AGENT_FEED_MAX_LINES AGENT_FEED_KEEP_LINES
@@ -57,10 +73,25 @@ event="$(extract '.hook_event_name')"; [ -n "$event" ] || event="Subagent"
 summary="$(extract '.agent_description // .description // .prompt // .last_message // .reason')"
 summary="$(printf '%s' "$summary" | tr -d '\n' | cut -c1-110)"
 
-# Label by the roster persona when the payload names the agent (so the feed
-# shows "[matthias - Claude Code]", matching AGENT_ROSTER.md), else env, else
-# generic. This is what makes .claude/agents/<persona>.md real in the feed.
+# Label by the roster persona named in the DISPATCH TEXT, else the agent type,
+# else env, else generic.
+#
+# BUG-027: this used to read `.subagent_type`, with a comment claiming it was
+# the roster persona. It is the agent TYPE — `general-purpose` for every persona
+# on this fleet — so every bookend line and every .subagent-map row carried the
+# same string, and the map is what the live feed labels streamed subagent output
+# from. The persona is in the description; bp_roster_name_in_text is the same
+# lookup agent-activity.sh uses on the transcript's meta file, so the bookends
+# and the streamed lines cannot disagree.
 plabel="$(extract '.subagent_type // .agent_type // .agent_name')"
+if [ -r "$ROSTER_LIB" ]; then
+  # The subshell is the guard, not a style choice — see ROSTER_LIB above.
+  persona="$(
+    . "$ROSTER_LIB" 2>/dev/null || exit 0
+    bp_roster_name_in_text "$repo_root" "$summary" 2>/dev/null || exit 0
+  )"
+  [ -n "${persona:-}" ] && plabel="$persona"
+fi
 label="${plabel:-${AGENT_FEED_LABEL:-subagent}}"
 ts="$(date +%H:%M:%S)"
 
@@ -68,7 +99,10 @@ ts="$(date +%H:%M:%S)"
 # subagent_feed) can label the STREAMED internal lines from
 # <session>/subagents/agent-<agent_id>.jsonl with the persona name, not just
 # bracket them with the dispatch/finish markers below. agent_id matches the
-# transcript filename; agent_type is the roster persona. Best-effort, never fatal.
+# transcript filename. The value written is the persona resolved above, NOT the
+# agent type this comment used to claim it was (BUG-027). It is the fallback
+# path now: the feed reads the transcript's own meta file first, so the map only
+# matters for a transcript that has none. Best-effort, never fatal.
 aid="$(extract '.agent_id')"
 if [ -n "$aid" ] && [ -n "$plabel" ]; then
   printf '%s %s\n' "$aid" "$plabel" >> "$repo_root/logs/.subagent-map" 2>/dev/null || true

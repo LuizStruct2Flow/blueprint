@@ -50,7 +50,11 @@ fails a test instead of passing unnoticed.
     not have been there. The claim is enforced — `tests/manifest` #2b asserts
     the `.gitattributes` export boundary in BOTH directions, so a
     `blueprint`-tier suite that ships fails the push, and so does a shipping
-    suite that has been export-ignore'd behind everyone's back.
+    suite that has been export-ignore'd behind everyone's back. It asserts
+    **runner by runner, against HEAD**: a directory is not a suite — one that
+    arrives without its runners is skipped in silence by the derived gate's own
+    `if [ -f … ]` guard — and HEAD is the tree actually being pushed, so a
+    boundary that exists only in the author's working tree cannot turn it green.
 - **Risk** — what breaks if this suite is absent and the thing it guards
   regresses. One line. This is the field that decides the tier.
 - **Rationale** — why that tier. A CI-only rationale must argue from *risk*

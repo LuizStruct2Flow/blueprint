@@ -751,9 +751,9 @@ fi
 # green throughout because those suites pass at home.
 #
 # Deliberately LAST of the bootstrap group and the slowest stage in the gate: it
-# bootstraps a project from the working tree and runs that project's ENTIRE
-# pre-push gate. That is the cost of the only assertion that speaks for the
-# people downstream.
+# bootstraps a project from HEAD — the tree about to be pushed — and runs that
+# project's ENTIRE pre-push gate. That is the cost of the only assertion that
+# speaks for the people downstream.
 if [ -f tests/bootstrap-gate/test.sh ]; then
   _st_bootstrap_gate(){
     bash tests/bootstrap-gate/test.sh || {

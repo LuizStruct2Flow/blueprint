@@ -19,13 +19,21 @@
 # machine. The only assertion that could have caught it is the end-to-end one —
 # bootstrap a project, run its gate, require zero.
 #
-# THE FIXTURE IS BUILT FROM THE WORKING TREE, not from `git archive HEAD`.
+# THE FIXTURE IS BUILT FROM HEAD — the tree that is about to be pushed.
 # `.gitattributes` is the surface this bug lives on, and git resolves
-# export-ignore from the tree being archived — so a HEAD-based fixture cannot
-# see an export boundary the author has written but not yet committed, which is
-# precisely the moment this suite has to speak. Copying tracked files and
-# committing them into a throwaway repo makes the fixture's HEAD equal to what
-# is about to be pushed.
+# export-ignore from the tree being archived, so which tree the fixture is built
+# from decides what this suite is even asserting. It used to be the WORKING
+# TREE, so that a boundary the author had written but not committed was visible.
+# That trade is backwards for a gate: at pre-push time the change is ALREADY
+# committed, so the working-tree view guarded a case that cannot arise here and
+# opened one that can — the gate goes green over an uncommitted fix, the author
+# pushes the commit without it, and the boundary ships broken with a green gate
+# behind it. Reading HEAD fails closed instead: an uncommitted fix leaves the
+# suite red until it is committed, which is what pre-push means.
+#
+# HEAD is materialised with `read-tree` + `checkout-index` rather than
+# `git archive HEAD`, because archive applies export-ignore and this fixture
+# must BE a blueprint — templates/ and all — before it can bootstrap anything.
 #
 # Run from the blueprint repo root:  bash tests/bootstrap-gate/test.sh
 # Exit codes: 0 = pass; non-zero = fail.
@@ -54,19 +62,22 @@ export GIT_COMMITTER_NAME=T GIT_COMMITTER_EMAIL=t@t.io
 export AGENT_CI_WATCH=0
 
 # ===========================================================================
-# FIXTURE — a blueprint whose HEAD is this working tree.
+# FIXTURE — a blueprint whose HEAD is this repo's HEAD.
 # ===========================================================================
 BP="$WORK/blueprint"
 mkdir -p "$BP"
-n_copied=0
-while IFS= read -r -d '' f; do
-  mkdir -p "$BP/$(dirname "$f")"
-  cp -p "$ROOT/$f" "$BP/$f" 2>/dev/null || continue
-  n_copied=$((n_copied + 1))
-done < <(git -C "$ROOT" ls-files -z)
+# checkout-index needs an index, and the real one must not be touched — so read
+# HEAD into a throwaway. It preserves file MODES, which `git show` would not:
+# a hook that arrives non-executable is silently never run (BUG-008).
+(
+  export GIT_INDEX_FILE="$WORK/fixture-index"
+  git -C "$ROOT" read-tree HEAD || exit 1
+  git -C "$ROOT" checkout-index -a -f --prefix="$BP/" || exit 1
+) || { echo "FAIL: could not materialise HEAD into the fixture"; exit 1; }
 
+n_copied=$(find "$BP" -type f | wc -l)
 if [ "$n_copied" -lt 50 ]; then
-  echo "FAIL: copied only $n_copied tracked files — the fixture is not a blueprint, so nothing below proves anything"
+  echo "FAIL: materialised only $n_copied tracked files — the fixture is not a blueprint, so nothing below proves anything"
   exit 1
 fi
 
@@ -78,7 +89,7 @@ fi
   git init -q .
   git add -A
   git ls-files --others --ignored --exclude-standard -z | xargs -0 -r git add -f
-  git commit -qm "fixture blueprint from the working tree"
+  git commit -qm "fixture blueprint from HEAD"
 ) >/dev/null 2>&1
 if [ ! -d "$BP/.git" ]; then
   echo "FAIL: could not init the fixture blueprint"

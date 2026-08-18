@@ -141,9 +141,25 @@ fi
 #     directory pattern like `templates/` even though `git archive` genuinely
 #     drops it, so it would have called a correct boundary broken.
 #
-#     The archive is taken of the WORKING TREE, not of HEAD, through a throwaway
-#     index. HEAD cannot answer for a boundary the author has written and not
-#     yet committed, which is the one moment this assertion is useful.
+#     The archive is taken of HEAD — the tree that is about to be pushed.
+#     It used to be taken of the WORKING TREE, on the argument that HEAD cannot
+#     answer for a boundary the author has written and not yet committed. That
+#     is true and it is the wrong trade: at pre-push time the change IS already
+#     committed, so the working-tree view guarded a case the gate cannot see and
+#     opened one it can — an uncommitted fix turns the gate green, the author
+#     pushes the commit without it, and the boundary ships broken with a green
+#     gate behind it. HEAD fails CLOSED in that case: it reports the boundary as
+#     it will actually ship, and the fix is to commit.
+#
+#     A suite SHIPS when its RUNNERS ship, not when its directory does. `grep
+#     "^tests/<suite>/"` matched any file at all, so export-ignoring
+#     `tests/foo/test.sh` while leaving a sibling README reported the boundary
+#     healthy — while the derived project received a suite directory with no
+#     runner and `.githooks/pre-push-project`'s own `if [ -f tests/foo/test.sh ]`
+#     guard skipped it in silence. That is this repo's recurring defect class,
+#     inside the control written to prevent it. Runners are discovered by shell
+#     file rather than by name, the same way #1 discovers suites, because
+#     `tests/staleness/` already ships two of them.
 #
 #     The reverse direction matters as much: a suite that is NOT blueprint-tier
 #     must actually reach derived projects. Export-ignoring one is a silent
@@ -154,50 +170,63 @@ fi
 #     really does produce a project whose gate passes). This one names the file.
 # ===========================================================================
 if [ "$IN_BLUEPRINT" -eq 1 ]; then
-  # BUG-014 — the gate runs this suite with GIT_DIR exported, and `git add`
-  # below would then write into whatever that names rather than this repo.
+  # BUG-014 — the gate runs this suite with GIT_DIR exported, and the git calls
+  # below would then read whatever that names rather than this repo.
   unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY
-  _tmpidx="$(mktemp)"
   _listing="$(mktemp)"
-  # git refuses a zero-length index file, so hand it a PATH, not an empty file.
-  rm -f "$_tmpidx"
-  (
-    cd "$ROOT" || exit 1
-    # `git add -A` honours .gitignore, so this tree omits the handful of files
-    # that are tracked AND ignored. Only `tests/` is read from the listing, and
-    # nothing under it is ignored, so that does not affect the assertion.
-    GIT_INDEX_FILE="$_tmpidx" git add -A 2>/dev/null || exit 1
-    _tree="$(GIT_INDEX_FILE="$_tmpidx" git write-tree 2>/dev/null)" || exit 1
-    [ -n "$_tree" ] || exit 1
-    git archive --format=tar "$_tree" 2>/dev/null | tar -t 2>/dev/null
-  ) >"$_listing"
+  _runners="$(mktemp)"
+  ( cd "$ROOT" && git archive --format=tar HEAD 2>/dev/null | tar -t 2>/dev/null ) >"$_listing"
+  ( cd "$ROOT" && find tests -type f -name '*.sh' | sort ) >"$_runners"
 
   if [ ! -s "$_listing" ]; then
-    fail "#2b could not archive the working tree — the export boundary is unverified, not verified"
+    fail "#2b could not archive HEAD — the export boundary is unverified, not verified"
   else
     shipped_bp=""
     withheld=""
+    hollow=""
     while IFS="$(printf '\t')" read -r s t _ _; do
       [ -n "$s" ] || continue
       [ -d "$ROOT/tests/$s" ] || continue
-      if grep -q "^tests/$s/" "$_listing"; then ships=1; else ships=0; fi
-      if [ "$t" = "blueprint" ] && [ "$ships" -eq 1 ]; then
-        shipped_bp="$shipped_bp $s"
-      elif [ "$t" != "blueprint" ] && [ "$ships" -eq 0 ]; then
+      # Does every RUNNER reach the archive? A directory that arrives without
+      # its runners is worse than an absent one: the derived gate skips it
+      # silently and the push stays green over a suite that no longer exists.
+      _tot=0
+      _got=0
+      for _r in $(grep "^tests/$s/" "$_runners"); do
+        _tot=$((_tot + 1))
+        grep -qxF "$_r" "$_listing" && _got=$((_got + 1))
+      done
+      if grep -q "^tests/$s/" "$_listing"; then _any=1; else _any=0; fi
+
+      if [ "$t" = "blueprint" ]; then
+        # Nothing at all may ship — not the runners, not a stray fixture.
+        [ "$_any" -eq 1 ] && shipped_bp="$shipped_bp $s"
+      elif [ "$_tot" -gt 0 ] && [ "$_got" -eq "$_tot" ]; then
+        : # ships, runners and all
+      elif [ "$_got" -eq 0 ] && [ "$_any" -eq 0 ]; then
         withheld="$withheld $s"
+      else
+        hollow="$hollow $s($_got/$_tot runners)"
       fi
     done <<EOF
 $(rows)
 EOF
     if [ -n "$shipped_bp" ]; then
       fail "#2b blueprint-only suites DO ship, so they run in every derived project's gate against machinery that cannot be there:$shipped_bp"
+    elif [ -n "$hollow" ]; then
+      fail "#2b suites ship WITHOUT their runners, so the derived gate's 'if [ -f tests/<suite>/<runner>.sh ]' guard skips them in silence:$hollow"
     elif [ -n "$withheld" ]; then
       fail "#2b suites classified as shipping are export-ignore'd, so every derived project silently loses them:$withheld"
     else
-      pass "#2b the export boundary matches the manifest in both directions"
+      pass "#2b the export boundary matches the manifest in both directions, runner by runner (HEAD)"
+    fi
+    if [ -n "$shipped_bp$hollow$withheld" ] && \
+       ! git -C "$ROOT" diff --quiet HEAD -- .gitattributes 2>/dev/null; then
+      echo "        .gitattributes is modified but NOT COMMITTED. This reads HEAD, which"
+      echo "        is the tree about to be pushed — commit the boundary and re-run."
     fi
   fi
-  rm -f "$_tmpidx" "$_listing"
+  rm -f "$_listing" "$_runners"
 fi
 
 # ===========================================================================

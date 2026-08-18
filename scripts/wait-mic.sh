@@ -34,7 +34,17 @@
 # "exit is an event". A 1s sleep buys that on any POSIX box, and the rename
 # subtlety disappears because content is compared rather than inodes watched.
 #
-# Exit: 0 the mic moved (its new value is on stdout) · 2 usage.
+# Exit: 0 the mic moved (its new value is on stdout) · 2 usage · 128+N killed by
+# signal N, which is how it ends when it is NOT the mic that moved — `timeout`
+# gives 124, the harness stopping the task gives a TERM. That path is not an
+# error case to be tidied away, it is one of the three events this script exists
+# to make visible ("the harness stopped it"), and the suite asserts 124 on every
+# negative for exactly that reason.
+#
+# There is no other exit. `set -u` is on and `set -e` is NOT, deliberately: a
+# `sleep` that fails on a bad `AGENT_WAIT_MIC_POLL` must not take the waiter down
+# silently, so the loop spins and the wasted CPU is the symptom. Failing closed
+# here would mean blindness, which is the one outcome this feature removes.
 set -u
 
 SIGNAL="${1:-}"
@@ -55,10 +65,24 @@ fi
 # move the mic, and waking on it re-arms for nothing.
 #
 # A READING IS ALL-OR-NOTHING: exactly one Holder row and one State row, both
-# non-empty, neither carrying extra columns; or nothing at all. Andreas added the
-# column check and he was right — a pipe inside a mic value splits the row, and
-# accepting the fragments would compare only the prefix, so two DIFFERENT values
-# could read as identical and a real handoff would be missed.
+# non-empty; or nothing at all.
+#
+# AMBIGUITY THAT CAN BE RESOLVED IS RESOLVED, NEVER REJECTED. A row's value is
+# everything between the second delimiter and the last one, so a `|` inside it is
+# REJOINED rather than treated as an extra column. Andreas found the real defect —
+# comparing only the prefix of a split row makes two DIFFERENT values read as
+# identical — but rejecting the row is the wrong cure, and Christian showed it
+# introduces the very miss it was added to prevent. `signal-set.sh` escapes `|`
+# in `Task` only, so `--holder 'A|B'` publishes cleanly through the only supported
+# writer; refusing to read that row then blinds `State` as well, because the
+# reading is all-or-nothing. `A|B`/IDLE → `A|B`/ACTIVE is a real handoff that
+# reject swallows and rejoin fires on. (Reject does not even rescue the case it
+# was written for: `A` → `A|B` is missed either way, since the prefix `A` is what
+# reject refuses to read at all.)
+#
+# So: recover what the writer wrote, verbatim, and judge nothing about it. Decline
+# only when the bytes cannot be recovered unambiguously — no `Holder` row, two of
+# them, an empty value, a row with no closing delimiter.
 #
 # READABILITY, NOT VALIDITY — and that distinction is a review finding against
 # the version this replaces. It also whitelisted `State` against the protocol's
@@ -83,8 +107,8 @@ fi
 # perpetually changing.
 mic() {
   awk -F'|' '
-    /^\| *Holder *\|/ { if (NF != 4) bad = 1; h = $3; nh++ }
-    /^\| *State *\|/  { if (NF != 4) bad = 1; s = $3; ns++ }
+    /^\| *Holder *\|/ { if (NF < 4) bad = 1; h = $3; for (i = 4; i < NF; i++) h = h "|" $i; nh++ }
+    /^\| *State *\|/  { if (NF < 4) bad = 1; s = $3; for (i = 4; i < NF; i++) s = s "|" $i; ns++ }
     END {
       gsub(/^[ \t\r]+|[ \t\r]+$/, "", h)
       gsub(/^[ \t\r]+|[ \t\r]+$/, "", s)
@@ -93,15 +117,6 @@ mic() {
   ' "$SIGNAL" 2>/dev/null
 }
 
-# An EMPTY read is "cannot see the mic", never "the mic moved".
-#
-# Deleting the baton used to exit 0 and print an empty MIC — a phantom handoff,
-# which is worse than the blindness this replaces: silence is merely uninformed,
-# but a false handoff makes the agent act. A baton that is absent, unreadable or
-# malformed is simply not a handoff, so keep waiting.
-#
-# The converse IS a real event and fires: an empty `prev` becoming a real value
-# is a fresh checkout seeding its baton, and that is the mic moving.
 # Poll cadence. 1s is latency, not correctness — nothing here depends on the
 # interval, only on comparing two readings — so the suite runs it fast rather
 # than spending 24s of gate on sleeps that assert nothing by being long.
@@ -112,6 +127,16 @@ mic() {
 # changes nothing but how often a comparison happens.
 POLL="${AGENT_WAIT_MIC_POLL:-1}"
 
+# An EMPTY read from mic() is "cannot see the mic", never "the mic moved" — which
+# is why the loop below tests `-n "$cur"` before it tests for a difference.
+#
+# Deleting the baton used to exit 0 and print an empty MIC — a phantom handoff,
+# which is worse than the blindness this replaces: silence is merely uninformed,
+# but a false handoff makes the agent act. A baton that is absent, unreadable or
+# malformed is simply not a handoff, so keep waiting.
+#
+# The converse IS a real event and fires: an empty `prev` becoming a real value
+# is a fresh checkout seeding its baton, and that is the mic moving.
 prev="$(mic)"
 while :; do
   cur="$(mic)"

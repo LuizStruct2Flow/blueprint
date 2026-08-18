@@ -225,8 +225,10 @@ fi
 # FEATURE-005 — the mic waiter must exit on a handoff and ONLY on a handoff. A
 # spurious exit is worse than the always-on Monitor it replaces: silence is
 # merely blind, but a phantom handoff makes the agent re-arm on an event that
-# never happened. Three of its four cases assert the negative. ~20s (they wait
-# out real timeouts, which is the only honest way to assert "did not fire").
+# never happened. Eight of its thirteen cases assert the negative; the five
+# positives guard the opposite defect, a reader that fails closed and sleeps
+# through a real handoff. ~16s (the negatives wait out real timeouts, which is
+# the only honest way to assert "did not fire").
 if [ -f tests/wait-mic/test.sh ]; then
   _st_wait_mic(){
     bash tests/wait-mic/test.sh || {

@@ -207,17 +207,70 @@ malformed 10 "a whitespace-only Holder is unreadable, not a handoff" \
 '
 
 # ===========================================================================
-# 11. AN EXTRA COLUMN MAKES A ROW UNREADABLE. Andreas's finding, and it is a
-#     MISSED handoff rather than a phantom: a pipe inside a mic value splits the
-#     row, and comparing the fragments compares only the prefix — so two
-#     different values can read as identical and a real change goes unnoticed.
+# 11. AN EXTRA `|` IS A VALUE, NOT AN EXTRA COLUMN — REJOINED AND FIRED ON.
+#
+#     This case previously asserted the opposite, and the inversion is Christian's
+#     finding. Andreas was right that comparing only the PREFIX of a split row
+#     makes two different values read as identical; refusing to read the row was
+#     the wrong cure. A row's value is everything between the second delimiter and
+#     the last one, so `| Holder | NEW | EXTRA |` carries the recoverable value
+#     `NEW | EXTRA` — and recovering it is what stops the prefix compare, not
+#     throwing the row away.
+#
+#     Swallowing it was a MISSED handoff of its own: the reading is all-or-nothing,
+#     so an unreadable Holder blinds State too (#13 is the case that proves it).
 # ===========================================================================
-malformed 11 "an extra column makes the row unreadable, not a handoff" \
-  '| Field | Value |
-|---|---|
-| Holder | NEW | EXTRA |
-| State | IDLE |
-'
+seed
+out11="$WORK/out11"
+( sh "$WAIT" "$SIG" >"$out11" 2>&1 ) &
+w11=$!
+sleep 0.5
+printf '| Field | Value |\n|---|---|\n| Holder | NEW | EXTRA |\n| State | IDLE |\n' >"$SIG"
+( sleep 6; kill "$w11" 2>/dev/null ) &
+k11=$!
+rc11=0
+wait "$w11" 2>/dev/null || rc11=$?
+kill "$k11" 2>/dev/null
+if [ "$rc11" -ne 0 ]; then
+  fail "#11 a rejoinable '|' in the Holder did not fire (rc=$rc11) — the row was thrown away"
+elif ! grep -qF 'MIC: Holder=NEW | EXTRA State=IDLE' "$out11"; then
+  fail "#11 fired but did not report the rejoined value verbatim: [$(cat "$out11")]"
+else
+  pass "#11 a '|' inside a Holder is rejoined and reported, not rejected"
+fi
+
+# ===========================================================================
+# 13. THE CASE REJECTING THE ROW WOULD MISS — a real State flip under a Holder
+#     that contains a `|`.
+#
+#     `signal-set.sh` escapes `|` in `Task` ONLY; Holder and State are printed
+#     raw. So `--holder 'A|B'` publishes cleanly through the only supported
+#     writer, and this baton is reachable rather than hand-edited — it is
+#     published here through the real setter to say so.
+#
+#     Under the old extra-column check both readings were empty, so a genuine
+#     IDLE -> ACTIVE flip was invisible: the check introduced a missed handoff on
+#     the very axis it was added to protect.
+# ===========================================================================
+seed
+bash "$SETTER" --file "$SIG" --holder 'A|B' --state IDLE --task 'seed' >/dev/null 2>&1
+out13="$WORK/out13"
+( sh "$WAIT" "$SIG" >"$out13" 2>&1 ) &
+w13=$!
+sleep 0.5
+bash "$SETTER" --file "$SIG" --holder 'A|B' --state ACTIVE --task 'go' >/dev/null 2>&1
+( sleep 6; kill "$w13" 2>/dev/null ) &
+k13=$!
+rc13=0
+wait "$w13" 2>/dev/null || rc13=$?
+kill "$k13" 2>/dev/null
+if [ "$rc13" -ne 0 ]; then
+  fail "#13 a State flip under a piped Holder did not fire (rc=$rc13) — missed handoff"
+elif ! grep -qF 'MIC: Holder=A|B State=ACTIVE' "$out13"; then
+  fail "#13 fired but did not recover the piped Holder verbatim: [$(cat "$out13")]"
+else
+  pass "#13 a State flip under a Holder containing '|' fires and is reported"
+fi
 
 # ===========================================================================
 # 12. AN UNRECOGNISED STATE IS STILL A MIC MOVE, AND MUST FIRE.

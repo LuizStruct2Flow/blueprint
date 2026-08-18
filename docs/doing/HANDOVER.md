@@ -45,10 +45,18 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**WIP: FEATURE-005**, the mic waiter — built, reviewed, PR pending only because
-GitHub's API was returning 503. Row and reasoning in
-[`BACKLOG.md`](BACKLOG.md). Everything else is parked or waiting on the founder
-— `docs/backlog/` and `docs/waiting-acceptance/`.
+**WIP: BUG-027**, the subagent feed blackout — fixed and gate-green on
+`bug/027-subagent-feed-blackout`, with **three unfixed findings** from the
+cross-provider review's third round: `BP_ROSTER_LOOKUP_TIMEOUT=0` hangs
+indefinitely (GNU `timeout 0` means *no* timeout), a killed lookup's partial
+stdout is accepted and persisted as a persona name, and `agent-activity.sh`
+sources `roster.sh` into the **supervisor's** own shell unguarded — the same two
+failure modes with the feed daemon as the blast radius.
+
+**Read TASK-012 before fixing them.** If the orchestration layer is going to be
+replaced, that is work we would throw away.
+
+Everything else is parked or waiting on the founder.
 
 ## 2. LIVE HAZARD — check before dispatching anyone
 

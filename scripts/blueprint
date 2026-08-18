@@ -334,15 +334,10 @@ marker_aware_merge() {
 # repeats it after each `pull` so a pulled file lands as a real,
 # usable file instead of leaking the literal placeholder. The project
 # name is the basename of the project root.
-_should_substitute() {
-  # Skip files that legitimately document or implement the substitution
-  # itself. The placeholder tokens appear in their source as code/docs,
-  # NOT as template tokens — substituting would corrupt the tool.
-  case "$1" in
-    *scripts/blueprint|*scripts/new-project.sh) return 1 ;;
-  esac
-  return 0
-}
+# Skip files that legitimately document or implement the substitution itself.
+# The predicate lives in scripts/lib/placeholders.sh beside the primitive it
+# guards, so bootstrap, pull, drift and a2bp cannot disagree about it (BUG-028).
+_should_substitute() { bp_should_substitute "$1"; }
 
 # Write a placeholder-substituted COPY of the blueprint file to a
 # temp path and print the temp path. Used by drift comparison +

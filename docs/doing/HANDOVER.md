@@ -45,8 +45,10 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**WIP: nothing.** `doing/` is empty. Everything is parked or waiting on the
-founder — `docs/backlog/` and `docs/waiting-acceptance/`.
+**WIP: FEATURE-005**, the mic waiter — built, reviewed, PR pending only because
+GitHub's API was returning 503. Row and reasoning in
+[`BACKLOG.md`](BACKLOG.md). Everything else is parked or waiting on the founder
+— `docs/backlog/` and `docs/waiting-acceptance/`.
 
 ## 2. LIVE HAZARD — check before dispatching anyone
 
@@ -77,7 +79,7 @@ for Monitors; see §3.
 | What | How |
 |---|---|
 | Activity feed | `bash scripts/agent-activity.sh --daemon`, watch with `tail -f logs/agent-activity.log`. **It truncates the log on start** — restarting destroys any replay window. |
-| Mic monitor | persistent `Monitor` on `logs/state/signal.md`, emit **only** on `Holder`/`State` change |
+| Mic waiter | `sh scripts/wait-mic.sh logs/state/signal.md` as a **background Bash task**, NOT a `Monitor`. It exits on the first `Holder`/`State` change — **re-arm it as the first thing you do when it fires** |
 | Exchange board monitor | persistent `Monitor` on `../../agent-exchange/EXCHANGE.md`, 10s, emit only on change |
 
 **Do not check a Monitor's liveness with `ps` — it cannot see them (A-40).**
@@ -86,8 +88,18 @@ while two mic monitors were alive and emitting seconds later. An earlier sweep
 *did* show the exchange-board monitor, which is what made the check look sound.
 Believing it cost a live monitor being declared dead and a duplicate armed on top
 of it. A Monitor's silence is not evidence of anything — the only proof it lives
-is an event. FEATURE-005 (parked) replaces it with a one-shot kernel wait whose
-**exit is itself an event**, which is the property the polling loop lacks.
+is an event.
+
+**The mic no longer uses a Monitor for that reason (FEATURE-005).** The waiter
+exits on the first change, so the harness reports the baton moving, the waiter
+crashing, and the harness stopping it — three events where a Monitor gave one.
+
+**It does not close the gap, and do not write that it does.** It must be re-armed
+after every event, and forgetting is silent. What would close it is a supervisor,
+which this repo does not have (Alexey, 2026-08-17). The exit notification and the
+need to re-arm arrive together, which is better than a death nobody is told
+about, and less than a guarantee. **The board monitor is still a `Monitor`** —
+same trade-off, not yet worth a second waiter.
 
 ### Why the board monitor is declared here
 

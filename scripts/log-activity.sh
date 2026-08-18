@@ -46,7 +46,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # keeps the line.
 # NOT SOURCED HERE. Sourcing runs the lib in THIS shell, so an `exit` anywhere in
 # it — today, or after some future edit — takes the hook down with it, and a hook
-# that dies fails the tool call it was only supposed to observe. Elias caught
+# that dies fails the tool call it was only supposed to observe. the cross-provider review caught
 # that: absent, unreadable and non-zero-return all degraded safely, and a bare
 # `exit` did not.
 #
@@ -85,12 +85,48 @@ summary="$(printf '%s' "$summary" | tr -d '\n' | cut -c1-110)"
 # and the streamed lines cannot disagree.
 plabel="$(extract '.subagent_type // .agent_type // .agent_name')"
 if [ -r "$ROSTER_LIB" ]; then
-  # The subshell is the guard, not a style choice — see ROSTER_LIB above.
-  persona="$(
-    . "$ROSTER_LIB" 2>/dev/null || exit 0
-    bp_roster_name_in_text "$repo_root" "$summary" 2>/dev/null || exit 0
+  # The subshell is one guard and the timeout is the other; neither is style.
+  #
+  # The subshell keeps an `exit` inside the lib out of THIS process. It does not
+  # keep a HANG out: the reviewer replaced the lib with an infinite loop and the hook
+  # returned rc=124 under an external 2s bound, having logged nothing and written
+  # no map row. Every other broken-library mode already degraded correctly —
+  # absent, unreadable, non-zero return, empty output, `exit`, `set -e` plus a
+  # failure, and a syntax error. Only hanging escaped, and a hook that hangs is
+  # worse than one that dies, because it stalls the tool call it was only there
+  # to observe.
+  #
+  # `timeout` is NOT guaranteed present — macOS ships none in the base system,
+  # which is why the Brewfile pulls coreutils for `gtimeout`. That question is
+  # already answered once, by bp_staleness_timeout_cmd, so it is answered there
+  # rather than a second time here. staleness.sh is itself read in a subshell,
+  # for exactly the reason roster.sh is.
+  #
+  # NO PROVIDER → NO LOOKUP. Deliberate, and it is the trade the whole guard is
+  # about: the label falls back to the agent type, which is legible and merely
+  # unspecific, whereas an unbounded lookup can stall a dispatch indefinitely. A
+  # wrong label is survivable; a hung tool call is not. It says so on stderr, not
+  # in the feed — Claude Code surfaces hook stderr under --debug and discards it
+  # otherwise, so the choice is discoverable without a line of noise per dispatch.
+  #
+  # `bash -c` rather than a bare subshell because `timeout` needs a process to
+  # signal, and it is what the lib is written in: this hook is also invoked as
+  # `sh`, and under dash the lib's parameter expansions are a syntax error, so
+  # the lookup could never have resolved anything there.
+  : "${BP_ROSTER_LOOKUP_TIMEOUT:=2}"
+  tcmd="$(
+    . "$repo_root/scripts/lib/staleness.sh" >/dev/null 2>&1 || exit 0
+    bp_staleness_timeout_cmd 2>/dev/null || exit 0
   )"
-  [ -n "${persona:-}" ] && plabel="$persona"
+  if [ -n "${tcmd:-}" ]; then
+    persona="$("$tcmd" "$BP_ROSTER_LOOKUP_TIMEOUT" bash -c '
+        . "$1" 2>/dev/null || exit 0
+        bp_roster_name_in_text "$2" "$3" 2>/dev/null || exit 0
+      ' bp-roster-lookup "$ROSTER_LIB" "$repo_root" "$summary" 2>/dev/null)"
+    [ -n "${persona:-}" ] && plabel="$persona"
+  else
+    printf '[log-activity] no timeout(1)/gtimeout(1) available — skipping the roster lookup; labelling by agent type\n' >&2
+  fi
 fi
 label="${plabel:-${AGENT_FEED_LABEL:-subagent}}"
 ts="$(date +%H:%M:%S)"

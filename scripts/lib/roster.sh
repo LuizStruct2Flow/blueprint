@@ -132,23 +132,55 @@ EOF
 # run with whoever happens to sit higher in the table. Wrong, and STABLY wrong,
 # which is worse than a visible miss.
 #
-# Matching is on WHOLE WORDS via tokenisation, never substring. Rosters commonly
-# carry a short name that is a prefix of a longer one, and `index()` resolves the
-# longer to the shorter every time. Tokenising also sidesteps escaping a name
-# into a regex — names are free text and may contain anything.
+# Matching is WHOLE-NAME and boundary-checked, never substring, and never via a
+# regex built from the name. Rosters commonly carry a short name that is a prefix
+# of a longer one, and a bare `index()` resolves the longer to the shorter every
+# time; a regex would mean escaping free text an engineer typed into a markdown
+# cell. So: `index()` locates the literal name, and the characters either side of
+# the hit must be non-alphanumeric (or absent) for it to count.
+#
+# This REPLACES tokenising the text and comparing each token to the whole name,
+# which had the right instinct — no regex — and the wrong shape: a token is one
+# word, so a name containing a space or punctuation could never equal one.
+# `Mary Jane` and `O'Neil` silently resolved to nothing, and the Name column is
+# free text that ships to every derived project, so any fleet with a two-word or
+# punctuated persona got the agent type instead (BUG-027 R2-S2, cross-provider review).
+#
+# Two properties survive the change and are the reason for the tie-break below:
+#   - EARLIEST MENTION WINS — smallest position in the text, not roster order.
+#   - LONGEST NAME WINS A TIE — `Mary` and `Mary Jane` can now both match at the
+#     same position with valid boundaries, which the tokenised form could not
+#     produce. The longer name is the specific one.
+#
+# The text is passed through the environment rather than `awk -v`, which
+# interprets backslash escapes in its assignment and would rewrite a description
+# containing `\n` or `\t` before it was ever matched.
 #
 # Case-insensitive; returns nothing (rc 1) when no persona is named, which is an
 # ordinary outcome and so deliberately does NOT warn.
 bp_roster_name_in_text(){
   local src="${1:-.}" text="${2:-}" hit
   [ -n "$text" ] || return 1
-  hit="$(bp_roster_rows "$src" 2>/dev/null | awk -F'\t' -v text="$text" '
-    BEGIN{ nw = split(tolower(text), w, /[^[:alnum:]]+/); best = 0 }
+  hit="$(bp_roster_rows "$src" 2>/dev/null | BP_ROSTER_TEXT="$text" awk -F'\t' '
+    BEGIN{ hay = tolower(ENVIRON["BP_ROSTER_TEXT"]); hlen = length(hay)
+           best = 0; bestlen = 0 }
     {
-      name = tolower($2)
-      if (name == "") next
-      for (i = 1; i <= nw; i++)
-        if (w[i] == name && (best == 0 || i < best)) { best = i; found = $2; break }
+      name = tolower($2); nlen = length(name)
+      if (nlen == 0) next
+      at = 0; from = 1
+      while (from <= hlen) {
+        p = index(substr(hay, from), name)
+        if (p == 0) break
+        abs = from + p - 1
+        before = (abs == 1)          ? "" : substr(hay, abs - 1, 1)
+        after  = (abs + nlen > hlen) ? "" : substr(hay, abs + nlen, 1)
+        if (before !~ /[[:alnum:]]/ && after !~ /[[:alnum:]]/) { at = abs; break }
+        from = abs + 1
+      }
+      if (at == 0) next
+      if (best == 0 || at < best || (at == best && nlen > bestlen)) {
+        best = at; bestlen = nlen; found = $2
+      }
     }
     END{ if (best > 0) print found }
   ')"

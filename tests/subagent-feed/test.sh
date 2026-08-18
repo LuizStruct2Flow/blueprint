@@ -84,6 +84,9 @@ cat > "$REPO/AGENT_ROSTER.md" <<'EOF'
 | Back-End-1 | Nadia | Claude Code |
 | Front-End-2 | Bo | Codex |
 | Front-End-1 | Bonnie | Claude Code |
+| Data-1 | Mary Jane | Claude Code |
+| Data-2 | Mary | Codex |
+| QA-1 | O'Neil | Codex |
 EOF
 
 SESS="$HOMEDIR/.claude/projects/$(printf '%s' "$REPO" | sed 's#/#-#g')/sess"
@@ -157,6 +160,38 @@ if command -v bp_roster_name_in_text >/dev/null 2>&1; then
   bp_roster_name_in_text "$REPO" "nobody by name here" >/dev/null 2>&1 \
     && fail "#0 a description naming no persona still resolved one" \
     || pass "#0 a description naming no persona resolves nothing (rc!=0)"
+
+  # --- free-form names (Elias, R2-S2) --------------------------------------
+  # The Name column is free text an engineer types into a markdown cell, and
+  # roster.sh ships to every derived project. The first implementation tokenised
+  # the DESCRIPTION and compared each token to the WHOLE name, so a name holding
+  # a space or an apostrophe could never equal one token: `Mary Jane reviews`
+  # and `O'Neil reviews` both resolved to nothing, silently, and every such fleet
+  # got the agent type on every line. The fixture rows exist for this.
+  got="$(bp_roster_name_in_text "$REPO" "Mary Jane reviews" 2>/dev/null)"
+  [ "$got" = "Mary Jane" ] \
+    && pass "#0 a name containing a SPACE resolves" \
+    || fail "#0 'Mary Jane reviews' resolved to '$got', not 'Mary Jane'"
+
+  got="$(bp_roster_name_in_text "$REPO" "O'Neil reviews" 2>/dev/null)"
+  [ "$got" = "O'Neil" ] \
+    && pass "#0 a name containing PUNCTUATION resolves" \
+    || fail "#0 \"O'Neil reviews\" resolved to '$got', not \"O'Neil\""
+
+  # Earliest mention still wins once names can span words — and the roster is
+  # ordered so that resolving by row would answer 'Mary Jane'.
+  got="$(bp_roster_name_in_text "$REPO" "O'Neil reviews Mary Jane's plan" 2>/dev/null)"
+  [ "$got" = "O'Neil" ] \
+    && pass "#0 earliest mention still wins with multi-word names" \
+    || fail "#0 earliest-mention broke for free-form names: got '$got', wanted \"O'Neil\""
+
+  # And no-substring still holds where the boundary check alone cannot decide it:
+  # 'Mary' and 'Mary Jane' both start at position 1 with clean boundaries, so the
+  # specific name has to win the tie. Bo/Bonnie above covers the other direction.
+  got="$(bp_roster_name_in_text "$REPO" "Mary Jane's plan lands" 2>/dev/null)"
+  [ "$got" = "Mary Jane" ] \
+    && pass "#0 a name that is a PREFIX of a longer one still resolves to the longer" \
+    || fail "#0 'Mary Jane…' resolved to '$got' — the shorter roster name won the tie"
 else
   fail "#0 no shared text→persona lookup — the feed and the hook must each grow one, and drift"
 fi
@@ -285,8 +320,56 @@ else
   pass "#5 a roster lib that exits cannot take the hook down (Elias)"
 fi
 
+# ===========================================================================
+# 6. A ROSTER LIB THAT HANGS MUST NOT HANG THE HOOK.
+#
+#    The sibling of #5, and the one mode the subshell does not cover: a subshell
+#    contains an `exit`, it does not contain an infinite loop. Elias measured it
+#    — rc=124 under an external 2s bound, no feed line, no map row — while every
+#    other broken-library mode degraded correctly. A hook that HANGS is worse
+#    than one that dies: it stalls the tool call it was only there to observe.
+#
+#    The outer bound here is the suite's own safety net, deliberately several
+#    times the hook's, so a regression shows up as a FAIL and never as a suite
+#    that never returns. The hook's own bound is turned down to 1s so the case
+#    costs about a second rather than the default two.
+# ===========================================================================
+# The same question the hook asks, asked the same way — read in a subshell so a
+# broken lib cannot take the suite down either.
+TCMD="$( . "$ROOT/scripts/lib/staleness.sh" >/dev/null 2>&1 || exit 0
+         bp_staleness_timeout_cmd 2>/dev/null || exit 0 )"
+
+if [ -z "${TCMD:-}" ]; then
+  echo "  -- skipped — no timeout(1)/gtimeout(1) here, so a hang cannot be bounded safely"
+else
+  HANG="$WORK/hang"; mkdir -p "$HANG/scripts/lib" "$HANG/logs"
+  cp "$HOOK" "$HANG/scripts/log-activity.sh"
+  cp -R "$ROOT/scripts/lib/." "$HANG/scripts/lib/"
+  cp "$REPO/AGENT_ROSTER.md" "$HANG/AGENT_ROSTER.md"
+  printf 'while :; do :; done\n' > "$HANG/scripts/lib/roster.sh"
+
+  hang_rc=0
+  printf '%s' '{"hook_event_name":"SubagentStart","agent_id":"hang01","subagent_type":"general-purpose","description":"Nadia does a thing"}' \
+    | AGENT_FEED_LOG="$HANG/logs/feed.log" BP_ROSTER_LOOKUP_TIMEOUT=1 \
+      "$TCMD" 15 sh "$HANG/scripts/log-activity.sh" >/dev/null 2>&1 || hang_rc=$?
+
+  if [ "$hang_rc" -eq 124 ]; then
+    fail "#6 a roster lib that never returns hangs the hook — it stalls the tool call it observes (Elias)"
+  elif [ "$hang_rc" -ne 0 ]; then
+    fail "#6 the hook exited $hang_rc on a hanging roster lib; a hook must always exit 0"
+  elif [ ! -s "$HANG/logs/feed.log" ]; then
+    fail "#6 the hook survived the hang but logged nothing — the bookend is what makes a dispatch visible"
+  elif ! grep -q '^hang01 ' "$HANG/logs/.subagent-map" 2>/dev/null; then
+    fail "#6 no .subagent-map row after a bounded lookup — the streamed-line fallback goes dark"
+  else
+    pass "#6 a roster lib that never returns is bounded; the line still lands, labelled by agent type"
+  fi
+fi
+
 grep -q 'ROSTER_LIB' "$HCODE" \
   || fail "static: the hook no longer references the roster lib at all"
+grep -q 'bp_staleness_timeout_cmd' "$HCODE" \
+  || fail "static: the hook resolves a timeout provider some other way — that question has one answer (scripts/lib/staleness.sh)"
 
 [ "$FAILED" -eq 0 ] && pass "static backstops clean"
 

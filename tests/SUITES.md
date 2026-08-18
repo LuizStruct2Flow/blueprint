@@ -35,11 +35,26 @@ fails a test instead of passing unnoticed.
 
 ## Rules
 
-- **Tier** is `pre-push`, `CI`, or `both`.
+- **Tier** is `pre-push`, `CI`, `both`, or `blueprint`.
   - `pre-push` — the gate blocks the push on it. Also runs in CI as a backstop.
   - `CI` — runs after the push. **Reporting, not blocking.**
   - `both` — in the gate, and additionally run in CI under different conditions
     (e.g. a slower clock, or extra cases).
+  - `blueprint` — `both`, **plus: does not ship to derived projects.** Reserved
+    for suites that drive blueprint-ONLY machinery — `new-project.sh`,
+    `templates/`, `.blueprint-root` — which no derived project has, because
+    bootstrapping is the one thing a derived project never does (CLAUDE.md
+    §"blueprint-only machinery"). This tier exists because BUG-028: five such
+    suites shipped anyway, `.githooks/pre-push-project` wired them into every
+    derived project's gate, and they failed on day one on machinery that could
+    not have been there. The claim is enforced — `tests/manifest` #2b asserts
+    the `.gitattributes` export boundary in BOTH directions, so a
+    `blueprint`-tier suite that ships fails the push, and so does a shipping
+    suite that has been export-ignore'd behind everyone's back. It asserts
+    **runner by runner, against HEAD**: a directory is not a suite — one that
+    arrives without its runners is skipped in silence by the derived gate's own
+    `if [ -f … ]` guard — and HEAD is the tree actually being pushed, so a
+    boundary that exists only in the author's working tree cannot turn it green.
 - **Risk** — what breaks if this suite is absent and the thing it guards
   regresses. One line. This is the field that decides the tier.
 - **Rationale** — why that tier. A CI-only rationale must argue from *risk*
@@ -80,14 +95,15 @@ fails a test instead of passing unnoticed.
 | `a2bp-inputs` | both | a2bp acts on an unvalidated destination or input | Fails closed before anything leaves the machine |
 | `a2bp-e2e` | both | The leak-critical wiring breaks: a contaminated file is pushed anyway | End-to-end proof that contamination blocks the whole request |
 | `staleness` | both | `drift` blocks a wake, prompts with no TTY, or reports an unknown checkout as current | Runs at every agent wake with nobody watching |
-| `bootstrap-contents` | both | A new project inherits this repo's work items, `.env`, or logs (A-05) | Every bootstrap is affected; cheap |
-| `bootstrap-identity` | both | Bootstrap writes a git identity or fails unsafely without one | Same path |
-| `drift-in-blueprint` | both | `blueprint drift` dies in the blueprint itself (BUG-007) | Guards the command every agent runs on every wake. **Found by this manifest's first run to be executing NOWHERE — in neither the gate nor CI (audit finding A-15 exactly)** |
+| `bootstrap-contents` | blueprint | A new project inherits this repo's work items, `.env`, or logs (A-05) | Every bootstrap is affected. `blueprint` because it drives the real `new-project.sh` against a fixture blueprint carrying `templates/` — neither exists downstream, so there it failed on machinery that could not have been present (BUG-028) |
+| `bootstrap-identity` | blueprint | Bootstrap writes a git identity or fails unsafely without one | Same path, and the same reason it cannot ship: it bootstraps, and only a blueprint can |
+| `drift-in-blueprint` | blueprint | `blueprint drift` dies in the blueprint itself (BUG-007) | Guards the command every agent runs on every wake. **Found by this manifest's first run to be executing NOWHERE — in neither the gate nor CI (audit finding A-15 exactly)**. `blueprint` because the path it exercises is keyed on `.blueprint-root`, which by BUG-013 must never ship — downstream there is nothing for it to be true about |
 | `git-isolation` | both | A test suite writes commits and config into the developer's real repository, disarming the gate (BUG-014) | Guards the gate's own integrity: this is what wiped `core.hooksPath` and let an ungated push through |
 | `no-chain-guard` | both | The command-chaining guard fails open, so compound commands inherit an allowlist match and defeat the deny list | Guards an enforcement control; it shipped failing open on malformed input and missing jq, which nothing could have detected without this |
 | `pull-behaviour` | both | A partial pull claims a full sync so drift reports zero commits behind, and pull dies with no TTY (BUG-016/BUG-018) | Guards the sync record every project trusts; a false "in sync" is invisible until someone diffs by hand |
 | `a2bp-pr-filing` | both | `a2bp` reports a request as filed when no PR was opened (BUG-011) | Guards the only sanctioned path for improvements to reach the blueprint; an exit code that asserts success while doing nothing is undetectable downstream |
-| `pull-exec-bit` | both | A pulled hook comes out non-executable, so the gate is armed but silently never runs (BUG-008) | Guards whether the gate runs at all in every project that pulls; git skips a non-executable hook without a word |
+| `pull-exec-bit` | blueprint | A pulled hook comes out non-executable, so the gate is armed but silently never runs (BUG-008) | Guards whether the gate runs at all in every project that pulls; git skips a non-executable hook without a word. `blueprint` because its #5 needs an executable file with the placeholder still IN it, and a bootstrapped project has none by construction — downstream it announced itself VACUOUS, which is the honest form of a suite that cannot hold there |
 | `env-namespace` | both | A managed script carries one project's env namespace to every other project (BUG-006) | Same class as BUG-002/009/010 — a specific thing baked into a file that travels; found four times by hand before this guard existed |
-| `template-source` | both | The blueprint's own config ships as the seed template, so anything it writes about itself propagates to every project (BUG-009) | Fourth instance of the travelling-contamination class; asserts against the real `git archive` and a real bootstrap |
-| `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above |
+| `template-source` | blueprint | The blueprint's own config ships as the seed template, so anything it writes about itself propagates to every project (BUG-009) | Fourth instance of the travelling-contamination class; asserts against the real `git archive` and a real bootstrap. `blueprint` because `templates/` is itself export-ignore'd — the suite needs the very thing whose absence it asserts |
+| `bootstrap-gate` | blueprint | A freshly bootstrapped project cannot pass its own pre-push gate and nobody here finds out — the failure lands on the new project's first push, on someone else's machine, after this repo's gate went green over the same suites passing at home (BUG-028) | The one assertion that could have caught six day-one failures, and the one nothing else makes: every other bootstrap suite checks what the archive CONTAINS, none ever ran what the new project RUNS. It must block, because `.gitattributes`, `new-project.sh` and this manifest are all on the push path and a regression in any of them reaches a commit unopposed. `blueprint` because it bootstraps, which only a blueprint can do. It is the slowest stage in the gate and the SLO names it on every run — visible, not demoted |
+| `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above, now including the export boundary that decides which suites reach a derived project at all |

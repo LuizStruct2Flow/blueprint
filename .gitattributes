@@ -14,12 +14,16 @@
 # what this file is.
 #
 # The structure ships; this repo's contents do not. README.md explains each
-# lifecycle state and HANDOVER.md is the canonical resume template a new project
-# fills in — both are template material and stay.
+# lifecycle state and stays. HANDOVER.md used to be listed here as "the
+# canonical resume template" — it was not; it was this repo's LIVE handover,
+# naming its current branch and its unfixed findings, with a link into
+# docs/done/ that does not ship. Every project opened with another repo's WIP as
+# its resume doc and failed doc-links on day one. The template now lives in
+# templates/HANDOVER.md and is seeded by new-project.sh (BUG-028), exactly as
+# BUG-009 split the project_config_*.md files.
 
 docs/doing/**                      export-ignore
 docs/doing/README.md              -export-ignore
-docs/doing/HANDOVER.md            -export-ignore
 
 docs/waiting-acceptance/**         export-ignore
 docs/waiting-acceptance/README.md -export-ignore
@@ -27,14 +31,22 @@ docs/waiting-acceptance/README.md -export-ignore
 docs/done/**                       export-ignore
 docs/done/README.md               -export-ignore
 
-# backlog/ additionally keeps BACKLOG.md and BUGS.md: unlike the folders above,
-# those are empty tables with only a header row — genuine templates a new project
-# fills in, not this repo's parked work. If the blueprint ever parks real items
-# there, they need listing here too.
+# backlog/ used to keep BACKLOG.md and BUGS.md, on the grounds that they were
+# "empty tables with only a header row — genuine templates". That note ended
+# with the condition that undid it: "If the blueprint ever parks real items
+# there, they need listing here too." It did. BACKLOG.md carried thirteen of
+# this repo's own parked items (A-04, A-13, TASK-004, FEATURE-004 …) and
+# BUGS.md three live parked bugs, all shipping into every new project's backlog
+# for its agents to read as their own — the A-05 defect the folders above exist
+# to stop, and the one BUG-009 found in project_config_*.md. One of those rows
+# also linked to this repo's audit register, so a fresh bootstrap failed
+# `doc-links` on a link it never wrote (BUG-028).
+#
+# The empty tables now live in templates/ and are seeded by new-project.sh, the
+# same split BUG-009 made. A condition written into a comment is not a control;
+# `tests/bootstrap-gate` is.
 docs/backlog/**                    export-ignore
 docs/backlog/README.md            -export-ignore
-docs/backlog/BACKLOG.md           -export-ignore
-docs/backlog/BUGS.md              -export-ignore
 
 # BUG-013 — the blueprint's self-identification marker must never reach a derived
 # project. `drift` uses its presence as positive proof of "this IS the blueprint";
@@ -65,3 +77,37 @@ project_config_dod.md              export-ignore
 project_config_security.md         export-ignore
 project_config_infra.md            export-ignore
 templates/                         export-ignore
+
+# BUG-028 — blueprint-ONLY machinery must not ship, and the suites that test it
+# must not ship either.
+#
+# `tests/` ships on purpose: 33 of its suites guard blueprint-MANAGED machinery
+# (`blueprint pull/drift/a2bp`, signal-set.sh, the feed, the hooks, the gate
+# renderer) that a derived project runs and can break, and `.githooks/pre-push-
+# project` is what wires them. Shipping the wiring without the suites, or the
+# suites without the wiring, is a gate that looks armed and measures nothing —
+# BUG-004 and A-22 in a new costume.
+#
+# These five are the exception. Each drives `scripts/new-project.sh`,
+# `templates/`, or `.blueprint-root` — things that exist ONLY in the blueprint,
+# because bootstrapping is the one thing a derived project never does
+# (CLAUDE.md §"blueprint-only machinery"). Downstream they did not merely fail;
+# they could not have passed anywhere. `pull-exec-bit` was the honest one — it
+# reported itself VACUOUS, because it needs an unsubstituted placeholder-bearing
+# file and a bootstrapped project has none by construction.
+#
+# tests/manifest asserts this boundary in BOTH directions: a `blueprint`-tier
+# suite that ships fails the push, and so does a shipping suite that is not
+# classified. The list below is not upkeep — it is checked.
+tests/bootstrap-contents/          export-ignore
+tests/bootstrap-identity/          export-ignore
+tests/template-source/             export-ignore
+tests/drift-in-blueprint/          export-ignore
+tests/pull-exec-bit/               export-ignore
+tests/bootstrap-gate/              export-ignore
+
+# This repo's own audit register. Same class as docs/doing/** above: it is a
+# real work item of THIS repo, not template material, and its ten relative links
+# point into docs/done/, which does not ship. A derived project inherited it and
+# failed `doc-links` on its first push with ten broken links it never wrote.
+docs/config/BLUEPRINT-AUDIT-2026-07-23.md  export-ignore

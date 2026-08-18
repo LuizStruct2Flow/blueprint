@@ -123,56 +123,78 @@ git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD | tar -x -C "$TARGET_DIR"
 # Fails LOUDLY if a template is missing: a project bootstrapped without its
 # config files looks fine until someone needs one, and the fix then is a manual
 # archaeology exercise.
-for _cfg in project_config_overview.md project_config_paths.md \
-            project_config_dod.md project_config_security.md \
-            project_config_infra.md; do
-  if [[ ! -f "$BLUEPRINT_ROOT/templates/$_cfg" ]]; then
-    echo "ERROR: $BLUEPRINT_ROOT/templates/$_cfg is missing — cannot seed the project config." >&2
+#
+# HANDOVER.md joined the same split under BUG-028. It is described as "the
+# canonical resume template a new project fills in", but what actually shipped
+# was the BLUEPRINT'S LIVE handover — its current WIP branch, its unfixed review
+# findings, and a relative link into `docs/done/`, which is export-ignore'd. So
+# every new project opened with another repo's in-flight notes as its own resume
+# doc, and its first `doc-links` run failed on the dangling link. Same defect as
+# the configs above, found the same way: the template and the live file were one
+# file.
+#
+# Entries are `templates/<src>=<dest relative to the project root>`.
+for _seed in project_config_overview.md=project_config_overview.md \
+             project_config_paths.md=project_config_paths.md \
+             project_config_dod.md=project_config_dod.md \
+             project_config_security.md=project_config_security.md \
+             project_config_infra.md=project_config_infra.md \
+             HANDOVER.md=docs/doing/HANDOVER.md \
+             BACKLOG.md=docs/backlog/BACKLOG.md \
+             BACKLOG-BUGS.md=docs/backlog/BUGS.md; do
+  _src="${_seed%%=*}"
+  _dst="${_seed#*=}"
+  if [[ ! -f "$BLUEPRINT_ROOT/templates/$_src" ]]; then
+    echo "ERROR: $BLUEPRINT_ROOT/templates/$_src is missing — cannot seed the project." >&2
     echo "       The blueprint checkout is incomplete or predates the BUG-009 split." >&2
     exit 1
   fi
-  cp "$BLUEPRINT_ROOT/templates/$_cfg" "$TARGET_DIR/$_cfg"
+  mkdir -p "$(dirname "$TARGET_DIR/$_dst")"
+  cp "$BLUEPRINT_ROOT/templates/$_src" "$TARGET_DIR/$_dst"
 done
 
 # Files the blueprint deliberately does NOT track but a project still needs.
 # AGENT_ROSTER.md is gitignored per-engineer state (A-12), so it is seeded from
 # the tracked example further down rather than copied.
 
-# --- Substitute placeholders in known files ---
-# We only substitute in files that the blueprint ships; project source code
-# will not exist yet, so no need for a broad sweep.
-TARGETS=(
-  "CLAUDE.md"
-  "AGENTS.md"
-  "AGENT_SIGNAL.md"
-  "STACK_DEFAULTS.md"
-  "docs/DoD.md"
-  "docs/OBSERVABILITY.md"
-  "docs/SECURITY.md"
-  "docs/INFRASTRUCTURE.md"
-  "docs/DOCUMENTATION.md"
-  "docs/A2BP_PLAYBOOK.md"
-  "docs/PUBLISHING.md"
-  "docs/doing/HANDOVER.md"
-  "scripts/codex-signal-watch.sh"
-  "scripts/start-codex-signal-watch.sh"
-  "scripts/start-gemini-signal-watch.sh"
-  "sonar-project.properties"
-  ".githooks/pre-push"
-  "config/README.md"
-  "project_config_overview.md"
-  "project_config_paths.md"
-  "project_config_dod.md"
-  "project_config_security.md"
-  "project_config_infra.md"
-)
+# --- Substitute placeholders ---
+#
+# BUG-028. This used to be a hand-maintained TARGETS array rewritten with a raw
+# `sed`, and both halves were wrong:
+#
+#   - The LIST went stale. `docs/way-of-working.md` and `scripts/lib/state-dir.sh`
+#     carry the placeholder and were never added, so `blueprint drift` — the
+#     command CLAUDE.md mandates at every wake — reported 5 drifted files on a
+#     zero-second-old bootstrap. The first thing a new project heard from its
+#     own tooling was a false report.
+#   - The `sed` was a FOURTH copy of the substitution. It knew nothing of
+#     `{{PROJECT_NAME_UPPER}}` (hence `docs/A2BP_PLAYBOOK.md` drifting), and it
+#     mangles a project name containing `&` or `\` — the exact defect
+#     scripts/lib/placeholders.sh exists to have fixed once (A-07 R5-F1).
+#
+# So: the same primitive pull and drift use, over the set drift compares. The
+# list comes from `blueprint files` rather than being copied here, because a
+# copied list is what went stale. Drift-clean by construction, not by upkeep.
+# shellcheck source=scripts/lib/placeholders.sh
+. "$BLUEPRINT_ROOT/scripts/lib/placeholders.sh"
 
-for f in "${TARGETS[@]}"; do
-  if [[ -f "$TARGET_DIR/$f" ]]; then
-    sed -i.bak "s/{{PROJECT_NAME}}/$PROJECT_NAME/g" "$TARGET_DIR/$f"
-    rm "$TARGET_DIR/$f.bak"
+_synced_files() {
+  bash "$BLUEPRINT_ROOT/scripts/blueprint" files | sed -n 's/^  \([^ ].*\)$/\1/p'
+}
+
+_subst_count=0
+while IFS= read -r f; do
+  [[ -n "$f" && -f "$TARGET_DIR/$f" ]] || continue
+  bp_should_substitute "$f" || continue
+  grep -q '{{PROJECT_NAME' "$TARGET_DIR/$f" 2>/dev/null || continue
+  if ! bp_substitute_in_place "$TARGET_DIR/$f" "$PROJECT_NAME"; then
+    echo "❌ Could not substitute placeholders in $f — bootstrap would ship a" >&2
+    echo "   half-templated project, and 'blueprint drift' would report it forever." >&2
+    exit 1
   fi
-done
+  _subst_count=$((_subst_count + 1))
+done < <(_synced_files)
+echo "🔤 Substituted placeholders in $_subst_count file(s)."
 
 # --- Seed the LIVE baton (BUG-019) ---
 # AGENT_SIGNAL.md is the protocol; the baton itself is untracked per-checkout
@@ -309,7 +331,11 @@ Next steps:
   3. brew bundle    (installs gitleaks + semgrep + osv-scanner for the pre-push gate)
   4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md, project_config_infra.md
   5. Create your backend/frontend src tree as needed
-  6. Optional: copy .githooks/pre-push-project.example to .githooks/pre-push-project and edit
+  6. Optional: APPEND your project guards to .githooks/pre-push-project.
+     It already ships populated — it wires the regression suites that guard the
+     blueprint-managed machinery this project runs. Copying the .example OVER it
+     would take those suites off your push path. The .example is a menu of guard
+     shapes to copy from.
 
 Blueprint sync:
   - Add the blueprint CLI to PATH (once per machine):

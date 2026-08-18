@@ -215,6 +215,10 @@ jobs:
           bash tests/marker-merge/test.sh
           bash tests/bootstrap-identity/test.sh
           bash tests/bootstrap-contents/test.sh
+          # BUG-028 — bootstraps a project and runs THAT project's whole gate.
+          # The only suite that speaks for the projects downstream, whose first
+          # push is where every defect in the export boundary actually lands.
+          bash tests/bootstrap-gate/test.sh
           bash tests/pre-push-scanners/test.sh
           bash tests/a2bp-contamination/test.sh
           bash tests/a2bp-request/test.sh

@@ -53,6 +53,7 @@ fails a test instead of passing unnoticed.
 
 | Suite | Tier | Risk if absent | Rationale for the tier |
 |---|---|---|---|
+| `bootstrap-gate` | both | A freshly bootstrapped project cannot pass its own pre-push gate and nobody here finds out — the failure lands on the new project's first push, on someone else's machine, after this repo's gate went green over the same suites passing at home (BUG-028) | The one assertion that could have caught six day-one failures, and the one nothing else makes: every other bootstrap suite checks what the archive CONTAINS, none ever ran what the new project RUNS. It must block, because `.gitattributes`, `new-project.sh` and this manifest are all on the push path and a regression in any of them reaches a commit unopposed. `blueprint` because it bootstraps, which only a blueprint can do. It is the slowest stage in the gate and the SLO names it on every run — visible, not demoted |
 | `pipeline` | both | The gate renderer could pass a failing stage, silently opening every gate in the repo | Guards fail-closed on the push path |
 | `marker-merge` | both | A pull clobbers project-owned content outside the markers | Data loss in a command run on every wake |
 | `agent-activity-bound` | both | The feed fork-bomb returns (BUG-001 pegged ~24 of 32 threads for 2.7 days) | Host-level damage, caused by code every wake runs; the race and fault-injection cases guard the same mechanism and belong with it |

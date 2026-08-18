@@ -744,6 +744,32 @@ else
   pipe_skip "bootstrap-identity" "suite absent"
 fi
 
+# BUG-028 — the end-to-end one. The three suites above assert what the archive
+# CONTAINS; none of them ever ran the thing a new project runs first. So a
+# derived project shipped for months with a gate that failed at EXIT=1 on day
+# one over the blueprint's own self-test suites, and this repo's gate stayed
+# green throughout because those suites pass at home.
+#
+# Deliberately LAST of the bootstrap group and the slowest stage in the gate: it
+# bootstraps a project from the working tree and runs that project's ENTIRE
+# pre-push gate. That is the cost of the only assertion that speaks for the
+# people downstream.
+if [ -f tests/bootstrap-gate/test.sh ]; then
+  _st_bootstrap_gate(){
+    bash tests/bootstrap-gate/test.sh || {
+      echo "❌ tests/bootstrap-gate/test.sh failed (BUG-028)."
+      echo "   A project bootstrapped from this commit cannot pass its own"
+      echo "   pre-push gate, or is not drift-clean against its own source."
+      echo "   Every project bootstrapped from here is affected, and the"
+      echo "   failure arrives on someone else's machine."
+      return 1
+    }
+  }
+  pipe_stage "bootstrap-gate · BUG-028" _st_bootstrap_gate
+else
+  pipe_skip "bootstrap-gate · BUG-028" "suite absent"
+fi
+
 # ============================================================================
 # DoD handoff checklist — rendered as STAGES, tagged [DoD-Gate] in the feed.
 #

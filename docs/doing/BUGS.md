@@ -33,8 +33,8 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
+| **BUG-028** | A freshly bootstrapped project cannot pass its own pre-push gate | S1 | Fixing | Found by the TASK-012 strip test, which needed a healthy control and did not get one: `EXIT=1` at 70 s on a zero-second-old bootstrap. **Root cause of five of the six: `.githooks/pre-push-project` ships downstream.** `MANAGED_FILES` excludes it explicitly (*"project guards, never synced"*) and `new-project.sh` tells the operator to copy the `.example` — but `.gitattributes` never `export-ignore`s it, so `git archive` carries the blueprint's own 34 KB guard into every derived project. **Every derived project's gate is the blueprint's self-test suite**, including `bootstrap-contents`, `bootstrap-identity`, `template-source` and `drift-in-blueprint` — four suites that test blueprint-only machinery and cannot pass anywhere else. The sixth, `pull-exec-bit`, reports itself **vacuous** downstream because placeholders are already substituted. Separately, `blueprint drift` reports **5 drifted files on a zero-second-old bootstrap** — files carrying `{{PROJECT_NAME}}` in prose that are missing from the substitution targets. **Same shape as A-22 and BUG-004**: the gate looks armed and is measuring the wrong thing, and nobody notices because the failure arrives on someone else's machine. |
 
-*(Empty.)*
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

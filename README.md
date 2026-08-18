@@ -88,8 +88,14 @@ After bootstrap:
    `project_config_dod.md`, `project_config_security.md`,
    `project_config_infra.md`
 5. Start adding code under `backend/`, `frontend/`, etc.
-6. Optional: copy `.githooks/pre-push-project.example` to
-   `.githooks/pre-push-project` and add your project-specific guards
+6. Optional: **append** your project-specific guards to the bottom of
+   `.githooks/pre-push-project`. **Do not copy the `.example` over it** — that
+   file ships already populated, wiring the regression suites that guard the
+   blueprint-managed machinery your project runs (`blueprint pull`/`drift`/
+   `a2bp`, `signal-set.sh`, the feed, the hooks, the gate renderer). Overwriting
+   it takes 33 suites off your push path in one command.
+   `.githooks/pre-push-project.example` is a menu of guard *shapes* to copy
+   from, not a replacement file (BUG-028)
 
 ---
 
@@ -113,7 +119,8 @@ blueprint/
 │   ├── pre-push                    ← generic security + build/lint/format/coverage gate
 │   ├── commit-msg                  ← rejects a commit that does not name its backlog item
 │   ├── pre-commit                  ← refuses a commit on the BLUEPRINT's main (inert in derived projects)
-│   └── pre-push-project.example    ← copy → edit for project-specific guards
+│   ├── pre-push-project            ← ships populated: wires the regression suites; APPEND your guards
+│   └── pre-push-project.example    ← a menu of guard shapes to copy FROM (never over)
 ├── .claude/
 │   └── settings.json               ← generic AWS / git / shell permission allow-list
 ├── scripts/
@@ -297,9 +304,14 @@ it. Current contents:
 - The five `project_config_*.md` files (`overview`, `paths`, `dod`,
   `security`, `infra`) — these are *templates* seeded once at bootstrap
   and then evolve with the project
-- `.githooks/pre-push-project` — project-specific guards
-- `AGENT_SIGNAL.md`, `docs/doing/HANDOVER.md` — stamped at bootstrap, then
-  evolve session-by-session
+- `.githooks/pre-push-project` — **ships populated** at bootstrap (it wires the
+  regression suites), then project-owned: append your guards, and `blueprint
+  pull` will never overwrite them. "Never synced" means pull leaves it alone,
+  not that you start from an empty file (BUG-028)
+- `AGENT_SIGNAL.md` — stamped at bootstrap, then evolves session-by-session
+- `docs/doing/HANDOVER.md`, `docs/backlog/BACKLOG.md`, `docs/backlog/BUGS.md` —
+  seeded from `templates/` at bootstrap (the blueprint's own copies hold its
+  real work and are export-ignore'd), then evolve session-by-session
 - Everything under `backend/`, `frontend/`, `infra/`, `docs/doing/`,
   `docs/waiting-acceptance/`, `docs/done/`, `docs/backlog/`,
   `docs/config/`, `docs/mocks/`, `docs/requirements/`

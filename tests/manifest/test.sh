@@ -100,10 +100,19 @@ fi
 # 2. EVERY CLASSIFIED SUITE EXISTS — a manifest that names ghosts would let a
 #    deleted suite look covered.
 # ===========================================================================
+# A `blueprint`-tier suite drives machinery that exists ONLY here —
+# new-project.sh, templates/, .blueprint-root. It is export-ignore'd, so in a
+# DERIVED project it is legitimately absent and this manifest still ships and
+# still runs. `.blueprint-root` is the same positive marker `drift` uses.
+IN_BLUEPRINT=0
+[ -f "$ROOT/.blueprint-root" ] && IN_BLUEPRINT=1
+
 ghosts=""
-while IFS="$(printf '\t')" read -r s _ _ _; do
+while IFS="$(printf '\t')" read -r s t _ _; do
   [ -n "$s" ] || continue
-  [ -f "$ROOT/tests/$s/test.sh" ] || ghosts="$ghosts $s"
+  [ -f "$ROOT/tests/$s/test.sh" ] && continue
+  if [ "$t" = "blueprint" ] && [ "$IN_BLUEPRINT" -eq 0 ]; then continue; fi
+  ghosts="$ghosts $s"
 done <<EOF
 $(rows)
 EOF
@@ -114,17 +123,95 @@ else
 fi
 
 # ===========================================================================
+# 2b. THE EXPORT BOUNDARY, BOTH DIRECTIONS (BUG-028).
+#
+#     A tier is a claim about WHERE a suite runs, and "blueprint only" is such
+#     a claim — but it was enforced by nothing at all. `tests/bootstrap-*`,
+#     `tests/template-source`, `tests/drift-in-blueprint` and
+#     `tests/pull-exec-bit` all shipped to every derived project, wired into its
+#     gate by `.githooks/pre-push-project`, testing machinery that cannot exist
+#     there. Five of the six day-one failures. Nobody saw it because the
+#     failure happens on someone else's machine, after the blueprint's own gate
+#     has gone green over the same suites passing at home.
+#
+#     Asserted against a REAL `git archive`, the way template-source is: the
+#     export BEHAVIOUR is what matters, and a rule that is present but not
+#     taking effect is exactly the failure mode being guarded. `git check-attr`
+#     was tried first and is unusable here — it reports `unspecified` for a
+#     directory pattern like `templates/` even though `git archive` genuinely
+#     drops it, so it would have called a correct boundary broken.
+#
+#     The archive is taken of the WORKING TREE, not of HEAD, through a throwaway
+#     index. HEAD cannot answer for a boundary the author has written and not
+#     yet committed, which is the one moment this assertion is useful.
+#
+#     The reverse direction matters as much: a suite that is NOT blueprint-tier
+#     must actually reach derived projects. Export-ignoring one is a silent
+#     coverage cut for every project but this one — the BUG-005 defect, hidden
+#     one level further down.
+#
+#     `tests/bootstrap-gate` asserts the consequence end-to-end (the archive
+#     really does produce a project whose gate passes). This one names the file.
+# ===========================================================================
+if [ "$IN_BLUEPRINT" -eq 1 ]; then
+  # BUG-014 — the gate runs this suite with GIT_DIR exported, and `git add`
+  # below would then write into whatever that names rather than this repo.
+  unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY
+  _tmpidx="$(mktemp)"
+  _listing="$(mktemp)"
+  # git refuses a zero-length index file, so hand it a PATH, not an empty file.
+  rm -f "$_tmpidx"
+  (
+    cd "$ROOT" || exit 1
+    # `git add -A` honours .gitignore, so this tree omits the handful of files
+    # that are tracked AND ignored. Only `tests/` is read from the listing, and
+    # nothing under it is ignored, so that does not affect the assertion.
+    GIT_INDEX_FILE="$_tmpidx" git add -A 2>/dev/null || exit 1
+    _tree="$(GIT_INDEX_FILE="$_tmpidx" git write-tree 2>/dev/null)" || exit 1
+    [ -n "$_tree" ] || exit 1
+    git archive --format=tar "$_tree" 2>/dev/null | tar -t 2>/dev/null
+  ) >"$_listing"
+
+  if [ ! -s "$_listing" ]; then
+    fail "#2b could not archive the working tree — the export boundary is unverified, not verified"
+  else
+    shipped_bp=""
+    withheld=""
+    while IFS="$(printf '\t')" read -r s t _ _; do
+      [ -n "$s" ] || continue
+      [ -d "$ROOT/tests/$s" ] || continue
+      if grep -q "^tests/$s/" "$_listing"; then ships=1; else ships=0; fi
+      if [ "$t" = "blueprint" ] && [ "$ships" -eq 1 ]; then
+        shipped_bp="$shipped_bp $s"
+      elif [ "$t" != "blueprint" ] && [ "$ships" -eq 0 ]; then
+        withheld="$withheld $s"
+      fi
+    done <<EOF
+$(rows)
+EOF
+    if [ -n "$shipped_bp" ]; then
+      fail "#2b blueprint-only suites DO ship, so they run in every derived project's gate against machinery that cannot be there:$shipped_bp"
+    elif [ -n "$withheld" ]; then
+      fail "#2b suites classified as shipping are export-ignore'd, so every derived project silently loses them:$withheld"
+    else
+      pass "#2b the export boundary matches the manifest in both directions"
+    fi
+  fi
+  rm -f "$_tmpidx" "$_listing"
+fi
+
+# ===========================================================================
 # 3. TIER IS ONE OF THE THREE LEGAL VALUES.
 # ===========================================================================
 badtier=""
 while IFS="$(printf '\t')" read -r s t _ _; do
   [ -n "$s" ] || continue
-  case "$t" in pre-push|CI|both) ;; *) badtier="$badtier $s($t)" ;; esac
+  case "$t" in pre-push|CI|both|blueprint) ;; *) badtier="$badtier $s($t)" ;; esac
 done <<EOF
 $(rows)
 EOF
 [ -n "$badtier" ] && fail "#3 illegal tier values:$badtier" \
-                  || pass "#3 every tier is pre-push, CI or both"
+                  || pass "#3 every tier is pre-push, CI, both or blueprint"
 
 # ===========================================================================
 # 4. EVERY BLOCKING SUITE IS ACTUALLY INVOKED BY THE GATE.
@@ -134,7 +221,9 @@ EOF
 notrun=""
 while IFS="$(printf '\t')" read -r s t _ _; do
   [ -n "$s" ] || continue
-  case "$t" in pre-push|both) ;; *) continue ;; esac
+  # `blueprint` is `both` plus "does not ship" (see #2b) — it still blocks the
+  # push HERE, so it is still required to be invoked by the gate.
+  case "$t" in pre-push|both|blueprint) ;; *) continue ;; esac
   if ! live_cmds "$GATE" "$HOOK" | grep -qE "(^|[^#[:alnum:]_/])bash +tests/$s/[a-z0-9._-]+\\.sh"; then
     notrun="$notrun $s"
   fi
@@ -154,7 +243,7 @@ if [ -f "$CI" ]; then
   ci_missing=""
   while IFS="$(printf '\t')" read -r s t _ _; do
     [ -n "$s" ] || continue
-    case "$t" in CI|both) ;; *) continue ;; esac
+    case "$t" in CI|both|blueprint) ;; *) continue ;; esac
     live_cmds "$CI" | grep -qE "bash +tests/$s/[a-z0-9._-]+\\.sh" \
       || ci_missing="$ci_missing $s"
   done <<EOF

@@ -39,6 +39,32 @@ bp_placeholder_upper() {
   printf '%s' "$1" | tr 'a-z-' 'A-Z_'
 }
 
+# bp_should_substitute PATH → 0 if forward substitution may be applied.
+#
+# BUG-028. The files that IMPLEMENT or DOCUMENT the substitution carry the
+# placeholder tokens as CODE AND PROSE, not as template slots — this file's own
+#   local TL='{{PROJECT_NAME}}' TU='{{PROJECT_NAME_UPPER}}'
+# is the primitive itself. Substituting it produces `local TL='acme-flow'` and
+# the tool silently stops recognising the token it exists to replace.
+#
+# `scripts/blueprint` and `scripts/new-project.sh` were already excluded for
+# exactly this reason, and the list simply never grew when the logic moved into
+# libraries. The consequence was live: on a zero-second-old bootstrap `drift`
+# reported `scripts/lib/placeholders.sh` and `scripts/lib/contamination.sh` as
+# drifted and offered `blueprint pull` — which would have corrupted them.
+#
+# It lives HERE, beside the primitive, so bootstrap, pull, drift and a2bp share
+# ONE answer. Three near-copies of the substitution itself had already drifted
+# apart once (A-07 R5-F1); a per-caller copy of "and which files are exempt"
+# fails the same way.
+bp_should_substitute() {
+  case "$1" in
+    *scripts/blueprint|*scripts/new-project.sh) return 1 ;;
+    *scripts/lib/placeholders.sh|*scripts/lib/contamination.sh) return 1 ;;
+  esac
+  return 0
+}
+
 # bp_replace_literal STRING FIND REPLACE → stdout, no trailing newline.
 # Every occurrence of FIND is replaced by REPLACE, both treated as literal
 # bytes. `${s%%"$find"*}` and `${s#*"$find"}` with FIND quoted are literal

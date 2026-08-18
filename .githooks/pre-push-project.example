@@ -1,7 +1,16 @@
 #!/bin/sh
-# Project-specific pre-push guards. Copy to .githooks/pre-push-project
-# (drop the .example suffix) and edit. Sourced by .githooks/pre-push if
-# present. NOT tracked under blueprint sync — your project owns this file.
+# Project-specific pre-push guards — a MENU OF SHAPES to copy FROM.
+#
+# APPEND what you need to the bottom of .githooks/pre-push-project. Do NOT copy
+# this file over it: `pre-push-project` ships already populated, wiring the
+# regression suites that guard the blueprint-managed machinery your project runs
+# (blueprint pull/drift/a2bp, signal-set.sh, the feed, the hooks, the gate
+# renderer). Overwriting it takes all of them off your push path in one command,
+# and the gate keeps printing PASSED over the remainder — which is BUG-004 and
+# A-22 exactly, so it would not look like a mistake (BUG-028).
+#
+# It is excluded from blueprint sync on purpose: your project owns the bottom of
+# it, so `blueprint pull` must never overwrite it.
 #
 # Examples (uncomment and adapt):
 

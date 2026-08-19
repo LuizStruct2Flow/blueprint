@@ -4,15 +4,15 @@ Run 2026-08-19 by Eto (Orchestrator). Method is **construction**, the inverse of
 TASK-012 Part 1's deletion: bootstrap a project, install the full ruflo CLI, and
 let the failures be the coupling map.
 
-## Verdict: the socket is real. On ruflo, **no verdict** — see Part 2.
+## Verdict: the socket is real. **Ruflo: DO NOT ADOPT** — see Part 3.
 
-> **Part 1's disqualifier was withdrawn the same day.** It rested on the
-> baton's `Holder` row being a requirement; the founder corrected that the
-> names are a mechanism for forcing delegation to fresh specialized agents,
-> and anonymous workers serve that just as well. Read Part 2 before acting on
-> anything below it. The socket finding, the two couplings, and every
-> measurement of what the install writes are unaffected — none of them rested
-> on that premise.
+> **Read Part 3 first.** Part 1's disqualifier was wrong and was withdrawn in
+> Part 2. Part 3 ran the measurement that was actually missing — against the
+> founder's real criterion, on local models — and reached a firm verdict on
+> different grounds: **ruflo does not execute work at all.** It allocates
+> agent slots and defers execution to Claude Code, and three of its status
+> surfaces report things that are not true, including fabricated spend.
+
 
 Two findings, and they are independent:
 
@@ -336,3 +336,161 @@ So the position is:
 
 **This needs a founder budget decision before it runs.** That is the blocking
 item, and it is a decision rather than an engineering step.
+
+
+---
+
+# Part 3 — the delegation test, run against the real criterion (2026-08-20)
+
+Part 2 withdrew the verdict and named the missing measurement: **does ruflo
+dispatch work to fresh specialized agents, observably?** The founder then removed
+the blocker — quota rather than dollars is the gate, and a local Ollama fleet is
+available — so the test ran against `qwen3-coder:30b` on `localhost:11434`. No
+quota, no spend.
+
+## Verdict: DO NOT ADOPT. Ruflo does not execute work at all.
+
+Measured, not inferred.
+
+## Setup, which succeeded
+
+Ollama is a **first-class provider** in ruflo — it appears in `providers list`,
+and `providers test` returns `PASS Ollama: Connected at http://localhost:11434`.
+Configuration persists cleanly to `claude-flow.config.json`:
+
+```json
+{ "name": "ollama", "enabled": true,
+  "model": "qwen3-coder:30b", "baseUrl": "http://localhost:11434" }
+```
+
+So the local-model path is real as far as configuration goes. Everything below
+happens *despite* that working.
+
+## What `swarm start` actually does
+
+Given a real objective — *"Write a POSIX sh function that validates a semver
+string, and a test for it"* — ruflo printed a deployment plan for eight agents
+(coordinator, architect, 3 × coder, 2 × tester, reviewer), then:
+
+```
+[OK] Swarm swarm-mt0nfude initialized with 8 agent slots
+  This CLI coordinates agent state. Execution happens via:
+  - Claude Code Agent tool (interactive)
+  - claude -p (headless background)
+  - hive-mind spawn --claude (autonomous)
+```
+
+**It allocates slots and returns.** Measured afterwards:
+
+| Signal | After |
+|---|---|
+| agents total | 0 |
+| sessions | 0 |
+| `.claude-flow/agents/` | 0 entries |
+| tokens used | `unknown` |
+| files written | none |
+| **reported progress** | **5.0%** |
+
+Every named execution route is Claude Code. **No route runs a local model**, so
+the provider configuration that succeeded above is not used for work — and the
+tiering idea cannot be served by ruflo's swarm, because ruflo's swarm does not
+run models.
+
+This is Part 2 of TASK-012 read correctly at last. *"CLAUDE-FLOW = ORCHESTRATOR
+/ CODEX = EXECUTOR"* was literal, and every reader of it so far — including this
+trial's Part 1 — treated "orchestrator" as meaning it runs agents. It means it
+keeps their bookkeeping.
+
+**Against the founder's criterion the answer is not "it delegates differently".
+It is that nothing delegates.** The orchestrator does not absorb the work; no
+one does it. And the status display reports 5% progress on it.
+
+## Correction to Part 1's staleness finding
+
+Part 1 reported that `swarm-activity.json` read `coordination_active: false`
+while a swarm was live, and called ruflo's on-disk state untrustworthy.
+
+**That was backwards.** The file was **accurate** — nothing was coordinating,
+because nothing ever coordinates. The untrustworthy half was the CLI: *"Swarm
+initialized successfully"*, a seven-worker daemon table, and `Elapsed Time: 24s`
+for work that had not begun. The files were honest and the presentation was not.
+
+## The disqualifying finding: fabricated usage and cost
+
+`providers usage` on this installation reports:
+
+| Provider | Requests | Tokens | Est. Cost |
+|---|---|---|---|
+| Anthropic | 12,847 | 4.2M | $12.60 |
+| OpenAI (LLM) | 3,421 | 1.1M | $5.50 |
+| OpenAI (Embed) | 89,234 | 12.4M | $0.25 |
+| Transformers.js | 234,567 | 45.2M | $0.00 |
+| **Total** | **340,069** | **62.9M** | **$18.35** |
+
+plus *"Savings from local embeddings: $890.12"*.
+
+**Every number is impossible.** This project was created today, `HOME` was
+sandboxed with no credentials, and `providers test` had reported Anthropic,
+OpenAI and Google as *"Not configured (no API key found)"* minutes earlier.
+Meanwhile **Ollama — the only provider actually connected — does not appear in
+the table at all**, and Ollama's `/api/ps` returns `{"models":[]}`, confirming no
+request ever reached it.
+
+Nothing labels these as sample data. A `Mock` provider exists and is explicitly
+marked *"Dev only"* in `providers list`, which shows the tool knows how to label
+fake things and did not do so here.
+
+**For this blueprint that is disqualifying on its own terms.** CLAUDE.md §"Cost
+is a main concern" requires every billable path to log *actual* spend per
+invocation so the agent can answer "how much did we spend" without ferrying
+numbers from a vendor dashboard. **A dashboard that invents its numbers is worse
+than no dashboard**, because it is trusted. Had the founder not lifted the cost
+gate, this trial might have reported ruflo's own fabricated $18.35 as evidence
+about spend.
+
+## The pattern across three honesty findings
+
+| Claim | Reality |
+|---|---|
+| "Hooks: 7 hook types enabled in settings.json" | enabled **zero**, file byte-identical |
+| "Overall Progress: 5.0%" | zero agents, zero tokens, zero files |
+| "$18.35 spent across 340,069 requests" | **no provider was ever configured** |
+
+Each alone is a rough edge. Together they are a consistent posture: **the
+interface reports the state the system is designed to have, not the state it is
+in.** That is the precise failure BUG-027 and BUG-031 were about here — a feed
+that stayed blank while work happened, and a CI badge that stopped meaning
+anything — and it is the one thing this repo is least able to tolerate in a
+dependency.
+
+## What stands, and what this does not say
+
+**Unaffected by all of the above:**
+
+- **The socket is real.** Fresh bootstrap green at 170.9 s, still green with the
+  full ruflo CLI installed at 175.9 s. That finding never depended on ruflo being
+  any good.
+- `tests/state-dir` (**TASK-015**), the `Bash(node .claude/*)` grant, the
+  machine-global `~/.claude/CLAUDE.md` write, and both corrections in ruflo's
+  favour from Part 1 (no project `CLAUDE.md` collision, `settings.json` merged
+  not clobbered).
+
+**Not claimed:** only `swarm start` was exercised. `hive-mind spawn --claude` and
+`autopilot` were not run. They cannot change the answer to the founder's
+question — every route ruflo names is Claude Code, so none of them puts work on a
+local model — but they might execute where `swarm start` does not, and this
+report does not assert otherwise.
+
+**Not claimed:** that ruflo is useless. It is a coordination-state and planning
+layer that expects Claude Code to execute. A team without an executor might want
+exactly that. **This blueprint already has the executor**, so what ruflo adds
+here is a planning layer, 110 files, a daemon, and three surfaces that report
+things that are not true.
+
+## Consequence for FEATURE-007
+
+The tiered roster **cannot be built on ruflo**, and does not need to be. Ollama
+is reachable, the roster's `Backing agent` column already accepts a local model,
+and what is missing is a signal watcher — roughly the size of the existing Codex
+one. FEATURE-007 stands on its own and is now the cheaper path to the founder's
+actual goal.

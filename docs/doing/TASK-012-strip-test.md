@@ -238,3 +238,154 @@ the working half, leaves the load-bearing half uncovered, and charges Node,
 
 **Both follow-ups Part 1 named remain worth doing regardless** — §7G moving out
 of the core DoD gate, and `drift`/`pull` learning the profile.
+
+
+---
+
+# Part 3 — revalidation (2026-08-19)
+
+**Reopened by the founder on the day it was filed.** Both halves were run
+competently and their *measurements* stand. The **inference** drawn from them
+does not: the spike measured whether orchestration comes **off**, and concluded
+something about whether another orchestrator can go **on**. Those are different
+properties and only the first was tested.
+
+## The invalid step
+
+The brief states the inference it intends to make (`doing/BACKLOG.md`
+§"TASK-012 — how to run it, and why not a fork"):
+
+> If a no-orchestration bootstrap is coherent, the blueprint is a product with a
+> plug-in orchestration socket, and ruflo is a candidate to fill it.
+
+The antecedent was established. **The consequent does not follow.**
+
+A socket is two properties — a thing detaches, *and* a different thing attaches
+in its place. The strip test ran a project with **no orchestrator at all** and
+drove a work item through it **by hand**. That is a clean measurement of
+detachability and says nothing about attachment. Nothing was ever plugged in.
+
+So the honest reading of Part 1 is:
+
+| Claimed | Actually measured |
+|---|---|
+| plug-in orchestration socket | the layer **detaches**; one hard coupling (§7G), one suite, three doc links |
+| ruflo is a candidate to fill it | *untested — no orchestrator was attached* |
+
+**Three things a detach-only test cannot see**, all of which decide the
+adoption:
+
+1. **§7G's fix is different under attachment.** With no orchestrator there is no
+   baton, so `pipe_skip` looks sufficient. With a foreign orchestrator there
+   *is* coordination state — it is simply not ours. The real question is whether
+   ruflo's state can be **translated into the baton contract** (`Holder` /
+   `State` / `Task`), and that is a mapping problem, not a skip.
+2. **The feed becomes two writers, not zero.** `lib/feed.sh` and
+   `log-activity.sh` were correctly reclassified out of orchestration and so
+   stayed in the seam project. A foreign orchestrator brings its own
+   observability — so attachment *creates* the two-records-of-one-fact defect
+   that Part 2's Q3 rejected ruflo for. Detaching never surfaces this, because
+   with nothing attached there is only one writer.
+3. **Who runs the gate.** The seam project's gate was invoked the way it always
+   is. Under attachment the orchestrator invokes it, and whether the DoD stages
+   still receive the inputs they assume is unmeasured.
+
+## The second wrong assumption, inherited by both halves
+
+The brief also fixed the evaluation topology in advance: **"Evaluate on the lite
+path only"** — chosen because the full CLI writes `CLAUDE.md`, a `MANAGED_FILES`
+entry that `blueprint pull` owns.
+
+That constraint is **incompatible with the socket question it was asked
+alongside.** Filling the socket means *being* the orchestrator, and ruflo is an
+orchestrator only as the full CLI. The lite path is an add-on by construction.
+So Part 2 evaluated ruflo sitting **beside** our orchestration while Part 1 was
+asking what could **replace** it.
+
+The consequence, question by question:
+
+- **Q1 — "cannot see a `codex exec` we launched."** The finding is true and
+  well-evidenced. **The conclusion drawn from it does not transfer.** It holds
+  only because *our* scripts spawn Codex; `start-all-watchers.sh` detaches with
+  `nohup` and fires `codex exec` outside any Claude Code hook. An orchestrator
+  that owns the dispatch sees what it dispatched, by construction. Q1 measured
+  a dispatcher's inability to observe a dispatcher it does not own — which is
+  not a defect of ruflo, and not the configuration under consideration.
+- **Q2 — "does the lite path stay out of `CLAUDE.md`?"** Moot. Under attachment
+  the full path *is* the path, and the `CLAUDE.md` collision is a real
+  integration cost to price rather than a reason the question was closed.
+- **Q3 — "does the dashboard replace `tail -f`?"** This is the question that
+  actually decides an attachment, and it was answered against the wrong
+  configuration: `ruflo-observability` is pinned to a release not on the lite
+  path, so it was assessed from source without ever being the thing running.
+
+**Q1 alone was declared decisive.** With Q1's inference withdrawn, nothing
+decides it.
+
+## What survives, unchanged
+
+These are measurements, not inferences, and the reopen does not touch them:
+
+- **The control is not healthy — a fresh bootstrap cannot pass its own gate**,
+  six of 39 suites failing on day one, root-caused to `.githooks/pre-push-project`
+  shipping downstream without an `export-ignore`. Raised as **BUG-028**.
+  Entirely independent of ruflo, and the most valuable thing the spike produced.
+- **The two premise corrections**: `feed.sh` / `log-activity.sh` are the
+  observability lane, not orchestration (three of four new failures came from
+  that single misclassification); and the set is ~7,100 of 51,100 tracked lines
+  (**~14%**), not 40% — the denominator differed, not the measurement.
+- **§7G is an orchestration assertion living inside the core DoD gate.** True
+  under detach and under attach; only the *remedy* differs.
+- **`drift` has no concept of opting out.** A profiled project is permanently
+  drifted against its own source and one `blueprint pull --yes` away from having
+  the layer restored. **Attachment makes this worse, not better** — a restored
+  layer would then collide with the attached orchestrator rather than merely
+  reappear.
+- **The `disler` alternative stays rejected.** It is a pure observability add-on
+  by design, so the attach/detach distinction does not apply to it, and its
+  `SubagentStart`/`SubagentStop` bookends are the approach BUG-027 replaced.
+
+## What does not survive
+
+| Conclusion | Status |
+|---|---|
+| "the blueprint is a product with a plug-in orchestration socket" | **downgraded** — detachable, proven; attachable, **unmeasured** |
+| "ruflo: DO NOT ADOPT" | **withdrawn** — rested on Q1, and Q1 assumed a topology the founder does not want |
+| "evaluate on the lite path only" | **retired as a constraint** — it excludes the only form that answers the question |
+
+Nothing here says ruflo *should* be adopted. It says the spike did not test the
+proposal that is actually on the table, so there is no verdict yet — the earlier
+one was answering a different question.
+
+## What is needed instead
+
+**[TASK-014](../backlog/BACKLOG.md) — the attachment trial.** Same falsifiable
+method as Part 1, run in the other direction: bootstrap a throwaway project,
+install the full ruflo CLI, mount the lifecycle and the DoD gate **on top of
+it**, and push one real work item through. Let the failures be the map, exactly
+as the strip test did.
+
+**The method note in Part 1 remains right and is reinforced**: a profile the
+sync CLI understands, not a fork. And the two follow-ups it named are still
+worth doing regardless of the trial's outcome — §7G out of the core gate, and
+`drift`/`pull` learning the profile. Those are the socket's *other* half; until
+they exist there is nothing for an orchestrator to attach to.
+
+## The process lesson
+
+**The spike's method was falsifiable and its brief was not.** Part 1 opened by
+insisting on deletion over construction, *"because building a `MANAGED_FILES`
+profile first would have presumed the seam exists"* — good discipline, correctly
+applied. But the brief it was executing had already presumed the conclusion in
+its own inference step, and had pre-committed the second half to a topology
+(`lite path only`) that could not answer the first half's question.
+
+Both halves then verified against the brief rather than against the decision the
+founder was actually facing. **A rigorous method inside a brief that assumed its
+answer produces confident, well-evidenced, wrong conclusions** — which is harder
+to catch than a sloppy run, because every individual measurement holds up. It
+took the founder reading the verdict and saying he did not see the problem.
+
+Same shape as the lifecycle triggers after the PR rule landed (CLAUDE.md
+§"Documentation Structure"): the mechanism was fine, the assumption underneath it
+had quietly stopped being true, and nothing failed loudly.

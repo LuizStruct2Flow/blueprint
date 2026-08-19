@@ -17,7 +17,23 @@
 #
 # Defensive by design: a hook must NEVER fail the tool call. Every branch falls
 # back to a best-effort line and exits 0. No jq → degrades to the raw event name.
-set -uo pipefail
+set -u
+# `pipefail` is a bash-ism, NOT POSIX, and it is requested here rather than set
+# outright because this file is the one script in scripts/ that is deliberately
+# also run by a plain `sh` (see the roster-lookup note below, and tests #5/#6).
+# A `sh` without pipefail does not ignore the option — it errors and EXITS 2,
+# taking the hook down on line 20, before a single defensive branch can run. The
+# most defensive script in the repo was killed by its own first statement.
+#
+# It survived every developer machine and failed on every CI runner, which is
+# the whole lesson: this machine's dash 0.5.12 accepts `pipefail`, the runner's
+# does not, and the local shell being *called* dash is not evidence that it
+# behaves like the runner's. BUG-031.
+#
+# The subshell is what makes the probe safe: an unsupported option kills the
+# subshell, not this script.
+# shellcheck disable=SC3040
+if ( set -o pipefail ) 2>/dev/null; then set -o pipefail; fi
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 

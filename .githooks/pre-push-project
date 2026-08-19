@@ -191,6 +191,23 @@ else
   pipe_skip "codex-persona-label · BUG-021" "suite absent"
 fi
 
+# BUG-027 — delegated work is visible in the feed, under its persona. ~2.3s
+# (it drives a real supervisor over a real subagent transcript).
+if [ -f tests/subagent-feed/test.sh ]; then
+  _st_subfeed(){
+    bash tests/subagent-feed/test.sh || {
+      echo "❌ tests/subagent-feed/test.sh failed (BUG-027)."
+      echo "   A subagent transcript is 100% isSidechain — the feed must stream it,"
+      echo "   labelled with the persona from the roster, while the SESSION"
+      echo "   transcript still drops sidechain records."
+      return 1
+    }
+  }
+  pipe_stage "subagent-feed · BUG-027" _st_subfeed
+else
+  pipe_skip "subagent-feed · BUG-027" "suite absent"
+fi
+
 # BUG-022 — a dispatch into silence is visible. ~8s (it runs real supervisors).
 if [ -f tests/watcher-liveness/test.sh ]; then
   _st_wlive(){

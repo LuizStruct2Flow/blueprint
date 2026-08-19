@@ -194,6 +194,7 @@ jobs:
           bash tests/commit-msg-gate/test.sh
           bash tests/commit-subjects/test.sh
           bash tests/codex-persona-label/test.sh
+          bash tests/subagent-feed/test.sh
           bash tests/watcher-liveness/test.sh
           bash tests/branch-guard/test.sh
           bash tests/dod-gate/test.sh

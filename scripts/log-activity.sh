@@ -40,6 +40,22 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/feed.sh
 . "$repo_root/scripts/lib/feed.sh"
 
+# BUG-027 — the persona is resolved through the ONE roster parser, shared with
+# scripts/agent-activity.sh. Sourced only if readable: a hook must never fail the
+# tool call it observes, so a tree without the lib loses the persona name and
+# keeps the line.
+# NOT SOURCED HERE. Sourcing runs the lib in THIS shell, so an `exit` anywhere in
+# it — today, or after some future edit — takes the hook down with it, and a hook
+# that dies fails the tool call it was only supposed to observe. the cross-provider review caught
+# that: absent, unreadable and non-zero-return all degraded safely, and a bare
+# `exit` did not.
+#
+# The lookup is done in a SUBSHELL at the point of use instead (see below), so
+# the lib cannot reach this process at all. Costs one fork per dispatch bookend,
+# twice per subagent, which is nothing against the risk of breaking dispatch to
+# improve logging.
+ROSTER_LIB="$repo_root/scripts/lib/roster.sh"
+
 : "${AGENT_FEED_MAX_LINES:=4000}"
 : "${AGENT_FEED_KEEP_LINES:=2000}"
 export AGENT_FEED_MAX_LINES AGENT_FEED_KEEP_LINES
@@ -57,10 +73,61 @@ event="$(extract '.hook_event_name')"; [ -n "$event" ] || event="Subagent"
 summary="$(extract '.agent_description // .description // .prompt // .last_message // .reason')"
 summary="$(printf '%s' "$summary" | tr -d '\n' | cut -c1-110)"
 
-# Label by the roster persona when the payload names the agent (so the feed
-# shows "[matthias - Claude Code]", matching AGENT_ROSTER.md), else env, else
-# generic. This is what makes .claude/agents/<persona>.md real in the feed.
+# Label by the roster persona named in the DISPATCH TEXT, else the agent type,
+# else env, else generic.
+#
+# BUG-027: this used to read `.subagent_type`, with a comment claiming it was
+# the roster persona. It is the agent TYPE — `general-purpose` for every persona
+# on this fleet — so every bookend line and every .subagent-map row carried the
+# same string, and the map is what the live feed labels streamed subagent output
+# from. The persona is in the description; bp_roster_name_in_text is the same
+# lookup agent-activity.sh uses on the transcript's meta file, so the bookends
+# and the streamed lines cannot disagree.
 plabel="$(extract '.subagent_type // .agent_type // .agent_name')"
+if [ -r "$ROSTER_LIB" ]; then
+  # The subshell is one guard and the timeout is the other; neither is style.
+  #
+  # The subshell keeps an `exit` inside the lib out of THIS process. It does not
+  # keep a HANG out: the reviewer replaced the lib with an infinite loop and the hook
+  # returned rc=124 under an external 2s bound, having logged nothing and written
+  # no map row. Every other broken-library mode already degraded correctly —
+  # absent, unreadable, non-zero return, empty output, `exit`, `set -e` plus a
+  # failure, and a syntax error. Only hanging escaped, and a hook that hangs is
+  # worse than one that dies, because it stalls the tool call it was only there
+  # to observe.
+  #
+  # `timeout` is NOT guaranteed present — macOS ships none in the base system,
+  # which is why the Brewfile pulls coreutils for `gtimeout`. That question is
+  # already answered once, by bp_staleness_timeout_cmd, so it is answered there
+  # rather than a second time here. staleness.sh is itself read in a subshell,
+  # for exactly the reason roster.sh is.
+  #
+  # NO PROVIDER → NO LOOKUP. Deliberate, and it is the trade the whole guard is
+  # about: the label falls back to the agent type, which is legible and merely
+  # unspecific, whereas an unbounded lookup can stall a dispatch indefinitely. A
+  # wrong label is survivable; a hung tool call is not. It says so on stderr, not
+  # in the feed — Claude Code surfaces hook stderr under --debug and discards it
+  # otherwise, so the choice is discoverable without a line of noise per dispatch.
+  #
+  # `bash -c` rather than a bare subshell because `timeout` needs a process to
+  # signal, and it is what the lib is written in: this hook is also invoked as
+  # `sh`, and under dash the lib's parameter expansions are a syntax error, so
+  # the lookup could never have resolved anything there.
+  : "${BP_ROSTER_LOOKUP_TIMEOUT:=2}"
+  tcmd="$(
+    . "$repo_root/scripts/lib/staleness.sh" >/dev/null 2>&1 || exit 0
+    bp_staleness_timeout_cmd 2>/dev/null || exit 0
+  )"
+  if [ -n "${tcmd:-}" ]; then
+    persona="$("$tcmd" "$BP_ROSTER_LOOKUP_TIMEOUT" bash -c '
+        . "$1" 2>/dev/null || exit 0
+        bp_roster_name_in_text "$2" "$3" 2>/dev/null || exit 0
+      ' bp-roster-lookup "$ROSTER_LIB" "$repo_root" "$summary" 2>/dev/null)"
+    [ -n "${persona:-}" ] && plabel="$persona"
+  else
+    printf '[log-activity] no timeout(1)/gtimeout(1) available — skipping the roster lookup; labelling by agent type\n' >&2
+  fi
+fi
 label="${plabel:-${AGENT_FEED_LABEL:-subagent}}"
 ts="$(date +%H:%M:%S)"
 
@@ -68,7 +135,10 @@ ts="$(date +%H:%M:%S)"
 # subagent_feed) can label the STREAMED internal lines from
 # <session>/subagents/agent-<agent_id>.jsonl with the persona name, not just
 # bracket them with the dispatch/finish markers below. agent_id matches the
-# transcript filename; agent_type is the roster persona. Best-effort, never fatal.
+# transcript filename. The value written is the persona resolved above, NOT the
+# agent type this comment used to claim it was (BUG-027). It is the fallback
+# path now: the feed reads the transcript's own meta file first, so the map only
+# matters for a transcript that has none. Best-effort, never fatal.
 aid="$(extract '.agent_id')"
 if [ -n "$aid" ] && [ -n "$plabel" ]; then
   printf '%s %s\n' "$aid" "$plabel" >> "$repo_root/logs/.subagent-map" 2>/dev/null || true

@@ -167,6 +167,37 @@ persona_label(){
   bp_roster_label "$repo_root" "$1"
 }
 
+# --- who is behind one subagent transcript? (BUG-027) ------------------------
+# Every subagent transcript has a sibling agent-<id>.meta.json, and its
+# `description` is the dispatch text — the only place the PERSONA appears.
+# `agentType` beside it is `general-purpose` for all of them, which is what the
+# hook was recording: fourteen identical rows in .subagent-map and every line of
+# every persona labelled the same.
+#
+# The name is read through scripts/lib/roster.sh, the same lookup the hook uses,
+# so the two labels cannot drift into disagreeing (BUG-010, BUG-021).
+#
+# Falls back to the previous behaviour — the mapped agent type, then a truncated
+# id — rather than failing. A stable, unhelpful label beats a feed that stops.
+#
+# Resolved ONCE per transcript and cached by the caller, because the meta file is
+# written at dispatch and the transcript only becomes interesting after that. The
+# known ceiling: if a transcript were ever discovered before its meta file
+# existed, that stream keeps the fallback label for its whole life. Re-resolving
+# every tick would cost a jq per subagent per tick forever — pay that only if the
+# race is ever actually observed.
+subagent_label(){
+  local f="$1" aid="$2" name
+  name="$(bp_roster_name_in_text "$repo_root" \
+          "$(jq -r '.description // empty' "${f%.jsonl}.meta.json" 2>/dev/null)" 2>/dev/null)"
+  if [ -n "$name" ]; then
+    bp_roster_label "$repo_root" "$name"
+    return 0
+  fi
+  name="$(grep -m1 "^$aid " "$log_dir/.subagent-map" 2>/dev/null | awk '{print $2}')"
+  printf '%s - Claude Code' "${name:-sub:${aid:0:6}}"
+}
+
 # Resolve once now; the supervisor re-resolves whenever the roster changes.
 resolve_identity
 field(){ grep "^| $1 " "$signal_file" 2>/dev/null | head -1 | sed "s/^| $1 *| //; s/ *|\$//"; }
@@ -290,10 +321,21 @@ emit(){
 }
 
 # Project one Claude/subagent transcript record to its visible text.
+#
+# $3 = 1 to ADMIT sidechain records, 0 to drop them. BUG-027: the filter is a
+# property of WHICH FILE is being read, not a global rule, and one function
+# served two files with opposite requirements.
+#   - the session transcript also carries the subagents' records, flagged
+#     isSidechain — dropping them there is what stops every subagent line
+#     appearing twice, once unlabelled.
+#   - a subagent's OWN transcript is 100% sidechain by construction, so the same
+#     filter discarded every record in it. That is the blackout: the feed went
+#     silent for the entire duration of any delegated work, which punished the
+#     rule it exists to serve — working solo kept the feed alive.
 project_jsonl(){
-  local line="$1" who="$2"
-  printf '%s' "$line" | jq -rc '
-    select(.type=="assistant" and (.isSidechain != true)) | .message.content[]? |
+  local line="$1" who="$2" side="${3:-0}"
+  printf '%s' "$line" | jq -rc --argjson side "$side" '
+    select(.type=="assistant" and ($side == 1 or (.isSidechain != true))) | .message.content[]? |
     if .type=="text" then .text
     elif .type=="tool_use" then "> " + .name + ": " + ((.input.description // .input.command // .input.file_path // "")|tostring|.[0:90])
     else empty end' 2>/dev/null |
@@ -306,8 +348,9 @@ emit_delta(){
   # $1 = file, $2 = prefix-bytes file, $3 = kind, $4 = label
   local kind="$3" who="$4"
   case "$kind" in
-    jsonl) while IFS= read -r line; do [ -n "$line" ] && project_jsonl "$line" "$who"; done <"$2" ;;
-    *)     while IFS= read -r line; do [ -n "$line" ] && emit "$(ts) [$who] $line"; done <"$2" ;;
+    jsonl)     while IFS= read -r line; do [ -n "$line" ] && project_jsonl "$line" "$who" 0; done <"$2" ;;
+    jsonl-sub) while IFS= read -r line; do [ -n "$line" ] && project_jsonl "$line" "$who" 1; done <"$2" ;;
+    *)         while IFS= read -r line; do [ -n "$line" ] && emit "$(ts) [$who] $line"; done <"$2" ;;
   esac
 }
 
@@ -558,11 +601,10 @@ supervise_body(){
         [ -n "$(find "$f" -mmin "-$SUBAGENT_MAX_AGE_MIN" 2>/dev/null)" ] || continue
         if [ -z "${LABEL[$f]+set}" ]; then
           aid="$(basename "$f" .jsonl | sed 's/^agent-//')"
-          p="$(grep -m1 "^$aid " "$log_dir/.subagent-map" 2>/dev/null | awk '{print $2}')"
-          LABEL["$f"]="${p:-sub:${aid:0:6}} - Claude Code"
+          LABEL["$f"]="$(subagent_label "$f" "$aid")"
           seed_offset "$f"
         fi
-        pump "$f" jsonl "${LABEL[$f]}"
+        pump "$f" jsonl-sub "${LABEL[$f]}"
       done
     fi
 

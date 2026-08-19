@@ -45,8 +45,10 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**WIP: TASK-012, reopened.** BUG-027, BUG-028 and BUG-029 were accepted on
-2026-08-19; BUG-031 is with the founder.
+**WIP: TASK-012 (reopened) and TASK-014 (promoted).** BUG-027, BUG-028,
+BUG-029 and BUG-031 were all accepted by the founder on 2026-08-19.
+BUG-031's move to `done/` is on PR #54 — once it merges, `waiting-acceptance/`
+is empty.
 
 **TASK-012 was reopened by the founder on 2026-08-19, the day it was filed.**
 Read Part 3 of [`TASK-012-strip-test.md`](TASK-012-strip-test.md) before acting on
@@ -111,10 +113,16 @@ rather than as damage. The verdict was recovered from `signal-history.log`.
    because it runs a complete second gate inside the first. The measurement is
    done; the report names what is *not* worth optimising (the bottom 28 stages
    total 8.5 s) and the trap in the obvious fix. Read it before touching timing.
-3. **TASK-014** — the attachment trial TASK-012's revalidation is waiting on:
-   bootstrap a throwaway, install the **full** ruflo CLI, mount the lifecycle and
-   the DoD gate on top, push one real work item through. Deletion proved the seam
-   opens; only construction proves something fits it.
+3. **TASK-014 — promoted, and it is the biggest item on this list.** The
+   attachment trial TASK-012's revalidation is waiting on: bootstrap a throwaway,
+   install the **full** ruflo CLI, mount the lifecycle and the DoD gate on top,
+   push one real work item through. Deletion proved the seam opens; only
+   construction proves something fits it. **Do not pre-specify the seam.** The
+   row lists two soft blockers (§7G leaving the core gate, `drift`/`pull` learning
+   the profile) and they are now the trial's first *output*, not its precondition
+   — deciding their shape before anything is plugged in is exactly the mistake
+   TASK-012 made. **This is a real spike and will raise its own bug numbers**;
+   it is not an afternoon.
 4. **BUG-027's three unfixed findings**, no longer gated on TASK-012 (the feed is
    the observability lane and survives either answer):
    `BP_ROSTER_LOOKUP_TIMEOUT=0` hangs indefinitely (GNU `timeout 0` means *no*

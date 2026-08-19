@@ -4,7 +4,15 @@ Run 2026-08-19 by Eto (Orchestrator). Method is **construction**, the inverse of
 TASK-012 Part 1's deletion: bootstrap a project, install the full ruflo CLI, and
 let the failures be the coupling map.
 
-## Verdict: the socket is real — ruflo does not fit it
+## Verdict: the socket is real. On ruflo, **no verdict** — see Part 2.
+
+> **Part 1's disqualifier was withdrawn the same day.** It rested on the
+> baton's `Holder` row being a requirement; the founder corrected that the
+> names are a mechanism for forcing delegation to fresh specialized agents,
+> and anonymous workers serve that just as well. Read Part 2 before acting on
+> anything below it. The socket finding, the two couplings, and every
+> measurement of what the install writes are unaffected — none of them rested
+> on that premise.
 
 Two findings, and they are independent:
 
@@ -19,8 +27,9 @@ Two findings, and they are independent:
    who do they hand to*. Ruflo coordinates anonymous workers over a task queue.
    There is no field in either its files or its CLI that answers the first two.
 
-**DO NOT ADOPT ruflo**, now on measured grounds. **Keep the socket** — it is
-sound, and the two couplings blocking it are now precisely characterised.
+~~**DO NOT ADOPT ruflo**, now on measured grounds.~~ **Withdrawn — see Part 2.**
+**Keep the socket** — that finding stands, and the two couplings blocking it
+are now precisely characterised.
 
 ## The control is healthy this time
 
@@ -208,3 +217,122 @@ gone — `pgrep -af 'ruflo|claude-flow'` returns nothing. Workspace is
    could fill it. Ruflo's model is anonymous workers over a task queue, and that
    is the mismatch — not its Codex support, and not its file hygiene, which is
    better than Part 2 assumed.
+
+
+---
+
+# Part 2 — the verdict is withdrawn (2026-08-19, same day)
+
+**Founder correction, on reading the report:**
+
+> I don't care if the agents have a name or not. I have the names only to avoid
+> the orchestrator doing all the work, instead of loading fresh and specialized
+> agents. If ruflo can work with different agents without naming them, fine.
+
+Part 1's disqualifier is **void**. It argued that ruflo cannot fill the socket
+because none of the three baton rows has a source in its state — `Holder` above
+all, since a swarm has anonymous workers and no roster. That argument treats the
+baton's *schema* as the requirement. It is not. The names are a **mechanism**,
+and the requirement underneath them is:
+
+> **Work must be dispatched to fresh, specialized agents rather than absorbed by
+> the orchestrator — and it must be observable that this happened.**
+
+Anonymous workers satisfy that requirement as readily as named personas. Arguably
+more readily: spawning specialized workers is ruflo's core function, not an
+add-on to it.
+
+## This is the third iteration of one error
+
+Worth naming, because the pattern is now the most reliable finding this spike has
+produced:
+
+| Stage | Assumed | Should have asked |
+|---|---|---|
+| the brief | that a coherent no-orchestration bootstrap proves a *socket* | does anything attach? |
+| Part 2 (ruflo eval) | that ruflo sits *beside* our orchestration (`lite path only`) | what if it replaces it? |
+| **Part 1 of this trial** | **that the baton's `Holder` row is the requirement** | **what is the row FOR?** |
+
+Each stage measured competently and inferred past its evidence. Each was caught
+by the founder rather than by the method. **A falsifiable method does not protect
+against an unexamined premise** — it only makes the premise's consequences
+precise.
+
+## What this changes
+
+**Withdrawn:**
+
+- *"None of the three baton rows has a source"* — true, and no longer a
+  disqualifier. `Holder` needs no source because `Holder` is not the requirement.
+- *"The baton and a ruflo swarm answer different questions"* — the baton asks a
+  narrower question than the requirement does. That is a fact about the baton.
+- *"§7G failed closed over a coordination model it could not describe, which is
+  it working."* **Reversed.** §7G asserts *our mechanism* is present, not that
+  *the project's coordination is healthy*. Under the corrected requirement it is
+  enforcing an implementation detail, and the adapter that made it green
+  vacuously is evidence of that rather than evidence against ruflo. §7G should
+  assert **the project's declared coordination mechanism**, whatever it is.
+
+**Changed in meaning, not withdrawn:**
+
+The staleness finding stands and now matters *more*, for a different reason. With
+a swarm initialised and seven workers live, `swarm-activity.json` read
+`coordination_active: false` at its install-time timestamp and `sessions` was
+empty. Under the old framing that blocked filling a `State` row. Under the
+correct requirement it is sharper: **the on-disk state cannot tell you whether
+delegation happened.** That is the BUG-027 blackout defect in a new place — work
+proceeding while the record says nothing is running.
+
+But it is **not fatal**, because the CLI is truthful where the files are not:
+
+```
+| map | ✓ | idle | 1 | 100% | 23s ago |
+```
+
+Delegation *is* observable in ruflo. Just not from the files a cheap adapter
+would read.
+
+**Unaffected — all of it measured, none of it resting on the void premise:**
+
+- The seam holds: fresh bootstrap green at 170.9 s, still green with the full
+  ruflo CLI installed at 175.9 s.
+- `tests/state-dir` is a core guard whose sample population is the orchestration
+  layer, and fails *vacuous* on the strip.
+- The install grants itself `Bash(node .claude/*)` over a gitignored directory it
+  had just filled with 110 files.
+- It reported "Hooks: 7 hook types enabled" and enabled zero.
+- It writes machine-global `~/.claude/CLAUDE.md` from a project-local install.
+- Both corrections to TASK-012 Part 2 stand: the project `CLAUDE.md` collision
+  does not reproduce, and `.claude/settings.json` is merged rather than clobbered.
+
+## The trial is incomplete against the real criterion
+
+The requirement is *does it delegate to fresh specialized agents, observably*.
+**That was never tested** — and it is precisely the half Part 1 recorded as not
+determined, for the correct reason: running work through a swarm means agents
+executing, which is a billable LLM path, and CLAUDE.md §"Cost is a main concern"
+forbids wiring one into a trial without an explicit budget decision.
+
+So the position is:
+
+- **No verdict on ruflo.** Again — but this time the missing evidence is named
+  and cheap to specify.
+- **The socket is still real.** That finding never depended on the void premise.
+
+## What the completed trial has to measure
+
+1. **Does a work item get decomposed onto multiple workers, or absorbed by one?**
+   The founder's actual concern. Measured by worker run-counts before and after a
+   real task, not by reading the topology config.
+2. **Are the workers fresh and specialized?** ruflo ships 17 agent definitions
+   under `.claude/agents/`. Do they receive scoped context, or is one generalist
+   doing everything under seven names?
+3. **Is the delegation observable without asking the vendor's CLI nicely?** The
+   files are stale; the CLI is truthful; the gate needs *something* it can check
+   cheaply. This is the §7G replacement question, correctly posed at last.
+4. **What does it cost per work item?** Declared cap, per-call spend logged,
+   halt-on-cap — the four capabilities in CLAUDE.md §"Cost is a main concern"
+   apply to the trial itself, not only to what it evaluates.
+
+**This needs a founder budget decision before it runs.** That is the blocking
+item, and it is a decision rather than an engineering step.

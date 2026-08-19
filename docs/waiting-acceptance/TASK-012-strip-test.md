@@ -136,3 +136,105 @@ orchestrator is chosen:
 
 Both are worth doing regardless of the ruflo answer, which is the property a good
 spike result has.
+
+
+---
+
+# Part 2 — the ruflo evaluation (2026-08-19)
+
+Run by Alexey (Architect, Codex) against the three questions the backlog row
+named. **Recommendation: DO NOT ADOPT** — neither ruflo (lite) nor the narrower
+alternative. All three answers came back negative and Q1 decides it alone.
+
+## Q1 — does its observability capture a `codex exec` dispatch? No.
+
+It captures Codex **only when ruflo itself spawned it.** Its own README states
+the model: *"CLAUDE-FLOW = ORCHESTRATOR (tracks state, stores memory) / CODEX =
+EXECUTOR"*. The mechanism is a child process — `dual-mode/orchestrator.ts`
+imports `spawn`, defaults `codexCommand ?? 'codex'`, and builds
+`codex exec --sandbox workspace-write --skip-git-repo-check`.
+
+That is a **dispatcher, not an observer.** It has no mechanism to see a codex
+process it did not launch, and ours it did not launch:
+`scripts/start-all-watchers.sh` detaches the watcher stack with `nohup`, and
+`start-codex-signal-watch.sh` fires `codex exec` from inside that detached
+process. It is not a Claude Code tool call, so no Claude Code hook can observe
+it — and ruflo's lite hook set is six Claude-session-internal events
+(`PreToolUse`/`PostToolUse` on `Bash` and `Write|Edit|MultiEdit`, `PreCompact`,
+`Stop`).
+
+**The "Codex" mentions in the lite plugin are the inverse topology** — ruflo
+running *inside* an interactive Codex session, detected via Codex's `turn_id`.
+Not ruflo watching our batch dispatch. And none of it is on the lite path: the
+marketplace lists 38 plugins, none for Codex. Codex needs
+`npx ruflo@latest init --codex`, the full CLI.
+
+So adopting ruflo for Codex visibility means handing it **our dispatcher and our
+mic**, not our feed. That is a product replacement, which this spike's
+"component swap" verdict does not license.
+
+## Q2 — does the lite path stay out of `CLAUDE.md`? At install yes, at runtime no.
+
+Credit where due: the claim survives inspection at install time. The only
+filesystem write found in the lite shim is a dedup marker under `os.tmpdir()`,
+not the workspace.
+
+But the shim is a **thin dispatcher to the full CLI** —
+`npx --prefer-offline --yes ruflo@latest hooks <subcommand>` — and the hooks it
+forwards are `post-edit --update-memory true` and
+`session-end --persist-state true --export-metrics true`. Persisted state and
+exported metrics land somewhere, and the writer is the full CLI: the one
+documented as creating `.claude/`, `.claude-flow/` and `CLAUDE.md`. `CLAUDE.md`
+is a `MANAGED_FILES` entry that `blueprint pull` owns, so that collides head-on
+with the sync model.
+
+Two further costs. `ruflo-core/.mcp.json` runs `command: node`, making **Node a
+hard runtime dependency** of a repo that is POSIX `sh`, `jq` and `awk` — on
+every Bash and Edit tool call, with their own note that `npx` "can take 30+s on
+a cold runner". And the legacy root `hooks.json` `PreCompact` hook **injects
+text telling the agent to read `CLAUDE.md` for "54 available agents" and SPARC
+workflows** — false in our repo, injected exactly when context is being
+compacted. That file self-describes as `"_legacy_unaudited_shim": true`.
+
+## Q3 — does the dashboard replace `tail -f`? No — a strictly weaker second record.
+
+`ruflo-observability` is **pinned to `@claude-flow/cli` v3.6**, so it is not
+available on the lite path at all. Its traces are ruflo's own swarm spans
+(`swarm-task` → `agent-spawn`) in an AgentDB namespace; the dashboards are
+hosted or a React app. **Nothing there reads `logs/agent-activity.log`**, and
+per Q1 nothing there can see our Codex half — so it cannot subsume the first
+record. That is the two-records-of-one-fact defect this repo has fixed three
+times (TASK-005's `INDEX.md`, the lifecycle triggers, the forwarding notes).
+
+## The narrower alternative — also no
+
+`disler/claude-code-hooks-multi-agent-observability` captures 12 hook types but
+handles subagents at **boundaries only** (`SubagentStart` / `SubagentStop`).
+That is precisely the bookend approach BUG-027 replaced — the founder watched
+work happen in the UI while the feed stayed blank, and the fix was projecting
+the subagent's own transcript live. Adopting it re-introduces the fixed defect.
+Claude-only, so the Codex half is uncovered by construction, at the price of a
+Bun server + SQLite + Vue client on two ports as a second record.
+
+## What could NOT be determined from public sources
+
+- **Where the full CLI actually writes when invoked through the lite shim.** The
+  persistence flags are on by default; the CLI's write paths were not traced and
+  nothing was installed. All evidence above is source reading.
+- **Version stability.** 68k stars, mid-rename from claude-flow, with a
+  self-declared unaudited legacy shim at the root.
+
+One question the evaluator listed as unknown is **answered by BUG-027**: Claude
+Code `PreToolUse`/`PostToolUse` hooks DO fire inside subagent sessions. The
+orchestrator assumed they did not and was wrong; the actual cause of the
+blackout was the `isSidechain` filter.
+
+## The bottom line
+
+The half of our feed ruflo cannot see is the half that produces our review
+findings. Buying infrastructure is right in principle — but this purchase covers
+the working half, leaves the load-bearing half uncovered, and charges Node,
+`npx` on every tool call, and a second record for it.
+
+**Both follow-ups Part 1 named remain worth doing regardless** — §7G moving out
+of the core DoD gate, and `drift`/`pull` learning the profile.

@@ -1,4 +1,4 @@
-<!-- session-marker: e597eb41 -->
+<!-- session-marker: dfffa1ea -->
 
 # HANDOVER — what a waking agent needs to TAKE OVER
 
@@ -45,29 +45,83 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**WIP: BUG-027**, the subagent feed blackout — fixed and gate-green on
-`bug/027-subagent-feed-blackout`, with **three unfixed findings** from the
-cross-provider review's third round: `BP_ROSTER_LOOKUP_TIMEOUT=0` hangs
-indefinitely (GNU `timeout 0` means *no* timeout), a killed lookup's partial
-stdout is accepted and persisted as a persona name, and `agent-activity.sh`
-sources `roster.sh` into the **supervisor's** own shell unguarded — the same two
-failure modes with the feed daemon as the blast radius.
+**No WIP. `doing/` is empty** — BUG-027, BUG-028 and BUG-029 were accepted on
+2026-08-19; BUG-031 and TASK-012 are with the founder.
 
-**Read TASK-012 before fixing them.** If the orchestration layer is going to be
-replaced, that is work we would throw away.
+**TASK-012 is answered, so stop deferring work on it.** Orchestration is
+separable-with-work, and ruflo is **do not adopt** — its Codex support is a
+dispatcher, not an observer, so it cannot see a `codex exec` it did not launch,
+which is the half of the feed our review findings come from. The handover used to
+say "read TASK-012 before touching the feed, we may throw the work away". That
+reason is gone. Feed work is worth doing.
 
-Everything else is parked or waiting on the founder.
+### The three things that cost the most on 2026-08-19
+
+**1. CI was red all day and nobody noticed, because `--admin` was used to merge
+five PRs.** Two independent causes, both landed by this session:
+
+- `scripts/log-activity.sh` ran `set -uo pipefail`, and `pipefail` is not POSIX.
+  A `sh` without it does not ignore the option, it **exits 2** — so the hook died
+  on line 20. It passed on every developer machine because this host's dash
+  0.5.12 accepts `pipefail` and the runner's rejects it. **"My `/bin/sh` is dash
+  too" is not evidence about the runner** — that reasoning wasted six local
+  experiments before the fix.
+- **Every PR title used `BUG-029:` when the enforced form is `BUG#29:`.** The
+  title becomes the squash subject and `TASK-002` checks it. Validate before
+  opening: `bash scripts/check-commit-subjects.sh --subject "<title>"`.
+
+**Never merge with `--admin`.** `gh pr checks <n>` reporting *"no checks
+reported"* means the workflow has not registered **yet**, not that there are
+none. Wait for it.
+
+**2. A push can report success and push nothing.** Twice on fresh branches: the
+gate ran to completion, printed `PASSED`, launched the CI watcher — and
+`git ls-remote origin <branch>` showed nothing. Re-running the identical push
+worked. **Verify every push with `git ls-remote`**; the terminal output is
+identical to a real push right up to the missing `To github.com:` line. Not yet
+rowed — no reproducer, and each attempt costs a 360 s gate.
+
+**3. A test suite reset the live coordination baton mid-review (BUG-030).**
+`tests/bootstrap-gate` set `Holder=Nobody / State=IDLE` while a reviewer held the
+mic. The reset text is the *bootstrap default*, so it reads as a fresh checkout
+rather than as damage. The verdict was recovered from `signal-history.log`.
+
+### Next, in the order worth doing
+
+1. **BUG-030** — the baton contamination above. `tests/git-isolation` and
+   `tests/state-dir` both exist and neither caught it.
+2. **TASK-013** — the gate is 357.8 s and `bootstrap-gate` alone is **50.6%**,
+   because it runs a complete second gate inside the first. The measurement is
+   done; the report names what is *not* worth optimising (the bottom 28 stages
+   total 8.5 s) and the trap in the obvious fix. Read it before touching timing.
+3. **BUG-027's three unfixed findings**, now unblocked by TASK-012:
+   `BP_ROSTER_LOOKUP_TIMEOUT=0` hangs indefinitely (GNU `timeout 0` means *no*
+   timeout), a killed lookup's partial stdout is accepted and persisted as a
+   persona name, and `agent-activity.sh` sources `roster.sh` into the
+   **supervisor's** own shell unguarded.
+
+Everything else is parked with a trigger.
 
 ## 2. LIVE HAZARD — check before dispatching anyone
 
-**No watcher is running.** Stopped deliberately at the end of 2026-08-07, and its
-lock removed so the next session is not met by a false dead-watcher warning.
-Start one before flipping the mic to Codex, or the dispatch goes nowhere:
+**A Codex watcher IS running** as of 2026-08-19 — `ppid 1`, up ~2 days, and it
+works: it dispatched Andreas three times during BUG-029's review. Check before
+starting another, or you get the double-dispatch below:
 
 ```bash
+ps -eo pid,ppid,etime,args | grep '[s]ignal-watch'
+# if none for THIS repo:
 setsid bash scripts/start-codex-signal-watch.sh >> logs/state/watcher-boot.log 2>&1 < /dev/null &
-ps -eo pid,ppid,etime,args | grep signal-watch    # expect exactly ONE
 ```
+
+**"Expect exactly ONE" was wrong advice and is now removed.** That grep matches
+every project's watcher on the machine — on 2026-08-19 it returned two, and the
+second belonged to a different repo entirely. **Match on the path**, not the
+count.
+
+Note it is at `ppid 1` and days old, which is the exact shape the hazard below
+describes. It is nonetheless the live one; age alone does not make a watcher
+stale.
 
 **A stale watcher will double-dispatch, and the fix cannot see it.** On
 2026-08-05 an orphan at `ppid 1` for 3h42m fired alongside a freshly started one:

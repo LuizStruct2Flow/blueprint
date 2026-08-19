@@ -193,7 +193,14 @@ fi
 # A check that cannot fail is worth less than no check, because it is counted.
 # Resolved and asserted non-empty first, then fed in.
 _managed_list="$(bash "$BP/scripts/blueprint" files 2>/dev/null)"
-if [ -z "$_managed_list" ]; then
+_managed_rc=$?
+# R4 — the status, THEN the shape. Checking only for emptiness covers a command
+# that fails silently and misses the one that fails after printing part of its
+# output: the list looks healthy, the loop runs over a prefix of it, and every
+# file the CLI never named goes unchecked while the case still says "ok".
+if [ "$_managed_rc" -ne 0 ]; then
+  fail "#5 'blueprint files' exited $_managed_rc — a partial list would let this case pass over the files it never saw"
+elif [ -z "$_managed_list" ]; then
   fail "#5 'blueprint files' produced nothing — the placeholder check below would have passed over an empty list"
 fi
 leftover=""
@@ -310,6 +317,33 @@ if printf '%s\n' "$boot2" | grep -q 'Happy struct2flowing'; then
   b7=1
 fi
 [ "$b7" -eq 0 ] && pass "#7 bootstrap refuses loudly (rc=$boot2_rc), names the cause, and creates nothing"
+
+# 7b. THE OTHER HALF: a `blueprint files` that SUCCEEDS and lists nothing.
+#
+#     #7 drives the non-zero path. This one drives the path where the status is
+#     0 and there is simply nothing to iterate — which is the case a status
+#     check alone cannot catch, and the mirror image of the partial-output case
+#     that a content check alone cannot catch. Both refusals in new-project.sh
+#     need a case or one of them is only asserted by reading the source.
+TARGET3="$WORK/derived-empty"
+printf 'exit 0\n' > "$BP/scripts/blueprint"
+boot3="$( cd "$BP" && bash scripts/new-project.sh derived-empty "$TARGET3" 2>&1 )"
+boot3_rc=$?
+b7b=0
+if [ "$boot3_rc" -eq 0 ]; then
+  fail "#7b bootstrap EXITED 0 on an empty file list — it would deliver a project with every placeholder still in it"
+  b7b=1
+fi
+if [ -e "$TARGET3" ]; then
+  fail "#7b a project was left at $TARGET3 despite there being no files to substitute"
+  b7b=1
+fi
+if ! printf '%s\n' "$boot3" | grep -qi "no files\|listed no"; then
+  fail "#7b the refusal does not distinguish an EMPTY list from a failed command:
+$(printf '%s\n' "$boot3" | tail -4 | sed 's/^/      /')"
+  b7b=1
+fi
+[ "$b7b" -eq 0 ] && pass "#7b a successful-but-empty file list is refused too (rc=$boot3_rc), and creates nothing"
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean."

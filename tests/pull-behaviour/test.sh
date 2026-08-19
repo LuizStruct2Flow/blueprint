@@ -37,9 +37,14 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # --- a minimal blueprint with TWO managed files and two commits -------------
 BP="$TMP/bp"
-mkdir -p "$BP/docs" "$BP/scripts"
+mkdir -p "$BP/docs" "$BP/scripts" "$BP/tests/fixture"
 printf '# DoD\nowner {{PROJECT_NAME}}\nversion two\n' >"$BP/docs/DoD.md"
 printf '# CLAUDE\nfor {{PROJECT_NAME}}\n'            >"$BP/CLAUDE.md"
+# BUG-029 — `tests/` is a managed DIRECTORY and expanding it to nothing is a
+# hard failure by design, so a fixture blueprint must actually ship suites. A
+# checkout with no tests/ at HEAD is not a blueprint, and the CLI refuses rather
+# than silently syncing zero of them.
+printf 'echo fixture\n' >"$BP/tests/fixture/test.sh"
 cp "$ROOT/scripts/blueprint" "$BP/scripts/blueprint"
 cp -r "$ROOT/scripts/lib" "$BP/scripts/lib"
 touch "$BP/.blueprint-root"

@@ -326,11 +326,23 @@ blueprint files            # list the blueprint-managed files (single source of 
 
 **What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`, `Brewfile`, every
 recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),
-`DoD.md`, the agent scripts, the pre-push hook, this deck itself.
+`DoD.md`, the agent scripts, the pre-push hook, this deck itself — **and the
+whole `tests/` tree**, because a suite that guards managed machinery has to
+move forward with the machinery it guards.
 
 **What's NOT managed** — `project_config_*.md` (templates seeded once
 at bootstrap, then drift on purpose), `BUGS.md`, `HANDOVER.md`,
 `AGENT_SIGNAL.md`, all source code.
+
+**Two things that only work together.** A managed *directory* syncs
+**additively** — created and updated, never deleted, because the project cannot
+tell "the blueprint dropped this" from "we wrote this", and a sync that guesses
+wrong deletes the project's own tests. And a file can be **half-managed**:
+`BLUEPRINT:BEGIN`/`END` markers split `.githooks/pre-push-project` and
+`tests/SUITES.md` into a blueprint region the pull replaces and a project region
+it preserves byte-for-byte. Without that split, a suite arrives with nothing to
+invoke it and no row to classify it — three files that are only a suite together
+(BUG-029).
 
 The agent calls `blueprint drift` on every wake. Drift between blueprint
 and project is treated like drift between code and prod: **detected, not

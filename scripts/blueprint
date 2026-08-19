@@ -70,9 +70,13 @@ fi
 # What does NOT belong (project-owned, never synced):
 #   - project_config_*.md  (the whole point of these files is project drift)
 #   - AGENT_SIGNAL.md, HANDOVER.md, BUGS.md, BACKLOG.md, PLAN-*.md, etc.
-#   - .githooks/pre-push-project  (project guards)
 #   - backend/, frontend/, infra/, src/, anywhere with project code
 #   - .claude/settings.local.json (host-specific)
+#
+# An entry ending in `/` names a DIRECTORY, and stands for every file the
+# blueprint SHIPS under it (bp_expand_managed_dirs below). Sync of a directory
+# is ADDITIVE ONLY: files the blueprint has are created and updated, and nothing
+# is ever deleted — see the "no delete path" note on that function.
 
 MANAGED_FILES=(
   # Top-level agent protocol
@@ -176,9 +180,35 @@ MANAGED_FILES=(
   "scripts/sonar.sh"
   "scripts/sonar-api.sh"
 
+  # tests/ — THE regression suites, as a managed DIRECTORY (BUG-029).
+  #
+  # Every one of these guards blueprint-MANAGED machinery that a derived project
+  # runs and can break. They were seeded once by bootstrap and then never again,
+  # so a project's suites froze at its bootstrap commit while the code under
+  # them kept being pulled forward — and a stale suite still PASSES, so the gate
+  # went green over assertions about machinery that project no longer runs.
+  #
+  # A directory rather than 40 rows because suites are added, renamed and
+  # dropped constantly, and a hand-maintained list of them is the thing that
+  # goes stale (BUG-028's substitution TARGETS array, one directory over).
+  # `tests/SUITES.md` lives inside it and travels with it, which is what keeps
+  # the manifest's classification honest downstream.
+  "tests/"
   # .githooks/ — generic gate
   ".githooks/pre-push"
   ".githooks/pre-push-project.example"
+  # BUG-029 — this MUST travel with tests/, and the markers are what make that
+  # possible. A suite is coherent only as three things: the files, its SUITES.md
+  # row, and its invocation here. Managing tests/ alone delivers the first two
+  # (SUITES.md is under tests/) and not the third, at which point tests/manifest
+  # #4 fails every derived push on a suite the gate cannot invoke.
+  #
+  # It used to be excluded as "project guards". That was the right instinct
+  # about the BOTTOM of the file and wrong about the top: it ships already
+  # populated (BUG-028), wiring the suites, and only the region after
+  # BLUEPRINT:END is the project's. The marker-aware merge in pull_file is
+  # exactly this distinction, and until now nothing used it.
+  ".githooks/pre-push-project"
   # commit-msg: every commit names its backlog item (DoD §1b rule 1). Generic —
   # the rule applies to every project, blueprint or derived.
   ".githooks/commit-msg"
@@ -344,9 +374,18 @@ _should_substitute() { bp_should_substitute "$1"; }
 # pull's "same?" check so the templated blueprint side is compared
 # against the substituted project side instead of producing infinite
 # false drift.
+# BUG-029 R2-S2 — the argument is the REPO-RELATIVE path, never
+# "$BLUEPRINT_ROOT/$f". This was the one call site of five that passed an
+# absolute path, and it made bp_should_substitute's answer a function of WHERE
+# THE BLUEPRINT IS CHECKED OUT. Every other exemption there is suffix-anchored
+# (`*scripts/blueprint`), so it survived that by luck; the moment a rule needed
+# a LEADING component the luck ran out, and a blueprint living under any
+# directory named `tests/` would silently stop substituting {{PROJECT_NAME}} in
+# every managed file. The predicate is about a file's identity in the repo, so
+# it gets the repo-relative path and nothing else.
 substituted_blueprint_copy() {
-  local bp="$1"
-  if ! _should_substitute "$bp"; then
+  local f="$1" bp="$BLUEPRINT_ROOT/$1"
+  if ! _should_substitute "$f"; then
     echo "$bp"
     return 0
   fi
@@ -549,6 +588,106 @@ read_blueprint_source() {
 
   BLUEPRINT_ROOT=$(_bp_resolve_blueprint_root "$from_file") || \
     die ".blueprint-source points at '$from_file' which does not exist, and no blueprint checkout could be resolved (export BLUEPRINT_ROOT=<path>)"
+
+  # Every MANAGED_FILES consumer below this point walks a list of FILES. Expand
+  # here, once, so `drift` and both of `pull`'s loops are unchanged (BUG-029).
+  bp_expand_managed_dirs
+}
+
+# --- BUG-029: a MANAGED_FILES entry ending in `/` names a directory ----------
+#
+# Replaces each such entry with the files the blueprint SHIPS under it. Called
+# at the end of read_blueprint_source, which is the one place every path that
+# needs BLUEPRINT_ROOT goes through — so drift and pull get the expansion for
+# free and nothing else has to know directories exist.
+#
+# THE LISTING IS `git archive HEAD <dir>`. Two parts of that are load-bearing
+# and neither is the obvious choice:
+#
+#   - `git archive`, NOT `git check-attr export-ignore`. A trailing-slash
+#     directory pattern in `.gitattributes` does NOT propagate to the files
+#     underneath it: `git check-attr export-ignore tests/bootstrap-contents/
+#     test.sh` reports `unspecified` for a file `git archive` genuinely drops.
+#     Archiving is the only query that answers "what ships". tests/manifest
+#     (:139-141) rejected check-attr for exactly this and had to say so; the
+#     trap is now pinned by tests/suite-sync #1c so nobody re-walks it.
+#   - HEAD, not the working tree — the same argument tests/manifest #2b makes.
+#     An uncommitted suite must not sync, or a project pulls a file that does
+#     not exist upstream yet. CONTENT still comes from the working tree, as it
+#     does for every other managed file.
+#
+# So the expansion is precisely "the files a bootstrap would have received",
+# which is the set a pull has to keep current.
+#
+# THERE IS NO DELETE PATH, deliberately. The information that distinguishes
+# "the blueprint dropped this suite" from "the project wrote this suite" does
+# not exist in the project, and a prefix-based delete would take out
+# project-authored suites — the one failure mode worse than the bug. The
+# announcement already exists and is fail-closed: when a suite's row leaves
+# tests/SUITES.md, tests/manifest #1 fails the derived push naming the orphan
+# directory.
+# IT FAILS CLOSED (BUG-029 R2-S1). An expansion that errors, or that yields
+# nothing, is a HARD failure — never an empty list.
+#
+# The first version warned and carried on, which reproduced BUG-029 inside its
+# own fix: `tests/` would silently expand to nothing, `drift` would compare zero
+# suites, report "✓ All blueprint-managed files match" and exit 0. A mechanism
+# that is present, reports nothing, and whose silence is indistinguishable from
+# success is the exact shape of A-22, BUG-004, BUG-018 and BUG-028 — four times
+# already in this repo, and it went straight back in through the door built to
+# close it. There is no such thing as "a managed directory that happens to be
+# empty today": either the blueprint ships files there and they must sync, or
+# the entry does not belong in MANAGED_FILES.
+#
+# STATUS IS CAPTURED OUTSIDE THE PIPE. `x=$(a | b | c)` yields only c's status,
+# so a failed `git archive` feeding a successful `grep` reads as success with
+# empty output — the trap behind BUG-027 finding (b), where a killed lookup's
+# partial stdout was accepted because its status vanished in `$( )`. Each stage
+# runs on its own, to a file, and is checked. `grep`'s own no-match 1 is the one
+# expected non-zero, and the emptiness check below is what actually judges it.
+bp_expand_managed_dirs() {
+  local expanded=() f listing line tarf listf
+  for f in "${MANAGED_FILES[@]}"; do
+    case "$f" in
+      */) ;;
+      *)  expanded+=("$f"); continue ;;
+    esac
+
+    tarf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+    listf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+
+    if ! git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "${f%/}" >"$tarf" 2>/dev/null; then
+      rm -f "$tarf" "$listf"
+      _bp_expand_die "$f" "'git archive HEAD ${f%/}' failed — the path is not in the blueprint's HEAD, or the checkout is unreadable"
+    fi
+    if ! tar -tf "$tarf" >"$listf" 2>/dev/null; then
+      rm -f "$tarf" "$listf"
+      _bp_expand_die "$f" "the archive could not be listed ('tar -t' failed)"
+    fi
+    listing=$(grep -v '/$' "$listf" || true)
+    rm -f "$tarf" "$listf"
+
+    if [ -z "$listing" ]; then
+      _bp_expand_die "$f" "it contains no shipping files at HEAD — every file under it is uncommitted or export-ignore'd"
+    fi
+
+    while IFS= read -r line; do
+      if [ -n "$line" ]; then expanded+=("$line"); fi
+    done <<< "$listing"
+  done
+  MANAGED_FILES=("${expanded[@]}")
+}
+
+# One message, so the failure always says which entry and always says why
+# continuing would be worse than stopping.
+_bp_expand_die() {
+  local entry="$1" why="$2"
+  echo "${C_RED}error:${C_RESET} managed directory '$entry' expanded to nothing: $why" >&2
+  echo "${C_DIM}  Refusing to continue. Carrying on would sync ZERO files from '$entry' while${C_RESET}" >&2
+  echo "${C_DIM}  reporting success — a project would read '✓ everything matches' and be wrong.${C_RESET}" >&2
+  echo "${C_DIM}  Fix the blueprint checkout (is '${entry%/}' committed at HEAD?), or remove${C_RESET}" >&2
+  echo "${C_DIM}  '$entry' from MANAGED_FILES in scripts/blueprint if it is genuinely gone.${C_RESET}" >&2
+  exit 1
 }
 
 # --- Subcommand: files ---
@@ -770,7 +909,7 @@ cmd_drift() {
     # otherwise every templated file looks "drifted" forever after
     # the first substitute-on-pull.
     local bp_cmp
-    bp_cmp=$(substituted_blueprint_copy "$bp")
+    bp_cmp=$(substituted_blueprint_copy "$f")
     if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
       DRIFTED+=("$f")
     fi
@@ -835,7 +974,7 @@ cmd_pull() {
         continue
       fi
       local bp_cmp
-      bp_cmp=$(substituted_blueprint_copy "$bp")
+      bp_cmp=$(substituted_blueprint_copy "$f")
       if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
         files+=("$f")
       fi
@@ -860,7 +999,7 @@ cmd_pull() {
     # files that have already been substituted in the project don't
     # show as "different" forever.
     local bp_cmp_pull
-    bp_cmp_pull=$(substituted_blueprint_copy "$bp")
+    bp_cmp_pull=$(substituted_blueprint_copy "$f")
     if [ -f "$f" ] && diff -q "$bp_cmp_pull" "$f" >/dev/null 2>&1; then
       [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
       echo "  ${C_DIM}same${C_RESET}  $f"

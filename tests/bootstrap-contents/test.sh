@@ -110,7 +110,16 @@ out="$( cd "$BP" && GIT_AUTHOR_NAME=T GIT_AUTHOR_EMAIL=t@t.io \
 # from the expected set and the check passed. A mutation test caught that:
 # removing "scripts/lib/request-file.sh" left it green at "12 libs". A guard
 # that reads its expectation from the thing it is guarding cannot fail.
+# BUG-029 R4 — check the STATUS, not just the content. A `blueprint files` that
+# dies partway prints some of MANAGED_FILES and exits non-zero; every lib it
+# never got to would then land in `unshipped` and fail this case for the wrong
+# reason, or — worse, if it died after the lib block — pass having compared a
+# truncated list. An empty result was already fatal here; a partial one was not.
 managed=$(bash "$ROOT/scripts/blueprint" files 2>/dev/null)
+managed_rc=$?
+if [ "$managed_rc" -ne 0 ]; then
+  fail "BUG-015: 'blueprint files' exited $managed_rc — the lib comparison below would run against a truncated list"
+fi
 unshipped=""
 n_libs=0
 for libpath in "$ROOT"/scripts/lib/*.sh; do

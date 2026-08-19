@@ -63,6 +63,35 @@ bp_inputs_mode() {
   if [ -x "$1" ]; then printf '100755'; else printf '100644'; fi
 }
 
+# --- _bp_inputs_under_managed_dir CANON MANAGED_LIST_FILE --------------------
+# BUG-029 — a managed entry ending in `/` names a DIRECTORY, and every file the
+# blueprint ships under it is managed.
+#
+# The exact-match test above cannot see those. `cmd_a2bp` is the one command
+# that never calls `read_blueprint_source` — it works against the fetched REMOTE
+# base rather than a local checkout, deliberately — so it has no HEAD to expand
+# the directory from and validates against the raw MANAGED_FILES list. Without
+# this, `a2bp tests/pipeline/test.sh` is refused as unmanaged, i.e. no suite
+# could ever be back-propagated.
+#
+# Prefix, and the trailing `/` is what makes it a safe one: `tests/` matches
+# `tests/pipeline/test.sh` and not the sibling `testsuite/test.sh`. This is a
+# MEMBERSHIP test only — whether the path really exists in the base is checked
+# after the fetch by bp_build_validate_base, and whether it exists HERE is
+# checked below, which is what refuses a suite this project does not have.
+_bp_inputs_under_managed_dir() {
+  local canon="$1" managed="$2" d
+  while IFS= read -r d; do
+    # `if`, not `[ … ] && return 0`: a trailing `&&` list that fails is the last
+    # command of the loop body, so under `set -e` this would abort anywhere but
+    # the `if !` condition it happens to be called from today.
+    case "$d" in
+      */) if [ "${canon#"$d"}" != "$canon" ]; then return 0; fi ;;
+    esac
+  done < "$managed"
+  return 1
+}
+
 # --- bp_inputs_validate ROOT MANAGED_LIST_FILE PATH... -----------------------
 # Prints one `<canonical-path>:<mode>` line per accepted input, sorted byte-wise
 # and de-duplicated. Any refusal fails the whole call: a request is filed as one
@@ -88,7 +117,7 @@ bp_inputs_validate() {
     # MANAGED_FILES is checked on the CANONICAL form, so `./docs/DoD.md` and
     # `docs/../docs/DoD.md` cannot slip past a check that only matches the
     # literal spelling.
-    if ! grep -qxF -- "$canon" "$managed"; then
+    if ! grep -qxF -- "$canon" "$managed" && ! _bp_inputs_under_managed_dir "$canon" "$managed"; then
       echo "bp_inputs: '$canon' is not a blueprint-managed file." >&2
       echo "  Only files in MANAGED_FILES can be back-propagated; project-specific" >&2
       echo "  content belongs in project_config_*.md. See 'blueprint files'." >&2

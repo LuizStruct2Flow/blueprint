@@ -39,7 +39,29 @@ pass(){ echo "  ok — $*"; }
 # ===========================================================================
 ALLOWED_PREFIXES='AGENT_|BP_|BLUEPRINT_|GIT_|SIGNAL_|CODEX_|GEMINI_|CLAUDE_|SONAR_|GITHUB_|GH_|OSV_|SEMGREP_|GITLEAKS_|HOME|PATH|TMPDIR|PWD|SHELL|USER|LANG|LC_|EDITOR|NO_COLOR|TERM|CI'
 
-managed=$(bash "$CLI" files 2>/dev/null | sed 's/^ *//')
+# BUG-029 R4 — the EXIT STATUS decides, not the shape of the output.
+#
+# This was `managed=$(bash "$CLI" files | sed …)`, guarded only by `[ -n ]`.
+# That covers a command that fails and prints NOTHING. It does not cover one
+# that fails after printing SOME of its lines: the guard sees a non-empty
+# string, the scan below runs over a truncated list, and every managed script
+# the CLI died before naming is silently unscanned — while the case reports
+# "all N managed scripts keep to generic env namespaces". Non-empty is not
+# success. Same shape as BUG-027 finding (b), where a killed roster lookup's
+# partial stdout was accepted as a persona name.
+#
+# And the pipeline had to go with it: in `$(a | b)` the status is b's, so `sed`
+# would have reported success no matter what the CLI did.
+_files_out="$(mktemp)"
+bash "$CLI" files >"$_files_out" 2>/dev/null
+_files_rc=$?
+if [ "$_files_rc" -ne 0 ]; then
+  echo "FAIL: 'blueprint files' exited $_files_rc — a partial listing would make the scan below pass over every file the CLI never named"
+  rm -f "$_files_out"
+  exit 1
+fi
+managed=$(sed 's/^ *//' "$_files_out")
+rm -f "$_files_out"
 [ -n "$managed" ] || { echo "FAIL: could not list MANAGED_FILES"; exit 1; }
 
 checked=0

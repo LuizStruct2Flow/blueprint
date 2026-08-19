@@ -114,6 +114,14 @@ setup() {
       git config user.email t@local
       git config user.name t
       git remote add origin "$FAKE_REMOTE"
+      # BUG-029 — `tests/` is a managed DIRECTORY and expanding it to nothing is
+      # a hard failure by design, so a stand-in blueprint has to ship suites for
+      # `pull` to run against it at all (#24 drives a real pull). Committed once
+      # here; the reset branch below only clears docs/ and scripts/.
+      mkdir -p tests/fixture
+      printf 'echo fixture\n' > tests/fixture/test.sh
+      git add -A tests
+      git -c commit.gpgsign=false commit -q -m "fixture suites"
     ) 2>/dev/null
   else
     # Drop request branches from previous cases so a stale one cannot be

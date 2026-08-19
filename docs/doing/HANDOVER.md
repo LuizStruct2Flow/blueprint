@@ -45,15 +45,32 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**No WIP. `doing/` is empty** — BUG-027, BUG-028 and BUG-029 were accepted on
-2026-08-19; BUG-031 and TASK-012 are with the founder.
+**WIP: TASK-012, reopened.** BUG-027, BUG-028 and BUG-029 were accepted on
+2026-08-19; BUG-031 is with the founder.
 
-**TASK-012 is answered, so stop deferring work on it.** Orchestration is
-separable-with-work, and ruflo is **do not adopt** — its Codex support is a
-dispatcher, not an observer, so it cannot see a `codex exec` it did not launch,
-which is the half of the feed our review findings come from. The handover used to
-say "read TASK-012 before touching the feed, we may throw the work away". That
-reason is gone. Feed work is worth doing.
+**TASK-012 was reopened by the founder on 2026-08-19, the day it was filed.**
+Read Part 3 of [`TASK-012-strip-test.md`](TASK-012-strip-test.md) before acting on
+anything the first two parts concluded. In short: the spike measured whether
+orchestration comes **off** and inferred something about whether another
+orchestrator can go **on**. Only detach was tested — nothing was ever attached.
+
+- **Still true:** orchestration detaches cleanly (one hard coupling, §7G; one
+  suite; three doc links), the ~14% measurement, `feed.sh`/`log-activity.sh` are
+  observability and not orchestration, and **BUG-028** — a fresh bootstrap cannot
+  pass its own gate. That last one is the most valuable thing the spike produced
+  and is entirely independent of ruflo.
+- **Withdrawn:** *ruflo — do not adopt*. It rested on Q1 alone, and Q1's finding
+  (ruflo cannot observe a `codex exec` **we** launched) holds only while we keep
+  our own dispatcher. An orchestrator that owns the dispatch sees it by
+  construction. **There is no verdict on ruflo right now.**
+- **Retired:** the brief's *"evaluate on the lite path only"* constraint. Filling
+  the socket means *being* the orchestrator, which is the full CLI; the lite path
+  is an add-on by construction and could never answer the question.
+
+**Feed work is still worth doing** — that part of the old note stands, and for a
+firmer reason than before: `feed.sh` and `log-activity.sh` are the observability
+lane, which survives either answer. What is **not** settled is whether we keep
+orchestrating in-house; that is **TASK-014**, the attachment trial.
 
 ### The three things that cost the most on 2026-08-19
 
@@ -94,7 +111,12 @@ rather than as damage. The verdict was recovered from `signal-history.log`.
    because it runs a complete second gate inside the first. The measurement is
    done; the report names what is *not* worth optimising (the bottom 28 stages
    total 8.5 s) and the trap in the obvious fix. Read it before touching timing.
-3. **BUG-027's three unfixed findings**, now unblocked by TASK-012:
+3. **TASK-014** — the attachment trial TASK-012's revalidation is waiting on:
+   bootstrap a throwaway, install the **full** ruflo CLI, mount the lifecycle and
+   the DoD gate on top, push one real work item through. Deletion proved the seam
+   opens; only construction proves something fits it.
+4. **BUG-027's three unfixed findings**, no longer gated on TASK-012 (the feed is
+   the observability lane and survives either answer):
    `BP_ROSTER_LOOKUP_TIMEOUT=0` hangs indefinitely (GNU `timeout 0` means *no*
    timeout), a killed lookup's partial stdout is accepted and persisted as a
    persona name, and `agent-activity.sh` sources `roster.sh` into the

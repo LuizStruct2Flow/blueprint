@@ -214,6 +214,7 @@ jobs:
           bash tests/drift-in-blueprint/test.sh
           bash tests/a2bp-e2e/test.sh
           bash tests/marker-merge/test.sh
+          bash tests/suite-sync/test.sh
           bash tests/bootstrap-identity/test.sh
           bash tests/bootstrap-contents/test.sh
           # BUG-028 — bootstraps a project and runs THAT project's whole gate.

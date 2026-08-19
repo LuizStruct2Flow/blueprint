@@ -76,6 +76,46 @@ if ! git -C "$_ident_probe" var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
 fi
 rmdir "$_ident_probe" 2>/dev/null || true
 
+# --- Resolve the managed-file list BEFORE creating anything (BUG-029 R3) ---
+#
+# The substitution loop further down consumed this list through a process
+# substitution — `done < <(_synced_files)` — which discards the exit status
+# entirely. And `_synced_files` was itself a PIPELINE (`blueprint files | sed`),
+# so even capturing its status would have read `sed`'s success. Two layers of
+# the same swallow, one inside the other.
+#
+# The consequence is not a bad substitution, it is NO substitution: an empty
+# list means the loop body never executes, so nothing can guard from inside it.
+# Bootstrap then printed "Substituted placeholders in 0 file(s)", finished with
+# "Happy struct2flowing", and exited 0 — handing over a brand-new project whose
+# CLAUDE.md still said {{PROJECT_NAME}} in five places. Verified by breaking
+# scripts/blueprint and re-running: rc=0, project delivered, placeholders intact.
+# BUG-028 already established that nothing downstream would ever report it.
+#
+# So the list is resolved HERE, before `mkdir -p "$TARGET_DIR"`, for exactly the
+# reason the identity probe above is: a late check leaves a half-bootstrapped
+# directory whose presence then defeats the "fix it and re-run" advice. Each
+# stage runs and is checked on its own — never `a | b` — which is the same
+# correction bp_expand_managed_dirs needed in scripts/blueprint.
+_files_raw="$(mktemp)"
+if ! bash "$BLUEPRINT_ROOT/scripts/blueprint" files >"$_files_raw" 2>&1; then
+  echo "❌ 'blueprint files' failed — nothing has been created." >&2
+  echo "   The bootstrap cannot know which files to substitute, and a project" >&2
+  echo "   built without that list ships literal {{PROJECT_NAME}} everywhere." >&2
+  sed 's/^/   | /' "$_files_raw" >&2
+  rm -f "$_files_raw"
+  exit 1
+fi
+SYNCED_FILES="$(sed -n 's/^  \([^ ].*\)$/\1/p' "$_files_raw")"
+rm -f "$_files_raw"
+if [[ -z "$SYNCED_FILES" ]]; then
+  echo "❌ 'blueprint files' listed no files — nothing has been created." >&2
+  echo "   An empty list is indistinguishable from a successful run with" >&2
+  echo "   nothing to do, and it would deliver a project with every" >&2
+  echo "   {{PROJECT_NAME}} placeholder still in it. Refusing instead." >&2
+  exit 1
+fi
+
 # --- Refuse to overwrite an existing dir ---
 if [[ -e "$TARGET_DIR" ]]; then
   echo "❌ Target already exists: $TARGET_DIR" >&2
@@ -178,10 +218,10 @@ done
 # shellcheck source=scripts/lib/placeholders.sh
 . "$BLUEPRINT_ROOT/scripts/lib/placeholders.sh"
 
-_synced_files() {
-  bash "$BLUEPRINT_ROOT/scripts/blueprint" files | sed -n 's/^  \([^ ].*\)$/\1/p'
-}
-
+# $SYNCED_FILES was resolved and validated near the top, before anything was
+# created — see "Resolve the managed-file list BEFORE creating anything". It is
+# fed in as a here-string rather than re-derived, so this loop cannot reach a
+# command whose failure it would then have no way to notice.
 _subst_count=0
 while IFS= read -r f; do
   [[ -n "$f" && -f "$TARGET_DIR/$f" ]] || continue
@@ -193,7 +233,7 @@ while IFS= read -r f; do
     exit 1
   fi
   _subst_count=$((_subst_count + 1))
-done < <(_synced_files)
+done <<< "$SYNCED_FILES"
 echo "🔤 Substituted placeholders in $_subst_count file(s)."
 
 # --- Seed the LIVE baton (BUG-019) ---
@@ -331,11 +371,14 @@ Next steps:
   3. brew bundle    (installs gitleaks + semgrep + osv-scanner for the pre-push gate)
   4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md, project_config_infra.md
   5. Create your backend/frontend src tree as needed
-  6. Optional: APPEND your project guards to .githooks/pre-push-project.
-     It already ships populated — it wires the regression suites that guard the
-     blueprint-managed machinery this project runs. Copying the .example OVER it
-     would take those suites off your push path. The .example is a menu of guard
-     shapes to copy from.
+  6. Optional: APPEND your project guards to .githooks/pre-push-project,
+     AFTER its BLUEPRINT:END marker. The region above that marker is
+     blueprint-managed and 'blueprint pull' replaces it (that is how a suite
+     added upstream arrives with something to invoke it); everything after it is
+     yours and is preserved. Your own test suites get a row in the SECOND table
+     of tests/SUITES.md, after that file's BLUEPRINT:END, for the same reason.
+     Copying the .example OVER pre-push-project would take every regression
+     suite off your push path. The .example is a menu of guard shapes.
 
 Blueprint sync:
   - Add the blueprint CLI to PATH (once per machine):

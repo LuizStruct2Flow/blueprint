@@ -163,6 +163,16 @@ guards (placeholder checks, asset invariants, release-notes guards, etc.)
 live in `.githooks/pre-push-project` and are sourced by the main hook if
 present.
 
+**`.githooks/pre-push-project` is half-managed, and the markers say which
+half.** Between `BLUEPRINT:BEGIN` and `BLUEPRINT:END` the blueprint owns it —
+those stages invoke the regression suites under `tests/`, which is itself a
+managed directory — and `blueprint pull` replaces the whole region. Everything
+after `BLUEPRINT:END` is the project's and is preserved byte-for-byte. Put your
+guards there; an edit inside the region is lost at the next pull, so send it
+upstream with `blueprint a2bp .githooks/pre-push-project` instead. The two must
+travel together: a suite is only a suite as three things — the files, its row in
+`tests/SUITES.md`, and its invocation in this hook (BUG-029).
+
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
 sets it at bootstrap, but a clone never runs bootstrap. This file previously

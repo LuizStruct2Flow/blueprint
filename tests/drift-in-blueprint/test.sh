@@ -115,9 +115,14 @@ fi
 #    files, and breaking it would be a far worse bug than the one being fixed.
 # ===========================================================================
 BP="$WORK/bp"
-mkdir -p "$BP/docs"
+mkdir -p "$BP/docs" "$BP/tests/fixture"
 printf '# CLAUDE\nshared\n' > "$BP/CLAUDE.md"
 printf '# DoD\nshared\n'    > "$BP/docs/DoD.md"
+# BUG-029 — `tests/` is a managed DIRECTORY, and expanding it to nothing is a
+# hard failure by design (a silent empty expansion would let drift report a
+# project clean while syncing zero suites). So a fixture blueprint has to be one:
+# a checkout with no tests/ at HEAD is not a blueprint, and the CLI now says so.
+printf 'echo fixture\n' > "$BP/tests/fixture/test.sh"
 (
   cd "$BP"
   git init -q -b main .

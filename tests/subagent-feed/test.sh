@@ -310,9 +310,17 @@ printf 'exit 3\n' > "$POISON/scripts/lib/roster.sh"
 
 poison_rc=0
 printf '%s' '{"hook_event_name":"SubagentStart","agent_id":"deadbeef","subagent_type":"general-purpose","description":"Nadia does a thing"}' \
-  | AGENT_FEED_LOG="$POISON/logs/feed.log" sh "$POISON/scripts/log-activity.sh" >/dev/null 2>&1 || poison_rc=$?
+  | AGENT_FEED_LOG="$POISON/logs/feed.log" sh "$POISON/scripts/log-activity.sh" \
+      >/dev/null 2>"$POISON/stderr" || poison_rc=$?
 
+# The hook's stderr is KEPT, not discarded. This assertion used to swallow it and
+# report `rc=2` alone, which is how it failed in CI for a whole day while passing
+# on every developer machine — the number named the symptom and nothing else, so
+# reproducing it locally was the only way in, and it does not reproduce locally.
+# An assertion that cannot say WHY is the same defect this suite exists to fix.
 if [ "$poison_rc" -ne 0 ]; then
+  printf '  --- hook stderr (rc=%s, sh=%s) ---\n' "$poison_rc" "$(readlink -f "$(command -v sh)" 2>/dev/null)" >&2
+  sed 's/^/  | /' "$POISON/stderr" >&2 2>/dev/null || true
   fail "#5 a roster lib that calls exit killed the hook (rc=$poison_rc) — it would fail the tool call"
 elif [ ! -s "$POISON/logs/feed.log" ]; then
   fail "#5 the hook survived but logged nothing — the bookend is what makes a dispatch visible at all"
@@ -351,7 +359,13 @@ else
   hang_rc=0
   printf '%s' '{"hook_event_name":"SubagentStart","agent_id":"hang01","subagent_type":"general-purpose","description":"Nadia does a thing"}' \
     | AGENT_FEED_LOG="$HANG/logs/feed.log" BP_ROSTER_LOOKUP_TIMEOUT=1 \
-      "$TCMD" 15 sh "$HANG/scripts/log-activity.sh" >/dev/null 2>&1 || hang_rc=$?
+      "$TCMD" 15 sh "$HANG/scripts/log-activity.sh" >/dev/null 2>"$HANG/stderr" || hang_rc=$?
+
+  # Stderr kept for the same reason as #5 — see the note there.
+  if [ "$hang_rc" -ne 0 ]; then
+    printf '  --- hook stderr (rc=%s, timeout=%s) ---\n' "$hang_rc" "$TCMD" >&2
+    sed 's/^/  | /' "$HANG/stderr" >&2 2>/dev/null || true
+  fi
 
   if [ "$hang_rc" -eq 124 ]; then
     fail "#6 a roster lib that never returns hangs the hook — it stalls the tool call it observes (Elias)"

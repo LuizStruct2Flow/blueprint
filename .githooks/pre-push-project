@@ -438,6 +438,27 @@ else
   pipe_skip "manifest · BUG-005" "suite absent"
 fi
 
+# BUG-029 — `tests/` is a managed DIRECTORY, and this is what makes that safe.
+# A derived project's suites were frozen at bootstrap while the machinery they
+# test kept being pulled forward, so its gate went green over assertions about
+# code it no longer runs. Syncing a directory is only correct if it is additive:
+# the property that must never regress is that a project-authored suite is
+# neither reported nor removed.
+if [ -f tests/suite-sync/test.sh ]; then
+  _st_suite_sync(){
+    bash tests/suite-sync/test.sh || {
+      echo "❌ tests/suite-sync/test.sh failed (BUG-029)."
+      echo "   A managed directory must expand from 'git archive HEAD', deliver"
+      echo "   new suites, leave project-authored ones alone, and never rewrite"
+      echo "   a suite that carries the placeholder as fixture data."
+      return 1
+    }
+  }
+  pipe_stage "suite-sync · BUG-029" _st_suite_sync
+else
+  pipe_skip "suite-sync · BUG-029" "suite absent"
+fi
+
 # BUG-014 — a test suite must never write into the repo it runs from. Git exports
 # GIT_DIR to every hook, so the fixtures below inherited it and their `git init`
 # landed in the REAL repository. That is what wiped core.hooksPath on 2026-08-02

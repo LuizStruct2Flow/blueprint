@@ -207,6 +207,42 @@ else
   pass "#5 every managed/template file was substituted at bootstrap"
 fi
 
+# ===========================================================================
+# 6. THE SECOND SYNC — `blueprint pull --yes`, then the project's own manifest.
+#
+#    BUG-029. `tests/` is now a managed DIRECTORY, so pull writes into the one
+#    tree the gate reads its own membership from. Two things have to hold at
+#    once and neither is visible from either side alone:
+#
+#      - Pull over a zero-second-old bootstrap must be a NO-OP. Bootstrap seeds
+#        the suites from `git archive` and pull re-derives that same set from
+#        HEAD; if the two disagree by so much as a substitution, every project
+#        gets a spurious diff on its suites at the first wake. Three suites
+#        carry a literal {{PROJECT_NAME}} as fixture data, so this is exactly
+#        where the BUG-028 self-corruption class would land next.
+#      - `tests/manifest` must still pass afterwards. It is the control that
+#        asserts every suite on disk is classified and every blocking suite is
+#        invoked by the gate — i.e. the control that fails if the suites and
+#        `.githooks/pre-push-project` ever arrive out of step with each other.
+# ===========================================================================
+pull="$( cd "$TARGET" && bash scripts/blueprint pull --yes </dev/null 2>&1 )"
+pull_rc=$?
+if [ "$pull_rc" -ne 0 ]; then
+  fail "#6 'blueprint pull --yes' failed on a zero-second-old bootstrap (exit $pull_rc)"
+  printf '%s\n' "$pull" | tail -12 | sed 's/^/      /'
+elif ! printf '%s\n' "$pull" | grep -q 'Nothing to pull'; then
+  fail "#6 pull found work to do on a zero-second-old bootstrap — bootstrap and pull disagree about what the project should contain"
+  printf '%s\n' "$pull" | grep -E '^(── |  (pulled|new file))' | head -20 | sed 's/^/      /'
+else
+  man="$( cd "$TARGET" && bash tests/manifest/test.sh 2>&1 )"
+  if [ $? -ne 0 ]; then
+    fail "#6 the derived project's own tests/manifest fails after a full pull — its suites and its gate are out of step"
+    printf '%s\n' "$man" | grep '^FAIL' | sed 's/^/      /'
+  else
+    pass "#6 a full pull is a no-op on a fresh bootstrap, and the project's manifest still passes"
+  fi
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean."
   exit 0

@@ -380,6 +380,35 @@ else
   fi
 fi
 
+# ===========================================================================
+# 7. BUG-031 — THE HOOK MUST SURVIVE A `sh` THAT HAS NO `pipefail`.
+#
+#    `set -uo pipefail` on line 20 killed the hook at rc=2 under the CI runner's
+#    dash, before one defensive branch could run: the most defensive script in
+#    the repo was destroyed by its own first statement.
+#
+#    It passed on every developer machine. This dash (0.5.12) ACCEPTS pipefail
+#    and the runner's rejects it, so "my /bin/sh is dash too" was never evidence
+#    — and neither is busybox here, which accepts it as well.
+#
+#    THIS ASSERTION IS A SOURCE CHECK, DELIBERATELY, AND THAT IS A REAL LIMIT.
+#    The behavioural check needs a shell that lacks the option, and this machine
+#    has none to offer — a stub cannot help, because the stub would have to
+#    INTERPRET the script, not merely launch it. Cases #5 and #6 run the hook
+#    under `sh` and do catch this behaviourally, but only where the shell lacks
+#    pipefail — i.e. on the runner, which is exactly where it broke and where a
+#    green local suite said nothing. So this case exists to fail on the machine
+#    where #5/#6 cannot, and it is named for what it is rather than dressed up
+#    as an execution test.
+# ===========================================================================
+if grep -q 'set -uo pipefail' "$HCODE" || grep -qE '^[[:space:]]*set -o pipefail' "$HCODE"; then
+  fail "#7 the hook sets pipefail unconditionally — it exits 2 on a sh without it (BUG-031)"
+elif grep -qE '\([[:space:]]*set -o pipefail[[:space:]]*\)' "$HCODE"; then
+  pass "#7 pipefail is probed in a subshell before being set (source check — see the note)"
+else
+  fail "#7 cannot tell how the hook handles pipefail — BUG-031 needs an explicit guard"
+fi
+
 grep -q 'ROSTER_LIB' "$HCODE" \
   || fail "static: the hook no longer references the roster lib at all"
 grep -q 'bp_staleness_timeout_cmd' "$HCODE" \

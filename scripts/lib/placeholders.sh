@@ -39,7 +39,20 @@ bp_placeholder_upper() {
   printf '%s' "$1" | tr 'a-z-' 'A-Z_'
 }
 
-# bp_should_substitute PATH → 0 if forward substitution may be applied.
+# bp_should_substitute REPO_RELATIVE_PATH → 0 if forward substitution may apply.
+#
+# THE ARGUMENT IS REPO-RELATIVE. Not "$BLUEPRINT_ROOT/$f", not "$PWD/$f" — the
+# path a file has INSIDE the repo, which is the only thing its identity depends
+# on. An absolute path makes the answer a function of where someone happened to
+# clone the blueprint, and the patterns below can then match a component of the
+# operator's home directory (BUG-029 R2-S2: a blueprint under any directory
+# named `tests/` stopped substituting {{PROJECT_NAME}} anywhere at all).
+#
+# The pre-existing entries are suffix-anchored, so they were immune to that by
+# accident rather than by design. Do not add a leading-component rule without
+# checking every call site: `blueprint`'s substituted_blueprint_copy /
+# substitute_placeholders, new-project.sh's bootstrap walk, and a2bp's staging
+# loop.
 #
 # BUG-028. The files that IMPLEMENT or DOCUMENT the substitution carry the
 # placeholder tokens as CODE AND PROSE, not as template slots — this file's own
@@ -74,7 +87,7 @@ bp_should_substitute() {
   case "$1" in
     *scripts/blueprint|*scripts/new-project.sh) return 1 ;;
     *scripts/lib/placeholders.sh|*scripts/lib/contamination.sh) return 1 ;;
-    tests/*|*/tests/*) return 1 ;;
+    tests/*) return 1 ;;
   esac
   return 0
 }

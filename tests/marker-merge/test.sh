@@ -91,6 +91,18 @@ mkdir -p "$BP_CLONE"
 ( cd "$ROOT" && git archive HEAD | tar -x -C "$BP_CLONE" )
 cp "$BP" "$BP_CLONE/docs/mocks/README.md"
 
+# BUG-029 — the clone must be a GIT repo, not just a tree. `tests/` is a managed
+# DIRECTORY and the CLI expands it from the blueprint's HEAD, so a checkout with
+# no HEAD cannot answer the question and refuses (deliberately: the alternative
+# is syncing zero suites while reporting success). The fixture already pretended
+# to have a bootstrap_sha via `rev-parse HEAD || echo no-sha`; now it has one.
+(
+  cd "$BP_CLONE"
+  git init -q -b main .
+  git add -A
+  git -c user.email=test@local -c user.name=test -c commit.gpgsign=false commit -q -m "fixture blueprint"
+) >/dev/null 2>&1
+
 # Put the project version into $WORK at the same relative path.
 mkdir -p "$WORK/docs/mocks"
 cp "$PROJ_BEFORE" "$WORK/docs/mocks/README.md"

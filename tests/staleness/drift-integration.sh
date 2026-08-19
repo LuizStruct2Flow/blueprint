@@ -55,6 +55,11 @@ mkdir -p "$UP"
   git init -q -b main .
   git config user.email t@local; git config user.name t
   printf '# CLAUDE\n' > CLAUDE.md
+  # BUG-029 — `tests/` is a managed DIRECTORY whose expansion is fail-closed, so
+  # a fixture blueprint has to ship suites or the CLI refuses rather than
+  # silently syncing zero of them.
+  mkdir -p tests/fixture
+  printf 'echo fixture\n' > tests/fixture/test.sh
   git add -A && git -c commit.gpgsign=false commit -q -m base
 ) 2>/dev/null
 

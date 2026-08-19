@@ -374,9 +374,18 @@ _should_substitute() { bp_should_substitute "$1"; }
 # pull's "same?" check so the templated blueprint side is compared
 # against the substituted project side instead of producing infinite
 # false drift.
+# BUG-029 R2-S2 — the argument is the REPO-RELATIVE path, never
+# "$BLUEPRINT_ROOT/$f". This was the one call site of five that passed an
+# absolute path, and it made bp_should_substitute's answer a function of WHERE
+# THE BLUEPRINT IS CHECKED OUT. Every other exemption there is suffix-anchored
+# (`*scripts/blueprint`), so it survived that by luck; the moment a rule needed
+# a LEADING component the luck ran out, and a blueprint living under any
+# directory named `tests/` would silently stop substituting {{PROJECT_NAME}} in
+# every managed file. The predicate is about a file's identity in the repo, so
+# it gets the repo-relative path and nothing else.
 substituted_blueprint_copy() {
-  local bp="$1"
-  if ! _should_substitute "$bp"; then
+  local f="$1" bp="$BLUEPRINT_ROOT/$1"
+  if ! _should_substitute "$f"; then
     echo "$bp"
     return 0
   fi
@@ -617,28 +626,68 @@ read_blueprint_source() {
 # announcement already exists and is fail-closed: when a suite's row leaves
 # tests/SUITES.md, tests/manifest #1 fails the derived push naming the orphan
 # directory.
+# IT FAILS CLOSED (BUG-029 R2-S1). An expansion that errors, or that yields
+# nothing, is a HARD failure — never an empty list.
+#
+# The first version warned and carried on, which reproduced BUG-029 inside its
+# own fix: `tests/` would silently expand to nothing, `drift` would compare zero
+# suites, report "✓ All blueprint-managed files match" and exit 0. A mechanism
+# that is present, reports nothing, and whose silence is indistinguishable from
+# success is the exact shape of A-22, BUG-004, BUG-018 and BUG-028 — four times
+# already in this repo, and it went straight back in through the door built to
+# close it. There is no such thing as "a managed directory that happens to be
+# empty today": either the blueprint ships files there and they must sync, or
+# the entry does not belong in MANAGED_FILES.
+#
+# STATUS IS CAPTURED OUTSIDE THE PIPE. `x=$(a | b | c)` yields only c's status,
+# so a failed `git archive` feeding a successful `grep` reads as success with
+# empty output — the trap behind BUG-027 finding (b), where a killed lookup's
+# partial stdout was accepted because its status vanished in `$( )`. Each stage
+# runs on its own, to a file, and is checked. `grep`'s own no-match 1 is the one
+# expected non-zero, and the emptiness check below is what actually judges it.
 bp_expand_managed_dirs() {
-  local expanded=() f listing line
+  local expanded=() f listing line tarf listf
   for f in "${MANAGED_FILES[@]}"; do
     case "$f" in
       */) ;;
       *)  expanded+=("$f"); continue ;;
     esac
-    listing=$(git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "${f%/}" 2>/dev/null \
-              | tar -t 2>/dev/null | grep -v '/$') || true
-    if [ -z "$listing" ]; then
-      # Loud, not silent: an empty managed directory means this project syncs
-      # nothing from it, and a silent coverage cut is the defect class this
-      # whole file keeps closing.
-      echo "${C_YELLOW}⚠ managed directory '$f' has no shipping files at the blueprint's HEAD —${C_RESET}" >&2
-      echo "${C_DIM}  nothing will be synced from it. Is it committed, or entirely export-ignore'd?${C_RESET}" >&2
-      continue
+
+    tarf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+    listf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+
+    if ! git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "${f%/}" >"$tarf" 2>/dev/null; then
+      rm -f "$tarf" "$listf"
+      _bp_expand_die "$f" "'git archive HEAD ${f%/}' failed — the path is not in the blueprint's HEAD, or the checkout is unreadable"
     fi
+    if ! tar -tf "$tarf" >"$listf" 2>/dev/null; then
+      rm -f "$tarf" "$listf"
+      _bp_expand_die "$f" "the archive could not be listed ('tar -t' failed)"
+    fi
+    listing=$(grep -v '/$' "$listf" || true)
+    rm -f "$tarf" "$listf"
+
+    if [ -z "$listing" ]; then
+      _bp_expand_die "$f" "it contains no shipping files at HEAD — every file under it is uncommitted or export-ignore'd"
+    fi
+
     while IFS= read -r line; do
       if [ -n "$line" ]; then expanded+=("$line"); fi
     done <<< "$listing"
   done
   MANAGED_FILES=("${expanded[@]}")
+}
+
+# One message, so the failure always says which entry and always says why
+# continuing would be worse than stopping.
+_bp_expand_die() {
+  local entry="$1" why="$2"
+  echo "${C_RED}error:${C_RESET} managed directory '$entry' expanded to nothing: $why" >&2
+  echo "${C_DIM}  Refusing to continue. Carrying on would sync ZERO files from '$entry' while${C_RESET}" >&2
+  echo "${C_DIM}  reporting success — a project would read '✓ everything matches' and be wrong.${C_RESET}" >&2
+  echo "${C_DIM}  Fix the blueprint checkout (is '${entry%/}' committed at HEAD?), or remove${C_RESET}" >&2
+  echo "${C_DIM}  '$entry' from MANAGED_FILES in scripts/blueprint if it is genuinely gone.${C_RESET}" >&2
+  exit 1
 }
 
 # --- Subcommand: files ---
@@ -860,7 +909,7 @@ cmd_drift() {
     # otherwise every templated file looks "drifted" forever after
     # the first substitute-on-pull.
     local bp_cmp
-    bp_cmp=$(substituted_blueprint_copy "$bp")
+    bp_cmp=$(substituted_blueprint_copy "$f")
     if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
       DRIFTED+=("$f")
     fi
@@ -925,7 +974,7 @@ cmd_pull() {
         continue
       fi
       local bp_cmp
-      bp_cmp=$(substituted_blueprint_copy "$bp")
+      bp_cmp=$(substituted_blueprint_copy "$f")
       if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
         files+=("$f")
       fi
@@ -950,7 +999,7 @@ cmd_pull() {
     # files that have already been substituted in the project don't
     # show as "different" forever.
     local bp_cmp_pull
-    bp_cmp_pull=$(substituted_blueprint_copy "$bp")
+    bp_cmp_pull=$(substituted_blueprint_copy "$f")
     if [ -f "$f" ] && diff -q "$bp_cmp_pull" "$f" >/dev/null 2>&1; then
       [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
       echo "  ${C_DIM}same${C_RESET}  $f"

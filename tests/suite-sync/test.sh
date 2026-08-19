@@ -351,6 +351,174 @@ if bp_inputs_validate "$A" "$MAN" tests >/dev/null 2>&1; then
 fi
 [ "$b7" -eq 0 ] && pass "#7 a2bp accepts files under a managed directory, and refuses absent ones, siblings and the directory itself"
 
+# ===========================================================================
+# 8. AN EXPANSION THAT YIELDS NOTHING IS A HARD FAILURE, NOT AN EMPTY LIST.
+#
+#    Andreas, R2-S1. The first fix warned and carried on, which reproduced
+#    BUG-029 INSIDE ITS OWN FIX: `tests/` expands to nothing, drift compares
+#    zero suites, prints "✓ All blueprint-managed files match the blueprint
+#    HEAD" and exits 0. A mechanism that is present, reports nothing, and whose
+#    silence is indistinguishable from success — A-22, BUG-004, BUG-018,
+#    BUG-028, and now the door built to close them.
+#
+#    Both halves are asserted, because either alone can pass while the defect
+#    stands: a non-zero exit with no message leaves the operator nothing to act
+#    on, and a message with exit 0 is what every caller and CI job reads as
+#    success.
+#
+#    8 is the pipeline-ERROR path (`git archive` fails), 8b the EMPTY-RESULT
+#    path. They are separate cases because the first one's status is the one
+#    that disappears inside `$( a | b | c )` — c succeeds, so the failure is
+#    invisible unless the stages are checked apart from each other.
+# ===========================================================================
+assert_expand_fails(){
+  local label="$1" bpdir="$2" projdir="$3" why="$4"
+  local o rc bad=0
+  o="$( cd "$projdir" && bash "$bpdir/scripts/blueprint" drift 2>&1 )"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    fail "$label drift EXITED 0 with $why — a caller cannot tell that from a clean project (this is BUG-029 inside its own fix)"
+    bad=1
+  fi
+  if printf '%s\n' "$o" | grep -q 'blueprint-managed files match'; then
+    fail "$label drift reported the project CLEAN while syncing zero suites"
+    bad=1
+  fi
+  if ! printf '%s\n' "$o" | grep -q "tests/"; then
+    fail "$label the failure never names the managed entry, so nobody can act on it:
+$(printf '%s\n' "$o" | tail -4 | sed 's/^/      /')"
+    bad=1
+  fi
+  [ "$bad" -eq 0 ] && pass "$label refuses loudly (rc=$rc) and names the entry — $why"
+}
+
+# A blueprint whose HEAD has no `tests` path at all.
+BP8="$WORK/bp8"
+mkdir -p "$BP8/docs" "$BP8/scripts"
+printf '# CLAUDE for {{PROJECT_NAME}}\n' > "$BP8/CLAUDE.md"
+printf '# DoD\n'                         > "$BP8/docs/DoD.md"
+cp "$ROOT/scripts/blueprint" "$BP8/scripts/blueprint"
+cp -r "$ROOT/scripts/lib" "$BP8/scripts/lib"
+git_c "$BP8" init -q
+git_c "$BP8" add -A
+git_c "$BP8" commit -qm "a blueprint with no tests/ at HEAD"
+
+P8="$WORK/proj8"
+mkdir -p "$P8/docs"
+printf '# CLAUDE for proj8\n' > "$P8/CLAUDE.md"
+printf '# DoD\n'              > "$P8/docs/DoD.md"
+{
+  printf 'config_version   = 2\n'
+  printf 'blueprint_source = %s\n' "$BP8"
+  printf 'bootstrap_sha    = %s\n' "$(git -C "$BP8" rev-parse HEAD)"
+  printf 'bootstrap_date   = 2026-01-01\n'
+} > "$P8/.blueprint-source"
+git_c "$P8" init -q
+git_c "$P8" add -A
+git_c "$P8" commit -qm init
+assert_expand_fails "#8" "$BP8" "$P8" "the managed directory is absent from HEAD ('git archive' fails)"
+
+# 8b. The directory EXISTS and every file under it is export-ignore'd, so the
+#     pipeline SUCCEEDS and returns nothing. This is the case a status check
+#     alone would miss, which is why it is separate from #8.
+mkdir -p "$BP8/tests/ghost"
+printf 'echo ghost\n'            > "$BP8/tests/ghost/test.sh"
+printf 'tests/   export-ignore\n' > "$BP8/.gitattributes"
+git_c "$BP8" add -A
+git_c "$BP8" commit -qm "tests/ present but entirely export-ignore'd"
+if [ -n "$(archive_tests "$BP8")" ]; then
+  fail "#8b fixture is wrong — the archive still ships files under tests/, so the empty-result path is not exercised"
+else
+  assert_expand_fails "#8b" "$BP8" "$P8" "every file under it is export-ignore'd (the pipeline succeeds and yields nothing)"
+fi
+
+# ===========================================================================
+# 9. THE SUBSTITUTION PREDICATE IS ABOUT THE FILE, NOT ABOUT WHERE THE
+#    BLUEPRINT LIVES.
+#
+#    Andreas, R2-S2. `substituted_blueprint_copy` was the one call site of five
+#    passing an ABSOLUTE path to bp_should_substitute, so a rule with a leading
+#    component matched against the checkout's own location. A blueprint under
+#    any directory named `tests/` exempted EVERY managed file.
+#
+#    THE SYMPTOM IS ON THE COMPARISON PATH, NOT IN THE PULLED BYTES, and that
+#    is worth being precise about because it is where I first aimed and missed.
+#    `pull_file` substitutes via `substitute_placeholders "$f"`, which already
+#    gets the relative path — so the file that LANDS is correct either way. What
+#    breaks is the comparison: drift and pull both diff the project against
+#    `substituted_blueprint_copy`, and with the exemption wrongly applied that
+#    copy still holds `{{PROJECT_NAME}}` while the project holds the real name.
+#    So every templated managed file reports DRIFTED forever, and every pull
+#    re-pulls it and changes nothing. Sync becomes permanently, quietly wrong
+#    for every project sourcing from that checkout — and the first version of
+#    this case asserted the pulled bytes, which are fine, and passed against the
+#    defect.
+#
+#    The fixture blueprint below lives at $WORK/tests/bp on purpose.
+# ===========================================================================
+BP9="$WORK/tests/bp"
+mkdir -p "$BP9/docs" "$BP9/scripts" "$BP9/tests/alpha"
+printf '# CLAUDE for {{PROJECT_NAME}}\n' > "$BP9/CLAUDE.md"
+printf '# DoD\n'                         > "$BP9/docs/DoD.md"
+printf 'echo alpha\n'                    > "$BP9/tests/alpha/test.sh"
+cp "$ROOT/scripts/blueprint" "$BP9/scripts/blueprint"
+cp -r "$ROOT/scripts/lib" "$BP9/scripts/lib"
+git_c "$BP9" init -q
+git_c "$BP9" add -A
+git_c "$BP9" commit -qm "a blueprint that lives under a directory named tests"
+
+P9="$WORK/proj9"
+mkdir -p "$P9/docs"
+printf '# DoD\n' > "$P9/docs/DoD.md"
+{
+  printf 'config_version   = 2\n'
+  printf 'blueprint_source = %s\n' "$BP9"
+  printf 'bootstrap_sha    = %s\n' "$(git -C "$BP9" rev-parse HEAD)"
+  printf 'bootstrap_date   = 2026-01-01\n'
+} > "$P9/.blueprint-source"
+git_c "$P9" init -q
+git_c "$P9" add -A
+git_c "$P9" commit -qm init
+( cd "$P9" && bash "$BP9/scripts/blueprint" pull --yes ) </dev/null >/dev/null 2>&1
+
+b9=0
+drift9="$( cd "$P9" && bash "$BP9/scripts/blueprint" drift 2>&1 )"
+
+if [ ! -f "$P9/CLAUDE.md" ]; then
+  fail "#9 the managed file was never pulled, so nothing about substitution was proved"
+  b9=1
+else
+  # The bytes: correct on both code paths, asserted so a "fix" that stops
+  # substituting altogether cannot pass the comparison assertion by making both
+  # sides equally wrong.
+  if grep -q '{{PROJECT_NAME' "$P9/CLAUDE.md"; then
+    fail "#9 the pulled file still holds the raw placeholder: $(cat "$P9/CLAUDE.md")"
+    b9=1
+  fi
+  if ! grep -q 'proj9' "$P9/CLAUDE.md"; then
+    fail "#9 the project name is not in the pulled file: $(cat "$P9/CLAUDE.md")"
+    b9=1
+  fi
+  # The comparison: THIS is the one the defect fails. With the predicate reading
+  # the checkout's location, the blueprint side is compared unsubstituted and
+  # CLAUDE.md reports drifted after every pull, forever.
+  if drift_mod "$drift9" | grep -qx 'CLAUDE.md'; then
+    fail "#9 a templated managed file reports DRIFTED immediately after being pulled — the exemption is matching the blueprint's own location ($BP9), so drift compares an unsubstituted copy"
+    b9=1
+  fi
+fi
+
+# And the suite under that same blueprint still must NOT be substituted — the
+# narrower rule has to keep doing its job, not merely stop over-reaching.
+if [ ! -f "$P9/tests/alpha/test.sh" ]; then
+  fail "#9b the suite was never pulled from a blueprint under a tests/ path"
+  b9=1
+elif printf '%s\n' "$drift9" | grep -q 'tests/alpha'; then
+  fail "#9b the suite reports drifted after being pulled — the tests/ exemption stopped applying"
+  b9=1
+fi
+[ "$b9" -eq 0 ] && pass "#9 the predicate reads the file's repo-relative path, not the blueprint's location"
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-029 — a managed directory syncs, additively, without eating project-owned files."
   exit 0

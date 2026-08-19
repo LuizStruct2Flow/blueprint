@@ -331,11 +331,14 @@ Next steps:
   3. brew bundle    (installs gitleaks + semgrep + osv-scanner for the pre-push gate)
   4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md, project_config_infra.md
   5. Create your backend/frontend src tree as needed
-  6. Optional: APPEND your project guards to .githooks/pre-push-project.
-     It already ships populated — it wires the regression suites that guard the
-     blueprint-managed machinery this project runs. Copying the .example OVER it
-     would take those suites off your push path. The .example is a menu of guard
-     shapes to copy from.
+  6. Optional: APPEND your project guards to .githooks/pre-push-project,
+     AFTER its BLUEPRINT:END marker. The region above that marker is
+     blueprint-managed and 'blueprint pull' replaces it (that is how a suite
+     added upstream arrives with something to invoke it); everything after it is
+     yours and is preserved. Your own test suites get a row in the SECOND table
+     of tests/SUITES.md, after that file's BLUEPRINT:END, for the same reason.
+     Copying the .example OVER pre-push-project would take every regression
+     suite off your push path. The .example is a menu of guard shapes.
 
 Blueprint sync:
   - Add the blueprint CLI to PATH (once per machine):

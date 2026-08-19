@@ -57,10 +57,24 @@ bp_placeholder_upper() {
 # ONE answer. Three near-copies of the substitution itself had already drifted
 # apart once (A-07 R5-F1); a per-caller copy of "and which files are exempt"
 # fails the same way.
+#
+# BUG-029 extends the same reasoning to `tests/`, which is now a managed
+# DIRECTORY. A suite's placeholder tokens are FIXTURE DATA, never template
+# slots: `tests/state-dir`, `tests/pull-behaviour` and `tests/a2bp-contamination`
+# all carry a literal `{{PROJECT_NAME}}` because they drive the substitution
+# itself. Substituting them replaces the token the suite exists to assert about,
+# and the damage is worse than a wrong fixture — pull would rewrite the file on
+# arrival, drift would then compare a substituted blueprint copy against a
+# project copy that no longer holds the token, and the file would report as
+# drifted forever with no pull able to fix it.
+#
+# This is REQUIRED, not defensive. Those three suites were safe only while
+# `tests/` was unmanaged, and nothing about them changed when it stopped being.
 bp_should_substitute() {
   case "$1" in
     *scripts/blueprint|*scripts/new-project.sh) return 1 ;;
     *scripts/lib/placeholders.sh|*scripts/lib/contamination.sh) return 1 ;;
+    tests/*|*/tests/*) return 1 ;;
   esac
   return 0
 }

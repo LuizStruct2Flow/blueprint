@@ -1,11 +1,25 @@
 #!/bin/sh
-# Project-specific pre-push guards for the BLUEPRINT repo itself.
+# BLUEPRINT:BEGIN — blueprint-managed. Put YOUR guards after BLUEPRINT:END.
+#
+# Everything between the markers is owned by the blueprint and is REPLACED by
+# `blueprint pull`; everything after BLUEPRINT:END is yours and is preserved
+# byte-for-byte (marker_aware_merge, scripts/blueprint). Editing inside the
+# region means losing the edit at the next pull — back-propagate it instead:
+# `blueprint a2bp .githooks/pre-push-project`.
+#
+# It is managed because it MUST travel with tests/ (BUG-029). A suite is
+# coherent only as three things — the files, its row in tests/SUITES.md, and its
+# invocation here. Sync the suites without the wiring and `tests/manifest` #4
+# fails every push on a suite the gate cannot invoke; sync the wiring without
+# the suites and the gate is armed over nothing, which is BUG-004 and A-22 in a
+# new costume.
 #
 # Sourced by .githooks/pre-push (see its "Project-specific guards" section).
-# The generic hook runs build/lint/test per workspace, but this repo has no
-# backend/ or frontend/ — so without this file its own regression tests run
-# NOWHERE and a regression to the sync CLI or the bootstrap script pushes green.
-# That gap was audit finding A-15.
+# The generic hook runs build/lint/test per workspace; the stages below run the
+# regression suites that guard the blueprint-managed machinery this project
+# depends on (blueprint pull/drift/a2bp, signal-set.sh, the feed, the hooks,
+# the gate renderer). Without them a regression to any of it pushes green —
+# audit finding A-15.
 #
 # There is NO wall-clock ceiling (CLAUDE.md §"Pre-push tolerance", founder
 # decision 2026-08-02 closing BUG-005). Coverage here is decided on RISK. The
@@ -849,3 +863,9 @@ else
   # exactly the signal the founder watches for, so it must carry its reason.
   pipe_skip "DoD checklist" "scripts/lib/dod-gate.sh absent — run: blueprint pull scripts/lib/dod-gate.sh"
 fi
+# BLUEPRINT:END
+#
+# --- YOUR PROJECT GUARDS GO BELOW THIS LINE ---------------------------------
+#
+# Everything from here down is project-owned and survives every `blueprint
+# pull` untouched. Copy shapes from .githooks/pre-push-project.example.

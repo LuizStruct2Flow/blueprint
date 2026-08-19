@@ -66,6 +66,15 @@ fails a test instead of passing unnoticed.
 
 ## The suites
 
+This file travels with the suites: `tests/` is a blueprint-managed **directory**
+(BUG-029), so `blueprint pull` replaces everything between the markers below
+with the blueprint's rows — the same suites it just delivered. **Your own
+suites go in the second table, after `BLUEPRINT:END`**, where the pull leaves
+them alone. `tests/manifest` parses both tables identically, so a project row is
+enforced exactly as hard as a blueprint one.
+
+<!-- BLUEPRINT:BEGIN — blueprint-managed rows. Yours go in the table after BLUEPRINT:END. -->
+
 | Suite | Tier | Risk if absent | Rationale for the tier |
 |---|---|---|---|
 | `pipeline` | both | The gate renderer could pass a failing stage, silently opening every gate in the repo | Guards fail-closed on the push path |
@@ -109,3 +118,17 @@ fails a test instead of passing unnoticed.
 | `bootstrap-gate` | blueprint | A freshly bootstrapped project cannot pass its own pre-push gate and nobody here finds out — the failure lands on the new project's first push, on someone else's machine, after this repo's gate went green over the same suites passing at home (BUG-028) | The one assertion that could have caught six day-one failures, and the one nothing else makes: every other bootstrap suite checks what the archive CONTAINS, none ever ran what the new project RUNS. It must block, because `.gitattributes`, `new-project.sh` and this manifest are all on the push path and a regression in any of them reaches a commit unopposed. `blueprint` because it bootstraps, which only a blueprint can do. It is the slowest stage in the gate and the SLO names it on every run — visible, not demoted |
 | `suite-sync` | both | Either half of BUG-029 returns: a derived project's suites freeze at bootstrap while the machinery they test keeps being pulled forward — so its gate goes green over assertions about code it no longer runs — or the sync grows a delete path and takes out the project's own suites with it | Guards the only mechanism that keeps a derived project's coverage honest, on the command every wake runs. Both failure directions are silent: a frozen suite still PASSES, and an additive-only sync leaves no trace when it is not additive. Drives the real CLI against a real fixture blueprint, and pins the `git check-attr` trap — the obvious query for "what ships" gives the wrong answer, and this repo has walked into it once already (`tests/manifest`:139-141) |
 | `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above, now including the export boundary that decides which suites reach a derived project at all |
+
+<!-- BLUEPRINT:END -->
+
+## Your project's suites
+
+Rows below are **project-owned**. `blueprint pull` never touches them, and
+`tests/manifest` enforces them exactly as it enforces the table above: a suite
+directory under `tests/` with no row here fails the push, and a rationale that
+argues from the clock is rejected whichever table it sits in.
+
+The blueprint ships this table empty on purpose — its own suites are all above.
+
+| Suite | Tier | Risk if absent | Rationale for the tier |
+|---|---|---|---|

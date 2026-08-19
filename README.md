@@ -88,14 +88,19 @@ After bootstrap:
    `project_config_dod.md`, `project_config_security.md`,
    `project_config_infra.md`
 5. Start adding code under `backend/`, `frontend/`, etc.
-6. Optional: **append** your project-specific guards to the bottom of
-   `.githooks/pre-push-project`. **Do not copy the `.example` over it** — that
-   file ships already populated, wiring the regression suites that guard the
-   blueprint-managed machinery your project runs (`blueprint pull`/`drift`/
-   `a2bp`, `signal-set.sh`, the feed, the hooks, the gate renderer). Overwriting
-   it takes 33 suites off your push path in one command.
-   `.githooks/pre-push-project.example` is a menu of guard *shapes* to copy
-   from, not a replacement file (BUG-028)
+6. Optional: **append** your project-specific guards to
+   `.githooks/pre-push-project`, **after the `BLUEPRINT:END` marker**.
+   Everything between `BLUEPRINT:BEGIN` and `BLUEPRINT:END` is
+   blueprint-managed and is replaced by `blueprint pull`; everything after
+   `END` is yours and is preserved byte-for-byte (BUG-029). Your own test
+   suites get a row in the *second* table of `tests/SUITES.md`, after that
+   file's own `BLUEPRINT:END`, for the same reason.
+   **Do not copy the `.example` over it** — that file ships already populated,
+   wiring the regression suites that guard the blueprint-managed machinery your
+   project runs (`blueprint pull`/`drift`/`a2bp`, `signal-set.sh`, the feed, the
+   hooks, the gate renderer). Overwriting it takes 33 suites off your push path
+   in one command. `.githooks/pre-push-project.example` is a menu of guard
+   *shapes* to copy from, not a replacement file (BUG-028)
 
 ---
 
@@ -119,7 +124,7 @@ blueprint/
 │   ├── pre-push                    ← generic security + build/lint/format/coverage gate
 │   ├── commit-msg                  ← rejects a commit that does not name its backlog item
 │   ├── pre-commit                  ← refuses a commit on the BLUEPRINT's main (inert in derived projects)
-│   ├── pre-push-project            ← ships populated: wires the regression suites; APPEND your guards
+│   ├── pre-push-project            ← managed between the BLUEPRINT markers (wires the suites); APPEND your guards after BLUEPRINT:END
 │   └── pre-push-project.example    ← a menu of guard shapes to copy FROM (never over)
 ├── .claude/
 │   └── settings.json               ← generic AWS / git / shell permission allow-list
@@ -295,7 +300,16 @@ it. Current contents:
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`, `way-of-working.md`
 - **`scripts/`:** `codex-signal-watch.sh`, `start-codex-signal-watch.sh`,
   `new-project.sh`, `blueprint` itself
-- **`.githooks/`:** `pre-push`, `commit-msg`, `pre-commit`, `pre-push-project.example`
+- **`tests/`** — the whole directory, expanded from `git archive HEAD tests`
+  (BUG-029). The regression suites guard blueprint-managed machinery your
+  project runs, so they have to move forward with it; `tests/SUITES.md` travels
+  with them. Sync here is **additive only** — files the blueprint ships are
+  created and updated, and nothing is ever deleted, because the project has no
+  way to tell "the blueprint dropped this" from "we wrote this"
+- **`.githooks/`:** `pre-push`, `commit-msg`, `pre-commit`,
+  `pre-push-project.example`, and `pre-push-project` **between its
+  `BLUEPRINT:BEGIN`/`END` markers** (it wires the suites, so it must travel
+  with them; the region after `END` stays yours)
 - **`.claude/`:** `settings.json` (host-specific bits live in
   `settings.local.json`, gitignored)
 - **Folder skeleton READMEs:** every `README.md` under `docs/` and `config/`
@@ -304,10 +318,14 @@ it. Current contents:
 - The five `project_config_*.md` files (`overview`, `paths`, `dod`,
   `security`, `infra`) — these are *templates* seeded once at bootstrap
   and then evolve with the project
-- `.githooks/pre-push-project` — **ships populated** at bootstrap (it wires the
-  regression suites), then project-owned: append your guards, and `blueprint
-  pull` will never overwrite them. "Never synced" means pull leaves it alone,
-  not that you start from an empty file (BUG-028)
+- `.githooks/pre-push-project` **after `BLUEPRINT:END`** — the top of the file
+  is managed (see above); everything you append below the end marker is yours
+  and survives every pull. It used to be excluded wholesale, which was right
+  about the bottom and wrong about the top: the blueprint kept adding suites
+  that no derived gate could invoke (BUG-029)
+- `tests/SUITES.md` **after `BLUEPRINT:END`** — the second table is where your
+  own suites are classified. `tests/manifest` enforces it exactly as hard as
+  the blueprint's table
 - `AGENT_SIGNAL.md` — stamped at bootstrap, then evolves session-by-session
 - `docs/doing/HANDOVER.md`, `docs/backlog/BACKLOG.md`, `docs/backlog/BUGS.md` —
   seeded from `templates/` at bootstrap (the blueprint's own copies hold its

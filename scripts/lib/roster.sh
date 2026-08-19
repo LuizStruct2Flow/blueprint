@@ -39,6 +39,7 @@
 #   bp_roster_rows            <repo-root|file>            # role<TAB>name<TAB>backing
 #   bp_roster_name_for_role   <repo-root|file> <role>
 #   bp_roster_backing_for_name <repo-root|file> <name>
+#   bp_roster_name_in_text    <repo-root|file> <free text>   # BUG-027
 
 # --- warning memo -----------------------------------------------------------
 # Deliberately a space-delimited string rather than an associative array: this
@@ -114,6 +115,77 @@ EOF
   bp_roster_warn "role:${want// /_}" \
     "no '$want' row in $(bp_roster_file "$src" 2>/dev/null || echo '<no roster>') — identity unresolved"
   return 1
+}
+
+# --- free text -> the persona it names ---------------------------------------
+# BUG-027. A Claude subagent's identity is NOT in its metadata: the agent TYPE
+# recorded there is the same string for every persona a fleet runs, so labelling
+# from it gives every dispatch one name. What DOES carry the persona is the
+# human-written dispatch description, and both readers of that string — the feed,
+# from a transcript's sibling meta file, and the hook, from its payload — must
+# agree on how to read it. Hence one function here rather than a regex in each:
+# two copies of this rule would be two rules (BUG-010, BUG-021).
+#
+# EARLIEST MENTION WINS, not first roster row. A description routinely names
+# more than one persona — "<X> implements <Y>'s prescription" is the ordinary
+# shape — and the subject comes first; resolving by table order would label the
+# run with whoever happens to sit higher in the table. Wrong, and STABLY wrong,
+# which is worse than a visible miss.
+#
+# Matching is WHOLE-NAME and boundary-checked, never substring, and never via a
+# regex built from the name. Rosters commonly carry a short name that is a prefix
+# of a longer one, and a bare `index()` resolves the longer to the shorter every
+# time; a regex would mean escaping free text an engineer typed into a markdown
+# cell. So: `index()` locates the literal name, and the characters either side of
+# the hit must be non-alphanumeric (or absent) for it to count.
+#
+# This REPLACES tokenising the text and comparing each token to the whole name,
+# which had the right instinct — no regex — and the wrong shape: a token is one
+# word, so a name containing a space or punctuation could never equal one.
+# `Mary Jane` and `O'Neil` silently resolved to nothing, and the Name column is
+# free text that ships to every derived project, so any fleet with a two-word or
+# punctuated persona got the agent type instead (BUG-027 R2-S2, cross-provider review).
+#
+# Two properties survive the change and are the reason for the tie-break below:
+#   - EARLIEST MENTION WINS — smallest position in the text, not roster order.
+#   - LONGEST NAME WINS A TIE — `Mary` and `Mary Jane` can now both match at the
+#     same position with valid boundaries, which the tokenised form could not
+#     produce. The longer name is the specific one.
+#
+# The text is passed through the environment rather than `awk -v`, which
+# interprets backslash escapes in its assignment and would rewrite a description
+# containing `\n` or `\t` before it was ever matched.
+#
+# Case-insensitive; returns nothing (rc 1) when no persona is named, which is an
+# ordinary outcome and so deliberately does NOT warn.
+bp_roster_name_in_text(){
+  local src="${1:-.}" text="${2:-}" hit
+  [ -n "$text" ] || return 1
+  hit="$(bp_roster_rows "$src" 2>/dev/null | BP_ROSTER_TEXT="$text" awk -F'\t' '
+    BEGIN{ hay = tolower(ENVIRON["BP_ROSTER_TEXT"]); hlen = length(hay)
+           best = 0; bestlen = 0 }
+    {
+      name = tolower($2); nlen = length(name)
+      if (nlen == 0) next
+      at = 0; from = 1
+      while (from <= hlen) {
+        p = index(substr(hay, from), name)
+        if (p == 0) break
+        abs = from + p - 1
+        before = (abs == 1)          ? "" : substr(hay, abs - 1, 1)
+        after  = (abs + nlen > hlen) ? "" : substr(hay, abs + nlen, 1)
+        if (before !~ /[[:alnum:]]/ && after !~ /[[:alnum:]]/) { at = abs; break }
+        from = abs + 1
+      }
+      if (at == 0) next
+      if (best == 0 || at < best || (at == best && nlen > bestlen)) {
+        best = at; bestlen = nlen; found = $2
+      }
+    }
+    END{ if (best > 0) print found }
+  ')"
+  [ -n "$hit" ] || return 1
+  printf '%s' "$hit"
 }
 
 # --- name -> backing agent --------------------------------------------------

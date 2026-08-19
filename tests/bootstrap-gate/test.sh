@@ -186,9 +186,21 @@ fi
 #    about a template file bootstrap forgot — and an unsubstituted
 #    {{PROJECT_NAME}} in a shipped config reads as a broken install.
 # ===========================================================================
+# BUG-029 R3 — the FOURTH instance of the swallow, found by sweeping for it, and
+# it is in the control rather than the code: this list used to be consumed as
+# `done < <(bash … files | sed …)`, so a failing `blueprint files` produced an
+# empty stream, the loop body never ran, `leftover` stayed empty and #5 PASSED.
+# A check that cannot fail is worth less than no check, because it is counted.
+# Resolved and asserted non-empty first, then fed in.
+_managed_list="$(bash "$BP/scripts/blueprint" files 2>/dev/null)"
+if [ -z "$_managed_list" ]; then
+  fail "#5 'blueprint files' produced nothing — the placeholder check below would have passed over an empty list"
+fi
 leftover=""
+_seen=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
+  _seen=$((_seen + 1))
   [ -f "$TARGET/$f" ] || continue
   # These carry the token as CODE and are exempt by design — the same list
   # bp_should_substitute holds. Named literally rather than sourced, so a
@@ -200,11 +212,15 @@ while IFS= read -r f; do
   if grep -q '{{PROJECT_NAME' "$TARGET/$f" 2>/dev/null; then
     leftover="$leftover $f"
   fi
-done < <(bash "$BP/scripts/blueprint" files 2>/dev/null | sed -n 's/^  \([^ ].*\)$/\1/p')
+done <<EOF
+$(printf '%s\n' "$_managed_list" | sed -n 's/^  \([^ ].*\)$/\1/p')
+EOF
 if [ -n "$leftover" ]; then
   fail "#5 blueprint-managed files reached the project with the placeholder intact:$leftover"
+elif [ "$_seen" -lt 20 ]; then
+  fail "#5 examined only $_seen managed paths — the list is broken, so this proved nothing"
 else
-  pass "#5 every managed/template file was substituted at bootstrap"
+  pass "#5 every managed/template file was substituted at bootstrap ($_seen paths examined)"
 fi
 
 # ===========================================================================
@@ -242,6 +258,58 @@ else
     pass "#6 a full pull is a no-op on a fresh bootstrap, and the project's manifest still passes"
   fi
 fi
+
+# ===========================================================================
+# 7. BOOTSTRAP FAILS LOUDLY, AND CREATES NOTHING, WHEN IT CANNOT RESOLVE THE
+#    MANAGED-FILE LIST.
+#
+#    BUG-029 R3 (Andreas). `new-project.sh` consumed `blueprint files` through
+#    `done < <(_synced_files)` — a process substitution, whose exit status is
+#    discarded — and `_synced_files` was itself `blueprint files | sed`, whose
+#    status is `sed`'s. Two nested swallows. The result is not a WRONG
+#    substitution but NO substitution: an empty list means the loop body never
+#    executes, so no guard placed inside it could ever fire.
+#
+#    Measured on the parent commit by breaking scripts/blueprint: bootstrap
+#    printed "Substituted placeholders in 0 file(s)", then "Happy
+#    struct2flowing", and exited 0 — delivering a project whose CLAUDE.md still
+#    said {{PROJECT_NAME}} in five places. Worse than the drift case S1 closed:
+#    a stale project is recoverable by pulling, a project that never had its
+#    identity written is broken from its first minute, and BUG-028 established
+#    that nothing downstream reports it.
+#
+#    ON THE TRIGGER, stated because the review's proposed one is not reachable:
+#    `cmd_files` never calls read_blueprint_source, so `blueprint files` does
+#    not expand `tests/` and CANNOT fail from the expansion. The defect is the
+#    swallow itself, so this injects the failure directly rather than staging a
+#    cause that does not exist. Writing the test around the unreachable trigger
+#    would have produced a case that passes for the wrong reason.
+#
+#    Deliberately LAST: it breaks the shared fixture blueprint's CLI in place.
+# ===========================================================================
+TARGET2="$WORK/derived-broken"
+printf 'exit 9\n' > "$BP/scripts/blueprint"
+boot2="$( cd "$BP" && bash scripts/new-project.sh derived-broken "$TARGET2" 2>&1 )"
+boot2_rc=$?
+b7=0
+if [ "$boot2_rc" -eq 0 ]; then
+  fail "#7 bootstrap EXITED 0 with an unusable 'blueprint files' — a caller cannot tell that from a good project"
+  b7=1
+fi
+if ! printf '%s\n' "$boot2" | grep -qi "blueprint files"; then
+  fail "#7 the failure never names 'blueprint files', so the operator cannot act on it:
+$(printf '%s\n' "$boot2" | tail -4 | sed 's/^/      /')"
+  b7=1
+fi
+if [ -e "$TARGET2" ]; then
+  fail "#7 a half-built project was left at $TARGET2 — the 'fix it and re-run' path is then blocked by the 'Target already exists' guard"
+  b7=1
+fi
+if printf '%s\n' "$boot2" | grep -q 'Happy struct2flowing'; then
+  fail "#7 bootstrap reported success while substituting nothing"
+  b7=1
+fi
+[ "$b7" -eq 0 ] && pass "#7 bootstrap refuses loudly (rc=$boot2_rc), names the cause, and creates nothing"
 
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean."

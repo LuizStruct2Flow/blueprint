@@ -51,7 +51,7 @@ BUG-031's move to `done/` is on PR #54 — once it merges, `waiting-acceptance/`
 is empty.
 
 **TASK-012 was reopened by the founder on 2026-08-19, the day it was filed.**
-Read Part 3 of [`TASK-012-strip-test.md`](../waiting-acceptance/TASK-012-strip-test.md) before acting on
+Read Part 3 of [`TASK-012-strip-test.md`](../done/TASK-012-strip-test.md) before acting on
 anything the first two parts concluded. In short: the spike measured whether
 orchestration comes **off** and inferred something about whether another
 orchestrator can go **on**. Only detach was tested — nothing was ever attached.

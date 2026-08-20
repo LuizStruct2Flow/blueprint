@@ -23,6 +23,67 @@ and it cannot go stale the way this file has, three times in one day.
 
 ---
 
+## 0. ON A DIFFERENT MACHINE — read this before anything else
+
+Handover written 2026-08-20 for a fresh checkout (founder moving to a Mac). The
+work is all on `main`. **What does not travel is the per-checkout state**, and
+three of the four items below will stop you within the first five minutes.
+
+**1. There is no live baton, and the gate fails closed without one.**
+`logs/state/signal.md` is untracked by design (BUG-019). DoD **§7G** requires it
+and returns 1 when absent, so **your first `git push` fails the gate** with
+`no live baton at … — seed it with scripts/signal-set.sh`. Seed it first:
+
+```
+bash scripts/signal-set.sh --holder <your-orchestrator-name> --state ACTIVE --task 'picking up after the 2026-08-20 handover'
+```
+
+**2. There is no roster.** `AGENT_ROSTER.md` is gitignored and per-engineer.
+
+```
+cp AGENT_ROSTER.example.md AGENT_ROSTER.md
+```
+
+The shipped template carries the same names as the machine this handover was
+written on for every persona in the grooming plan — Klaus, Christian, Vitali,
+Markus, Philipp — **except the Orchestrator, which is `Sylvia` in the template
+and was `Eto` here.** So attributions in the plan resolve, and yours is whatever
+you edit that cell to. `bash scripts/agent-activity.sh --whoami` prints it.
+
+**3. The hook is NOT armed on a fresh clone.** `core.hooksPath` is repo-*local*
+config, so cloning never gets it — this is BUG-004 and A-22, and a push of 12
+commits once went out completely ungated this way. It is armed automatically by
+`arm_gate`, which both `bash scripts/agent-activity.sh --daemon` and
+`blueprint drift` call on every run, and both report the state rather than arming
+silently. Verify with `git config --get core.hooksPath`.
+
+**4. Expect roughly half your pushes to silently not happen — BUG-032.** The
+gate runs ~361 s while git holds the remote connection idle, and the push then
+dies of SIGPIPE: **exit 141, completely empty output, no `To github.com:` line,
+and the ref absent from the remote.** A re-run is *not* a reliable workaround —
+it appeared to be one for five occurrences and then failed twice consecutively.
+Two things make this survivable:
+
+```
+GIT_SSH_COMMAND="ssh -o ServerAliveInterval=20 -o ServerAliveCountMax=30" git push -u origin <branch>
+git ls-remote origin <branch>     # the ONLY authority on whether it landed
+```
+
+The keepalive is 5/5 against 5 failures in 7 without it — **but the causation is
+not established** (see the BUG-032 note below), and **it is persisted nowhere**:
+no `ServerAliveInterval` in `~/.ssh/config`, `core.sshCommand` unset. Your Mac
+starts equally exposed.
+
+Never trust a push's exit code through a pipe — `git push … | tail` reports
+`tail`'s status, which is why this looked like "reports success" for a day.
+
+**Also, if you intend to run the full gate:** `brew bundle` installs gitleaks,
+semgrep, osv-scanner and trivy. Without them those stages `pipe_skip` rather than
+fail, so an unprepared machine gets a green gate that checked less — the exact
+shape BUG-035 is about.
+
+---
+
 ## 1. START HERE
 
 ```bash
@@ -45,36 +106,32 @@ Two things it does NOT do, so you do not go looking:
 - **It does not detect tampering**, only loss. Silence means nothing was lost by
   itself, not that nobody rewrote the record.
 
-**WIP: TASK-012 (reopened) and TASK-014 (promoted).** BUG-027, BUG-028,
-BUG-029 and BUG-031 were all accepted by the founder on 2026-08-19.
-BUG-031's move to `done/` is on PR #54 — once it merges, `waiting-acceptance/`
-is empty.
+**WIP: nothing is half-done. `doing/` holds no rows.** TASK-012 and TASK-014 are
+accepted and in `done/`. The whole ruflo question is closed: **adopt nothing** —
+it allocates agent slots and defers execution to Claude Code, which this repo
+already has.
 
-**TASK-012 was reopened by the founder on 2026-08-19, the day it was filed.**
-Read Part 3 of [`TASK-012-strip-test.md`](../done/TASK-012-strip-test.md) before acting on
-anything the first two parts concluded. In short: the spike measured whether
-orchestration comes **off** and inferred something about whether another
-orchestrator can go **on**. Only detach was tested — nothing was ever attached.
+**Open on a fresh checkout: read [`PLAN-GROOMING-2026-08-20.md`](../backlog/PLAN-GROOMING-2026-08-20.md) first.**
+It is the output of a five-persona grooming pass and it is the only place the
+dispositions exist. The rows themselves were **not** yet amended — that is
+TASK-016's remaining work, and until it runs three rows in `backlog/` still state
+a mechanism that is known to be wrong:
 
-- **Still true:** orchestration detaches cleanly (one hard coupling, §7G; one
-  suite; three doc links), the ~14% measurement, `feed.sh`/`log-activity.sh` are
-  observability and not orchestration, and **BUG-028** — a fresh bootstrap cannot
-  pass its own gate. That last one is the most valuable thing the spike produced
-  and is entirely independent of ruflo.
-- **Withdrawn:** *ruflo — do not adopt*. It rested on Q1 alone, and Q1's finding
-  (ruflo cannot observe a `codex exec` **we** launched) holds only while we keep
-  our own dispatcher. An orchestrator that owns the dispatch sees it by
-  construction. **There is no verdict on ruflo right now.**
-- **Retired:** the brief's *"evaluate on the lite path only"* constraint. Filling
-  the socket means *being* the orchestrator, which is the full CLI; the lite path
-  is an add-on by construction and could never answer the question.
+- **BUG-032** says "Mechanism — CONFIRMED by experiment". The *ordering* is
+  confirmed (git opens two connections before the hook and holds them idle
+  across it). The *causation* is not: gate duration and the keepalive are
+  perfectly confounded in the captured data, and both failures were also the two
+  longest runs of 25. **Cheap falsification: push over HTTPS**, which opens a
+  fresh connection after the hook.
+- **BUG-033** names two hypotheses and **both are refuted** — 0 failures in 80
+  full-suite runs at load 257, and the detector is provably sensitive. The real
+  defect is that #13 discards `--mark`'s exit code.
+- **TASK-015**'s "likely shape of the answer" would entrench the bug it
+  describes. The declared population already exists (`tests/state-dir/test.sh:37`)
+  and is stale now: **six files carry the physical-root block, the guard checks
+  four**, leaving `signal-set.sh` — the baton's sole writer — unguarded.
 
-**Feed work is still worth doing** — that part of the old note stands, and for a
-firmer reason than before: `feed.sh` and `log-activity.sh` are the observability
-lane, which survives either answer. What is **not** settled is whether we keep
-orchestrating in-house; that is **TASK-014**, the attachment trial.
-
-### The three things that cost the most on 2026-08-19
+### Standing hazards, learned the expensive way
 
 **1. CI was red all day and nobody noticed, because `--admin` was used to merge
 five PRs.** Two independent causes, both landed by this session:
@@ -107,28 +164,34 @@ rather than as damage. The verdict was recovered from `signal-history.log`.
 
 ### Next, in the order worth doing
 
-1. **BUG-030** — the baton contamination above. `tests/git-isolation` and
-   `tests/state-dir` both exist and neither caught it.
-2. **TASK-013** — the gate is 357.8 s and `bootstrap-gate` alone is **50.6%**,
-   because it runs a complete second gate inside the first. The measurement is
-   done; the report names what is *not* worth optimising (the bottom 28 stages
-   total 8.5 s) and the trap in the obvious fix. Read it before touching timing.
-3. **TASK-014 — promoted, and it is the biggest item on this list.** The
-   attachment trial TASK-012's revalidation is waiting on: bootstrap a throwaway,
-   install the **full** ruflo CLI, mount the lifecycle and the DoD gate on top,
-   push one real work item through. Deletion proved the seam opens; only
-   construction proves something fits it. **Do not pre-specify the seam.** The
-   row lists two soft blockers (§7G leaving the core gate, `drift`/`pull` learning
-   the profile) and they are now the trial's first *output*, not its precondition
-   — deciding their shape before anything is plugged in is exactly the mistake
-   TASK-012 made. **This is a real spike and will raise its own bug numbers**;
-   it is not an afternoon.
-4. **BUG-027's three unfixed findings**, no longer gated on TASK-012 (the feed is
-   the observability lane and survives either answer):
-   `BP_ROSTER_LOOKUP_TIMEOUT=0` hangs indefinitely (GNU `timeout 0` means *no*
-   timeout), a killed lookup's partial stdout is accepted and persisted as a
-   persona name, and `agent-activity.sh` sources `roster.sh` into the
-   **supervisor's** own shell unguarded.
+Full reasoning in [`PLAN-GROOMING-2026-08-20.md`](../backlog/PLAN-GROOMING-2026-08-20.md).
+This list is the conclusion, not the argument.
+
+1. **BUG-035 — the SAST gate scans a language this repo does not contain.**
+   99 `.md`, 79 `.sh`, zero JS/TS, and `shellcheck` is never invoked. A-16 and
+   A-17 are both default shellcheck findings that a human found in July while the
+   gate printed a green SAST check on every push since. ~10 lines to fix.
+2. **BUG-034 — `blueprint pull` can silently delete project content.**
+   `marker_aware_merge` compares marker counts, never order. Core sync verb.
+   Reproducer before fix.
+3. **BUG-030 — reproduced, and its class fix is a net deletion.** `--file` on the
+   seed at `new-project.sh:245`, plus one `unset AGENT_SIGNAL_FILE
+   AGENT_STATE_HOME AGENT_FEED_LOG` at the `pipe_stage` boundary, then delete the
+   four duplicated per-suite unsets. Retires a class with three prior instances.
+4. **The dispatcher trio (BUG-024/025/026).** Cross-provider review — the
+   declared differentiator — currently returns a wrong answer with no signal.
+5. **The records that state something untrue.** `CLAUDE.md:476` claims the SLO
+   warns past 120 s / 45 s when `pipeline.sh:287-288` uses 180 s / 95 s, and that
+   file **ships to every derived project**. `SUITES.md` has two rows both claiming
+   to be the slowest stage. `docs/config/findings.md` is referenced by 12 files
+   including one that ships, and **does not exist** — so the lifecycle's "cancel
+   the row, leave a pointer" path terminates nowhere.
+6. **BUG-027's three unfixed findings have no row anywhere** and exist only as
+   prose in this file, which is rewritten every wake: `BP_ROSTER_LOOKUP_TIMEOUT=0`
+   hangs indefinitely (GNU `timeout 0` means *no* timeout), a killed lookup's
+   partial stdout is accepted and persisted as a persona name, and
+   `agent-activity.sh` sources `roster.sh` into the supervisor's own shell
+   unguarded. **Row them before they vanish.**
 
 Everything else is parked with a trigger.
 

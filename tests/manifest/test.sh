@@ -805,20 +805,48 @@ if [ "$TS_PRESENT" -eq 1 ]; then
 fi
 
 notrun=""
+bp_skipped=0
+enforced=0
 while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
   [ -n "$s" ] || continue
   # `blueprint` is `both` plus "does not ship" (see #2b) — it still blocks the
   # push HERE, so it is still required to be invoked by the gate.
   case "$t" in pre-push|both|blueprint) ;; *) continue ;; esac
 
+  # BUG-053 — NOT APPLICABLE OUTSIDE A BLUEPRINT.
+  #
+  # tests/SUITES.md ships; the blueprint-tier suite DIRECTORIES deliberately do
+  # not (#2b enforces that here). So a derived project receives rows describing
+  # suites that cannot exist there, and demanding their invocation asks it to
+  # run files it was correctly never given. Invisible until retirement made it
+  # load-bearing — a retirement asserts "the shell runner is not invoked BECAUSE
+  # the spec runs", and downstream neither of them is present.
+  #
+  # KEYED ON `.blueprint-root`, NEVER ON THE DIRECTORY BEING ABSENT. That
+  # distinction is the whole safety of this skip: absence-keying would let a
+  # derived project silently lose a suite it SHOULD run by deleting its
+  # directory, which is BUG-005 with an extra step. Here, deleting a shipping
+  # suite's directory still fails #2 as a ghost and #4 as uninvoked. #2 has made
+  # the identical judgement since it was written; this brings #4/#4b/#5 into
+  # line with it rather than inventing a new rule.
+  #
+  # The other half is enforced where it can be: in the blueprint, #2b fails the
+  # push if a `blueprint`-tier suite ships. So re-tiering a shipping suite to
+  # `blueprint` to buy this skip is refused at the only place that can see it.
+  if [ "$t" = "blueprint" ] && [ "$IN_BLUEPRINT" -eq 0 ]; then
+    bp_skipped=$((bp_skipped + 1))
+    continue
+  fi
+  enforced=$((enforced + 1))
+
   _sh=0; _ts=0
   has_sh_runner "$s" && _sh=1
   has_ts_runner "$s" && _ts=1
 
   if [ $((_sh + _ts)) -eq 0 ]; then
-    # No runner here at all — a blueprint-tier suite in a derived project. We
-    # cannot know which kind it is, so either proof suffices. #2 has already
-    # decided whether that absence is legitimate.
+    # A shipping suite with no runner on disk. #2 has already reported it as a
+    # ghost; #4 still asks whether the gate believes in it, because the two
+    # failures name different repairs.
     if _gate_sh_invoked "$s"; then continue; fi
     if [ "$TS_PRESENT" -eq 1 ] && _ts_covered_gate "$s"; then continue; fi
     notrun="$notrun $s"
@@ -842,14 +870,22 @@ while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
 done <<EOF
 $(rows)
 EOF
+_bp_note=""
+[ "$bp_skipped" -gt 0 ] && _bp_note=" ($bp_skipped blueprint-only row(s) skipped — not applicable outside a blueprint)"
 if [ -n "$notrun" ]; then
   fail "#4 declared blocking but the gate never invokes them:$notrun"
   echo "        A shell runner is proven by an anchored 'bash tests/<suite>/<file>.sh'."
   echo "        A spec is proven by a vitest run with NO path filter — in the hook, or in"
   echo "        a bridge the hook sources AND calls into — plus an include glob that"
   echo "        reaches it. A stage naming the spec outright also counts."
+elif [ "$bp_skipped" -gt 0 ] && [ "$enforced" -eq 0 ]; then
+  # Every blocking row skipped as blueprint-only is not a pass, it is a control
+  # that examined nothing — the vacuity #7 exists to catch, one assertion over.
+  # A real derived project inherits ~37 shipping rows; zero means the tiers are
+  # wrong or the parse is.
+  fail "#4 every blocking row was skipped as blueprint-only, so this checked NOTHING ($bp_skipped skipped, 0 enforced)"
 else
-  pass "#4 every pre-push/both suite is invoked by the gate, runner kind by runner kind"
+  pass "#4 every pre-push/both suite is invoked by the gate, runner kind by runner kind$_bp_note"
 fi
 
 # ===========================================================================
@@ -884,11 +920,22 @@ fi
 #        revert the edit, or carry it into the spec and re-prove it.
 # ===========================================================================
 ret_n=0
+ret_skipped=0
 ret_bad=""
 ret_stale=""
+# The tier is not in the retirement table — one fact, one place — so it is
+# looked up from the suite row that already carries it.
+tier_of(){ rows | awk -F'\t' -v s="$1" '$1==s{print $2; exit}'; }
 while IFS="$(printf '\t')" read -r s mut cid; do
   [ -n "$s" ] || continue
   ret_n=$((ret_n + 1))
+  # Same rule as #4, same reason, same key: a blueprint-tier suite's files are
+  # not downstream, so neither its shell runner nor its spec is there to compare
+  # and the declaration describes nothing a derived project can act on.
+  if [ "$IN_BLUEPRINT" -eq 0 ] && [ "$(tier_of "$s")" = "blueprint" ]; then
+    ret_skipped=$((ret_skipped + 1))
+    continue
+  fi
   row_exists "$s"   || { ret_bad="$ret_bad $s(not a declared suite)"; continue; }
   has_ts_runner "$s" || { ret_bad="$ret_bad $s(no *.spec.ts — retiring the shell runner would leave nothing running)"; continue; }
   has_sh_runner "$s" || { ret_bad="$ret_bad $s(no *.sh on disk — nothing to retire)"; continue; }
@@ -946,8 +993,10 @@ elif [ -n "$ret_stale" ]; then
   fail "#4b a retired shell runner has been modified more recently than the spec that replaced it, so the equivalence claim under it is stale:$ret_stale"
   echo "        Nobody runs that file. Delete it — that is the intended end state — or revert"
   echo "        the edit, or carry the change into the spec and re-run the mutant."
+elif [ "$ret_skipped" -gt 0 ] && [ "$ret_skipped" -eq "$ret_n" ]; then
+  pass "#4b $ret_skipped retirement declaration(s), all for blueprint-only suites — not applicable outside a blueprint"
 elif [ "$ret_n" -gt 0 ]; then
-  pass "#4b $ret_n shell runner(s) retired, each with a mutation recipe and a live spec (still on disk; the number is meant to reach zero)"
+  pass "#4b $((ret_n - ret_skipped)) shell runner(s) retired, each with a mutation recipe and a live spec (still on disk; the number is meant to reach zero)"
 else
   pass "#4b no shell runner is declared retired"
 fi
@@ -957,9 +1006,18 @@ fi
 # ===========================================================================
 if [ -f "$CI" ]; then
   ci_missing=""
+  ci_bp_skipped=0
+  ci_enforced=0
   while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
     [ -n "$s" ] || continue
     case "$t" in CI|both|blueprint) ;; *) continue ;; esac
+
+    # See #4: `.blueprint-root`-keyed, never absence-keyed.
+    if [ "$t" = "blueprint" ] && [ "$IN_BLUEPRINT" -eq 0 ]; then
+      ci_bp_skipped=$((ci_bp_skipped + 1))
+      continue
+    fi
+    ci_enforced=$((ci_enforced + 1))
 
     _sh=0; _ts=0
     has_sh_runner "$s" && _sh=1
@@ -988,8 +1046,15 @@ if [ -f "$CI" ]; then
   done <<EOF
 $(rows)
 EOF
-  [ -n "$ci_missing" ] && fail "#5 declared CI but absent from the workflow:$ci_missing" \
-                       || pass "#5 every CI/both suite runs in the workflow, runner kind by runner kind"
+  _ci_bp_note=""
+  [ "$ci_bp_skipped" -gt 0 ] && _ci_bp_note=" ($ci_bp_skipped blueprint-only row(s) skipped — not applicable outside a blueprint)"
+  if [ -n "$ci_missing" ]; then
+    fail "#5 declared CI but absent from the workflow:$ci_missing"
+  elif [ "$ci_bp_skipped" -gt 0 ] && [ "$ci_enforced" -eq 0 ]; then
+    fail "#5 every CI row was skipped as blueprint-only, so this checked NOTHING ($ci_bp_skipped skipped, 0 enforced)"
+  else
+    pass "#5 every CI/both suite runs in the workflow, runner kind by runner kind$_ci_bp_note"
+  fi
 fi
 
 # ===========================================================================

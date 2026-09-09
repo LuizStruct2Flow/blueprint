@@ -519,7 +519,14 @@ if wait_sup 1; then
   printf 'RACE-B\n' >>"$RUNLOG"     # lands DURING the slowed read
   sleep 0.3
   printf 'RACE-C\n' >>"$RUNLOG"
-  wait_for RACE-C 6; sleep 1
+  # BUG-038 — 6s was too tight to survive the full gate. These two cases run
+  # with a deliberately SLOWED read seam, on a host where a tick is already
+  # ~10s once #2's 80 transcripts exist, while the rest of the gate competes
+  # for the machine. They passed standalone and failed under load, which is the
+  # worst way for a suite to be wrong. The assertion here is exactly-once
+  # delivery, not latency, so a generous bound costs nothing when things work
+  # and removes a false failure when they are merely slow.
+  wait_for RACE-C 30; sleep 1
   a="$(count_in_log RACE-A)"; b="$(count_in_log RACE-B)"; c="$(count_in_log RACE-C)"
   if [ "$a" -eq 1 ] && [ "$b" -eq 1 ] && [ "$c" -eq 1 ]; then
     pass "#10 append during a slowed read: every record emitted exactly once"
@@ -551,7 +558,7 @@ if wait_sup 1; then
     pass "#18 short sink emits nothing and consumes nothing"
   else fail "#18 a short capture was emitted — partial bytes escaped the bounded read"; fi
   rm -f "$SENTINEL"                                  # sink healthy again
-  if wait_for "SHORTSINK-PAYLOAD" 5; then
+  if wait_for "SHORTSINK-PAYLOAD" 30; then   # BUG-038 — was 5s; see #10 above
     [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 1 ] \
       && pass "#18 deferred range delivered intact, exactly once, by the same supervisor" \
       || fail "#18 range delivered $(count_in_log "SHORTSINK-PAYLOAD") times after recovery"

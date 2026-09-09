@@ -106,24 +106,30 @@ broken `node_modules` fails loudly instead of not gating at all.
 
 ---
 
-## 3. THE ONE THING BLOCKING THE BRANCH
+## 3. THE STATE OF THE BRANCH
 
-`bootstrap-gate` #6 fails: a bootstrapped project's own `tests/manifest` is out
-of step with its gate.
+**Fixed and verified on evo-x2: 45 of 46 stages pass, 374 s** (the same gate was
+778 s on the Mac). `bootstrap-gate` passes at 188.5 s, and BUG-053 — the
+blueprint-tier-rows-downstream defect — is closed in both its instances.
 
-**Diagnosed, not guessed.** The suite DIRECTORIES for `drift-in-blueprint`,
-`pull-exec-bit` and `harness` are blueprint-tier and correctly do not ship
-(`git archive … | grep -c` → 0), but `tests/SUITES.md` DOES ship (→ 1). So a
-derived project receives rows describing suites whose files are not there, and
-its manifest enforces invocation for suites it cannot have.
+**The transfer was by `git bundle`, not by push**, because the Mac could not
+complete a gate run. So this branch has **no upstream** until the first
+successful push from here — `git pull` will say *"no tracking information"* and
+that is expected, not a problem. `git push -u` sets it.
 
-Vitali (QA-1) has it. The proposed fix: a `blueprint`-tier row means "exists only
-in a blueprint", so downstream — keyed on **"am I the blueprint"**, never on
-"is the directory missing" — those rows are not-applicable rather than unmet.
-Keying on absence would let a project silently lose a suite by deleting a
-directory, which is the BUG-005 shape.
+**Two setup traps found the hard way, both non-obvious:**
 
-**Nothing else is blocking.** 44 of 45 stages passed.
+- **`~/.local/bin` is in `.profile`, which a NON-LOGIN shell does not source.**
+  So `install-toolchain.sh check` reports `gitleaks`/`semgrep`/`osv-scanner`
+  MISSING over SSH or from a dispatched agent, while they are present and on
+  PATH for you interactively. Anything automated must export it explicitly.
+- **`git fetch <bundle> "refs/heads/*:refs/heads/*"` acts as a MIRROR** and
+  prunes local refs the bundle does not carry. It deleted `main` here once;
+  recovered with `git reset origin/main`. Fetch bundle branches BY NAME.
+
+There is a stash on this checkout — *"evo-x2 session marker before TASK-018
+checkout"* — holding one line of a superseded `HANDOVER.md`. Drop it; do not pop
+it.
 
 ---
 

@@ -136,6 +136,20 @@ fi
 # The scrub must cover the harness's ENTIRE forbidden set, not a remembered
 # subset of it. Read from the harness rather than restated, so this cannot
 # drift the way a second copy of the list would.
+#
+# KEYED ON `.blueprint-root`, NEVER ON THE FILE BEING ABSENT (BUG-053).
+# tests/harness/ is a blueprint-tier suite and deliberately does not ship, so
+# downstream there is no FORBIDDEN_ENV to read and this assertion is
+# not-applicable rather than failed. Absence-keying would be the tempting fix
+# and is the wrong one: it would let a blueprint that deleted its own harness
+# skip the check in silence, which is BUG-005 with an extra step. The bridge
+# itself DOES ship, so every other case here still runs downstream.
+#
+# Caught by tests/bootstrap-gate — the one suite that speaks for the projects
+# downstream — exactly as it caught BUG-053.
+if [ ! -f "$ROOT/.blueprint-root" ]; then
+  pass "#1c not applicable outside a blueprint — tests/harness/ is blueprint-tier and does not ship, so there is no FORBIDDEN_ENV here to cross-check"
+else
 missed=""
 for v in $(sed -n "/FORBIDDEN_ENV = \[/,/^]/p" "$ROOT/tests/harness/env.ts" \
            | sed -nE "s/^[[:space:]]*'([A-Z0-9_]+)',.*/\1/p"); do
@@ -149,6 +163,7 @@ if [ -n "$(sed -n "/FORBIDDEN_ENV = \[/,/^]/p" "$ROOT/tests/harness/env.ts" | se
   fi
 else
   fail "#1c BUG-055: could not read FORBIDDEN_ENV from tests/harness/env.ts — this check would pass over nothing"
+fi
 fi
 
 # The stage must also actually RENDER, not merely run.

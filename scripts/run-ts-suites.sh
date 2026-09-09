@@ -87,9 +87,50 @@ ts_suites_stage(){
   # No positional path filter, deliberately: tests/manifest #4 proves the gate
   # runs vitest BLANKET, because a path-filtered run is how a suite silently
   # stops being executed. Narrowing this breaks that assertion by design.
-  ( cd "$_ts_root" && npx vitest run --reporter=json --outputFile="$_ts_json" ) \
-    >/dev/null 2>&1
-  _ts_rc=$?
+  _ts_out="$(mktemp)"
+  # BUG-055 — SCRUB GIT'S ENVIRONMENT, exactly as every shell suite does.
+  #
+  # git exports GIT_DIR when it invokes a hook. The harness refuses to run any
+  # scenario while it is present (tests/harness/env.ts, assertProcessEnvClean)
+  # and that refusal is CORRECT — it is the BUG-046/BUG-047 guard. The two
+  # facts together mean the TS suites could never run under a real `git push`:
+  # by hand all 41 passed, under a push all 41 failed, and the difference was
+  # one inherited variable.
+  #
+  # The shell suites have handled this since BUG-014 with an `unset` at the top
+  # of each file. Doing it here rather than in each spec is the same reasoning
+  # as the harness itself: every TS suite routes through this one command, so
+  # this is the place it cannot be forgotten.
+  #
+  # BUG-055 — AND KEEP THE STATUS AND THE OUTPUT.
+  #
+  # This was `( … ) >/dev/null 2>&1` followed by `_ts_rc=$?`, under a hook that
+  # runs `set -e`. That makes the assignment UNREACHABLE on the only path where
+  # it matters: a failing vitest killed the hook before its status could be
+  # read, so the stage printed nothing at all — no stage line, no summary, no
+  # error — and the push was refused with no way to tell a broken run from a
+  # missing one. `pipe_batch_end` below exists to reconcile that status, and it
+  # could never receive it. The per-suite note already said "see the vitest
+  # output above" while the output was going to /dev/null.
+  if ( cd "$_ts_root" \
+       && unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+       && npx vitest run --reporter=json --outputFile="$_ts_json" ) >"$_ts_out" 2>&1
+  then
+    _ts_rc=0
+  else
+    _ts_rc=$?
+  fi
+
+  # A failing run must SAY so. Truncated because a full vitest failure dump is
+  # long and the gate is already dense; the temp file path is not printed
+  # because it is removed below, and a path to a deleted file is worse than no
+  # path at all.
+  if [ "$_ts_rc" -ne 0 ]; then
+    echo "  ── vitest failed (rc=$_ts_rc) ──"
+    tail -40 "$_ts_out"
+    echo "  ── end vitest output ──"
+  fi
+  rm -f "$_ts_out"
 
   # shellcheck disable=SC2086
   pipe_batch_begin "vitest" $_ts_expect

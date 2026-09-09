@@ -474,6 +474,26 @@ else
   pipe_skip "manifest · BUG-005" "suite absent"
 fi
 
+# BUG-055 — the manifest proves the vitest bridge is INVOKED; this proves it
+# WORKS. The bridge only ever ran by hand, where GIT_DIR is absent. Under a real
+# `git push` git exports it, the TS harness correctly refuses every scenario,
+# and `set -e` killed the hook before one stage printed — a refused push with
+# the stage list truncated and no error anywhere. Runs before the stage it
+# guards, and hermetic (~0.1 s, stubbed npx).
+if [ -f tests/ts-bridge/test.sh ]; then
+  _st_tsbridge(){
+    bash tests/ts-bridge/test.sh || {
+      echo "❌ tests/ts-bridge/test.sh failed (BUG-055)."
+      echo "   The vitest bridge must scrub git's environment before invoking the"
+      echo "   runner, and must report its own failure instead of aborting the gate."
+      return 1
+    }
+  }
+  pipe_stage "ts-bridge · BUG-055" _st_tsbridge
+else
+  pipe_skip "ts-bridge · BUG-055" "suite absent"
+fi
+
 # BUG-029 — `tests/` is a managed DIRECTORY, and this is what makes that safe.
 # A derived project's suites were frozen at bootstrap while the machinery they
 # test kept being pulled forward, so its gate went green over assertions about

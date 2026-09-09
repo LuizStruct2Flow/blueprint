@@ -205,6 +205,7 @@ jobs:
           # drift-in-blueprint was in neither the gate nor CI (A-15 exactly);
           # a2bp-e2e was gate-only, so CI carried no backstop for it.
           bash tests/manifest/test.sh
+          bash tests/ts-bridge/test.sh
           bash tests/env-namespace/test.sh
           bash tests/template-source/test.sh
           bash tests/no-chain-guard/test.sh

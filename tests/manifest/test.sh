@@ -99,56 +99,33 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
 [ -f "$MANIFEST" ] || { echo "FAIL: tests/SUITES.md is missing — the tier policy has no control"; exit 1; }
 
-# Parse the manifest table:
-#   | suite | tier | risk | rationale | parallelism | why that class |
-# Padding-tolerant (BUG-010's lesson: a formatter's spaces must not break a
-# parser), and only rows whose suite is in backticks are treated as entries.
+# THE TABLE PARSE LIVES IN scripts/lib/suites.sh, AND THIS FILE DOES NOT KEEP
+# A COPY OF IT.
 #
-# The two trailing fields are emitted even when the row does not have them, so a
-# row still written in the old four-column shape arrives with an EMPTY class and
-# fails #8 rather than being skipped. A parser that ignores rows it does not
-# recognise is how a schema change becomes a silent exemption.
-rows(){
-  awk -F'|' '
-    function trim(s){ gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /^[[:space:]]*\|/ {
-      n=split($0,f,"|"); if (n<6) next
-      s=trim(f[2]); t=trim(f[3]); r=trim(f[4]); w=trim(f[5])
-      p=(n>=7 ? trim(f[6]) : ""); q=(n>=8 ? trim(f[7]) : "")
-      if (s !~ /^`.*`$/) next
-      gsub(/`/,"",s)
-      print s "\t" t "\t" r "\t" w "\t" p "\t" q
-    }
-  ' "$MANIFEST"
-}
+# It used to. `scripts/run-ts-suites.sh` then grew a verbatim copy of the same
+# awk, under a comment claiming to be the thing that could not drift — and it
+# had already drifted, taking field 2 only while this file gated the parallelism
+# class on fields 6 and 7. Two parsers of one table is the shape
+# `scripts/lib/commit-subject.sh` and `scripts/lib/roster.sh` exist to refuse,
+# and a control asserting a rule from its own private copy of that rule is
+# asserting less than it appears to.
+#
+# Sourced by absolute path and REQUIRED. A missing parser must not degrade to an
+# empty parse: every assertion below passes trivially against no rows, which is
+# precisely the vacuity #7 exists to catch — but it would catch it one step too
+# late and blame the manifest rather than the missing file.
+. "$ROOT/scripts/lib/suites.sh" 2>/dev/null || true
+if ! command -v bp_suite_rows >/dev/null 2>&1 || ! command -v bp_retired_rows >/dev/null 2>&1; then
+  echo "FAIL: scripts/lib/suites.sh did not load — tests/SUITES.md has no parser, so every"
+  echo "      assertion here would pass over zero rows. Run: blueprint pull scripts/lib/suites.sh"
+  exit 1
+fi
 
-# retired_rows — the RETIRED-SHELL-RUNNERS tables:
-#   | suite | the mutant | the case it turned red |
-#
-# Parsed only BETWEEN its markers, never by shape. A shape-based parser here
-# would be a way to exempt a suite from #4 by writing a row that happens to look
-# right, and the whole point of this table is that retirement is DECLARED in one
-# place a reviewer can find. Both tables are read — the blueprint's, and the
-# project's after BLUEPRINT:END — the same way `rows` reads both suite tables.
-#
-# Three columns is also what keeps these rows invisible to `rows` above, which
-# needs six fields. #7 asserts no suite name is parsed twice, so a future column
-# added here fails loudly instead of quietly turning a retirement row into a
-# suite.
-retired_rows(){
-  awk -F'|' '
-    function trim(s){ gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /RETIRED-SHELL-RUNNERS:BEGIN/ { inblock=1; next }
-    /RETIRED-SHELL-RUNNERS:END/   { inblock=0; next }
-    inblock && /^[[:space:]]*\|/ {
-      n=split($0,f,"|"); if (n<4) next
-      s=trim(f[2]); m=trim(f[3]); c=trim(f[4])
-      if (s !~ /^`.*`$/) next
-      gsub(/`/,"",s)
-      print s "\t" m "\t" c
-    }
-  ' "$MANIFEST"
-}
+# ROOT-bound aliases, not second definitions: one function, curried. They cannot
+# drift from the shared parse because they contain none of it.
+rows(){ bp_suite_rows "$ROOT"; }
+retired_rows(){ bp_retired_rows "$ROOT"; }
+
 RETIRED=" $(retired_rows | cut -f1 | tr '\n' ' ')"
 is_retired(){ case "$RETIRED" in *" $1 "*) return 0 ;; esac; return 1; }
 
@@ -276,8 +253,8 @@ _defined_funcs(){
 _live_bridges(){
   _lb_text="$(live_cmds "$@")"
   printf '%s\n' "$_lb_text" \
-    | grep -oE '(^|[[:space:]])(\.|source)[[:space:]]+"?\.?/?[A-Za-z0-9_][A-Za-z0-9_./-]*' \
-    | sed -E -e 's/.*[[:space:]](\.|source)[[:space:]]+//' -e 's/^"//' -e 's#^\./##' \
+    | grep -oE '(^|[[:space:]])(\.|source)[[:space:]]+"?(\$ROOT/)?\.?/?[A-Za-z0-9_][A-Za-z0-9_./-]*' \
+    | sed -E -e 's/.*[[:space:]](\.|source)[[:space:]]+//' -e 's/^"//' -e 's#^\$ROOT/##' -e 's#^\./##' \
     | sort -u \
     | while IFS= read -r _p; do
         [ -n "$_p" ] || continue
@@ -675,7 +652,10 @@ EOF
     #     THE SAME CLAIM COVERS THE GATE'S OWN DEPENDENCIES. `.githooks/pre-push`
     #     and `.githooks/pre-push-project` are BOTH managed, so every file they
     #     source has to travel by both paths too, or the hook arrives downstream
-    #     with half of itself. The failure is quiet and permanent: a hook whose
+    #     with half of itself. THIS FILE IS SCANNED TOO, for the same reason and
+    #     because it just acquired one: sourcing `scripts/lib/suites.sh` means a
+    #     derived project whose copy of that library never arrives gets a
+    #     manifest that refuses to run at all. The failure is quiet and permanent: a hook whose
     #     bridge never arrives takes its `else` branch on every push — a
     #     `pipe_skip` with a reason, which reads as deliberate, forever. This is
     #     checked generically off the same bridge discovery #4 uses, so a new
@@ -708,7 +688,7 @@ EOF
       _managed "$_rel" && _bm=1
       [ "$_bs" -eq "$_bm" ] || _bridge_split="$_bridge_split $_rel(ships=$_bs,managed=$_bm)"
     done <<EOF
-$(_live_bridges "$GATE" "$HOOK")
+$(_live_bridges "$GATE" "$HOOK" "$ROOT/tests/manifest/test.sh")
 EOF
 
     if [ "${_mf_n:-0}" -lt 20 ] || ! _managed 'tests/'; then
@@ -1057,6 +1037,55 @@ elif [ -n "${dupes// /}" ]; then
   fail "#7 the same suite is declared more than once:$dupes — two rows means two tiers, and every check above honours whichever it read last"
 else
   pass "#7 parsed $n manifest rows, each suite once (assertions above are non-vacuous)"
+fi
+
+# ===========================================================================
+# 7b. BUG-052 — THE MARKERS THAT MAKE A MANAGED FILE MERGEABLE ARE BALANCED.
+#
+#     `marker_aware_merge` (scripts/blueprint) refuses to merge unless a file's
+#     BEGIN and END counts are equal, and `pull_file` then falls back to a
+#     WHOLE-FILE COPY — which is exactly the data loss the markers exist to
+#     prevent. It warns and leaves a `.bp-bak`, and nobody reads either.
+#
+#     It counts SUBSTRINGS, so a sentence explaining "put your rows after
+#     BLUEPRINT:END" counts as an END. Both managed marker files in this repo
+#     were in that state and had been for their whole lives:
+#
+#       tests/SUITES.md            1 BEGIN, 4 END
+#       .githooks/pre-push-project 1 BEGIN, 3 END
+#
+#     So neither file has ever been marker-merged. Every derived project's own
+#     suite rows and its own gate guards — the two things CLAUDE.md promises are
+#     "preserved byte-for-byte" — were being replaced on every pull. Found by
+#     reading the merge's precondition while adding a marker of my own, which is
+#     how I discovered I had just made it worse.
+#
+#     `tests/marker-merge` does not catch this: it drives the MECHANISM against
+#     fixture files that satisfy the precondition, and never asks whether the
+#     real managed files do. A control that tests the machine and not the
+#     instance — the same gap as `git-isolation` choosing its population from
+#     comments (BUG-047).
+#
+#     Checked for every marker vocabulary, because the prose trap applies to all
+#     of them equally and the SUITES/RETIRED ones are new enough to have no
+#     history of being right.
+# ===========================================================================
+marker_bad=""
+for _mf_file in "$MANIFEST" "$GATE" "$HOOK"; do
+  [ -f "$_mf_file" ] || continue
+  for _voc in BLUEPRINT SUITES RETIRED-SHELL-RUNNERS; do
+    set -- $(bp_marker_balance "$_mf_file" "$_voc")
+    [ "$1" -eq 0 ] && [ "$2" -eq 0 ] && continue
+    [ "$1" -eq "$2" ] && continue
+    marker_bad="$marker_bad ${_mf_file#"$ROOT"/}:$_voc($1 BEGIN/$2 END)"
+  done
+done
+if [ -n "$marker_bad" ]; then
+  fail "#7b marker counts do not balance, so 'blueprint pull' will NOT merge these files — it falls back to a whole-file copy and destroys the project's own content outside the markers:$marker_bad"
+  echo "        The counts are of SUBSTRINGS, so prose describing a marker counts as one."
+  echo "        Say 'the managed region' in sentences and keep the literal token for markers."
+else
+  pass "#7b every marker vocabulary balances, so pull merges these files instead of clobbering them"
 fi
 
 # ===========================================================================

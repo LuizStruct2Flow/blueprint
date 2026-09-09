@@ -55,6 +55,14 @@ GITLEAKS_VERSION="8.28.0"
 OSV_SCANNER_VERSION="2.2.2"
 HELM_VERSION="3.19.0"
 
+# FLOORS, not pins — a distinction worth keeping straight. The versions above
+# say "install exactly this"; these say "anything at or above this can run the
+# test harness". They must track `engines.node` in the root package.json, which
+# is where npm enforces the same constraint at install time. Modern vitest needs
+# Node 18+; npm 8+ is the floor for a lockfileVersion 2/3 `npm ci`.
+NODE_MIN_MAJOR="18"
+NPM_MIN_MAJOR="8"
+
 # Tools the pre-push gate actually probes for (`command -v` in .githooks/pre-push).
 # Keep this in step with that file — a tool listed here that the gate never uses
 # is install-time cost for nothing, and one the gate uses that is missing here
@@ -123,6 +131,62 @@ have_gnu_diff() {
     /dev/null /dev/null >/dev/null 2>&1
 }
 
+# Node and npm are BLOCK-class, not skip-class, and the difference is the whole
+# reason this file exists. The gate `pipe_skip`s a scanner it cannot find; if the
+# test harness were treated the same way, a machine without a usable Node would
+# get a GREEN gate over every suite the harness runs — dozens of them, silently
+# absent. That is precisely the defect TASK-017 closed for the security tools,
+# reintroduced through a different door. So a missing or too-old Node is
+# reported as missing and this script exits non-zero, in `check` and in install.
+#
+# Checked by CAPABILITY, exactly like have_gnu_diff and for the same reason:
+# `have node` is TRUE for a v12 that cannot run vitest at all, so presence
+# answers a question nobody asked. Ask the engine whether it is new enough, by
+# running it.
+have_node() {
+  node -e "process.exit(parseInt(process.versions.node, 10) >= $NODE_MIN_MAJOR ? 0 : 1)" \
+    >/dev/null 2>&1
+}
+
+# `npm ci` is what the gate uses to materialise node_modules reproducibly, and
+# lockfileVersion 2/3 needs npm 7+. Floor at 8 because that is what ships with
+# every Node this script will accept. Again a capability check — running
+# `npm --version` proves the binary works, which `command -v npm` does not (a
+# dangling nvm shim is on PATH and exits 127).
+have_npm() {
+  _npm_v="$(npm --version 2>/dev/null)" || return 1
+  case "$_npm_v" in ''|*[!0-9.]*) return 1 ;; esac
+  [ "${_npm_v%%.*}" -ge "$NPM_MIN_MAJOR" ] 2>/dev/null
+}
+
+# Node is deliberately NOT installed here — same posture, and the same reason,
+# as cdk and terraform below. Which Node a project runs is a PROJECT decision
+# (`engines.node`, `.nvmrc`), and on a developer machine it is almost always
+# owned by a version manager (nvm / fnm / asdf / volta). Dropping a second Node
+# into /usr/local from here would shadow that one on PATH for some shells and
+# not others, which is a worse failure than the one it fixes — and vendoring a
+# tarball is out for the reason stated in the header: nothing in this file
+# verifies a checksum.
+NODE_INSTALL_HINT="install Node ${NODE_MIN_MAJOR}+ via your version manager (nvm/fnm/asdf/volta) or the installer at nodejs.org — pin it in .nvmrc and engines.node"
+
+# One implementation, called from both OS branches, so macOS and Linux cannot
+# drift into requiring different things.
+require_node() {
+  if have_node; then
+    note "✓ node $(node --version 2>/dev/null) already present"
+  elif have node; then
+    fail_tool node "$(node --version 2>&1 | head -1) is below the ${NODE_MIN_MAJOR}+ floor — $NODE_INSTALL_HINT"
+  else
+    fail_tool node "not installed — $NODE_INSTALL_HINT"
+  fi
+
+  if have_npm; then
+    note "✓ npm $(npm --version 2>/dev/null) already present"
+  else
+    fail_tool npm "missing or older than ${NPM_MIN_MAJOR} — 'npm ci' cannot materialise the test harness"
+  fi
+}
+
 # --- check mode: identical on every OS ---------------------------------------
 if [ "$MODE" = "check" ]; then
   missing=0
@@ -150,6 +214,30 @@ if [ "$MODE" = "check" ]; then
   else
     note "✗ GNU diff  MISSING — 'diff' here does not support --unchanged-line-format,"
     note "            so 'blueprint a2bp' cannot stage a request and its suite fails"
+    missing=$((missing + 1))
+  fi
+
+  # Node/npm are reported here because `check` must report the same set the
+  # install path requires — a check narrower than the install is how a machine
+  # reports itself ready and is not (see the INFRA_TOOLS note above; `aws` is in
+  # that list for exactly this reason).
+  if have_node; then
+    note "✓ node $(node --version 2>/dev/null)  ($(command -v node))"
+  elif have node; then
+    note "✗ node  TOO OLD — $(node --version 2>&1 | head -1), the harness needs ${NODE_MIN_MAJOR}+"
+    note "        $NODE_INSTALL_HINT"
+    missing=$((missing + 1))
+  else
+    note "✗ node  MISSING — the test harness cannot run, and the gate would pass over every suite it owns"
+    note "        $NODE_INSTALL_HINT"
+    missing=$((missing + 1))
+  fi
+
+  if have_npm; then
+    note "✓ npm $(npm --version 2>/dev/null)  ($(command -v npm))"
+  else
+    note "✗ npm  MISSING or older than ${NPM_MIN_MAJOR} — 'npm ci' cannot materialise the harness"
+    note "        it ships with Node ${NODE_MIN_MAJOR}+; $NODE_INSTALL_HINT"
     missing=$((missing + 1))
   fi
 
@@ -206,6 +294,8 @@ if [ "$(uname -s)" = "Darwin" ]; then
     fail_tool diffutils "brew install diffutils failed — 'blueprint a2bp' cannot stage a request without GNU line-format flags"
   fi
 
+  require_node
+
   if [ "$WITH_INFRA" = "yes" ]; then
     echo "Installing IaC tools via Homebrew ..."
     brew_install cdk       aws-cdk
@@ -244,6 +334,9 @@ else
   # alpine) ships a diff without the line-format flags, and a2bp would then
   # fail there for the same reason it fails on a stock Mac.
   have_gnu_diff || fail_tool diffutils "diff lacks --unchanged-line-format — install GNU diffutils (apt/dnf install diffutils)"
+  # Same posture on both OSes: required, reported, never vendored. See
+  # require_node's comment for why a distro/vendored Node is the wrong answer.
+  require_node
 
   # Fetch to a temp file, verify the pin, then install. Never pipe a download
   # into a shell, and never install a file we have not checksummed.
@@ -350,6 +443,9 @@ if [ -n "$FAILED" ]; then
   echo "   Re-run after fixing, or install those manually."
   echo "   NOTE: the pre-push gate SKIPS a scanner it cannot find — a green gate"
   echo "   on this machine is currently checking less than a complete one."
+  echo "   node/npm are the exception: they BLOCK rather than skip, because the"
+  echo "   harness they run owns most of the suites and their absence would be"
+  echo "   invisible in the render."
   exit 1
 fi
 echo "✅ Toolchain complete. Verify any time with: bash scripts/install-toolchain.sh check"

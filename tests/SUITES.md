@@ -103,11 +103,34 @@ fails a test instead of passing unnoticed.
 This file travels with the suites: `tests/` is a blueprint-managed **directory**
 (BUG-029), so `blueprint pull` replaces everything between the markers below
 with the blueprint's rows — the same suites it just delivered. **Your own
-suites go in the second table, after `BLUEPRINT:END`**, where the pull leaves
+suites go in the second table, below the managed region**, where the pull leaves
 them alone. `tests/manifest` parses both tables identically, so a project row is
 enforced exactly as hard as a blueprint one.
 
-<!-- BLUEPRINT:BEGIN — blueprint-managed rows. Yours go in the table after BLUEPRINT:END. -->
+**Every table here is delimited, and a row outside a delimited region belongs to
+nothing.** The parse lives in `scripts/lib/suites.sh` — one definition, sourced
+by `tests/manifest` and by the vitest bridge, because two parsers of one table
+drift and this file has already watched that happen. It used to decide what a
+row was by counting fields, which meant a table with the wrong number of columns
+silently became a table of suites; now each table is bounded by its own comment
+markers and nothing else is read.
+
+Two consequences worth knowing before you edit this file:
+
+- **Prose must never contain a marker token.** `blueprint pull` counts those
+  strings to decide whether it can merge, and an unbalanced count makes it
+  replace the whole file — including everything of yours below. Write "the
+  managed region" in a sentence and keep the literal token for markers.
+  `tests/manifest` #7b fails the push if the counts stop balancing.
+- **Upgrading an existing project:** if your suite rows stop being recognised
+  after a pull, your own tables need the markers the blueprint's now have. Wrap
+  each with its `BEGIN`/`END` comment pair, copying the shape below. The failure
+  is loud — every suite directory of yours is reported unclassified — and this
+  is the whole fix.
+
+<!-- BLUEPRINT:BEGIN — blueprint-managed rows. Yours go in the table after the managed region. -->
+
+<!-- SUITES:BEGIN — blueprint-managed. -->
 
 | Suite | Tier | Risk if absent | Rationale for the tier | Parallelism | Why that class |
 |---|---|---|---|---|---|
@@ -155,6 +178,8 @@ enforced exactly as hard as a blueprint one.
 | `harness` | blueprint | The TypeScript fixture API stops isolating, and every migrated suite silently inherits the defect it was built to make impossible: an unscrubbed `GIT_DIR` writing the developer's real repository (BUG-047), an inherited `AGENT_SIGNAL_FILE` resetting the live baton (BUG-046), an unreaped child, a temp root left behind (BUG-049) | TASK-018's whole claim is that isolation becomes structural instead of remembered, and `tests/harness/` is the only place that claim is tested directly rather than relied upon. A harness that quietly stops scrubbing turns every green spec above it into a spec that proved nothing, so it blocks on the same path as the suites it carries. **`blueprint` for TASK-018 phase 1 only, and that is an enforced claim rather than a label:** `.gitattributes` holds `tests/harness/` back until a SHIPPING suite is TypeScript, so this suite genuinely reaches no derived project and #2b fails the push the moment it does. Phase 2 flips this cell to `both` in the same change that deletes those export-ignore lines — #2c is what stops that move being half-done | serial-global | unclassified-pending-verification — it exercises the fixture primitives themselves, spawned children and temp roots included, and has not been execution-probed for concurrency |
 | `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above, now including the export boundary that decides which suites reach a derived project at all | parallel-safe | Self-concurrency verified by execution. Reads `tests/`, this file, the gate and the workflow; writes nothing outside two `mktemp` files |
 
+<!-- SUITES:END -->
+
 ### Retired shell runners
 
 A migrated suite keeps its `*.sh` on disk until the whole migration is finished
@@ -195,7 +220,7 @@ honest answers are to delete the dead runner, revert the edit, or carry the
 change into the spec and re-prove it. The count is also reported on every green
 run, so the number that is meant to reach zero is visible rather than remembered.
 
-<!-- RETIRED-SHELL-RUNNERS:BEGIN — blueprint-managed. Your own go in the table after BLUEPRINT:END. -->
+<!-- RETIRED-SHELL-RUNNERS:BEGIN — blueprint-managed. Your own go in the project-owned table below. -->
 
 | Suite | The mutant that proved the spec equivalent | The case it turned red |
 |---|---|---|
@@ -215,8 +240,12 @@ argues from the clock is rejected whichever table it sits in.
 
 The blueprint ships this table empty on purpose — its own suites are all above.
 
+<!-- SUITES:BEGIN — project-owned. -->
+
 | Suite | Tier | Risk if absent | Rationale for the tier | Parallelism | Why that class |
 |---|---|---|---|---|---|
+
+<!-- SUITES:END -->
 
 ### Your project's retired shell runners
 

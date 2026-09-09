@@ -1,11 +1,20 @@
 #!/bin/sh
-# BLUEPRINT:BEGIN — blueprint-managed. Put YOUR guards after BLUEPRINT:END.
+# BLUEPRINT:BEGIN — blueprint-managed. Put YOUR guards below the end marker.
 #
 # Everything between the markers is owned by the blueprint and is REPLACED by
-# `blueprint pull`; everything after BLUEPRINT:END is yours and is preserved
+# `blueprint pull`; everything below the end marker is yours and is preserved
 # byte-for-byte (marker_aware_merge, scripts/blueprint). Editing inside the
 # region means losing the edit at the next pull — back-propagate it instead:
 # `blueprint a2bp .githooks/pre-push-project`.
+#
+# THE PROSE ABOVE DELIBERATELY DOES NOT SPELL THE END MARKER (BUG-053).
+# marker_aware_merge counts the marker tokens as SUBSTRINGS and refuses to merge
+# unless BEGIN and END balance. Two sentences here mentioned the end token by
+# name, giving this file a count of 1 and 3 — so the merge never ran, `pull`
+# fell back to a whole-file copy, and every derived project's own guards below
+# the region were REPLACED on every pull. The guarantee stated in this very
+# paragraph was broken by the paragraph stating it. tests/manifest #7b now
+# asserts the balance on both managed files.
 #
 # It is managed because it MUST travel with tests/ (BUG-029). A suite is
 # coherent only as three things — the files, its row in tests/SUITES.md, and its

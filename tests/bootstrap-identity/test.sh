@@ -70,7 +70,27 @@ case "$out_a" in
   *) fail "expected a missing-identity error, got:
 $out_a" ;;
 esac
-pass "missing identity fails before any filesystem change"
+pass "#2 BUG-044: missing identity fails before any filesystem change"
+
+# --- 2b. BUG-044 — the probe must REFUSE to auto-detect, not merely ask -------
+#
+# Case 2 asserts the consequence and is the right shape, but it can pass
+# VACUOUSLY on a host where git happens to fail on its own. That is exactly
+# what hid BUG-044: `git var GIT_AUTHOR_IDENT` does not fail when identity is
+# absent, it GUESSES, from the passwd gecos name and the hostname. On macOS
+# that always succeeds, so the guard passed, bootstrap proceeded, and the
+# initial commit carried a machine-invented author — the A-14 outcome reached
+# THROUGH the guard meant to prevent it.
+#
+# Whether the guess succeeds is a property of the HOST, so no consequence test
+# can pin this on every platform. The thing that holds everywhere is that the
+# probe disables auto-detection, and that is asserted at the source — the same
+# licence case 1 already takes when it greps for a hardcoded identity.
+if grep -q 'user\.useConfigOnly=true' "$SCRIPT"; then
+  pass "#2b BUG-044: the identity probe disables git's auto-detection"
+else
+  fail "#2b BUG-044: the identity probe does not set user.useConfigOnly=true, so 'git var' will GUESS an identity from gecos + hostname instead of failing — on any host where that guess succeeds, bootstrap commits as a machine-invented author and case 2 above passes vacuously"
+fi
 
 # --- 3. Inherited identity is used verbatim as the initial commit author -------
 TARGET_B="$WORK/with-identity"

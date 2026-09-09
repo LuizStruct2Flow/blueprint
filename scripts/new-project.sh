@@ -251,10 +251,34 @@ echo "🔤 Substituted placeholders in $_subst_count file(s)."
 # state under logs/state/, so a freshly bootstrapped project has none. Seed it
 # here for the same reason the roster is copied from its .example: a new project
 # should be able to run the ceremony without a manual first step.
+#
+# BUG-046 — the seed is scrubbed of the CALLER's baton pointers, because the
+# only baton this line may ever write is the NEW PROJECT'S.
+#
+# `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.sh:87) and
+# $AGENT_STATE_HOME (:56), and `codex-signal-watch.sh` EXPORTS
+# AGENT_SIGNAL_FILE into every dispatched wake command. So bootstrapping from a
+# dispatched agent — or from any suite that drives this script without scrubbing
+# its own environment — resolved the seed to the CALLER's live mic and published
+# `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a
+# real hand-off, silently, while everything reported success. That is BUG-030,
+# reproduced here from four different suites.
+#
+# Fixed at the source rather than in the callers: an override that means "this
+# session's baton" cannot also mean "the baton of a project that does not exist
+# yet", so it is not an override this call may honour AT ALL. Unsetting inside
+# the subshell — rather than computing a path and passing `--file` — keeps the
+# target's own scripts/lib/state-dir.sh as the SINGLE derivation of where its
+# baton lives (A-09; tests/state-dir #7), instead of adding a second copy of
+# that rule here that could drift from it.
 if [[ -f "$TARGET_DIR/scripts/signal-set.sh" ]]; then
-  ( cd "$TARGET_DIR" && bash scripts/signal-set.sh \
+  (
+    cd "$TARGET_DIR" || exit 0
+    unset AGENT_SIGNAL_FILE AGENT_STATE_HOME
+    bash scripts/signal-set.sh \
       --holder Nobody --state IDLE \
-      --task "Bootstrapped from the blueprint. Claim the mic to begin." ) >/dev/null 2>&1 || true
+      --task "Bootstrapped from the blueprint. Claim the mic to begin."
+  ) >/dev/null 2>&1 || true
 fi
 
 # --- Today's date in HANDOVER + AGENT_SIGNAL stamps ---

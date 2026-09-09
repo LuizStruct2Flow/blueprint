@@ -81,7 +81,29 @@ new_victim(){
 #    which is the whole lesson of #3 (and of BUG-035). ~7 s for the pair; the
 #    cost is paid on risk, not on the clock (CLAUDE.md §"Pre-push tolerance").
 # ===========================================================================
-for suite in marker-merge gate-arming commit-subjects bootstrap-identity; do
+# BUG-053 — `bootstrap-identity` is blueprint-tier and does not ship, so
+# downstream it is NOT APPLICABLE rather than missing. Keyed on
+# `.blueprint-root`, the same positive marker `drift` and tests/manifest use,
+# and NEVER on the file being absent: keying on absence would let a derived
+# project silently drop an anchor it should have by deleting a directory, which
+# is BUG-005 with an extra step.
+#
+# `bootstrap-gate` found this by running a bootstrapped project's own gate —
+# #1 reported "tests/bootstrap-identity/test.sh not found" and #3 reported the
+# predicate had MISSED it. Both were correct about the file and wrong about
+# what that meant.
+GI_ANCHORS="marker-merge gate-arming commit-subjects"
+[ -f "$ROOT/.blueprint-root" ] && GI_ANCHORS="$GI_ANCHORS bootstrap-identity"
+
+# The skip must not be able to empty the anchor set. If it ever did, #1 would
+# execute nothing and #3 would find nothing MISSING — both passing over an
+# empty list, which is precisely the vacuous-pass shape this suite exists to
+# refuse. Three is the floor because three anchors ship.
+_gi_n=0
+for _a in $GI_ANCHORS; do _gi_n=$((_gi_n + 1)); done
+[ "$_gi_n" -ge 3 ] || fail "#1 anchor set collapsed to $_gi_n — this suite would prove nothing"
+
+for suite in $GI_ANCHORS; do
   s="$ROOT/tests/$suite/test.sh"
   if [ ! -f "$s" ]; then fail "#1 tests/$suite/test.sh not found"; continue; fi
 
@@ -165,7 +187,7 @@ done
 # execution in #1 above to write into a victim repo, so a predicate that stops
 # finding one of them has stopped being this control.
 missing_anchor=""
-for a in marker-merge gate-arming commit-subjects bootstrap-identity; do
+for a in $GI_ANCHORS; do
   case " $members " in
     *" $a/test.sh "*) ;;
     *) missing_anchor="$missing_anchor $a" ;;

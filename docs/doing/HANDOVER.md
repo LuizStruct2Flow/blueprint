@@ -112,6 +112,21 @@ broken `node_modules` fails loudly instead of not gating at all.
 778 s on the Mac). `bootstrap-gate` passes at 188.5 s, and BUG-053 — the
 blueprint-tier-rows-downstream defect — is closed in both its instances.
 
+**The 46th was `pull-behaviour · BUG-016/018`, and this section used to leave it
+unnamed.** Do not repeat that: a count without the name of the failure is the
+one fact a waking agent cannot derive from anything else here, and it cost a
+session. It is now **BUG-054** and fixed — `blueprint pull` asked whether the
+*process* had a controlling terminal instead of whether its *caller* gave it an
+interactive stdin, so from a `git push` typed in a terminal it prompted on the
+real tty and hung.
+
+**Two numbers in this file were symptoms of it, and both misled.** The suite was
+recorded at `426.2s`; it runs in **0.778 s**. It was never slow — it was blocked
+on a prompt. That same idle is what made the push's own connection die with
+*"Connection to github.com closed by remote host"*, so the failure presented as
+a network problem. **If a suite here is implausibly slow, suspect a blocked read
+before you suspect the suite.**
+
 **The transfer was by `git bundle`, not by push**, because the Mac could not
 complete a gate run. So this branch has **no upstream** until the first
 successful push from here — `git pull` will say *"no tracking information"* and

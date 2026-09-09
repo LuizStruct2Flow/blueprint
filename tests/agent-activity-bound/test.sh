@@ -195,6 +195,51 @@ wait_sup(){ local want="$1" i=0
   while [ "$i" -lt 40 ]; do [ "$(supervisors)" -eq "$want" ] && return 0; sleep 0.1; i=$((i+1)); done
   return 1; }
 
+# BUG-038 — wait_sup proves a supervisor is RESIDENT. It does not prove the
+# supervisor has finished its initial scan and registered a baseline offset for
+# a given run log, and those two are not the same instant.
+#
+# The gap is load-bearing because the feed deliberately does NOT replay
+# pre-existing content (case #16). A payload appended after wait_sup returns but
+# before the supervisor registers the file is folded into the baseline and is
+# never emitted — so the suite reports "the reader lost it", which is
+# indistinguishable from the regression these cases exist to catch.
+#
+# On a fast Linux box registration lands inside the same tick and nobody sees
+# it. On macOS here it does not, and #7/#10/#18/#5f all failed for this one
+# reason. A `sleep 2` makes them pass, which is how the mechanism was isolated —
+# and is exactly the fixed-interval guess BUG-037 was about, so it is not the
+# fix. Handshake instead: write a unique sentinel to the very file the case will
+# use and wait until it comes out the other end. That proves liveness AND that
+# THIS file is registered, which is the property the case actually needs.
+# The bound is 20s, and it is measured rather than padded. Append-to-emit
+# latency for the FIRST record after `--daemon` is 32.6s on this host, twice
+# measured at 32.60 and 32.59 — a deterministic constant, not load. Every
+# SUBSEQUENT record is 0.25-0.47s, i.e. the tick. Foreground has no such delay.
+#
+# The cause is that --daemon returns once the supervisor holds its lock, which
+# is not the same instant as the supervisor having registered a run log to read.
+# A record landing in that window waits for whatever re-scan closes it. That is
+# a real defect in its own right (rowed as BUG-039): 32s of silence after
+# starting the feed is bad for an operator, not just for this suite. The
+# principled fix is for --daemon to return when the supervisor is PUMPING rather
+# than merely resident, which would also let this bound drop back to a second or
+# two.
+#
+# 20s and not 45s, deliberately. 45 was tried against the measured 32.6s and
+# changed no outcome while adding 2m41s to the run, which means the cases still
+# failing (#7 and #5f) are NOT failing on this window — see BUG-039. Widening a
+# bound that buys nothing is how a suite gets slow without getting truthful.
+#
+# A handshake that FAILS must be loud. The first version of this returned a
+# status nobody checked, so a failed handshake silently degraded to exactly the
+# unsynchronised behaviour it exists to prevent — a guard whose failure mode is
+# invisible is not a guard. Callers use `reader_ready … || fail`.
+reader_ready(){ local f="$1" tag
+  tag="READY-$$-${2:-x}-$(date +%s)"
+  printf '%s\n' "$tag" >>"$f"
+  wait_for "$tag" 20; }
+
 # ===========================================================================
 # #1 Concurrency — EXACTLY one supervisor (not "at most": zero would mean the
 #    daemon never started, and the plan requires one survivor).
@@ -420,6 +465,9 @@ SPACEY="$WORK/state dir with spaces"; mkdir -p "$SPACEY"; : >"$SPACEY/gemini-run
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$SPACEY" AGENT_FEED_TICK="${TICKVAL:-0.25}" \
   bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 wait_sup 1
+# Handshake on the spacey path itself: it is also the first proof the reader
+# opened a path containing spaces at all.
+reader_ready "$SPACEY/gemini-runs.log" spacey || fail "#7 reader never registered the spacey run log - the case below cannot tell a lost record from an unsynchronised start"
 printf 'SPACED-PATH-OK\n' >>"$SPACEY/gemini-runs.log"
 if wait_for "SPACED-PATH-OK" 8; then pass "#7 state dir containing spaces handled"
 else fail "#7 a path with spaces broke the reader (word splitting)"; fi
@@ -453,6 +501,11 @@ stop_feed >/dev/null 2>&1; wait_sup 0
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   AGENT_FEED_TEST_SLOW_READ=1 bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 if wait_sup 1; then
+  # BUG-038 — RACE-A used to be appended the instant a supervisor was resident.
+  # If registration had not happened yet it was absorbed into the baseline and
+  # never emitted, giving A=0 B=0 C=0: read as "the reader lost every record",
+  # which is precisely the regression this case exists to detect.
+  reader_ready "$RUNLOG" race || fail "#10 reader never registered the run log - the RACE counts below are not trustworthy"
   printf 'RACE-A\n' >>"$RUNLOG"     # in the snapshot
   sleep 0.3
   printf 'RACE-B\n' >>"$RUNLOG"     # lands DURING the slowed read
@@ -473,10 +526,17 @@ stop_feed >/dev/null 2>&1; wait_sup 0
 #     restart would legitimately re-seed at EOF and mask the property.
 # ===========================================================================
 : >"$RUNLOG"
-SENTINEL="$WORK/short-sink-active"; : >"$SENTINEL"
+SENTINEL="$WORK/short-sink-active"
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   AGENT_FEED_TEST_SHORT_SINK="$SENTINEL" bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 if wait_sup 1; then
+  # BUG-038 — the handshake must happen while the sink is HEALTHY, because the
+  # seam's whole purpose is to suppress emission. So the sentinel is created
+  # here, after the reader has proven it is registered, rather than before the
+  # daemon starts. The property under test is unchanged: the payload below is
+  # still written with the short sink armed, on the same supervisor.
+  reader_ready "$RUNLOG" shortsink || fail "#18 reader never registered the run log before the short sink was armed"
+  : >"$SENTINEL"                                     # arm the short sink NOW
   printf 'SHORTSINK-PAYLOAD\n' >>"$RUNLOG"
   sleep 1.5
   if [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 0 ]; then
@@ -509,6 +569,10 @@ kids="$(ps -eo ppid,args 2>/dev/null | awk -v P="$fgpid" '$1==P' | grep -c '[t]e
 if [ "$kids" -eq 0 ]; then pass "#15f foreground spawns no 'tee' (supervisor writes both sinks)"
 else fail "#15f foreground spawned a 'tee' — the one-resident-process contract is false"; fi
 
+# BUG-038 — same handshake. Foreground is not exempt: it becomes the pumping
+# supervisor at its own pace, and both #5f assertions failed here because the
+# line was appended before it had registered $RUNLOG.
+reader_ready "$RUNLOG" fg || fail "#5f foreground never registered the run log - the assertions below cannot tell a reader fault from a slow start"
 printf 'FOREGROUND-LINE\n' >>"$RUNLOG"
 sleep 1.5
 if grep -qF "FOREGROUND-LINE" "$FGOUT" 2>/dev/null; then pass "#5f foreground writes to stdout"

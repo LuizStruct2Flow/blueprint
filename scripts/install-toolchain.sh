@@ -83,8 +83,18 @@ have() { command -v "$1" >/dev/null 2>&1; }
 FAILED=""
 fail_tool() { FAILED="$FAILED $1"; echo "  ✗ $1: $2" >&2; }
 
+# Clear the shell's command-location cache. bash remembers where it found a
+# command, so a tool installed DURING this run is still looked up at its old
+# path — or reported absent — until the cache is dropped. Observed for real:
+# `brew install diffutils` succeeded, symlinked /usr/local/bin/diff, and the
+# capability check immediately after still saw Apple's /usr/bin/diff and
+# declared the install failed. An installer that cannot see its own work
+# reports a false failure, which is the same class as BUG-037.
+rehash() { hash -r 2>/dev/null || true; }
+
 verify() {
   _t="$1"
+  rehash
   if have "$_t"; then
     note "✓ $_t installed ($("$_t" --version 2>&1 | head -1))"
   else
@@ -97,6 +107,21 @@ verify() {
 # BLOCKS rather than run it uncapped (A-03 R4-F2). macOS has no `timeout` in
 # the base system — coreutils installs it as `gtimeout`.
 have_timeout() { have timeout || have gtimeout; }
+
+# GNU diffutils, checked by CAPABILITY rather than by presence. `have diff` is
+# TRUE on macOS and tells you nothing: Apple ships a FreeBSD diff that does not
+# implement --unchanged-line-format, and `blueprint a2bp` needs exactly those
+# line-format flags to build its staged request. Without them a2bp refuses every
+# file with "staging failed" — correctly, and loudly, but it means the product's
+# back-propagation verb does not work at all on a stock Mac, and the whole
+# tests/a2bp-contamination suite fails (19 cases) rather than skipping.
+#
+# This is the same trap as `have coreutils`: asking whether a package name
+# resolves, when the thing you depend on is a behaviour.
+have_gnu_diff() {
+  diff --unchanged-line-format='' --old-line-format='' --new-line-format='' \
+    /dev/null /dev/null >/dev/null 2>&1
+}
 
 # --- check mode: identical on every OS ---------------------------------------
 if [ "$MODE" = "check" ]; then
@@ -117,6 +142,14 @@ if [ "$MODE" = "check" ]; then
     note "✓ timeout  ($(command -v timeout 2>/dev/null || command -v gtimeout))"
   else
     note "✗ timeout/gtimeout  MISSING — the secret scan cannot be bounded, and the gate blocks"
+    missing=$((missing + 1))
+  fi
+
+  if have_gnu_diff; then
+    note "✓ GNU diff  ($(command -v diff))"
+  else
+    note "✗ GNU diff  MISSING — 'diff' here does not support --unchanged-line-format,"
+    note "            so 'blueprint a2bp' cannot stage a request and its suite fails"
     missing=$((missing + 1))
   fi
 
@@ -158,10 +191,19 @@ if [ "$(uname -s)" = "Darwin" ]; then
   # on every run.
   if have_timeout; then
     note "✓ timeout/gtimeout already present"
-  elif brew install coreutils >/dev/null && have_timeout; then
+  elif brew install coreutils >/dev/null && rehash && have_timeout; then
     note "✓ gtimeout installed (coreutils)"
   else
     fail_tool coreutils "brew install coreutils failed — the secret scan cannot be bounded"
+  fi
+
+  # Keyed on the capability, not the formula: Apple's diff is always on PATH.
+  if have_gnu_diff; then
+    note "✓ GNU diff already present"
+  elif brew install diffutils >/dev/null && rehash && have_gnu_diff; then
+    note "✓ GNU diff installed (diffutils)"
+  else
+    fail_tool diffutils "brew install diffutils failed — 'blueprint a2bp' cannot stage a request without GNU line-format flags"
   fi
 
   if [ "$WITH_INFRA" = "yes" ]; then
@@ -197,6 +239,11 @@ else
   # is genuinely absent the distro package is the only sane answer — we do not
   # ship a coreutils binary.
   have_timeout || fail_tool coreutils "no timeout(1) — install GNU coreutils via your package manager"
+  # GNU diffutils is the default on Linux, so this normally passes untouched.
+  # It is still asserted rather than assumed: a minimal container (busybox,
+  # alpine) ships a diff without the line-format flags, and a2bp would then
+  # fail there for the same reason it fails on a stock Mac.
+  have_gnu_diff || fail_tool diffutils "diff lacks --unchanged-line-format — install GNU diffutils (apt/dnf install diffutils)"
 
   # Fetch to a temp file, verify the pin, then install. Never pipe a download
   # into a shell, and never install a file we have not checksummed.

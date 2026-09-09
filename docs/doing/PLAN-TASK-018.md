@@ -72,14 +72,30 @@ for this task.
 | S1.3 | The guard for S1.2 selects its population by grepping **comments** | `git-isolation:118` greps `'git init'`; `commit-subjects:195` is `git -C "$T6" init -q` | BUG-047 |
 | S5 | `fail` inside a command substitution — headline assertion cannot fail | `a2bp-contamination:201` | BUG-048 |
 | S4 | 133 MB of leaked blueprint archives, measured | `marker-merge:89`; `state-dir` has no trap at all | BUG-049 |
-| S2.1 | Real-feed escape canary: **token** check survives anything, **count** check cannot | `pipeline:284-286` vs `pipeline.sh:153` `feed_append "[GATE]"` | Declare serial; keep the token half |
+| S2.1 | Real-feed escape canary. **CORRECTED — see below**; the count half cannot survive a parallel gate, and the token half was NOT unique either | `pipeline:284-286` vs `pipeline.sh:153` `feed_append "[GATE]"` | Declare serial; token now unique per run (BUG-050) |
 | S2.2 | Global `/tmp` scan, **vacuous on macOS** (`TMPDIR` is `/var/folders/…`) | `pipeline:170-175` | BUG-005 class here, real hazard on CI |
 | S2.3 | Global `$TMPDIR` absence + `-newer` | `a2bp-e2e:309` vs `request-file.sh:28` | `a2bp-e2e` ∥ `a2bp-contamination` fails **by construction** |
 | S2.4 | Global `tail -n0 -F` count, no ownership filter | `agent-activity-bound:264,491,494` | Blocks |
 | S2.5 | Reads **and `rm -f`s** the real watcher lock | `watcher-liveness:282-296` | Deletes a live watcher's lock |
 | S2.8 | Asserts a **recycled pid** resolves to empty | `proc-cwd:93-102` | Nondeterministic under pid churn |
 
-**Two corrections to earlier drafts of this section, both from execution:**
+**BUG-050 — the audit's own sentence broke the test it described.** Vitali's
+S2.1 said the escape canary's *token* check "is unique per run and survives
+anything — keep it". It was a **fixed literal**, and
+`logs/agent-activity.log` is the feed every agent's prose lands in. So writing
+that sentence put the literal into the real feed and wedged `tests/pipeline` #19
+permanently red, in a checkout where `logs/` is gitignored — so a fresh clone
+read clean and it looked like a local mystery. The failure text then accused the
+suite of polluting the production log, which is exactly backwards (the
+BUG-041/BUG-042 misdirection class).
+
+Found by Philipp, contradicting Vitali, and the proof is Vitali's own words.
+Fixed: unique-per-run token, scoped search. **The harness already got this
+right** — `canary.ts` mints `canary-must-not-escape-<scenario>-<pid>-<time>` —
+which is the first evidence that the typed fixture prevents a class the shell
+suites keep re-encountering.
+
+**Three corrections to earlier drafts of this section, all from execution:**
 
 - **`no-chain-guard:54` is not a fixed `/tmp` path.** It is a heredoc payload
   string fed to the guard and never executed. `no-chain-guard` is in fact the

@@ -41,25 +41,22 @@ ts_suites_present(){
   [ -n "$(find "${1:-.}/tests" -type f -name '*.spec.ts' -print -quit 2>/dev/null)" ]
 }
 
-# ts_declared_suites ROOT — the suite names that own a *.spec.ts, read from the
-# manifest table. Same parse shape tests/manifest uses, deliberately: two
-# parsers of one table drift, and this file exists to be the thing that cannot.
+# ts_declared_suites ROOT — the suite names that own a *.spec.ts.
+#
+# Delegates to scripts/lib/suites.sh. This function used to carry its own copy
+# of the manifest table parse, under a comment claiming "two parsers of one
+# table drift, and this file exists to be the thing that cannot" — while being
+# the second parser. Vitali (QA-1) caught it, and it was already drifting: the
+# manifest's copy emits six fields and gates the parallelism class on the last
+# two, while this one read field 2 and would have accepted a legacy four-column
+# row the manifest rejects.
 ts_declared_suites(){
   _tsd_root="${1:-.}"
-  awk -F'|' '
-    function trim(s){ gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /^[[:space:]]*\|/ {
-      n=split($0,f,"|"); if (n<6) next
-      s=trim(f[2])
-      if (s !~ /^`.*`$/) next
-      gsub(/`/,"",s)
-      print s
-    }
-  ' "$_tsd_root/tests/SUITES.md" 2>/dev/null | while IFS= read -r _s; do
-    [ -n "$_s" ] || continue
-    [ -n "$(find "$_tsd_root/tests/$_s" -maxdepth 1 -type f -name '*.spec.ts' -print -quit 2>/dev/null)" ] \
-      && printf '%s\n' "$_s"
-  done
+  if [ -r "$_tsd_root/scripts/lib/suites.sh" ]; then
+    # shellcheck source=scripts/lib/suites.sh
+    . "$_tsd_root/scripts/lib/suites.sh"
+    bp_suites_with_spec "$_tsd_root"
+  fi
 }
 
 # ts_suites_stage [ROOT] — the whole thing.

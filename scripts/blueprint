@@ -138,6 +138,15 @@ MANAGED_FILES=(
   # CLOSED without it (deliberately), so a project that pulls the hook and not
   # this file cannot push at all until it lands.
   "scripts/lib/pipeline.sh"
+  # TASK-018. Both are sourced BY a managed hook, so managing the hook without
+  # managing them delivers a call to a file the recipient never receives: the
+  # derived gate takes the `else` branch and pipe_skips the vitest stage on
+  # every push, permanently, with a reason that reads as deliberate. Worse, that
+  # reason said `blueprint pull scripts/run-ts-suites.sh`, which cannot work on
+  # an unmanaged file — the message sent the operator to a dead end. Found by
+  # tests/manifest #2c the day the bridge landed.
+  "scripts/lib/suites.sh"
+  "scripts/run-ts-suites.sh"
   # THE roster parser, shared by the feed and team-kickoff. MUST ship: both of
   # those are managed files, and without this one they have nowhere to resolve
   # persona identity from — which is BUG-010, where a fleet's persona names were

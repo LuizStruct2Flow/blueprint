@@ -878,6 +878,35 @@ else
   # exactly the signal the founder watches for, so it must carry its reason.
   pipe_skip "DoD checklist" "scripts/lib/dod-gate.sh absent — run: blueprint pull scripts/lib/dod-gate.sh"
 fi
+
+# --- TASK-018: the TypeScript suites ----------------------------------------
+#
+# ONE vitest process, rendered as one stage PER SUITE.
+#
+# Forty-two separate invocations would mean forty-two Node startups and would
+# discard the parallelism that is the whole point. But collapsing them into a
+# single "vitest" stage breaks two things that matter: tests/bootstrap-gate #3
+# requires a derived project's gate to pass >= 25 stages as an explicit
+# non-vacuity guard, and `slowest: vitest 200s` names nothing anyone can act
+# on. scripts/run-ts-suites.sh bridges the two through pipeline.sh's batch API
+# (PLAN-TASK-018 §7.3).
+#
+# The expected suite list comes from tests/SUITES.md, never from vitest's own
+# output — otherwise every guard reduces to trusting the runner, and a suite
+# dropped from the include glob vanishes with the gate still green. Verified by
+# breaking it: narrowing the glob produces both a named per-suite failure and a
+# runner-contradicts-its-report failure.
+#
+# Placed here, at the END of the managed region, deliberately. It is the only
+# stage that needs a toolchain the rest of the gate does not, so a machine
+# missing it fails one clearly-named stage rather than poisoning earlier ones.
+if [ -f scripts/run-ts-suites.sh ]; then
+  # shellcheck source=scripts/run-ts-suites.sh
+  . ./scripts/run-ts-suites.sh
+  ts_suites_stage "$(pwd)"
+else
+  pipe_skip "vitest · TASK-018" "scripts/run-ts-suites.sh absent — run: blueprint pull scripts/run-ts-suites.sh"
+fi
 # BLUEPRINT:END
 #
 # --- YOUR PROJECT GUARDS GO BELOW THIS LINE ---------------------------------

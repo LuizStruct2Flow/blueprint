@@ -2,9 +2,10 @@
  * tests/drift-in-blueprint/drift-in-blueprint.spec.ts — BUG-007 regression.
  *
  * Parallelism class: serial-global.
- *   Case #1 intentionally runs the real blueprint CLI in the real blueprint
- *   checkout because that is the wake-time failure this suite exists to guard.
- *   Fixture cases use scenario-owned directories but still exercise git repos.
+ *   Every case now runs in a scenario-owned directory. Case #1 used to run the
+ *   real CLI in the real checkout, described here as intentional — see
+ *   BUG-056 at createBlueprintCheckout below for why that was a defect rather
+ *   than a decision, and how it hid.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -72,10 +73,53 @@ async function createDerivedProject(
   await commitAll(s, root)
 }
 
+/**
+ * A checkout that IS a blueprint: `.blueprint-root` present, `.blueprint-source`
+ * absent. That pair is the entire input BUG-007 is about.
+ *
+ * BUG-056 — cases #1 and #1b used to run against REPO_ROOT, the developer's
+ * actual checkout, and the header called that intentional. It was not safe:
+ * `drift` arms the gate (CLAUDE.md §"Before Every Push"), `arm_gate` writes
+ * `core.hooksPath` into `.git/config`, and so the case MUTATED THE REAL
+ * REPOSITORY — which is BUG-047 exactly, the defect the real-state canary was
+ * added to catch. It caught it.
+ *
+ * It also made the case environment-dependent, which is why nobody noticed:
+ * on any machine where the gate is already armed `arm_gate` is a no-op and the
+ * config never changes, so it passed for every developer and failed on the
+ * first fresh clone — CI. Same shape as BUG-054's case and BUG-044's, twice
+ * more in the same week.
+ *
+ * The fixture reproduces the INPUT rather than borrowing the directory. What
+ * the old form additionally covered — "drift works in this actual checkout" —
+ * is not a regression test; it is the wake protocol, which runs it every
+ * session.
+ */
+async function createBlueprintCheckout(s: Scenario, root: string) {
+  await mkdir(join(root, 'scripts/lib'), { recursive: true })
+  await mkdir(join(root, '.githooks'), { recursive: true })
+  await copyFile(CLI, join(root, 'scripts/blueprint'))
+  await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
+  await copyFile(join(REPO_ROOT, 'scripts/lib/gate.sh'), join(root, 'scripts/lib/gate.sh'))
+  await copyFile(
+    join(REPO_ROOT, 'scripts/lib/placeholders.sh'),
+    join(root, 'scripts/lib/placeholders.sh'),
+  )
+  await copyFile(join(REPO_ROOT, '.blueprint-root'), join(root, '.blueprint-root'))
+  await writeFile(join(root, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
+  await s.run('chmod', ['+x', join(root, '.githooks/pre-push')], { cwd: root })
+  await writeFile(join(root, 'f.txt'), 'x\n', 'utf8')
+  await initRepo(s, root)
+  await commitAll(s, root, 'blueprint checkout')
+}
+
 describe('BUG-007 — drift completes in the blueprint and still refuses non-projects', () => {
   it("#1 'blueprint drift' completes inside the blueprint itself", async () => {
     await scenario('drift-in-blueprint-1', async (s) => {
-      const r = await s.run(CLI, ['drift'], { cwd: REPO_ROOT, timeoutMs: 120_000 })
+      const b = await s.workspace.dir('bp')
+      await createBlueprintCheckout(s, b)
+
+      const r = await run(s, './scripts/blueprint drift 2>&1 </dev/null', b)
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).not.toContain('not a struct2flow project')
@@ -84,10 +128,30 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
 
   it('#1b it names the case rather than exiting quietly', async () => {
     await scenario('drift-in-blueprint-1b', async (s) => {
-      const r = await s.run(CLI, ['drift'], { cwd: REPO_ROOT, timeoutMs: 120_000 })
+      const b = await s.workspace.dir('bp')
+      await createBlueprintCheckout(s, b)
+
+      const r = await run(s, './scripts/blueprint drift 2>&1 </dev/null', b)
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).toMatch(/blueprint itself|is the blueprint|source of truth/i)
+    })
+  })
+
+  it('#1c BUG-056: the case owns the repo it drifts — no real config is touched', async () => {
+    await scenario('drift-in-blueprint-1c', async (s) => {
+      const b = await s.workspace.dir('bp')
+      await createBlueprintCheckout(s, b)
+      await git(s, b, ['config', '--unset', 'core.hooksPath'])
+
+      await run(s, './scripts/blueprint drift 2>&1 </dev/null', b)
+      const armed = await git(s, b, ['config', '--get', 'core.hooksPath'])
+
+      // drift arms the gate — that is the documented behaviour, and the point
+      // is that the arming lands in the FIXTURE's config. The scenario-wide
+      // canary asserts the real .git/config is untouched; if this case ever
+      // reverts to REPO_ROOT, that canary fails rather than this expectation.
+      expect(armed.stdout.trim()).toBe('.githooks')
     })
   })
 

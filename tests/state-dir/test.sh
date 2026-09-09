@@ -466,7 +466,13 @@ fi
 # BSD/older macOS, where `-f` is rejected. So #10b would not have caught it, and
 # only #10's grep for the flag would. Together: #10 forbids the dependency, #10b
 # proves the portable walk that replaced it actually follows a chain.
-probe="$(mktemp -d)"
+# BUG-036 — physical path. The resolver under test correctly returns a
+# fully-resolved path, and on macOS `mktemp -d` hands back /var/folders/...
+# while /var is a symlink to /private/var. Comparing the resolver's correct
+# answer against the unresolved literal failed #10b with "chain not followed"
+# — an accusation against the resolver for doing exactly its job. Same
+# mechanism as the WORK normalisation in tests/agent-activity-bound.
+probe="$(cd "$(mktemp -d)" && pwd -P)"
 mkdir -p "$probe/real/scripts" "$probe/links/nested"
 blk="$(sed -n '/^_bp_self=/,/^_bp_root=/p' "$ROOT/scripts/codex-signal-watch.sh")"
 printf '%s\nprintf "%%s\\n" "$_bp_root"\n' "$blk" > "$probe/real/scripts/probe.sh"

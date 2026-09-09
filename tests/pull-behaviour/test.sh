@@ -90,9 +90,40 @@ sha_of(){ grep '^bootstrap_sha' "$1/.blueprint-source" | cut -d= -f2- | tr -d ' 
 #    All three properties are now asserted independently, so no one of them can
 #    carry the case on its own.
 # ===========================================================================
+#    BUG-054 — REOPENED AGAIN, and this time the CASE was the defect too.
+#
+#    The three properties below are right. What was wrong is that the case let
+#    the ENVIRONMENT decide which code path it exercised. `</dev/null` says
+#    "stdin is not interactive", but the guard under test asked about
+#    /dev/tty — a different question, answered by whether the RUNNER has a
+#    controlling terminal. So this case tested the refusal path when run
+#    detached (no ctty; guard fires; green) and the broken path when run from
+#    a terminal — which is every `git push` a human types. A case whose
+#    verdict depends on how it was launched is not a control, and this one
+#    reported green on the very runs that mattered least.
+#
+#    So the ctty is now PROVIDED rather than inherited: a pty from `script`,
+#    with stdin redirected to /dev/null INSIDE it. That is precisely the
+#    pre-push gate's shape — terminal present, stdin not a terminal — and it
+#    is the combination both previous fixes got wrong.
+# ===========================================================================
 P="$TMP/p18"
 new_project "$P"
-out=$( cd "$P" && bash "$BP/scripts/blueprint" pull docs/DoD.md </dev/null 2>&1 )
+
+# Run a command with a controlling terminal but a NON-interactive stdin.
+# util-linux takes `-qec CMD FILE`; BSD/macOS takes `-q FILE CMD ...`. The
+# inner `</dev/null` is what separates the two conditions — without it the
+# child inherits the pty as stdin and `[ -t 0 ]` is true, which is the
+# interactive case and not the one this asserts.
+with_ctty_no_stdin(){
+  if script -qec true /dev/null >/dev/null 2>&1; then
+    script -qec "$1" /dev/null
+  else
+    script -q /dev/null /bin/sh -c "$1"
+  fi
+}
+
+out=$( with_ctty_no_stdin "cd '$P' && bash '$BP/scripts/blueprint' pull docs/DoD.md </dev/null 2>&1" )
 rc=$?
 bad18=0
 if printf '%s' "$out" | grep -q '/dev/tty'; then

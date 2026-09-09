@@ -77,44 +77,63 @@ ts_suites_stage(){
     return 1
   fi
 
-  _ts_expect="$(ts_declared_suites "$_ts_root")"
+  # THE LIST IS THE CONTRACT, NOT THE STATUS — and `|| true` is load-bearing.
+  #
+  # scripts/lib/suites.sh says of bp_suites_with_spec: "a final suite without a
+  # spec made this return 1 with a perfectly good list on stdout. Harmless to
+  # the one caller that reads it through `$( )`." That reasons about the VALUE
+  # and forgets the caller runs under `set -e`, where a non-zero status is fatal
+  # no matter how good the list is. The gate died on this line: entered the
+  # stage, passed the npx check, and vanished — no stage, no skip, no summary,
+  # push refused with nothing printed. Emptiness is judged below, where it can
+  # be reported.
+  _ts_declrc=0
+  _ts_expect="$(ts_declared_suites "$_ts_root")" || _ts_declrc=$?
   if [ -z "$_ts_expect" ]; then
     pipe_skip "vitest · TASK-018" "no suite in tests/SUITES.md owns a *.spec.ts"
     return 0
   fi
 
   _ts_json="$(mktemp)"
+  _ts_out="$(mktemp)"
   # No positional path filter, deliberately: tests/manifest #4 proves the gate
   # runs vitest BLANKET, because a path-filtered run is how a suite silently
   # stops being executed. Narrowing this breaks that assertion by design.
-  _ts_out="$(mktemp)"
-  # BUG-055 — SCRUB GIT'S ENVIRONMENT, exactly as every shell suite does.
   #
-  # git exports GIT_DIR when it invokes a hook. The harness refuses to run any
-  # scenario while it is present (tests/harness/env.ts, assertProcessEnvClean)
-  # and that refusal is CORRECT — it is the BUG-046/BUG-047 guard. The two
-  # facts together mean the TS suites could never run under a real `git push`:
-  # by hand all 41 passed, under a push all 41 failed, and the difference was
-  # one inherited variable.
-  #
-  # The shell suites have handled this since BUG-014 with an `unset` at the top
-  # of each file. Doing it here rather than in each spec is the same reasoning
-  # as the harness itself: every TS suite routes through this one command, so
-  # this is the place it cannot be forgotten.
-  #
-  # BUG-055 — AND KEEP THE STATUS AND THE OUTPUT.
+  # BUG-055 — KEEP THE STATUS AND THE OUTPUT.
   #
   # This was `( … ) >/dev/null 2>&1` followed by `_ts_rc=$?`, under a hook that
   # runs `set -e`. That makes the assignment UNREACHABLE on the only path where
-  # it matters: a failing vitest killed the hook before its status could be
-  # read, so the stage printed nothing at all — no stage line, no summary, no
-  # error — and the push was refused with no way to tell a broken run from a
-  # missing one. `pipe_batch_end` below exists to reconcile that status, and it
-  # could never receive it. The per-suite note already said "see the vitest
-  # output above" while the output was going to /dev/null.
-  if ( cd "$_ts_root" \
-       && unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
-       && npx vitest run --reporter=json --outputFile="$_ts_json" ) >"$_ts_out" 2>&1
+  # it matters: a failing runner would kill the hook before its status could be
+  # read. `pipe_batch_end` below exists to reconcile that status and could never
+  # receive it, and the per-suite note said "see the vitest output above" while
+  # the output went to /dev/null.
+  #
+  # This was not what broke the push — that was the declared-suites status
+  # above — but it is why finding it took eight attempts: every failure in this
+  # stage rendered as an absence, and an absence names nothing.
+  #
+  # ENV SCRUB: HARDENING, NOT THE FIX. Stated plainly because the first draft of
+  # this comment claimed otherwise. git does NOT export GIT_DIR to a pre-push
+  # hook (measured: it exports GIT_EDITOR, GIT_EXEC_PATH, GIT_PREFIX and
+  # nothing else), so the harness's assertProcessEnvClean was never firing here.
+  # The scrub stays because any caller that DOES hold a git or agent variable —
+  # a nested gate, a dispatcher, a future hook — would otherwise hit that guard
+  # and fail in the same unreadable way, and because every shell suite has
+  # scrubbed since BUG-014. It is a defence with a real threat and no cost, not
+  # a diagnosis.
+  #
+  # By PREFIX rather than by list: FORBIDDEN_ENV is fifteen names, all GIT_* or
+  # AGENT_*, and restating them here would be a second copy that drifts. This
+  # file already made that mistake once — `ts_declared_suites` carried a
+  # duplicate of the manifest parse under a comment claiming it could not drift.
+  if (
+    cd "$_ts_root" || exit 1
+    for _v in $(env | sed -nE 's/^((GIT|AGENT)_[A-Za-z0-9_]*)=.*/\1/p'); do
+      unset "$_v"
+    done
+    npx vitest run --reporter=json --outputFile="$_ts_json"
+  ) >"$_ts_out" 2>&1
   then
     _ts_rc=0
   else

@@ -52,6 +52,21 @@ cp "$ROOT/scripts/run-ts-suites.sh" "$W/scripts/"
 sed -n '1,/^|---/p' "$ROOT/tests/SUITES.md" > "$W/tests/SUITES.md"
 printf '| `demo` | both | fixture | fixture | parallel-safe | fixture |\n' \
   >> "$W/tests/SUITES.md"
+# THE LAST ROW OWNS NO SPEC, AND THAT IS THE WHOLE POINT.
+#
+# bp_suites_with_spec ends its loop on `[ -n "$(find … *.spec.ts)" ]`, so the
+# LAST classified row decides the function's exit status. A final row without a
+# spec makes it return 1 while printing a perfectly correct list — the case
+# scripts/lib/suites.sh calls "harmless to the one caller that reads it through
+# `$( )`". Under `set -e` it is fatal to exactly that caller.
+#
+# The first version of this fixture had `demo` last, so the function returned 0
+# and every case here passed while the real gate died on the real manifest.
+# A fixture that cannot produce the failing input is not a fixture for it.
+mkdir -p "$W/tests/nospec"
+: > "$W/tests/nospec/test.sh"
+printf '| `nospec` | both | fixture | fixture | parallel-safe | fixture |\n' \
+  >> "$W/tests/SUITES.md"
 
 if [ -z "$( cd "$W" && . ./scripts/lib/suites.sh && bp_suites_with_spec "$W" )" ]; then
   fail "#0 the fixture declares no suite — the cases below would pass vacuously"
@@ -59,12 +74,13 @@ if [ -z "$( cd "$W" && . ./scripts/lib/suites.sh && bp_suites_with_spec "$W" )" 
 fi
 pass "#0 the fixture declares a suite that owns a spec"
 
+
 # A stub npx that RECORDS the git environment it was handed, then reports one
 # passing suite in vitest's JSON shape.
 make_npx(){ # $1 = exit code the stub returns
   cat > "$W/bin/npx" <<STUB
 #!/bin/sh
-printf 'GIT_DIR=[%s]\n' "\${GIT_DIR:-}" > "$TMP/seen-env"
+env | sed -nE 's/^((GIT|AGENT)_[A-Za-z0-9_]*)=.*/\1/p' | sort > "$TMP/seen-env"
 printf 'ran\n' >> "$TMP/seen-env"
 echo "stub npx: pretending to be vitest"
 for a in "\$@"; do
@@ -80,10 +96,19 @@ STUB
   chmod +x "$W/bin/npx"
 }
 
-run_bridge(){ # runs the stage in a fixture, with GIT_DIR deliberately set
+run_bridge(){ # runs the stage with the environment a real hook is handed
   ( cd "$W"
     export PATH="$W/bin:$PATH"
+    # Everything git and the gate actually export. The first version of this
+    # case set GIT_DIR alone, so it passed a fix that unset four git names and
+    # left AGENT_* inherited — and the real push failed again, identically and
+    # just as silently. One variable is not a population.
     export GIT_DIR="$W/.git-decoy"
+    export GIT_INDEX_FILE="$W/.git-decoy/index"
+    export GIT_CONFIG_GLOBAL="$W/.gitconfig-decoy"
+    export AGENT_FEED_TAG="GATE"
+    export AGENT_SIGNAL_FILE="$W/decoy-signal.md"
+    export AGENT_STATE_HOME="$W/decoy-state"
     set -e                      # the hook's own setting — case 2 depends on it
     . ./scripts/lib/pipeline.sh
     pipe_init "ts-bridge fixture" >/dev/null 2>&1 || true
@@ -99,12 +124,31 @@ make_npx 0
 rm -f "$TMP/seen-env"
 run_bridge || true
 
+carried="$(grep -E '^(GIT|AGENT)_' "$TMP/seen-env" 2>/dev/null | tr '\n' ' ')"
 if [ ! -f "$TMP/seen-env" ]; then
   fail "#1 BUG-055: the runner was never invoked at all — output was: $(cat "$TMP/out")"
-elif grep -q 'GIT_DIR=\[\]' "$TMP/seen-env"; then
-  pass "#1 BUG-055: the runner is invoked with GIT_DIR scrubbed, so the harness guard does not refuse under a real push"
+elif [ -z "$carried" ]; then
+  pass "#1 BUG-055: the runner sees no GIT_* or AGENT_* variable, so the harness guard does not refuse under a real push"
 else
-  fail "#1 BUG-055: the runner inherited $(grep GIT_DIR "$TMP/seen-env") — under a real 'git push' git sets GIT_DIR, the harness refuses every scenario, and the whole TS stage fails while passing by hand"
+  fail "#1 BUG-055: the runner inherited $carried — the harness refuses every scenario while any of these is set, so the whole TS stage fails under a real push while passing by hand"
+fi
+
+# The scrub must cover the harness's ENTIRE forbidden set, not a remembered
+# subset of it. Read from the harness rather than restated, so this cannot
+# drift the way a second copy of the list would.
+missed=""
+for v in $(sed -n "/FORBIDDEN_ENV = \[/,/^]/p" "$ROOT/tests/harness/env.ts" \
+           | sed -nE "s/^[[:space:]]*'([A-Z0-9_]+)',.*/\1/p"); do
+  grep -qx "$v" "$TMP/seen-env" && missed="$missed $v"
+done
+if [ -n "$(sed -n "/FORBIDDEN_ENV = \[/,/^]/p" "$ROOT/tests/harness/env.ts" | sed -nE "s/^[[:space:]]*'([A-Z0-9_]+)',.*/\1/p")" ]; then
+  if [ -z "$missed" ]; then
+    pass "#1c BUG-055: every name in the harness's own FORBIDDEN_ENV is scrubbed before the runner starts"
+  else
+    fail "#1c BUG-055: these forbidden names reached the runner:$missed"
+  fi
+else
+  fail "#1c BUG-055: could not read FORBIDDEN_ENV from tests/harness/env.ts — this check would pass over nothing"
 fi
 
 # The stage must also actually RENDER, not merely run.
@@ -112,6 +156,48 @@ if grep -q 'demo' "$TMP/out"; then
   pass "#1b BUG-055: the declared suite renders as its own stage"
 else
   fail "#1b BUG-055: the suite ran but produced no stage line: $(cat "$TMP/out")"
+fi
+
+# ===========================================================================
+# 1d. BUG-055 — THE DEFECT ITSELF: a non-zero declared-suites status, under
+#     `set -e`, must not kill the caller.
+#
+#     This is what actually refused the founder's push. bp_suites_with_spec
+#     returned 1 with a correct four-suite list, the caller's unprotected
+#     `_ts_expect="$(…)"` inherited that status, and `set -e` destroyed the
+#     hook between two statements — no stage, no skip, no summary, no error,
+#     and a push refused with nothing to read. Eight pushes to find, because
+#     the failure rendered as an absence.
+#
+#     The assertion is deliberately about the CONSEQUENCE (the stage still
+#     reports) rather than about how the status is masked, so a future rewrite
+#     of the masking cannot pass this by accident.
+# ===========================================================================
+#     The status is INJECTED rather than coaxed out of the manifest parser.
+#     Reproducing it through a fixture manifest depends on which row happens to
+#     sort last and on internals of bp_suites_with_spec — so it would silently
+#     stop reproducing the moment either changed, and the case would go green
+#     while guarding nothing. What the bridge must survive is a non-zero status
+#     from that call, whatever produces it. So the case says exactly that.
+make_npx 0
+rm -f "$TMP/seen-env"
+( cd "$W"
+  export PATH="$W/bin:$PATH"
+  set -e
+  . ./scripts/lib/pipeline.sh
+  pipe_init "hostile-status fixture" >/dev/null 2>&1 || true
+  . ./scripts/run-ts-suites.sh
+  # A correct list, and a failing status. Precisely what the real manifest
+  # parser handed the gate: rc=1 alongside four valid suite names.
+  ts_declared_suites(){ printf 'demo\n'; return 1; }
+  ts_suites_stage "$W"
+) >"$TMP/out" 2>&1
+hostile_rc=$?
+
+if grep -q 'demo' "$TMP/out"; then
+  pass "#1d BUG-055: a declared-suites call returning non-zero with a good list does not abort the stage under set -e (rc=$hostile_rc)"
+else
+  fail "#1d BUG-055: the stage did not survive a non-zero declared-suites status — the exact silent death that refused the push. Output was: [$(cat "$TMP/out")]"
 fi
 
 # ===========================================================================

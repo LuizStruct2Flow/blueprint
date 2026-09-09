@@ -61,8 +61,18 @@ fi
 # in STACK_DEFAULTS.md §"Git author identity". Probed in a scratch dir outside
 # any repo so the blueprint's own local config can't mask a missing global one —
 # the new project will see global/env only.
+#
+# `user.useConfigOnly=true` is REQUIRED, not belt-and-braces (BUG-044). Without
+# it `git var GIT_AUTHOR_IDENT` does not fail when identity is absent — it
+# GUESSES one, from the passwd gecos name and the hostname. On macOS that
+# always succeeds, so this probe passed on a Mac with no identity configured at
+# all and bootstrap went on to commit as `Someone <someone@MacBook-Pro.local>`.
+# A guard against assuming an identity was itself assuming one. Verified: with
+# global+system config hidden it returned exactly that, and with useConfigOnly
+# it refuses ("auto-detection is disabled"). The documented one-shot
+# GIT_AUTHOR_* override still works, because env vars outrank config-only mode.
 _ident_probe="$(mktemp -d)"
-if ! git -C "$_ident_probe" var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+if ! git -C "$_ident_probe" -c user.useConfigOnly=true var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
   rmdir "$_ident_probe" 2>/dev/null || true
   echo "❌ No git author identity configured — nothing has been created." >&2
   echo "   Bootstrap inherits your identity rather than assuming one. Set it:" >&2

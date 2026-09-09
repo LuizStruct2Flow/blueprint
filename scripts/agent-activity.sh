@@ -302,9 +302,25 @@ cmd_daemon(){
   fi
   # setsid ONLY here, so the foreground contract stays unambiguous.
   setsid "$0" --supervise >/dev/null 2>&1 &
-  sleep 0.4
-  if feed_is_running; then echo "[agent-activity] started (daemon) → $out"; return 0; fi
-  echo "[agent-activity] failed to start" >&2; return 1
+  # BUG-037 — this was `sleep 0.4` followed by ONE check. Measured on macOS the
+  # supervisor takes ~0.6 s to acquire the lock, so the check ran before the
+  # thing it was checking for, and `--daemon` printed "failed to start" and
+  # exited 1 while the supervisor was alive and healthy. On a faster box startup
+  # fits inside 0.4 s, which is why a fixed sleep looked correct for months.
+  #
+  # A false "failed to start" is not cosmetic here. cmd_daemon's own guard is
+  # `feed_is_running`, so a caller that believes the failure and retries gets a
+  # SECOND supervisor — the unbounded-spawn shape that BUG-001 rode to load 175
+  # for 2.7 days. The idempotency guard is only as good as the report it gives.
+  #
+  # Poll instead of guessing, with the same 5 s bound and 0.1 s tick cmd_stop
+  # already uses. A timing assumption removed beats a magic number enlarged.
+  local i=0
+  while [ $i -lt 50 ]; do
+    if feed_is_running; then echo "[agent-activity] started (daemon) → $out"; return 0; fi
+    sleep 0.1; i=$((i+1))
+  done
+  echo "[agent-activity] failed to start (no lock held after 5s)" >&2; return 1
 }
 
 # ===========================================================================

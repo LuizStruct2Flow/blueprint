@@ -368,7 +368,12 @@ cat <<EOF
 Next steps:
   1. cd $TARGET_DIR
   2. Open in VS Code: code .
-  3. brew bundle    (installs gitleaks + semgrep + osv-scanner for the pre-push gate)
+  3. bash scripts/install-toolchain.sh
+     (installs gitleaks + semgrep + osv-scanner for the pre-push gate: Homebrew on
+     macOS, pinned release binaries into ~/.local/bin on Linux. Add --infra for the
+     IaC set; 'check' reports what is missing without installing. The gate SKIPS a
+     scanner it cannot find, so an unprepared machine gets a green gate that
+     checked less.)
   4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md, project_config_infra.md
   5. Create your backend/frontend src tree as needed
   6. Optional: APPEND your project guards to .githooks/pre-push-project,

@@ -83,7 +83,10 @@ After bootstrap:
 
 1. `cd ~/sources/struct2flow/acme-flow`
 2. `code .` (open in VS Code)
-3. `brew bundle` (installs `gitleaks` + `semgrep` + `osv-scanner` for the pre-push gate)
+3. `bash scripts/install-toolchain.sh` (installs `gitleaks` + `semgrep` +
+   `osv-scanner` for the pre-push gate — Homebrew on macOS, pinned release
+   binaries into `~/.local/bin` on Linux; add `--infra` for the IaC set, and
+   `check` to report what is present without installing anything)
 4. Fill out `project_config_overview.md`, `project_config_paths.md`,
    `project_config_dod.md`, `project_config_security.md`,
    `project_config_infra.md`
@@ -113,7 +116,6 @@ blueprint/
 ├── AGENTS.md                       ← Codex wake-up rules
 ├── AGENT_SIGNAL.md                 ← signal template (Task field is a stub)
 ├── STACK_DEFAULTS.md               ← default tech stack for new struct2flow projects
-├── Brewfile                        ← brew bundle: gitleaks + semgrep + osv-scanner (security gate deps)
 ├── project_config_overview.md      ← project-specific overview (stub)
 ├── project_config_paths.md         ← project-specific paths / URLs (stub)
 ├── project_config_dod.md           ← project-specific DoD extensions (stub)
@@ -129,6 +131,7 @@ blueprint/
 ├── .claude/
 │   └── settings.json               ← generic AWS / git / shell permission allow-list
 ├── scripts/
+│   ├── install-toolchain.sh        ← installs the gate's tools per-OS (brew on macOS, pinned binaries on Linux)
 │   ├── codex-signal-watch.sh       ← signal poller (whole-file generic)
 │   ├── start-codex-signal-watch.sh ← Codex CLI launcher (uses {{PROJECT_NAME}})
 │   ├── new-project.sh              ← bootstrap a new project
@@ -295,11 +298,11 @@ The canonical list is the `MANAGED_FILES` array inside
 [`scripts/blueprint`](scripts/blueprint). Run `blueprint files` to print
 it. Current contents:
 
-- **Top-level:** `CLAUDE.md`, `AGENTS.md`, `STACK_DEFAULTS.md`, `Brewfile`
+- **Top-level:** `CLAUDE.md`, `AGENTS.md`, `STACK_DEFAULTS.md`
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`, `way-of-working.md`
-- **`scripts/`:** `codex-signal-watch.sh`, `start-codex-signal-watch.sh`,
-  `new-project.sh`, `blueprint` itself
+- **`scripts/`:** `install-toolchain.sh`, `codex-signal-watch.sh`,
+  `start-codex-signal-watch.sh`, `new-project.sh`, `blueprint` itself
 - **`tests/`** — the whole directory, expanded from `git archive HEAD tests`
   (BUG-029). The regression suites guard blueprint-managed machinery your
   project runs, so they have to move forward with it; `tests/SUITES.md` travels
@@ -377,8 +380,8 @@ different speeds:
   pre-push gate. Open a PR with a [Conventional
   Commits](https://www.conventionalcommits.org/) message
   (`BUG#20: …`, `TASK#1: …` — enforced by `.githooks/commit-msg`); CI runs the pre-push gate
-  locally so make sure `brew bundle && .githooks/pre-push` passes
-  before opening the PR.
+  locally, so make sure `bash scripts/install-toolchain.sh` has been run
+  and `.githooks/pre-push` passes before opening the PR.
 - **Slower track — new capabilities or new concerns.** The blueprint
   is **derived, not designed** ([CLAUDE.md](CLAUDE.md) §"The
   blueprint is derived, not designed"): capabilities are admitted
@@ -396,7 +399,11 @@ URLs, feature flags) belongs in a downstream project's
 hard-code such content will be asked to refactor.
 
 **Before opening a PR:**
-- `brew bundle` to install `gitleaks` + `semgrep` + `osv-scanner`.
+- `bash scripts/install-toolchain.sh` to install `gitleaks` + `semgrep` +
+  `osv-scanner` (Homebrew on macOS, pinned release binaries into
+  `~/.local/bin` on Linux). `bash scripts/install-toolchain.sh check` tells
+  you what is still missing — and a missing scanner is `pipe_skip`ped rather
+  than blocking, so a green gate on an unprepared machine has checked less.
 - `.githooks/pre-push` to run the full gate locally (security +
   build + lint + format + tests + IaC validate).
 - For any change to [docs/DoD.md](docs/DoD.md), [CLAUDE.md](CLAUDE.md),

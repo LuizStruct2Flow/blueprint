@@ -84,7 +84,6 @@ MANAGED_FILES=(
   "AGENTS.md"
   "AGENT_ROSTER.example.md"
   "STACK_DEFAULTS.md"
-  "Brewfile"
 
   # docs/ — the canonical reference docs
   "docs/DoD.md"
@@ -97,6 +96,7 @@ MANAGED_FILES=(
   "docs/way-of-working.md"
 
   # scripts/ — the agent infra
+  "scripts/install-toolchain.sh"
   "scripts/codex-signal-watch.sh"
   "scripts/start-codex-signal-watch.sh"
   "scripts/start-gemini-signal-watch.sh"
@@ -558,7 +558,8 @@ read_blueprint_source() {
     # what this used to do — is both false and useless, because the operator IS
     # standing in the project root and will go looking for a bug in their cwd.
     local markers=0 m
-    for m in AGENT_SIGNAL.md AGENTS.md CLAUDE.md STACK_DEFAULTS.md Brewfile \
+    for m in AGENT_SIGNAL.md AGENTS.md CLAUDE.md STACK_DEFAULTS.md \
+             scripts/install-toolchain.sh \
              .githooks/pre-push scripts/blueprint scripts/agent-activity.sh docs/DoD.md; do
       [ -e "$m" ] && markers=$((markers+1))
     done

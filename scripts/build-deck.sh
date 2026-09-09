@@ -24,7 +24,7 @@ if [ ! -f "$DECK_SRC" ]; then
 fi
 
 if ! command -v npx >/dev/null 2>&1; then
-  echo "❌ npx not found. Install Node (or 'brew bundle' in projects that pin it)." >&2
+  echo "❌ npx not found. Install Node (or add it to scripts/install-toolchain-project.sh in projects that pin it)." >&2
   exit 1
 fi
 

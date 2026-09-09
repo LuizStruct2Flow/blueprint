@@ -8,9 +8,13 @@
 # (sonar.token / sonar.host.url). Project config lives in
 # sonar-project.properties.
 #
-# Requires sonar-scanner on PATH. Install via:
-#   brew install sonar-scanner   (macOS, recommended)
-#   or download from sonarqube.org
+# Requires sonar-scanner on PATH. It is deliberately NOT in
+# scripts/install-toolchain.sh: that file installs what the pre-push GATE
+# probes for, and Sonar is a post-commit audit a project opts into. Install via:
+#   macOS   brew install sonar-scanner
+#   Linux   unpack the CLI from sonarqube.org into ~/.local/bin
+#   or add it to scripts/install-toolchain-project.sh if your project wants it
+#   installed with the rest of the toolchain.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,7 +45,8 @@ if [[ -z "${SONAR_HOST_URL:-}" ]]; then
 fi
 
 if ! command -v sonar-scanner >/dev/null 2>&1; then
-  echo "❌ sonar-scanner not found on PATH. Install via 'brew install sonar-scanner' (macOS)." >&2
+  echo "❌ sonar-scanner not found on PATH. macOS: brew install sonar-scanner." >&2
+  echo "   Linux: unpack the CLI from sonarqube.org into ~/.local/bin." >&2
   exit 1
 fi
 

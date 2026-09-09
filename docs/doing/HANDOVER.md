@@ -77,10 +77,15 @@ starts equally exposed.
 Never trust a push's exit code through a pipe — `git push … | tail` reports
 `tail`'s status, which is why this looked like "reports success" for a day.
 
-**Also, if you intend to run the full gate:** `brew bundle` installs gitleaks,
-semgrep, osv-scanner and trivy. Without them those stages `pipe_skip` rather than
-fail, so an unprepared machine gets a green gate that checked less — the exact
-shape BUG-035 is about.
+**Also, if you intend to run the full gate:** `bash scripts/install-toolchain.sh`
+installs gitleaks, semgrep, osv-scanner and jq, and
+`bash scripts/install-toolchain.sh check` reports what is still missing without
+installing anything. Without them those stages `pipe_skip` rather than fail, so
+an unprepared machine gets a green gate that checked less — the exact shape
+BUG-035 is about. (This replaced `brew bundle` in TASK-017: the Brewfile was
+macOS-only, so on any other OS the *only documented install path* produced
+exactly that reduced gate. Note the old text here also named `trivy`, which
+neither the hook nor CI has ever invoked.)
 
 ---
 

@@ -212,33 +212,41 @@ wait_sup(){ local want="$1" i=0
 # fix. Handshake instead: write a unique sentinel to the very file the case will
 # use and wait until it comes out the other end. That proves liveness AND that
 # THIS file is registered, which is the property the case actually needs.
-# The bound is 20s, and it is measured rather than padded. Append-to-emit
-# latency for the FIRST record after `--daemon` is 32.6s on this host, twice
-# measured at 32.60 and 32.59 — a deterministic constant, not load. Every
-# SUBSEQUENT record is 0.25-0.47s, i.e. the tick. Foreground has no such delay.
+# THE SENTINEL IS RE-WRITTEN, and that is the whole point — waiting longer does
+# not work, which cost a wrong diagnosis before it was understood.
 #
-# The cause is that --daemon returns once the supervisor holds its lock, which
-# is not the same instant as the supervisor having registered a run log to read.
-# A record landing in that window waits for whatever re-scan closes it. That is
-# a real defect in its own right (rowed as BUG-039): 32s of silence after
-# starting the feed is bad for an operator, not just for this suite. The
-# principled fix is for --daemon to return when the supervisor is PUMPING rather
-# than merely resident, which would also let this bound drop back to a second or
-# two.
+# seed_offset() records a run log's size at seeding time so pre-existing content
+# is never replayed. A sentinel appended BEFORE seeding is therefore behind the
+# offset and is skipped PERMANENTLY, not merely delayed. A single write plus a
+# longer timeout cannot close that: the bound was tried at 45s against a
+# measured 32.6s first-record latency, changed no outcome at all, and added
+# 2m41s to the run. The write has to be repeated until one of them lands after
+# the seed.
 #
-# 20s and not 45s, deliberately. 45 was tried against the measured 32.6s and
-# changed no outcome while adding 2m41s to the run, which means the cases still
-# failing (#7 and #5f) are NOT failing on this window — see BUG-039. Widening a
-# bound that buys nothing is how a suite gets slow without getting truthful.
+# Measured, for whoever tunes this next: first record after `--daemon` is 32.6s
+# (twice, at 32.60 and 32.59 — deterministic, not load), every subsequent record
+# 0.25-0.47s, and running `--supervise` directly has no delay whatsoever. The
+# underlying defect is that `--daemon` returns when the supervisor is RESIDENT
+# rather than PUMPING (BUG-039); 32s of silence after starting the feed is an
+# operator problem, not just a test problem. When that is fixed this helper can
+# lose most of its patience.
 #
 # A handshake that FAILS must be loud. The first version of this returned a
 # status nobody checked, so a failed handshake silently degraded to exactly the
 # unsynchronised behaviour it exists to prevent — a guard whose failure mode is
 # invisible is not a guard. Callers use `reader_ready … || fail`.
-reader_ready(){ local f="$1" tag
+reader_ready(){ local f="$1" tag i=0 j
   tag="READY-$$-${2:-x}-$(date +%s)"
-  printf '%s\n' "$tag" >>"$f"
-  wait_for "$tag" 20; }
+  while [ "$i" -lt 20 ]; do
+    printf '%s\n' "$tag" >>"$f"
+    j=0
+    while [ "$j" -lt 4 ]; do
+      grep -qF -- "$tag" "$LOG" 2>/dev/null && return 0
+      sleep 0.25; j=$((j+1))
+    done
+    i=$((i+1))
+  done
+  return 1; }
 
 # ===========================================================================
 # #1 Concurrency — EXACTLY one supervisor (not "at most": zero would mean the
@@ -574,7 +582,13 @@ else fail "#15f foreground spawned a 'tee' — the one-resident-process contract
 # line was appended before it had registered $RUNLOG.
 reader_ready "$RUNLOG" fg || fail "#5f foreground never registered the run log - the assertions below cannot tell a reader fault from a slow start"
 printf 'FOREGROUND-LINE\n' >>"$RUNLOG"
-sleep 1.5
+# BUG-038 — was `sleep 1.5`. By this point #2 has created 80 subagent
+# transcripts and every tick scans them, so the effective tick here is ~10s,
+# not the configured 0.25s: the handshake above needed 10s of retries and its
+# sentinels came out in one burst. A fixed 1.5s wait against a 10s tick reports
+# "foreground did not write" about a supervisor that writes perfectly well.
+# Poll for the line instead of guessing how long a tick costs.
+wait_for "FOREGROUND-LINE" 30
 if grep -qF "FOREGROUND-LINE" "$FGOUT" 2>/dev/null; then pass "#5f foreground writes to stdout"
 else fail "#5f foreground did not write to stdout"; fi
 if grep -qF "FOREGROUND-LINE" "$LOG" 2>/dev/null; then pass "#5f foreground also writes the log itself"

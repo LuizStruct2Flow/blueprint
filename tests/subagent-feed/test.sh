@@ -145,6 +145,26 @@ count_in_log(){ grep -cF -- "$1" "$LOG" 2>/dev/null | head -1; }
 # One assistant record as Claude Code writes it. $1 = text, $2 = isSidechain.
 rec(){ printf '{"type":"assistant","isSidechain":%s,"message":{"content":[{"type":"text","text":"%s"}]}}\n' "$2" "$1"; }
 
+# BUG-038 — same readiness gap as tests/agent-activity-bound, same fix.
+# wait_sup proves a supervisor is RESIDENT. seed_offset() then records each
+# watched file's size, and anything appended before that is behind the offset
+# and skipped PERMANENTLY rather than merely delayed — so a longer timeout does
+# not help and the sentinel must be RE-WRITTEN until one lands after the seed.
+# Without this, #1 and #2 report "nothing emitted", which reads exactly like the
+# blackout regression #1 exists to detect.
+reader_ready(){ local f="$1" tag i=0 j
+  tag="READY-$$-$(date +%s)"
+  while [ "$i" -lt 20 ]; do
+    rec "$tag" true >>"$f"
+    j=0
+    while [ "$j" -lt 4 ]; do
+      grep -qF -- "$tag" "$LOG" 2>/dev/null && return 0
+      sleep 0.25; j=$((j+1))
+    done
+    i=$((i+1))
+  done
+  return 1; }
+
 # ===========================================================================
 # 0. The roster resolver — the ONE derivation both readers share.
 # ===========================================================================
@@ -210,6 +230,7 @@ fi
 # ===========================================================================
 feed --daemon >/dev/null 2>&1
 wait_sup 1 || { echo "FAIL: no supervisor started"; exit 1; }
+reader_ready "$SUB" || fail "the reader never registered the subagent transcript — #1 and #2 below cannot tell a blackout from an unsynchronised start"
 
 rec "SUBAGENT-VISIBLE-LINE" true >>"$SUB"
 

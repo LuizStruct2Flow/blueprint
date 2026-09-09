@@ -858,6 +858,10 @@ cmd_drift() {
   _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
   # shellcheck source=scripts/lib/gate.sh
   [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  # BUG-032 — the push keepalive rides the same two wake paths, for the same
+  # reason: it is repo-local config, so a clone starts without it.
+  command -v arm_push_keepalive >/dev/null 2>&1 \
+    && arm_push_keepalive "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
   # BUG-007: the wake ritual runs `blueprint drift` in EVERY struct2flow repo,
   # and this one has no `.blueprint-source` because it is the source. It used to

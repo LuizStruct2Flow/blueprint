@@ -659,6 +659,7 @@ case "${1:-}" in
   --status)    cmd_status ;;
   --whoami)    cmd_whoami ;;
   --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
+               command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$repo_root"
                cmd_daemon ;;
   --supervise) AGENT_FEED_FOREGROUND=0 supervise ;;          # internal: daemon child
   "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"

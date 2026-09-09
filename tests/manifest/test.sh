@@ -87,6 +87,17 @@ for f in $(find "$ROOT/tests" -type f -name '*.sh' 2>/dev/null | sort); do
     missing="$missing $rel(top-level)"
     continue
   fi
+  # SHARED HELPERS ARE NOT SUITES. CLAUDE.md §"Test directory layout" puts
+  # shared helpers/mocks/fixtures in tests/helpers/ (or tests/__helpers__/)
+  # precisely because they serve several suites and belong to none. They carry
+  # no assertions and the gate never invokes them, so a manifest row would be a
+  # row about nothing — and #4/#5 would then demand the gate and CI "invoke" a
+  # file that is only ever sourced.
+  #
+  # This is a narrowing of the control, so it is deliberately literal — only
+  # these two names, never a prefix match — and #1b below stops the directory
+  # becoming a place where dead code accumulates unnoticed.
+  case "$dir" in helpers|__helpers__) continue ;; esac
   rows | cut -f1 | grep -qx "$dir" || \
     case " $missing " in *" $dir "*) ;; *) missing="$missing $dir" ;; esac
 done
@@ -94,6 +105,22 @@ if [ -n "$missing" ]; then
   fail "#1 shell files exist under tests/ whose suite is not classified:$missing"
 else
   pass "#1 every suite directory containing shell files is classified"
+fi
+
+# #1b — the compensating control for the helpers exemption above. A helper is
+# exempt from classification because it is sourced rather than run, so the thing
+# to assert is that it IS sourced: an unreferenced file there is dead code that
+# no tier, no gate stage and no CI job would ever have complained about.
+orphans=""
+for f in $(find "$ROOT/tests/helpers" "$ROOT/tests/__helpers__" -type f -name '*.sh' 2>/dev/null | sort); do
+  base="$(basename "$f")"
+  grep -rqF "helpers/$base" "$ROOT/tests" --include='*.sh' --exclude-dir=helpers --exclude-dir=__helpers__ 2>/dev/null \
+    || orphans="$orphans $base"
+done
+if [ -n "$orphans" ]; then
+  fail "#1b shared helpers that no suite sources:$orphans — exempt from classification, so nothing else would catch them"
+else
+  pass "#1b every shared helper is sourced by at least one suite"
 fi
 
 # ===========================================================================

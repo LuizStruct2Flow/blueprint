@@ -131,6 +131,21 @@ fi
 # unrun regression is the A-15 defect this repo already carried once: deleting
 # the shared helper or restoring a literal state path could otherwise push green
 # while cross-project log contamination silently returns. ~0.1s.
+if [ -f tests/proc-cwd/test.sh ]; then
+  _st_proc_cwd(){
+    bash tests/proc-cwd/test.sh || {
+      echo "❌ tests/proc-cwd/test.sh failed (BUG-036)."
+      echo "   Process-cwd lookup must work on this OS (procfs on Linux, lsof on"
+      echo "   BSD/macOS) via tests/helpers/proc-cwd.sh. Without it every suite"
+      echo "   that counts 'my running processes' counts 0 and fails closed."
+      return 1
+    }
+  }
+  pipe_stage "proc-cwd · BUG-036" _st_proc_cwd
+else
+  pipe_skip "proc-cwd · BUG-036" "suite absent"
+fi
+
 if [ -f tests/state-dir/test.sh ]; then
   _st_state_dir(){
     bash tests/state-dir/test.sh || {

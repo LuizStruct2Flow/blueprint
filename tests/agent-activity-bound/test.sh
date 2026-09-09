@@ -52,8 +52,17 @@ FAST=0
 skip(){ [ "$FAST" -eq 1 ] && { echo "  – skipped in --fast (runs in CI): $*"; return 0; }; return 1; }
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# BUG-036 — portable process-cwd lookup. Sourced rather than inlined because
+# the same assumption was duplicated across three call sites in two suites.
+. "$ROOT/tests/helpers/proc-cwd.sh"
 SCRIPT="$ROOT/scripts/agent-activity.sh"
-WORK="$(mktemp -d)"
+# BUG-036 — normalise to the PHYSICAL path. On macOS `mktemp -d` hands back
+# /var/folders/... while /var is a symlink to /private/var, so a process's real
+# cwd is reported as /private/var/... and `case "$cwd" in "$WORK"*)` never
+# matched. Every ownership test then counted 0 of its own processes. Resolve it
+# once here rather than at each comparison, so the whole suite compares like
+# with like.
+WORK="$(cd "$(mktemp -d)" && pwd -P)"
 FAILED=0
 
 cleanup(){
@@ -77,8 +86,17 @@ pass(){ echo "  ok — $*"; }
 # very implementation it exists to catch. Select one explicitly.
 UTF8_LOCALE=""
 [ -n "${AGENT_FEED_TEST_NO_UTF8:-}" ] || \
+# BUG-036 — this normalised the candidate to the glibc spelling (`en_US.utf8`)
+# and grepped for THAT only. macOS lists `en_US.UTF-8`, dash and all, so on a
+# Mac the match never fired and the suite announced "no UTF-8 locale available"
+# on a host whose LANG *is* en_US.UTF-8 and whose `locale -a` lists it. #19 was
+# then skipped for a reason that was not true. Match either spelling.
 for l in "${LANG:-}" en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
-  case "$l" in *[Uu][Tt][Ff]*) locale -a 2>/dev/null | grep -qix "$(printf '%s' "$l" | sed 's/UTF-8/utf8/I')" && { UTF8_LOCALE="$l"; break; } ;;
+  case "$l" in *[Uu][Tt][Ff]*)
+    _l_glibc="$(printf '%s' "$l" | sed 's/UTF-8/utf8/I')"
+    _l_bsd="$(printf '%s' "$l" | sed 's/utf8/UTF-8/I')"
+    locale -a 2>/dev/null | grep -qix -e "$_l_glibc" -e "$_l_bsd" \
+      && { UTF8_LOCALE="$l"; break; } ;;
   esac
 done
 if [ -n "$UTF8_LOCALE" ]; then
@@ -156,7 +174,10 @@ status_feed(){ feed --status; }
 supervisors(){
   local n=0 p cwd
   for p in $(ps -eo pid,args 2>/dev/null | grep '[a]gent-activity.sh --supervise' | awk '{print $1}'); do
-    cwd="$(readlink -f "/proc/$p/cwd" 2>/dev/null)"
+    # BUG-036: this read /proc/<pid>/cwd directly, which macOS does not have,
+    # so the count was 0 on a Mac no matter what was running and six cases
+    # below failed closed. bp_proc_cwd falls back to lsof.
+    cwd="$(bp_proc_cwd "$p")"
     case "$cwd" in "$WORK"*) n=$((n+1)) ;; esac
   done
   echo "$n"
@@ -417,7 +438,7 @@ sleep 1
 n2="$(supervisors)"; t2="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
 if [ "$n1" -eq 1 ] && [ "$n2" -eq 1 ] && [ "$t1" -eq 0 ] && [ "$t2" -eq 0 ]; then
   pass "#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)"
-else fail "#2 process count grew with transcripts (sup $n1→$n2, tails $t1→$t2) — the RC-2 leak"; fi
+else fail "#2 process count grew with transcripts (sup ${n1}→${n2}, tails ${t1}→${t2}) — the RC-2 leak"; fi
 stop_feed >/dev/null 2>&1
 
 # ===========================================================================

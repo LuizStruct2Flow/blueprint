@@ -37,16 +37,24 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# BUG-036 — portable process-cwd lookup (procfs on Linux, lsof on BSD/macOS).
+. "$ROOT/tests/helpers/proc-cwd.sh"
 SCRIPT="$ROOT/scripts/agent-activity.sh"
 HOOK="$ROOT/scripts/log-activity.sh"
-WORK="$(mktemp -d)"
+# BUG-036 — physical path, not the /var symlink macOS hands back. See the same
+# note in tests/agent-activity-bound: an unnormalised WORK makes every
+# "is this process mine?" comparison fail on a Mac.
+WORK="$(cd "$(mktemp -d)" && pwd -P)"
 FAILED=0
 
 cleanup(){
   [ -n "${REPO:-}" ] && feed --stop >/dev/null 2>&1
   local p
   for p in $(ps -eo pid,args 2>/dev/null | grep '[a]gent-activity.sh --supervise' | awk '{print $1}'); do
-    case "$(readlink -f "/proc/$p/cwd" 2>/dev/null)" in "$WORK"*) kill -9 "$p" 2>/dev/null ;; esac
+    # BUG-036 — was a bare /proc read, which macOS lacks. This is cleanup, so
+    # the failure there was not a red test but a LEAK: stray supervisors from
+    # this suite were never matched and so never killed.
+    case "$(bp_proc_cwd "$p")" in "$WORK"*) kill -9 "$p" 2>/dev/null ;; esac
   done
   rm -rf "$WORK"
 }
@@ -122,7 +130,7 @@ feed(){ ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TIC
 supervisors(){
   local n=0 p
   for p in $(ps -eo pid,args 2>/dev/null | grep '[a]gent-activity.sh --supervise' | awk '{print $1}'); do
-    case "$(readlink -f "/proc/$p/cwd" 2>/dev/null)" in "$WORK"*) n=$((n+1)) ;; esac
+    case "$(bp_proc_cwd "$p")" in "$WORK"*) n=$((n+1)) ;; esac
   done
   echo "$n"
 }

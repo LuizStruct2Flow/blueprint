@@ -174,6 +174,100 @@ describe('harness — workspace teardown (BUG-049)', () => {
   })
 })
 
+describe('harness — filesystem writes cannot escape (Andreas, Codex)', () => {
+  // The gap Andreas found: the first version enforced isolation for processes
+  // and merely asked for it politely for files. writeFile is one import away
+  // while spawning is not, so the weaker standard governed the easier mistake.
+  it('REFUSES an absolute path outside the workspace', async () => {
+    await scenario('fs-escape-abs', async (s) => {
+      await expect(
+        s.fs.write('/tmp/definitely-not-mine.txt', 'nope'),
+      ).rejects.toThrow(/Refusing to write outside/)
+    })
+  })
+
+  it('REFUSES an escape via ..', async () => {
+    await scenario('fs-escape-rel', async (s) => {
+      await expect(s.fs.write('../escaped.txt', 'nope')).rejects.toThrow(
+        /Refusing to write outside/,
+      )
+    })
+  })
+
+  it('REFUSES a sibling whose name merely starts with the root', async () => {
+    await scenario('fs-escape-prefix', async (s) => {
+      // startsWith(root) without the separator would accept `<root>-evil`.
+      await expect(
+        s.fs.write(`${s.workspace.root}-evil/x.txt`, 'nope'),
+      ).rejects.toThrow(/Refusing to write outside/)
+    })
+  })
+
+  it('allows writes inside, with modes, and reads them back', async () => {
+    await scenario('fs-inside', async (s) => {
+      await s.fs.write('deep/nested/file.txt', 'hello', { mode: 0o755 })
+      expect(await s.fs.read('deep/nested/file.txt')).toBe('hello')
+      expect(await s.fs.mode('deep/nested/file.txt')).toBe('755')
+      expect(await s.fs.exists('deep/nested/file.txt')).toBe(true)
+      expect(await s.fs.exists('deep/nope.txt')).toBe(false)
+    })
+  })
+})
+
+describe('harness — git fixtures (Andreas, Codex)', () => {
+  it('creates a repo with a LOCAL identity and a pinned branch', async () => {
+    await scenario('git-basic', async (s) => {
+      const repo = await s.gitRepo('proj', { initialCommit: true })
+
+      expect(await repo.config('user.email')).toBe('fixture@example.test')
+      const branch = await repo.git(['rev-parse', '--abbrev-ref', 'HEAD'])
+      expect(branch.stdout.trim()).toBe('main')
+      expect(await repo.head()).not.toBe('')
+    })
+  })
+
+  it('supports a repo with NO identity — bootstrap-identity needs that state', async () => {
+    await scenario('git-no-identity', async (s) => {
+      const repo = await s.gitRepo('proj', { identity: null })
+      expect(await repo.config('user.email')).toBe('')
+    })
+  })
+
+  it('the repo is real: git init created a .git INSIDE the fixture (BUG-047)', async () => {
+    await scenario('git-real', async (s) => {
+      const repo = await s.gitRepo('proj')
+      // Under an inherited GIT_DIR, `git init` returns 0 and creates NO .git
+      // here, and every later commit lands in the real repository. That is the
+      // defect, and this is the assertion that would catch it coming back.
+      expect(await s.fs.exists('proj/.git')).toBe(true)
+    })
+  })
+})
+
+describe('harness — PATH shims (Andreas, Codex)', () => {
+  it('puts a shim ahead of the real tool without discarding the rest of PATH', async () => {
+    await scenario('shim', async (s) => {
+      const shims = await s.shimDir()
+      await shims.add('git', 'echo SHIMMED')
+
+      const r = await s.run('sh', ['-c', 'git --version'], {
+        cwd: s.workspace.root,
+        env: { PATH: shims.path() },
+      })
+      expect(r.stdout.trim()).toBe('SHIMMED')
+
+      // The rest of PATH survives: a tool the shim dir does NOT define still
+      // resolves. Replacing PATH outright would silently turn a fault-injection
+      // case into a "what if coreutils is missing" case.
+      const real = await s.run('sh', ['-c', 'echo ok'], {
+        cwd: s.workspace.root,
+        env: { PATH: shims.path() },
+      })
+      expect(real.stdout.trim()).toBe('ok')
+    })
+  })
+})
+
 describe('harness — process ownership', () => {
   it('reaps a background process the scenario forgot', async () => {
     // The scenario deliberately leaves a daemon running. The harness must kill

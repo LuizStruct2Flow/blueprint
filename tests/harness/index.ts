@@ -36,6 +36,14 @@ import { createWorkspace, type Workspace } from './workspace.js'
 import { ProcessRegistry, type RunResult, type SpawnOptions } from './process.js'
 import { RealStateCanary, realStateTargets } from './canary.js'
 import { assertProcessEnvClean } from './env.js'
+import { ScopedFs } from './files.js'
+import {
+  makeFixtureRepo,
+  makeShimDir,
+  type FixtureRepo,
+  type FixtureRepoOptions,
+  type ShimDir,
+} from './fixture-repo.js'
 
 /** Absolute path to the blueprint checkout under test. */
 export const REPO_ROOT = resolve(
@@ -63,6 +71,22 @@ export interface Scenario {
 
   /** Run a shell script from the blueprint under test. */
   runScript(relPath: string, args?: string[], options?: Partial<SpawnOptions>): Promise<RunResult>
+
+  /**
+   * Filesystem operations that REFUSE to write outside this workspace.
+   *
+   * Added after Andreas (Codex) pointed out that the first version enforced
+   * isolation for processes but only asked for it politely for files — and
+   * `writeFile` is one import away while spawning is not. The canary caught
+   * such a write after the fact; this prevents it.
+   */
+  readonly fs: ScopedFs
+
+  /** A git repository this scenario owns. Identity is local, never global. */
+  gitRepo(name: string, options?: FixtureRepoOptions): Promise<FixtureRepo>
+
+  /** A directory of executable shims, plus a PATH that finds them first. */
+  shimDir(name?: string): Promise<ShimDir>
 }
 
 /**
@@ -127,6 +151,7 @@ export async function scenario(
     feedLog,
     workspaceRoot: workspace.root,
   })
+  const scopedFs = new ScopedFs(workspace.root)
 
   const s: Scenario = {
     workspace,
@@ -149,6 +174,30 @@ export async function scenario(
         timeoutMs: options.timeoutMs,
         env: { ...baseEnv, ...(options.env ?? {}) },
       })
+    },
+
+    fs: scopedFs,
+
+    async gitRepo(name, repoOptions = {}) {
+      const dir = await workspace.dir(name)
+      return makeFixtureRepo(
+        (command, args, opts) =>
+          registry.run(command, args, {
+            ...opts,
+            env: { ...baseEnv, ...(opts.env ?? {}) },
+          }),
+        dir,
+        repoOptions,
+      )
+    },
+
+    async shimDir(name = 'shims') {
+      const dir = await workspace.dir(name)
+      return makeShimDir(
+        dir,
+        (rel, content, o) => scopedFs.write(rel, content, o),
+        name,
+      )
     },
   }
 

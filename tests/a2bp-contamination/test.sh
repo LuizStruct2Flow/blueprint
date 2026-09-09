@@ -79,7 +79,12 @@ esac
 exit 0
 SH
 chmod +x "$GH_SHIM/gh"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+# BUG-049 — the trap covers EVERY temp root this suite allocates, not just the
+# first. $GH_SHIM is its own `mktemp -d` and was outside the trap, so one shim
+# directory leaked into $TMPDIR on every run. That is not only untidy:
+# a2bp-e2e:309 scans that same directory for leaked `a2bp.*` dirs, so debris
+# accumulating there is a live cross-suite hazard.
+trap 'rm -rf "$WORK" "$GH_SHIM"' EXIT INT TERM
 
 # The project directory's BASENAME is the project name the CLI derives, so it
 # has to be a real name rather than mktemp's random one.
@@ -216,13 +221,69 @@ run_a2bp_in() {
       git -C "$FAKE_REMOTE" show "$new_ref:$p" > "$FAKE_BP/$p" 2>/dev/null || true
     done < <(git -C "$FAKE_REMOTE" diff --name-only main "$new_ref" 2>/dev/null)
   fi
-  echo $rc
+  # BUG-048 — RETURN the status; never echo it.
+  #
+  # This used to `echo $rc`, so every caller wrote `rc=$(run_a2bp …)` — a
+  # COMMAND SUBSTITUTION, which is a subshell. `fail` above therefore set
+  # FAILED=1 in a child process that then exited, and the suite's exit status
+  # never saw it. The assertion so disarmed was the headline one — "a2bp MOVED
+  # THE BLUEPRINT'S MAIN BRANCH" — the single thing A-07 and the whole
+  # request-is-not-a-delivery model rest on. The suite would have printed its
+  # normal PASS while a2bp pushed to main. (Worse: `fail` writes to stdout, so
+  # the FAIL text was also captured INTO $rc, corrupting the value every case
+  # then compared against.)
+  #
+  # Returning is not merely a fix for that one `fail`; it removes the subshell,
+  # so any assertion added inside this helper in future works by construction.
+  # Callers say `run_a2bp …` then `rc=$?`.
+  return $rc
 }
 
 run_a2bp() { run_a2bp_in "$PROJ" "$@"; }
 
 bp_copy() { cat "$FAKE_BP/$CARRIER"; }
 bp_untouched() { grep -q '^SENTINEL' "$FAKE_BP/$CARRIER"; }
+
+# ===========================================================================
+# 0. THIS SUITE'S OWN HEADLINE ASSERTION MUST BE REACHABLE (BUG-048).
+#
+#    `run_a2bp_in` calls `fail` when a2bp moves the blueprint's main branch.
+#    That works only while the helper runs in THIS shell. For most of this
+#    suite's life every caller wrote `rc=$(run_a2bp …)` — a command
+#    substitution, i.e. a subshell — so `FAILED=1` was set in a child that then
+#    exited, and the suite printed PASS while a2bp had pushed to main. Proven by
+#    mutation: with a2bp made to move main, the pre-fix suite reported the
+#    failure 28 times on stdout and still exited 0.
+#
+#    A comment saying "callers must not use $( )" is the wrong shape of fix —
+#    it has to be remembered at the moment the author is busy adding case #29.
+#    So the rule is checked. Cheap, and it guards the one door A-07 rests on.
+#
+#    Two things make it honest, and the first draft failed both:
+#
+#    * It reads a COMMENT-STRIPPED copy. Written naively it matched the prose
+#      three lines above — this comment quotes the very construct it forbids —
+#      which is BUG-047's defect exactly: a control whose population is decided
+#      by what comments say rather than by what code does. `sed` deletes no
+#      lines, so the reported line numbers stay real.
+#    * The pattern is written with bracket escapes so it cannot match ITSELF. A
+#      self-matching guard fails permanently and gets deleted, which is worse
+#      than no guard at all.
+# ===========================================================================
+_bug048_pat='rc=[$][(]([A-Za-z_][A-Za-z_0-9]*=[^ ]* )*run_a2bp'
+_bug048_code="$(sed 's/#.*//' "$0")"
+_bug048_calls="$(printf '%s\n' "$_bug048_code" | grep -cE '^[[:space:]]*([A-Za-z_][A-Za-z_0-9]*=[^ ]* )*run_a2bp(_in)? ')"
+if [ "$_bug048_calls" -lt 10 ]; then
+  fail "#0 only $_bug048_calls direct run_a2bp calls found — this check has gone vacuous (BUG-048)"
+elif printf '%s\n' "$_bug048_code" | grep -qE "$_bug048_pat"; then
+  fail "#0 a caller invokes run_a2bp in a COMMAND SUBSTITUTION:
+$(printf '%s\n' "$_bug048_code" | grep -nE "$_bug048_pat" | sed 's/^/        /')
+      That is a subshell, so every 'fail' inside the helper — including 'a2bp
+      MOVED THE BLUEPRINT'S MAIN BRANCH' — is lost and this suite passes over
+      it (BUG-048). Call it directly and read \$? on the next line."
+else
+  pass "#0 all $_bug048_calls run_a2bp calls run in this shell, so the helper's assertions can fail the suite"
+fi
 
 # ===========================================================================
 # 1. THE REPRODUCER — reverse-substitution.
@@ -251,7 +312,8 @@ Generic guidance for the acme-flow project.
 Environment override: ACME_FLOW_HOME
 A genuinely new generic line.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#1 a2bp exited $rc on a legitimately generic file — see $WORK/out"
 elif bp_untouched; then
@@ -285,7 +347,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 # Mocks
 Run the tool from /home/someuser/sources/thing before review.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if ! bp_untouched; then
   fail "#2 a host path (/home/someuser/...) was copied into the blueprint — contamination scan absent or not blocking"
 elif [ "$rc" -eq 0 ]; then
@@ -306,7 +369,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 # Mocks
 State is kept under $HOME/.other-project/state for now.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if ! bp_untouched; then
   fail "#3 a literal per-project state dir (\$HOME/.other-project) was copied into the blueprint — this is the A-09 contamination re-entering"
 elif [ "$rc" -eq 0 ]; then
@@ -328,7 +392,8 @@ Design mockups and throwaway prototypes live here. Keep spike code out of
 production `src/` trees — see CLAUDE.md §"Work-item folder rule".
 Well-known tool dirs such as ~/.config and ~/.local/bin are fine to mention.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#4 a clean generic file was rejected (exit $rc) — false positive; see $WORK/out"
 elif bp_untouched; then
@@ -360,7 +425,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 # Mocks
 Run the tool from /home/someuser/sources/thing before review.
 EOF
-rc=$(run_a2bp --force "$CARRIER")
+run_a2bp --force "$CARRIER"
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#5 --force still waived the guard and filed the request"
 elif grep -q 'reject.*--force' "$WORK/out"; then
@@ -397,7 +463,8 @@ cat >"$PROJ/scripts/new-project.sh" <<'EOF'
 # Bootstrap. Mentions acme-flow only as example text.  a2bp-allow: example text in a comment, not a path
 sed -e "s/{{PROJECT_NAME}}/${proj}/g" "$f"
 EOF
-rc=$(run_a2bp scripts/new-project.sh)
+run_a2bp scripts/new-project.sh
+rc=$?
 if grep -q '^SENTINEL' "$FAKE_BP/scripts/new-project.sh"; then
   fail "#6 scripts/new-project.sh was not filed (exit $rc) — see $WORK/out"
 elif ! grep -q 'acme-flow' "$FAKE_BP/scripts/new-project.sh"; then
@@ -456,7 +523,8 @@ blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-rc=$(run_a2bp_in "$WORD_PROJ" "$CARRIER")
+run_a2bp_in "$WORD_PROJ" "$CARRIER"
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#7 expected a BLOCK for a project named after a common word; a2bp filed the request instead"
 elif ! grep -q 'project name survived reverse-substitution' "$WORK/out"; then
@@ -482,7 +550,8 @@ cat >"$WORD_PROJ/$CARRIER" <<'EOF'
 The blueprint documentation explains blueprint sync.  <!-- a2bp-allow: generic prose; the project is merely named after the word -->
 A new generic line about mockups.
 EOF
-rc=$(run_a2bp_in "$WORD_PROJ" "$CARRIER")
+run_a2bp_in "$WORD_PROJ" "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#7b a marked benign collision did not file (exit $rc) — see $WORK/out"
 elif grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
@@ -503,7 +572,8 @@ fi
 setup
 printf '# Mocks\nState lives under the {{PROJECT_NAME}} home.\n' > "$FAKE_BP/$CARRIER"
 printf '# Mocks\nState lives under the acme-flow home, newly reworded.\n' > "$PROJ/$CARRIER"
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#8 an edited line still carrying the literal project name was copied — the tool guessed instead of failing closed"
 elif grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
@@ -531,7 +601,8 @@ blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-rc=$(run_a2bp_in "$RX_PROJ" "$CARRIER")
+run_a2bp_in "$RX_PROJ" "$CARRIER"
+rc=$?
 if grep -q '{{PROJECT_NAME}}' "$FAKE_BP/$CARRIER"; then
   fail "#9 'acmeXflow' was treated as a match for project 'acme.flow' — the name is being compiled as a regex"
 elif [ "$rc" -ne 0 ] && grep -q 'acmeXflow' "$WORK/out"; then
@@ -552,7 +623,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 # Mocks
 Dispatcher output lands in `~/.{{PROJECT_NAME}}/codex-runs.log` by convention.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#10 legitimate Markdown documenting ~/.{{PROJECT_NAME}} was BLOCKED — the prose exception is dead in the real a2bp path (Codex F2); see $WORK/out"
 elif bp_untouched; then
@@ -569,7 +641,8 @@ setup
 mkdir -p "$PROJ/scripts" "$FAKE_BP/scripts"
 printf 'SENTINEL\n' > "$FAKE_BP/scripts/log-activity.sh"
 printf '#!/bin/sh\nstate_dir="$HOME/.{{PROJECT_NAME}}"\n' > "$PROJ/scripts/log-activity.sh"
-rc=$(run_a2bp scripts/log-activity.sh)
+run_a2bp scripts/log-activity.sh
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#11 a SCRIPT hardcoding \$HOME/.{{PROJECT_NAME}} was copied — that is the A-09 defect, and the prose exception has become a blanket hole"
 else
@@ -598,7 +671,8 @@ mkdir -p "$PROJ/docs/config" "$FAKE_BP/docs/config"
 printf 'SENTINEL2\n' > "$FAKE_BP/docs/config/README.md"
 printf '# Mocks\nPerfectly generic guidance.\n' > "$PROJ/$CARRIER"
 printf '# Config\nSee /home/someuser/notes for details.\n' > "$PROJ/docs/config/README.md"
-rc=$(run_a2bp "$CARRIER" docs/config/README.md)
+run_a2bp "$CARRIER" docs/config/README.md
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#12 a request containing a contaminated file was FILED — an agent reading only the exit code would never see the refusal"
 elif ! grep -q '^SENTINEL2' "$FAKE_BP/docs/config/README.md"; then
@@ -622,7 +696,8 @@ setup
   for i in 3 4 5 6 7 8 9 10; do echo "filler line $i"; done
   echo "Line 11 mentions /home/someuser/two with no marker at all"
 } > "$PROJ/$CARRIER"
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#13 line 11 was suppressed by line 2's marker — the suppression set is matching substrings, not whole line numbers"
 elif ! grep -q 'someuser/two' "$WORK/out"; then
@@ -640,7 +715,8 @@ fi
 # ===========================================================================
 setup
 printf '# Mocks\nSee /home/someuser/x  a2bp-allow:\n' > "$PROJ/$CARRIER"
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#14 a bare 'a2bp-allow:' with no justification suppressed the finding — the justification requirement is not enforced"
 else
@@ -654,7 +730,8 @@ fi
 # ===========================================================================
 setup
 printf '# Mocks\nNo trailing newline here.' > "$PROJ/$CARRIER"
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#15 a2bp exited $rc on a file with no final newline"
 elif ! diff -q "$PROJ/$CARRIER" "$FAKE_BP/$CARRIER" >/dev/null 2>&1; then
@@ -682,7 +759,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 acme-flow
 acme-flow
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 got=$(cat "$FAKE_BP/$CARRIER")
 want=$(printf '{{PROJECT_NAME}}\nacme-flow\n')
 if [ "$got" = "$(printf '{{PROJECT_NAME}}\n{{PROJECT_NAME}}')" ]; then
@@ -709,7 +787,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 Historical note: the old tool wrote to /home/someuser/state.
 Historical note: the old tool wrote to /home/someuser/state.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#17 a duplicated host-path line was copied — the exemption is a content set, so a NEW occurrence inherited the old one's pass (Codex R2-F2)"
 elif [ "$(grep -c 'someuser' "$FAKE_BP/$CARRIER")" -ne 1 ]; then
@@ -732,7 +811,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 Historical note: the old tool wrote to /home/someuser/state.
 A newly added, perfectly generic line.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 # CONTRACT CHANGE at R4. There is no longer an alignment-derived exemption:
 # every staged line is scanned. Codex R4-F2 showed that an exemption list is
 # the one place a misattributed alignment can actually leak — a relocated
@@ -766,7 +846,8 @@ cat >"$PROJ/$CARRIER" <<'EOF'
 Perfectly ordinary upstream guidance.
 A newly added, perfectly generic line.
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#18b a clean edit to a clean file was blocked (exit $rc) — see $WORK/out"
 elif ! grep -q 'newly added' "$FAKE_BP/$CARRIER"; then
@@ -795,7 +876,8 @@ acme-flow
 edited-placeholder
 TAIL
 EOF
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 # CONTRACT, narrowly. Codex proved across R1–R4 that no content-derived
 # matching recovers edit history, so the alignment WILL sometimes misattribute
 # and this fixture is one of those layouts. What is asserted here is the
@@ -840,7 +922,8 @@ setup
 # unaffected: the last line is still incomplete and still carries the name.
 printf 'first line\n{{PROJECT_NAME}}' > "$FAKE_BP/$CARRIER"
 printf 'first line, edited\nacme-flow'  > "$PROJ/$CARRIER"
-rc=$(run_a2bp "$CARRIER")
+run_a2bp "$CARRIER"
+rc=$?
 if [ "$rc" -ne 0 ]; then
   fail "#20 an incomplete final line blocked (exit $rc) — the record protocol is inheriting the input's line endings (Codex R3-F2); see $WORK/out"
 elif [ "$(tail -1 "$FAKE_BP/$CARRIER")" != '{{PROJECT_NAME}}' ]; then
@@ -868,7 +951,8 @@ printf '# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project.\n' > "$FAKE_
 printf '# Mocks\nGeneric guidance for the acme-flow project.\n' > "$PROJ/$CARRIER"
 SHIMDIR="$WORK/shim"; mkdir -p "$SHIMDIR"
 printf '#!/bin/sh\nexit 2\n' > "$SHIMDIR/diff"; chmod +x "$SHIMDIR/diff"
-rc=$(PATH="$SHIMDIR:$PATH" run_a2bp "$CARRIER")
+PATH="$SHIMDIR:$PATH" run_a2bp "$CARRIER"
+rc=$?
 if grep -q 'acme-flow' "$FAKE_BP/$CARRIER"; then
   fail "#21 a broken 'diff' let UNRESTORED project bytes reach the blueprint (Codex R3-F3)"
 elif [ "$rc" -eq 0 ]; then
@@ -922,7 +1006,8 @@ blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-  rc=$(run_a2bp_in "$MP" "$CARRIER")
+  run_a2bp_in "$MP" "$CARRIER"
+  rc=$?
   if [ "$rc" -ne 0 ]; then
     fail "#22[$META] a2bp exited $rc for a legal basename containing a substitution metacharacter — see $WORK/out"
   elif grep -qF "$META" "$FAKE_BP/$CARRIER"; then
@@ -952,7 +1037,8 @@ blueprint_branch = main
 bootstrap_sha    = test-fixture
 bootstrap_date   = test-fixture
 EOF
-  rc=$(run_a2bp_in "$MP/$META" "$CARRIER")
+  run_a2bp_in "$MP/$META" "$CARRIER"
+  rc=$?
   if [ "$rc" -eq 0 ]; then
     fail "#22b[$META] a project name that cannot be a ref component filed a request anyway — the name must have been mangled"
   elif ! grep -q "not a valid branch name" "$WORK/out"; then
@@ -1024,7 +1110,8 @@ EOF
   # no-op and refused with "nothing to request" (6), instead of quietly filing a
   # request whose diff happens to be empty. Disagreement would show up as a
   # block (4) or as a filed request that changes the file — both caught below.
-  rc=$(run_a2bp_in "$MP" "$CARRIER")
+  run_a2bp_in "$MP" "$CARRIER"
+  rc=$?
   if [ "$rc" -eq 4 ]; then
     fail "#24[$META] a2bp BLOCKED an untouched pull→a2bp round-trip — pull and the verifier disagree on this name (R5-F1); see $WORK/out"
   elif [ "$rc" -ne 6 ]; then

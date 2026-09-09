@@ -155,6 +155,55 @@ enforced exactly as hard as a blueprint one.
 | `harness` | blueprint | The TypeScript fixture API stops isolating, and every migrated suite silently inherits the defect it was built to make impossible: an unscrubbed `GIT_DIR` writing the developer's real repository (BUG-047), an inherited `AGENT_SIGNAL_FILE` resetting the live baton (BUG-046), an unreaped child, a temp root left behind (BUG-049) | TASK-018's whole claim is that isolation becomes structural instead of remembered, and `tests/harness/` is the only place that claim is tested directly rather than relied upon. A harness that quietly stops scrubbing turns every green spec above it into a spec that proved nothing, so it blocks on the same path as the suites it carries. **`blueprint` for TASK-018 phase 1 only, and that is an enforced claim rather than a label:** `.gitattributes` holds `tests/harness/` back until a SHIPPING suite is TypeScript, so this suite genuinely reaches no derived project and #2b fails the push the moment it does. Phase 2 flips this cell to `both` in the same change that deletes those export-ignore lines — #2c is what stops that move being half-done | serial-global | unclassified-pending-verification — it exercises the fixture primitives themselves, spawned children and temp roots included, and has not been execution-probed for concurrency |
 | `manifest` | both | This manifest stops being enforced, and silent exclusions return | Guards the control that guards every tier above, now including the export boundary that decides which suites reach a derived project at all | parallel-safe | Self-concurrency verified by execution. Reads `tests/`, this file, the gate and the workflow; writes nothing outside two `mktemp` files |
 
+### Retired shell runners
+
+A migrated suite keeps its `*.sh` on disk until the whole migration is finished
+— deleting it early throws away the only thing the spec can be checked against —
+but the gate **stops running it** as soon as the spec is equivalence-proven,
+because running both is paying twice for one assertion.
+
+**That decision has to be DECLARED, or it is indistinguishable from forgetting.**
+"We deliberately stopped invoking this" and "this fell out of the gate and nobody
+noticed" look identical from outside, and the second one is BUG-005 — the defect
+this whole file exists to prevent. So a suite may have a `*.sh` the gate never
+invokes only when every one of these holds, and `tests/manifest` #4/#4b/#5 check
+all of them:
+
+1. it has a row **here**, naming the mutant and the case that mutant turned red,
+2. the suite **has** a `*.spec.ts`, and
+3. that spec is **actually invoked** — the full four-link chain, same as any
+   other spec. Losing a shell runner without gaining a running TypeScript one is
+   not expressible.
+
+**The recipe is required, and it is checked for content, not just presence.**
+PLAN-TASK-018 §5 says a shell runner is not retired until a mutant proves the
+spec fails on the defect the suite exists for. Recorded only in a commit
+message, that proof is unauditable at the point the claim is made — the same
+failure as `git-isolation` deciding its own membership from comments (BUG-047).
+So the cell must name a concrete change (a backticked path, and any path named
+must exist) and the case ID it turned red, and — like every other rationale in
+this file — **it may not argue from the clock.** The saving is a consequence of
+retirement, never its justification: "it is slow" is exactly the sentence that
+produced BUG-005, and it is rejected here for the same reason it is rejected in
+the Rationale column.
+
+**Nothing here is permanent, and one thing pushes back.** There is no deadline —
+this repo does not gate on calendars. But #4b fails if a retired `*.sh` has been
+modified more recently than the spec that replaced it: an edit to a runner
+nothing executes means the equivalence claim underneath it is now stale, and the
+honest answers are to delete the dead runner, revert the edit, or carry the
+change into the spec and re-prove it. The count is also reported on every green
+run, so the number that is meant to reach zero is visible rather than remembered.
+
+<!-- RETIRED-SHELL-RUNNERS:BEGIN — blueprint-managed. Your own go in the table after BLUEPRINT:END. -->
+
+| Suite | The mutant that proved the spec equivalent | The case it turned red |
+|---|---|---|
+| `drift-in-blueprint` | Make `_bp_is_blueprint_itself` (`scripts/blueprint`) always report false, so `drift` stops recognising the blueprint as itself and takes the derived-project path | `#1` — the spec goes red exactly where the shell runner did, on the BUG-007 assertion that `drift` exits 0 in the blueprint |
+| `pull-exec-bit` | Remove the mode-preservation block from `scripts/lib/placeholders.sh`, so a pulled hook lands without its executable bit | `#1` — the spec goes red on the mode assertion, observing 600 where 755 is required, which is the BUG-008 defect itself |
+
+<!-- RETIRED-SHELL-RUNNERS:END -->
+
 <!-- BLUEPRINT:END -->
 
 ## Your project's suites
@@ -168,3 +217,17 @@ The blueprint ships this table empty on purpose — its own suites are all above
 
 | Suite | Tier | Risk if absent | Rationale for the tier | Parallelism | Why that class |
 |---|---|---|---|---|---|
+
+### Your project's retired shell runners
+
+Same rules as the blueprint's table above, same enforcement, and this one is
+yours — `blueprint pull` never touches it. The markers are what the manifest
+parses, so keep them even while the table is empty; a retirement row anywhere
+else in this file is not a declaration, it is a comment.
+
+<!-- RETIRED-SHELL-RUNNERS:BEGIN — project-owned. -->
+
+| Suite | The mutant that proved the spec equivalent | The case it turned red |
+|---|---|---|
+
+<!-- RETIRED-SHELL-RUNNERS:END -->

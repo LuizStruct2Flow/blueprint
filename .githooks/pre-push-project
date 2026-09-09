@@ -436,18 +436,16 @@ fi
 # exactly ("a suite nothing executes"). It guards BUG-007: `blueprint drift`
 # dying inside the blueprint itself, which is the command every agent runs on
 # every wake. 1.7 s.
-if [ -f tests/drift-in-blueprint/test.sh ]; then
-  _st_drift_in_blueprint(){
-    bash tests/drift-in-blueprint/test.sh || {
-      echo "❌ tests/drift-in-blueprint/test.sh failed (BUG-007)."
-      echo "   drift must report 'this IS the blueprint' and exit 0, not die."
-      return 1
-    }
-  }
-  pipe_stage "drift-in-blueprint · BUG-007" _st_drift_in_blueprint
-else
-  pipe_skip "drift-in-blueprint · BUG-007" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). The shell runner is gone, so this stage is
+# gone with it — the suite now runs inside the single vitest batch at the end of
+# this file and still renders as its own line, with its own timing, through
+# pipe_stage_report. Its equivalence was proven by mutation before the shell
+# runner was retired: making `_bp_is_blueprint_itself()` always return failure
+# turns #1 and #1b red in the spec, which is the bar PLAN-TASK-018 §5 sets.
+#
+# Leaving a `[ -f … ]` guard here would be worse than deleting it: it would
+# pipe_skip "suite absent" forever, which reads as a deliberate exclusion rather
+# than as a completed migration.
 
 # The manifest is the control that makes every tier above checkable (BUG-005 /
 # Codex F1). Without it, omitting a pipe_stage block is a silent, one-line
@@ -567,19 +565,10 @@ fi
 # skips a non-executable hook without a word. This bug was "fixed" once and
 # shipped broken because there was no test; the suite pins the PRIMITIVE, since
 # the previous repair fixed the four callers and the primitive undid them.
-if [ -f tests/pull-exec-bit/test.sh ]; then
-  _st_pull_exec_bit(){
-    bash tests/pull-exec-bit/test.sh || {
-      echo "❌ tests/pull-exec-bit/test.sh failed (BUG-008)."
-      echo "   A pulled executable must stay executable, or the gate is armed"
-      echo "   and silently skipped in every project that pulls it."
-      return 1
-    }
-  }
-  pipe_stage "pull-exec-bit · BUG-008" _st_pull_exec_bit
-else
-  pipe_skip "pull-exec-bit · BUG-008" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
+# Equivalence proven by mutation first: removing the mode-preservation block
+# before `mv "$tmp" "$f"` in scripts/lib/placeholders.sh turns #1 red with
+# `755 -> 600`, and #5 catches .githooks/pre-push becoming non-executable.
 
 # BUG-006 — a managed script must carry no project-specific env namespace.
 # `LWA_FEED_*` was one project's initials in a file that ships to every project,

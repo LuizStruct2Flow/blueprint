@@ -90,6 +90,13 @@ FAILED=0
 fail(){ echo "FAIL: $*"; FAILED=1; }
 pass(){ echo "  ok — $*"; }
 
+# BUG-014 — the gate runs this suite with GIT_DIR exported, and every git call
+# below (#2b's archive, #4b's history query) would then read whatever that names
+# rather than this repo. Hoisted to the top because it used to sit inside #2b's
+# `if IN_BLUEPRINT` block, which left it unset for a derived project — where #4b
+# now runs git too.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
 [ -f "$MANIFEST" ] || { echo "FAIL: tests/SUITES.md is missing — the tier policy has no control"; exit 1; }
 
 # Parse the manifest table:
@@ -114,6 +121,36 @@ rows(){
     }
   ' "$MANIFEST"
 }
+
+# retired_rows — the RETIRED-SHELL-RUNNERS tables:
+#   | suite | the mutant | the case it turned red |
+#
+# Parsed only BETWEEN its markers, never by shape. A shape-based parser here
+# would be a way to exempt a suite from #4 by writing a row that happens to look
+# right, and the whole point of this table is that retirement is DECLARED in one
+# place a reviewer can find. Both tables are read — the blueprint's, and the
+# project's after BLUEPRINT:END — the same way `rows` reads both suite tables.
+#
+# Three columns is also what keeps these rows invisible to `rows` above, which
+# needs six fields. #7 asserts no suite name is parsed twice, so a future column
+# added here fails loudly instead of quietly turning a retirement row into a
+# suite.
+retired_rows(){
+  awk -F'|' '
+    function trim(s){ gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /RETIRED-SHELL-RUNNERS:BEGIN/ { inblock=1; next }
+    /RETIRED-SHELL-RUNNERS:END/   { inblock=0; next }
+    inblock && /^[[:space:]]*\|/ {
+      n=split($0,f,"|"); if (n<4) next
+      s=trim(f[2]); m=trim(f[3]); c=trim(f[4])
+      if (s !~ /^`.*`$/) next
+      gsub(/`/,"",s)
+      print s "\t" m "\t" c
+    }
+  ' "$MANIFEST"
+}
+RETIRED=" $(retired_rows | cut -f1 | tr '\n' ' ')"
+is_retired(){ case "$RETIRED" in *" $1 "*) return 0 ;; esac; return 1; }
 
 # live_cmds FILE... — the files with COMMENT LINES REMOVED.
 #
@@ -482,9 +519,7 @@ fi
 #     what makes that transition all-or-nothing.
 # ===========================================================================
 if [ "$IN_BLUEPRINT" -eq 1 ]; then
-  # BUG-014 — the gate runs this suite with GIT_DIR exported, and the git calls
-  # below would then read whatever that names rather than this repo.
-  unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY
+  # (GIT_DIR and friends are scrubbed at the top of this file — BUG-014.)
   _listing="$(mktemp)"
   _runners="$(mktemp)"
   ( cd "$ROOT" && git archive --format=tar HEAD 2>/dev/null | tar -t 2>/dev/null ) >"$_listing"
@@ -810,8 +845,16 @@ while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
     continue
   fi
 
+  # A DECLARED retirement is the only reason a shell runner may sit uninvoked.
+  # It buys nothing on its own: the suite still has to have a spec, and that
+  # spec still has to survive the full chain below — so "lost the shell runner,
+  # gained nothing" cannot be written down. #4b judges the declaration itself.
   if [ "$_sh" -eq 1 ] && ! _gate_sh_invoked "$s"; then
-    notrun="$notrun $s(shell runner never invoked)"
+    if ! is_retired "$s"; then
+      notrun="$notrun $s(shell runner never invoked, and no retirement declared)"
+    elif [ "$_ts" -eq 0 ]; then
+      notrun="$notrun $s(shell runner retired but the suite has no spec)"
+    fi
   fi
   if [ "$_ts" -eq 1 ] && ! _ts_covered_gate "$s"; then
     notrun="$notrun $s($TS_WHY)"
@@ -827,6 +870,106 @@ if [ -n "$notrun" ]; then
   echo "        reaches it. A stage naming the spec outright also counts."
 else
   pass "#4 every pre-push/both suite is invoked by the gate, runner kind by runner kind"
+fi
+
+# ===========================================================================
+# 4b. A RETIREMENT IS A CLAIM, AND CLAIMS ARE CHECKED.
+#
+#     #4 accepts a declared retirement. This decides whether the declaration is
+#     worth accepting, because a marker that only has to EXIST is a way to
+#     switch #4 off one row at a time — and #4 is the assertion that stopped
+#     BUG-005.
+#
+#     Four things are checked, and the third is the one with teeth:
+#
+#     1. The suite is real and has a spec. (#2 keeps a runner on disk, so this
+#        cannot become a route to a suite with nothing at all.)
+#     2. The recipe names a concrete change — a backticked token, and any
+#        backticked path must actually exist — and names the case ID it turned
+#        red. You cannot write "#4c went red" without having watched it.
+#     3. THE RECIPE MAY NOT ARGUE FROM THE CLOCK. The founder's reason for
+#        retiring these is that running both is slower, and that reason is
+#        correct — but it is a consequence, not a justification. "It is slow" is
+#        the exact sentence that produced BUG-005, and #6 and #8 already refuse
+#        it in the other two rationale fields. A suite stops being run because
+#        something else now proves what it proved; never because of what it
+#        costs.
+#     4. The claim has not gone stale. There is no deadline here — this repo
+#        does not gate on calendars, and a date in a table is upkeep that rots.
+#        But a retired runner that has been MODIFIED more recently than the spec
+#        replacing it is a claim nobody re-proved: someone changed behaviour in
+#        a file nothing executes. Answered with git history rather than a
+#        recorded baseline, so there is nothing to maintain. The remedies are
+#        all good outcomes — delete the dead runner (the intended end state),
+#        revert the edit, or carry it into the spec and re-prove it.
+# ===========================================================================
+ret_n=0
+ret_bad=""
+ret_stale=""
+while IFS="$(printf '\t')" read -r s mut cid; do
+  [ -n "$s" ] || continue
+  ret_n=$((ret_n + 1))
+  row_exists "$s"   || { ret_bad="$ret_bad $s(not a declared suite)"; continue; }
+  has_ts_runner "$s" || { ret_bad="$ret_bad $s(no *.spec.ts — retiring the shell runner would leave nothing running)"; continue; }
+  has_sh_runner "$s" || { ret_bad="$ret_bad $s(no *.sh on disk — nothing to retire)"; continue; }
+
+  if [ -z "$mut" ] || [ -z "$cid" ]; then
+    ret_bad="$ret_bad $s(recipe or case ID empty)"
+    continue
+  fi
+  if clocky "$mut" || clocky "$cid"; then
+    ret_bad="$ret_bad $s(argues from cost)"
+    continue
+  fi
+  printf '%s' "$cid" | grep -qE '#[0-9]+[a-z]?' \
+    || { ret_bad="$ret_bad $s(names no case ID that went red)"; continue; }
+  printf '%s' "$mut" | grep -q '`' \
+    || { ret_bad="$ret_bad $s(recipe names no concrete symbol or path)"; continue; }
+  # BUG-041's lesson: no GNU-only sed here (`2~2p` would have looked right and
+  # matched nothing on macOS). grep -o extracts the backticked tokens directly.
+  _badpath=""
+  for _tok in $(printf '%s' "$mut" | grep -oE '`[^`]+`' | tr -d '`'); do
+    case "$_tok" in
+      */*) [ -e "$ROOT/$_tok" ] || _badpath="$_badpath $_tok" ;;
+    esac
+  done
+  [ -n "$_badpath" ] && { ret_bad="$ret_bad $s(recipe names paths that do not exist:$_badpath)"; continue; }
+
+  # 4 — is the equivalence claim still current? Newest commit touching a
+  # retired shell runner vs newest touching the specs that replaced it.
+  _sh_ts=0
+  _spec_ts=0
+  for _f in $(find "$ROOT/tests/$s" -maxdepth 1 -type f -name '*.sh' 2>/dev/null | sort); do
+    _c="$(git -C "$ROOT" log -1 --format=%ct -- "$_f" 2>/dev/null)"
+    case "$_c" in ''|*[!0-9]*) continue ;; esac
+    [ "$_c" -gt "$_sh_ts" ] && _sh_ts="$_c"
+  done
+  for _f in $(find "$ROOT/tests/$s" -maxdepth 1 -type f -name '*.spec.ts' 2>/dev/null | sort); do
+    _c="$(git -C "$ROOT" log -1 --format=%ct -- "$_f" 2>/dev/null)"
+    case "$_c" in ''|*[!0-9]*) continue ;; esac
+    [ "$_c" -gt "$_spec_ts" ] && _spec_ts="$_c"
+  done
+  # Either side uncommitted (or no git at all) → no history to compare. Silence
+  # here is correct: #2b already fails an uncommitted runner at push time.
+  if [ "$_sh_ts" -gt 0 ] && [ "$_spec_ts" -gt 0 ] && [ "$_sh_ts" -gt "$_spec_ts" ]; then
+    ret_stale="$ret_stale $s"
+  fi
+done <<EOF
+$(retired_rows)
+EOF
+if [ -n "$ret_bad" ]; then
+  fail "#4b retirement declarations that do not hold up:$ret_bad"
+  echo "        A retirement must name the mutant that proved the spec equivalent and the"
+  echo "        case it turned red (PLAN-TASK-018 §5). A marker that only has to EXIST is a"
+  echo "        way to switch #4 off one row at a time."
+elif [ -n "$ret_stale" ]; then
+  fail "#4b a retired shell runner has been modified more recently than the spec that replaced it, so the equivalence claim under it is stale:$ret_stale"
+  echo "        Nobody runs that file. Delete it — that is the intended end state — or revert"
+  echo "        the edit, or carry the change into the spec and re-run the mutant."
+elif [ "$ret_n" -gt 0 ]; then
+  pass "#4b $ret_n shell runner(s) retired, each with a mutation recipe and a live spec (still on disk; the number is meant to reach zero)"
+else
+  pass "#4b no shell runner is declared retired"
 fi
 
 # ===========================================================================
@@ -850,7 +993,14 @@ if [ -f "$CI" ]; then
     fi
 
     if [ "$_sh" -eq 1 ] && ! _ci_sh_invoked "$s"; then
-      ci_missing="$ci_missing $s(shell runner)"
+      # Same declaration, same conditions (see #4). A retirement is one decision
+      # about one suite; it would be incoherent for the gate to honour it and
+      # the workflow not to.
+      if ! is_retired "$s"; then
+        ci_missing="$ci_missing $s(shell runner, and no retirement declared)"
+      elif [ "$_ts" -eq 0 ]; then
+        ci_missing="$ci_missing $s(shell runner retired but the suite has no spec)"
+      fi
     fi
     if [ "$_ts" -eq 1 ] && ! _ts_covered_ci "$s"; then
       ci_missing="$ci_missing $s($TS_WHY)"
@@ -895,10 +1045,18 @@ fi
 #    failure mode this file exists to prevent.
 # ===========================================================================
 n="$(rows | grep -c .)"
+# A suite named twice is a parser that has started reading something that is not
+# the suite table — the RETIRED-SHELL-RUNNERS rows are the live candidate, since
+# they are kept out of `rows` only by having three columns. It is also a real
+# hazard on its own: two rows for one suite means two tiers and two parallelism
+# classes, and every loop above silently honours whichever it reads last.
+dupes="$(rows | cut -f1 | sort | uniq -d | tr '\n' ' ')"
 if [ "${n:-0}" -lt 10 ]; then
   fail "#7 parsed only ${n:-0} manifest rows — the parser is broken, so #1-#6 proved nothing"
+elif [ -n "${dupes// /}" ]; then
+  fail "#7 the same suite is declared more than once:$dupes — two rows means two tiers, and every check above honours whichever it read last"
 else
-  pass "#7 parsed $n manifest rows (assertions above are non-vacuous)"
+  pass "#7 parsed $n manifest rows, each suite once (assertions above are non-vacuous)"
 fi
 
 # ===========================================================================

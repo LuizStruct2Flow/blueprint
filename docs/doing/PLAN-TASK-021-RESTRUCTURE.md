@@ -251,6 +251,49 @@ Recommend one helper — `bp_blueprint_path <project-relative>` — and route al
 seven sites through it. It is the same shape the repo already chose for
 `bp_should_substitute` and `bp_suite_runners`.
 
+**IMPLEMENTED 2026-09-10 (Stage A′, `cc16e62`) — five corrections to the table
+above.** The line numbers were all mapped at `e5e3600` and have shifted; the pull
+copy loop is now ~`:1122`. More importantly the site list was incomplete, and two
+of the gaps were caught by a failing test rather than by reading:
+
+- **`bp_build_assert` is missing from the table entirely**, and needs the mapping
+  in **two** places — `want`, and the per-spec mode/blob loop. Without it
+  `bp_build_request` fails its own internal assertion and returns empty.
+- **`bp_inputs_drop_unchanged` (`request-inputs.sh:181,185`) is not listed.**
+  Without it nothing is ever dropped, so every request carries files the blueprint
+  already has.
+- **The a2bp prefix cannot come from a `BLUEPRINT_ROOT` probe**, as §6 implies:
+  `cmd_a2bp` never resolves `BLUEPRINT_ROOT` at all. It needs its own oracle — see
+  the two-resolver note below.
+- **`_bp_resolve_blueprint_root` needs BOTH the `../..` walk-up and RELAXED
+  anchors**, each accepted at either coordinate. Requiring the root `CLAUDE.md`
+  stub makes the resolver fail on a mid-move tree — the exact state it most needs
+  to survive.
+- **Pull has two loops, not one.** The table lists `:1008`; the default-collection
+  loop and the copy loop both need routing, and patching only the first passes
+  review and fails the test.
+
+**There are TWO resolvers, deliberately, and they must not be merged.** Each asks
+its question the way its caller reads the answer:
+
+| Resolver | Oracle | Why |
+|---|---|---|
+| `bp_blueprint_path` (`scripts/blueprint`) | the **filesystem** — `[ -e "$BLUEPRINT_ROOT/scaffolding/$1" ]` | `drift`/`pull` compare and copy working-tree bytes |
+| `bp_base_path bare base path` (`lib/request.sh`) | the **fetched base tree** | `a2bp` deliberately needs no local checkout, and a stale one would misplace the request |
+| `bp_expand_managed_dirs` | **HEAD** (BUG-029's contract), unioning both halves and stripping the prefix | one half absent is normal; the *union* being empty is what dies |
+
+Where the oracles diverge — a staged-but-uncommitted `git mv` — the divergence is
+*correct*: HEAD names the root path, the filesystem holds only the scaffolding
+one, so the expansion yields the project-relative **name** and the resolver finds
+the **content**, both landing on the one file on disk.
+
+**And a quiet failure the plan did not name.** §6 said the move breaks every
+subcommand. It does not — only `drift` and `pull` route through
+`read_blueprint_source`. `a2bp` breaks too, but **silently**: it would file its
+request at the blueprint's **root** coordinate, proposing a second `docs/DoD.md`
+beside the real one. A plausible-looking PR at the wrong path is worse than a
+refusal, because a reviewer may merge it.
+
 ### 2.4 The trap that will bite silently
 
 `scripts/lib/placeholders.sh:86-93`:

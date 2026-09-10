@@ -100,6 +100,7 @@ function scenarioEnv(s: {
   signalFile: string
   feedLog: string
   workspaceRoot: string
+  escapeToken: string
 }): Record<string, string> {
   return {
     HOME: s.home,
@@ -110,6 +111,31 @@ function scenarioEnv(s: {
     AGENT_STATE_HOME: s.stateHome,
     AGENT_SIGNAL_FILE: s.signalFile,
     AGENT_FEED_LOG: s.feedLog,
+    // THE ESCAPE TOKEN HAS TO RIDE ON THE LINES THEMSELVES, or the canary that
+    // searches the real feed for it can never fire. Pinning AGENT_FEED_LOG is
+    // what SHOULD keep a fixture out of the real feed; these two are what makes
+    // a failure of that pinning visible, and they are the same trick
+    // tests/pipeline #19 plays by naming its fixture stage after the token.
+    //
+    //   AGENT_FEED_TAG  scripts/lib/pipeline.sh:173 renders every gate line as
+    //                   "[${AGENT_FEED_TAG:-GATE}] …", so a whole gate run —
+    //                   header, every stage, the summary — carries it.
+    //   AGENT_PERSONA   scripts/agent-activity.sh:113 labels the supervisor's
+    //                   lines with it, and that script IGNORES AGENT_FEED_LOG
+    //                   (line 78 derives the path from the repo root), so it is
+    //                   the one writer a scenario can invoke that reaches the
+    //                   real feed with the pinning fully intact. It is the leak
+    //                   most worth being able to see.
+    //
+    // WHAT THIS STILL DOES NOT COVER, stated rather than implied: a line whose
+    // label is a literal — watch-ci.sh's "[CI]", log-activity.sh's persona from
+    // a hook payload — carries no token, and a fixture writing its own prose
+    // into the feed carries none either. Those leaks are caught only by the
+    // prefix half of the canary, which sees a rewrite and not an append. The
+    // token canary is therefore a real check over the two dominant writers, not
+    // a claim that every append is detectable.
+    AGENT_FEED_TAG: s.escapeToken,
+    AGENT_PERSONA: s.escapeToken,
     // Deterministic collation and character classes. [[:space:]] is
     // locale-dependent and matched U+00A0 under a UTF-8 locale on BSD, which is
     // BUG-043 — the baton trimmed differently depending on the publisher's LANG.
@@ -151,6 +177,7 @@ export async function scenario(
     signalFile,
     feedLog,
     workspaceRoot: workspace.root,
+    escapeToken,
   })
   const scopedFs = new ScopedFs(workspace.root)
 

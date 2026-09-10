@@ -156,6 +156,31 @@ describe('harness — the real-state canary (BUG-030)', () => {
     }
   })
 
+  it('BUG-062 a gate line a fixture emits CARRIES the token, so a leak would be visible', async () => {
+    // The other half, and the half that was missing: detection is worthless if
+    // nothing can produce the token. This drives the REAL pipeline library the
+    // way the gate does and reads the line back out of the scenario's own feed
+    // — so the mechanism is proved without writing a byte into the operator's.
+    // If AGENT_FEED_TAG ever stops reaching a feed line, this goes red here
+    // rather than by quietly making the canary vacuous again.
+    await scenario('canary-token-emitted', async (s) => {
+      const script = await s.fs.write(
+        'run-gate.sh',
+        // pipeline.sh finds feed.sh through _PIPE_LIBDIR, which defaults to the
+        // RELATIVE `scripts/lib` — it feeds only when the caller's cwd is the
+        // repo root, which is true of a git hook and not of a fixture.
+        `_PIPE_LIBDIR="${REPO_ROOT}/scripts/lib"\n` +
+          `. "${REPO_ROOT}/scripts/lib/pipeline.sh"\n` +
+          `pipe_init gate\n` +
+          `pipe_stage 'a stage that passes' true\n` +
+          `pipe_finish\n`,
+      )
+      const r = await s.run('bash', [script], { cwd: s.workspace.root })
+      expect(r.code, r.output).toBe(0)
+      expect(await s.fs.read('logs/agent-activity.log')).toContain(s.escapeToken)
+    })
+  })
+
   it('DETECTS a mutation of a watched file', async () => {
     // The negative case. Point a canary at a fixture file, change it, and
     // require the canary to object. Without this, "the canary protects the

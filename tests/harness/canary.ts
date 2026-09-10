@@ -151,6 +151,20 @@ export class RealStateCanary {
    * This is the half of the escape canary that survives a parallel gate: the
    * token is unique per scenario, so a sibling stage writing to the same file
    * cannot cause a false positive. The count-based half cannot make that claim.
+   *
+   * A TOKEN NOTHING EMITS DETECTS NOTHING. For a while this one was minted,
+   * handed to every scenario and searched for, while no fixture had any way to
+   * produce it — a check over a case that could not arise, which is this repo's
+   * signature defect wearing the uniform of the control that exists to catch
+   * it. What closes that is on the emitting side: scenarioEnv (index.ts) sets
+   * AGENT_FEED_TAG and AGENT_PERSONA to the token, so the two dominant feed
+   * writers — the gate pipeline and the activity supervisor — label every line
+   * they emit with it. The comment there says what is and is not covered.
+   *
+   * Unique per RUN, never a literal, and BUG-050 is why: tests/pipeline once
+   * searched for the fixed string `canary-must-not-escape`, an agent WROTE
+   * ABOUT the check in the feed, and the canary went permanently red accusing
+   * the suite of the pollution it was reading in its own prose.
    */
   static escapeToken(scenario: string): string {
     return `canary-must-not-escape-${scenario}-${process.pid}-${Date.now()}`

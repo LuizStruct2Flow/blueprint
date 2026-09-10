@@ -1,4 +1,4 @@
-<!-- session-marker: dfffa1ea -->
+<!-- session-marker: 2c7bdd58 -->
 
 # HANDOVER — what a waking agent needs to TAKE OVER
 
@@ -20,41 +20,27 @@ fourth time it has gone stale by restating something `ls` already answers.
 
 ---
 
-## 0. MOVING TO evo-x2 — read this before anything else
+## 0. THE TWO THINGS THAT WILL COST YOU FIRST
 
-Written 2026-09-09. The work is moving from `macbook-pro` to **evo-x2** (Linux,
-x86_64, 32 cores, node v22.22.1), which is ~3× faster on this repo's test suite
-and is where development continues.
-
-**The four things that do not travel.** Same list as any fresh checkout, and
-three of them will stop you inside five minutes:
-
-```
-cp AGENT_ROSTER.example.md AGENT_ROSTER.md          # gitignored, per-engineer
-bash scripts/signal-set.sh --holder <name> --state ACTIVE --task '<what you are doing>'
-bash scripts/agent-activity.sh --daemon             # also arms core.hooksPath
-npm ci --legacy-peer-deps --include=optional        # the TS harness
-```
-
-The baton is untracked per-checkout state (BUG-019) and DoD §7G **fails closed**
-without it — your first push dies before it starts. `core.hooksPath` is
-repo-LOCAL config, so a clone is ungated until something arms it (BUG-004/A-22).
-
-Then check the toolchain, which now BLOCKS rather than skips:
+**1. RUN VITEST FROM `tests/`, NEVER FROM THE REPO ROOT.** The harness manifest,
+`vitest.config.ts` and `node_modules` moved under `tests/` on 2026-09-10
+(TASK-020). From the repo root vitest finds **no config**, so it silently uses a
+**5 s** default timeout instead of 300 s — `bootstrap-gate`'s nested-gate case
+then dies at 5 s and you will spend a run diagnosing a defect that is not there.
+It also picks up `**/*.spec.ts` under **`.scratch/`**, which is exactly where
+CLAUDE.md tells you to put scratch files.
 
 ```
-bash scripts/install-toolchain.sh check
+tests/node_modules/.bin/vitest run --root "$PWD/tests"      # works from anywhere
 ```
 
-**What you can stop worrying about on Linux.** Every defect fixed on 2026-09-09
-was a BSD-vs-GNU difference, and none of them exists here: `/proc` is present,
-`sed` supports `\|` alternation and bare `-i`, `[[:space:]]` does not match
-U+00A0, and `git var` refuses to guess an identity. That is also why they
-survived for months — **the blueprint was developed on Linux and had never run
-on a Mac.** Do not re-derive them; the rows are in `BUGS.md` with mechanisms.
+`cd tests` does **not** persist between an agent's Bash calls. Two agents and I
+each lost a ~200 s run to this on day one.
 
-**Do not use `~/dev/struct2flow/blueprint-perf`.** That is a measurement scratch
-copy with no remote. Delete it.
+**2. `git push` runs the full gate (~390 s) and reveals ONE problem per push.**
+A failing stage kills every stage after it (**BUG-057**), so a red push names the
+first thing wrong and nothing about the rest. Budget several rounds, or run the
+specific suite locally first.
 
 ---
 
@@ -64,125 +50,138 @@ copy with no remote. Delete it.
 bash scripts/session-resume.sh
 ```
 
-It derives the git state, the four lifecycle folders, the live baton and the
-journal since the last marker. **Exit 9** means the report is incomplete and the
-warning says which — do not read a short replay as a quiet one.
+Derives git state, the four lifecycle folders, the live baton and the journal
+since the last marker. **Exit 9** means the report is incomplete and says which
+part — do not read a short replay as a quiet one.
 
 ---
 
-## 2. WHAT IS IN FLIGHT — TASK-018, phase 1
+## 2. WHAT IS IN FLIGHT
 
-**The rules and the structure are AGREED with the founder.** Do not reopen them;
-read `docs/doing/TASK-018-RULES.md` (seven rules, each with its enforcement) and
-`docs/doing/PLAN-TASK-018.md`.
+**TASK-018 phase 1 is COMPLETE.** Six `blueprint`-tier suites are TypeScript,
+their shell runners are deleted, and each carries its mutation recipe in its own
+spec docblock. `tests/SUITES.md` no longer exists: the expected suite set is
+derived from the filesystem (`tests/*/*.spec.ts`) and tier from `.gitattributes`'
+`export-ignore` lines. `TASK-018-RULES.md` and `TASK-018-CONVENTIONS.md` are
+**agreed — do not reopen them**, except the correction in §4.
 
-Agreed structure, **not yet implemented**:
+**Phase 2 is now three steps**, not the data-loss-shaped transition it was:
 
-```
-scaffolding/   ships to derived projects
-forge/         bootstrap, sync, a2bp, templates — never ships
-<root>/        this repo's own docs/, AGENT_ROSTER.md, logs/ — like any project
-```
+1. delete the four `export-ignore` lines withholding the TS toolchain,
+2. teach `bootstrap-gate` to `npm ci` **on the product path**, not just in the
+   fixture (measured: 0.84 s warm, 1.6 s cold — the cost objection in
+   `PLAN-TASK-018` §7.3 is not real; the risk is offline availability),
+3. land **BUG-045**.
 
-Tests are **co-located** with what they test. `SUITES.md` and most of
-`tests/manifest` cease to exist once the migration lands, because vitest
-discovers by glob and there is no per-suite wiring to forget.
+No `MANAGED_FILES` change is needed. Under `tests/`, `pull` lists via
+`git archive HEAD tests` — the same query bootstrap answers — so ships ⟺ managed
+by construction.
 
-**Sequencing decided, and it matters:** migrate **component by component**, not
-"all tests then all internals". Port a script to TypeScript, write its spec
-against the TypeScript, retire the shell script and its shell suite together,
-run the mutant once. Porting a test faithfully against a shell script and then
-rewriting the script means writing the test twice — and the first version is the
-slow spawn-a-subprocess kind. Measured: a faithful port is ~1.7× slower than its
-shell original; a test rewritten against logic is ~80× faster.
-
-Order by risk: `state-dir`, `commit-subject`, `placeholders`, `suites`,
-`signal-set` first (small, mostly pure). Then `pipeline`. Then the `blueprint`
-CLI. Then `new-project`. **`agent-activity` last** — `flock` has no native Node
-equivalent and BUG-001 was a fork bomb that ran 2.7 days.
-
-**One thing stays shell permanently:** the pre-push hook's entry point, so a
-broken `node_modules` fails loudly instead of not gating at all.
+**The 36 remaining suites can be ported in parallel.** Each touches its own
+`tests/<suite>/` plus one block in `.githooks/pre-push-project`; that hook is the
+only real contention. 4–6 agents on disjoint sets is the practical ceiling.
 
 ---
 
-## 3. THE STATE OF THE BRANCH
+## 3. WHAT TO DO NEXT, AND WHY IT IS NOT MORE MIGRATION
 
-**Fixed and verified on evo-x2: 45 of 46 stages pass, 374 s** (the same gate was
-778 s on the Mac). `bootstrap-gate` passes at 188.5 s, and BUG-053 — the
-blueprint-tier-rows-downstream defect — is closed in both its instances.
+**TASK-013 — the declared bootstrap profile.** Parked in `backlog/`, and the item
+that actually buys wall-clock:
 
-**The 46th was `pull-behaviour · BUG-016/018`, and this section used to leave it
-unnamed.** Do not repeat that: a count without the name of the failure is the
-one fact a waking agent cannot derive from anything else here, and it cost a
-session. It is now **BUG-054** and fixed — `blueprint pull` asked whether the
-*process* had a controlling terminal instead of whether its *caller* gave it an
-interactive stdin, so from a `git push` typed in a terminal it prompted on the
-real tty and hung.
+```
+389 s   full gate
+189 s   of it is bootstrap-gate #2/#3 — A COMPLETE SECOND GATE
+```
 
-**Two numbers in this file were symptoms of it, and both misled.** The suite was
-recorded at `426.2s`; it runs in **0.778 s**. It was never slow — it was blocked
-on a prompt. That same idle is what made the push's own connection die with
-*"Connection to github.com closed by remote host"*, so the failure presented as
-a network problem. **If a suite here is implausibly slow, suspect a blocked read
-before you suspect the suite.**
+`#2`/`#3` bootstraps a derived project and runs its whole pre-push gate: 41
+stages from the project hook (36 shell suites + a probe + 4 DoD) plus ~4 generic
+ones. Every one of those 36 was just run by the outer gate, from the same file.
 
-**The transfer was by `git bundle`, not by push**, because the Mac could not
-complete a gate run. So this branch has **no upstream** until the first
-successful push from here — `git pull` will say *"no tracking information"* and
-that is expected, not a problem. `git push -u` sets it.
+**It is not pure duplication, and that is what makes it delicate.** The two runs
+have different SUBJECTS — the outer against the blueprint's working tree, the
+inner against a project bootstrapped from `git archive`, placeholders
+substituted, no `templates/`, no `.blueprint-root`. That configuration is what
+BUG-028 exists for, and `bootstrap-gate` #6 caught BUG-053 precisely there. So
+the profile must be **declared per suite** — which suites can behave differently
+downstream — and checkable, never a hand-picked list that rots.
 
-**Two setup traps found the hard way, both non-obvious:**
+**Do this BEFORE the 36-suite fan-out.** Every suite migrated from here runs
+twice per push until the profile lands.
 
-- **`~/.local/bin` is in `.profile`, which a NON-LOGIN shell does not source.**
-  So `install-toolchain.sh check` reports `gitleaks`/`semgrep`/`osv-scanner`
-  MISSING over SSH or from a dispatched agent, while they are present and on
-  PATH for you interactively. Anything automated must export it explicitly.
-- **`git fetch <bundle> "refs/heads/*:refs/heads/*"` acts as a MIRROR** and
-  prunes local refs the bundle does not carry. It deleted `main` here once;
-  recovered with `git reset origin/main`. Fetch bundle branches BY NAME.
-
-There is a stash on this checkout — *"evo-x2 session marker before TASK-018
-checkout"* — holding one line of a superseded `HANDOVER.md`. Drop it; do not pop
-it.
+Parallelism is NOT the lever, by measurement. `fileParallelism: false` today;
+flipping it saves ~8% because one case is 97% of its suite, and parallelising
+*within* `bootstrap-gate` saves 3% while adding contention to a suite that
+already has a live flake. `PLAN-TASK-018` §3 ranks the profile #1 and parallelism
+#3; that ranking still holds.
 
 ---
 
 ## 4. LIVE HAZARDS
 
-**No Codex signal watcher is running.** `ps -eo pid,ppid,etime,args | grep
-'[s]ignal-watch'` — match on the path, not the count; that grep sees every
-project's watcher on the machine. A stale watcher at `ppid 1` double-dispatches
-and BUG-022's lock cannot see one started before that fix.
+**Two flakes in the one stage that gates every push.** `bootstrap-gate` failed at
+51.2 s and passed at 186.8 s on the same commit; `agent-activity-bound` #12
+failed once inside the nested gate and was isolated against a clean baseline as
+pre-existing. Rowed as **BUG-065**. A retry cleared both — the `--admin` habit
+**BUG-033** warns about. If you retry a red gate, say so out loud.
 
-**Codex is installed and authenticated** (`codex-cli 0.153.4`, ChatGPT auth) and
-the dispatcher's flags still match. Cross-provider review works — Slava, Jesko
-and Andreas all contributed today, and Andreas found a hole in the test harness
-that a Claude agent had not.
+**`fileParallelism: true` is not safe yet**, and one blocker is inside the
+harness: the canary compares the live baton **byte-exactly**, so one ordinary mic
+flip mid-run would fail *every* concurrent scenario, each reporting "the scenario
+mutated real state outside its fixture" — forty innocent specs accused of
+something an orchestrator did. Fix that before flipping, not after.
 
-**Persona labels: put the NAME in the dispatch description** (BUG-052). The feed
-resolves the persona from the description text, so `"Vitali isolation audit"`
-labels correctly and `"QA-1 isolation audit"` does not. 1510 of 2489 feed lines
-in one session read `[general-purpose - Claude Code]` because of this.
+**R3's wording overstates what the harness enforces.** Five rounds of
+Claude/Codex review hardened it — symlink containment, process-group retention,
+`GIT_CONFIG*` injection denial, default-deny on undeclared `GIT_*`/`AGENT_*`,
+`HOME`/`TMPDIR` containment — but a spec *can* still exercise a forbidden
+variable deliberately, by design (`git-isolation` needs it). Residuals are
+written down in **BUG-060** and **BUG-062** rather than papered over.
+**`AGENT_PERSONA` has a known open hole** — an override kills the
+`agent-activity.sh` half of leak detection — left open deliberately because
+`tests/roster` asserts what a named persona renders as.
 
-**Monitors die with the session.** Feed: `bash scripts/agent-activity.sh
---daemon`. Mic: `sh scripts/wait-mic.sh logs/state/signal.md` as a background
-task, **re-armed after every event** — it exits on the first change by design
-(FEATURE-005). Do not check a Monitor's liveness with `ps`; it cannot see them
-(A-40). Only an event proves one is alive.
+**`bootstrap-gate`'s docblock says `serial-timing`. That is wrong** — it asserts
+no wall-clock, it is merely slow — and R5 retires the taxonomy anyway. Harmless
+today; correct it when you next touch the file.
 
 ---
 
-## 5. OPEN FOR THE FOUNDER
+## 5. WORKING WITH THE OTHER AGENTS
 
-- **`pipeline.sh` → `package.json`.** Founder asked why the gate needs a bespoke
-  shell renderer. Answer given: right idiom, wrong substitute — `package.json` is
-  a task runner, `pipeline.sh` is a reporter, and most of what it renders is not
-  npm. Recommended sequencing it after phase 1 rather than rebuilding the
-  reporter while 40 shell suites still depend on it. **Not yet decided.**
-- **Whether `both`-tier suites ever become TypeScript.** Phase 1 deliberately
-  does not answer it. If the answer is no, the blueprint permanently runs two
-  test stacks.
+**This repo is TRUNK-BASED** (TASK-019, 2026-09-10). Commit and push to `main`.
+No branch, no PR, and no guard will stop you. Pull requests exist for EXTERNAL
+collaboration — that is what `blueprint a2bp` files.
+
+**Dispatch Codex so it lands in the feed**, or it works invisibly:
+
+```
+codex exec --json … 2>>logs/agent-activity.log \
+  | tee .scratch/<name>.jsonl \
+  | bash scripts/codex-feed-filter.sh >> logs/agent-activity.log
+```
+
+`--json` and the filter are both required — raw output is 6000+ lines of file
+contents and drowns the feed. The `tee` is required too: the filter clips at 220
+characters, so without it a long review is **unrecoverable** and must be re-run.
+All three mistakes were made on day one.
+
+**Put the persona NAME in an Agent dispatch description** (BUG-052) — the feed
+resolves the label from that text.
+
+---
+
+## 6. OPEN FOR THE FOUNDER
+
+- **BUG-045** — the local osv-scanner gate blocks on ANY advisory while CI blocks
+  only MEDIUM+. Now live here: the lockfile exists, so the "no package sources"
+  exemption its row relies on is spent.
+- **BUG-057** — a failing stage truncates the rest of the gate.
+- **The `.scratch/` glob hazard** in §0 is not yet rowed.
+- **`a2bp` has been used exactly twice, ever** (both 2026-07-31), and this repo
+  structurally cannot run it — no `.blueprint-source`. Six blocking suites, 2605
+  lines, 11.3 s per push guard it. The founder decided on 2026-09-10 to KEEP them
+  all on the push path and fix their dead assertions instead. Recorded so the
+  decision is not silently revisited.
 - **`docs/config/findings.md` does not exist** but is referenced by 12 files
   including one that ships, so the lifecycle's "cancel the row, leave a pointer"
   path terminates nowhere.

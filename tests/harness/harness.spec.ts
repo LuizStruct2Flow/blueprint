@@ -294,6 +294,19 @@ describe('harness — PATH shims (Andreas, Codex)', () => {
 })
 
 describe('harness — process ownership', () => {
+  it('BUG-059 retains a completed parent group and fails on its detached descendant', async () => {
+    await expect(
+      scenario('harness-descendant', async (s) => {
+        const r = await s.run(
+          'sh',
+          ['-c', 'sleep 30 </dev/null >/dev/null 2>&1 &'],
+          { cwd: s.workspace.root },
+        )
+        expect(r.code).toBe(0)
+      }),
+    ).rejects.toThrow(/left 1 process\(es\) running/)
+  })
+
   it('reaps a background process the scenario forgot', async () => {
     // The scenario deliberately leaves a daemon running. The harness must kill
     // it AND fail the scenario — orphaned supervisors at ppid 1 caused a real

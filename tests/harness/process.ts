@@ -45,6 +45,7 @@ export interface RunResult {
  */
 export class ProcessRegistry {
   private readonly live = new Set<ChildProcess>()
+  private readonly groups = new Set<number>()
 
   /**
    * Spawn a process and wait for it to exit.
@@ -66,6 +67,7 @@ export class ProcessRegistry {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     this.live.add(child)
+    if (child.pid !== undefined) this.groups.add(child.pid)
 
     let stdout = ''
     let stderr = ''
@@ -130,6 +132,7 @@ export class ProcessRegistry {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     this.live.add(child)
+    if (child.pid !== undefined) this.groups.add(child.pid)
     return child
   }
 
@@ -157,24 +160,30 @@ export class ProcessRegistry {
   async disposeAll(): Promise<number[]> {
     const survivors: number[] = []
 
-    for (const child of this.live) {
-      if (child.exitCode === null && child.signalCode === null) {
-        if (child.pid !== undefined) survivors.push(child.pid)
-        this.killGroup(child, 'SIGTERM')
+    for (const pgid of this.groups) {
+      try {
+        process.kill(-pgid, 0)
+        survivors.push(pgid)
+        process.kill(-pgid, 'SIGTERM')
+      } catch {
+        // The entire process group is already gone.
       }
     }
 
     if (survivors.length > 0) {
       // Give SIGTERM a moment, then insist.
       await new Promise((r) => setTimeout(r, 300))
-      for (const child of this.live) {
-        if (child.exitCode === null && child.signalCode === null) {
-          this.killGroup(child, 'SIGKILL')
+      for (const pgid of survivors) {
+        try {
+          process.kill(-pgid, 'SIGKILL')
+        } catch {
+          // SIGTERM reaped it.
         }
       }
     }
 
     this.live.clear()
+    this.groups.clear()
     return survivors
   }
 }

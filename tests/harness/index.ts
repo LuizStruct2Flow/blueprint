@@ -137,6 +137,7 @@ export async function scenario(
   const workspace = await createWorkspace(label)
   const registry = new ProcessRegistry()
   const canary = await RealStateCanary.capture(realStateTargets(REPO_ROOT))
+  const escapeToken = RealStateCanary.escapeToken(label)
 
   const home = await workspace.dir('home')
   const stateHome = await workspace.dir('state')
@@ -159,7 +160,7 @@ export async function scenario(
     stateHome,
     signalFile,
     feedLog,
-    escapeToken: RealStateCanary.escapeToken(label),
+    escapeToken,
 
     run(command, args, options) {
       return registry.run(command, args, {
@@ -215,7 +216,7 @@ export async function scenario(
   let teardownError: unknown
 
   try {
-    await canary.assertUnchanged()
+    await canary.assertUnchanged(escapeToken)
     await workspace.dispose()
     if (survivors.length > 0) {
       throw new Error(

@@ -75,6 +75,22 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
 })
 
 describe('harness — the real-state canary (BUG-030)', () => {
+  it('BUG-062 DETECTS its unique token appended to an activity feed', async () => {
+    const ws = await createWorkspace('canary-feed-token')
+    try {
+      const victim = join(ws.root, 'agent-activity.log')
+      await writeFile(victim, 'existing operator activity\n', 'utf8')
+      const token = RealStateCanary.escapeToken('harness-feed-token')
+      const canary = await RealStateCanary.capture([
+        { label: 'activity feed', path: victim },
+      ])
+      await writeFile(victim, `existing operator activity\n${token}\n`, 'utf8')
+      await expect(canary.assertUnchanged(token)).rejects.toThrow(/unique escape token/)
+    } finally {
+      await ws.dispose()
+    }
+  })
+
   it('DETECTS a mutation of a watched file', async () => {
     // The negative case. Point a canary at a fixture file, change it, and
     // require the canary to object. Without this, "the canary protects the

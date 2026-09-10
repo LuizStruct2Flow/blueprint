@@ -32,29 +32,87 @@ import { dirname, resolve, sep } from 'node:path'
  *    AGENT_SIGNAL_FILE and AGENT_STATE_HOME, and codex-signal-watch.sh exports
  *    AGENT_SIGNAL_FILE into every dispatched wake — which is why BUG-046 struck
  *    during a Codex review and not during ordinary local runs.
+ *
+ * EACH ONE DECLARES THE KIND OF VALUE IT HOLDS, because the containment check
+ * below is only meaningful for some of them:
+ *
+ *   'path'      one filesystem path. A deliberate override must land inside the
+ *               scenario's own workspace.
+ *   'path-list' a COLON-SEPARATED list of paths. git accepts several of these,
+ *               and validating the joined string as one path rejects every
+ *               legitimate multi-element value.
+ *   'opaque'    a name, a label or a count. There is nothing to contain: these
+ *               redirect no write and name nothing on disk. They are forbidden
+ *               because INHERITING one silently mislabels or misconfigures a
+ *               fixture, not because setting one can reach outside — so the
+ *               right check for them is none, and a containment check is worse
+ *               than none. It rejects `AGENT_PERSONA=Vitali` with a message
+ *               about paths, which is the BUG-041/BUG-042 misdirection class
+ *               (a guard indicting the thing it was pointed at) reintroduced
+ *               inside the guard. tests/codex-persona-label and tests/roster
+ *               deal in persona labels and would have hit exactly that.
+ *
+ * The kinds and the list are ONE declaration, not two: FORBIDDEN_ENV is derived
+ * from it. A second hand-written copy is how BUG-051, BUG-053 and BUG-061 each
+ * went stale — an enumeration cannot see what it was never told about.
  */
-export const FORBIDDEN_ENV = [
+const FORBIDDEN_ENV_KIND = {
   // git repo pointers (BUG-014 / BUG-047)
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_INDEX_FILE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_CEILING_DIRECTORIES',
+  GIT_DIR: 'path',
+  GIT_WORK_TREE: 'path',
+  GIT_INDEX_FILE: 'path',
+  GIT_OBJECT_DIRECTORY: 'path',
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: 'path-list',
+  GIT_CEILING_DIRECTORIES: 'path-list',
   // git identity/config resolution — a fixture must not read the developer's
   // real config, and must not be able to write it either.
-  'GIT_CONFIG',
-  'GIT_CONFIG_GLOBAL',
-  'GIT_CONFIG_SYSTEM',
-  'GIT_CONFIG_COUNT',
+  GIT_CONFIG: 'path',
+  GIT_CONFIG_GLOBAL: 'path',
+  GIT_CONFIG_SYSTEM: 'path',
+  // A COUNT of the GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> pairs git should
+  // apply in memory. It writes nothing and points at nothing.
+  GIT_CONFIG_COUNT: 'opaque',
   // blueprint coordination state (BUG-046 / BUG-030)
-  'AGENT_SIGNAL_FILE',
-  'AGENT_STATE_HOME',
-  'AGENT_FEED_LOG',
-  'AGENT_PERSONA',
-  'AGENT_BACKING',
-  'AGENT_GATE_PROFILE',
-] as const
+  AGENT_SIGNAL_FILE: 'path',
+  AGENT_STATE_HOME: 'path',
+  AGENT_FEED_LOG: 'path',
+  // A persona NAME, a backing-agent LABEL, and a gate-profile NAME.
+  AGENT_PERSONA: 'opaque',
+  AGENT_BACKING: 'opaque',
+  AGENT_GATE_PROFILE: 'opaque',
+} as const satisfies Record<string, 'path' | 'path-list' | 'opaque'>
+
+export type ForbiddenVar = keyof typeof FORBIDDEN_ENV_KIND
+
+export const FORBIDDEN_ENV = Object.keys(FORBIDDEN_ENV_KIND) as readonly ForbiddenVar[]
+
+/**
+ * Does this path, resolved PHYSICALLY, land inside the workspace?
+ *
+ * The nearest existing ancestor is what gets resolved: the path itself usually
+ * does not exist yet — a fixture names where it wants git to write — and a
+ * symlink anywhere along the existing part is exactly the redirect this is
+ * here to catch (the same reasoning as ScopedFs.resolve, BUG-058).
+ */
+function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean {
+  const target = resolve(value)
+  let ancestor = target
+  for (;;) {
+    try {
+      const physicalAncestor = realpathSync(ancestor)
+      const suffix = target.slice(ancestor.length).replace(/^[/\\]+/, '')
+      const physicalTarget = resolve(physicalAncestor, suffix)
+      return (
+        physicalTarget === workspaceRoot ||
+        physicalTarget.startsWith(workspaceRoot + sep)
+      )
+    } catch {
+      const parent = dirname(ancestor)
+      if (parent === ancestor) return false
+      ancestor = parent
+    }
+  }
+}
 
 /**
  * Build the environment for a fixture child process.
@@ -83,33 +141,29 @@ export function fixtureEnv(
     if (value === undefined) {
       delete env[key]
     } else {
-      if ((FORBIDDEN_ENV as readonly string[]).includes(key)) {
+      const kind = FORBIDDEN_ENV_KIND[key as ForbiddenVar]
+      if (kind !== undefined && kind !== 'opaque') {
+        // `/dev/null` is the standard read-only way to suppress a developer's
+        // real git config, and it is outside every workspace by definition.
         const isNullGitConfig =
           (key === 'GIT_CONFIG_GLOBAL' || key === 'GIT_CONFIG_SYSTEM') &&
           value === '/dev/null'
-        let insideWorkspace = false
-        if (workspaceRoot !== undefined) {
-          let ancestor = resolve(value)
-          for (;;) {
-            try {
-              const physicalAncestor = realpathSync(ancestor)
-              const suffix = resolve(value).slice(ancestor.length).replace(/^[/\\]+/, '')
-              const physicalValue = resolve(physicalAncestor, suffix)
-              insideWorkspace =
-                physicalValue === workspaceRoot ||
-                physicalValue.startsWith(workspaceRoot + sep)
-              break
-            } catch {
-              const parent = dirname(ancestor)
-              if (parent === ancestor) break
-              ancestor = parent
-            }
+        // A list is validated ELEMENT BY ELEMENT. Joined, it is not a path, so
+        // a value with two perfectly contained entries would be refused.
+        const paths =
+          kind === 'path-list' ? value.split(':').filter(Boolean) : [value]
+        for (const path of paths) {
+          if (isNullGitConfig) continue
+          if (
+            workspaceRoot !== undefined &&
+            resolvesInsideWorkspace(path, workspaceRoot)
+          ) {
+            continue
           }
-        }
-        if (!isNullGitConfig && !insideWorkspace) {
           throw new Error(
             `Refusing forbidden environment override ${key}=${value}: ` +
-              `the path must be inside the scenario workspace ${workspaceRoot ?? '(missing)'}`,
+              `the path ${path} must be inside the scenario workspace ` +
+              `${workspaceRoot ?? '(missing)'}`,
           )
         }
       }

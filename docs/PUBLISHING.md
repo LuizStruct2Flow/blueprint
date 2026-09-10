@@ -1,9 +1,16 @@
 # PUBLISHING — runbook for first public push
 
-> **This file is gitignored** (under `docs/`). It exists only on the
-> founder's machine. Step-by-step process for taking a struct2flow
-> project from local development to a public GitHub repository without
-> leaking AI configurations or project-specific personal data.
+> **This file is TRACKED, and it SHIPS to every derived project.** It is
+> framework content: the process for taking a struct2flow project from local
+> development to a public GitHub repository without leaking AI configurations
+> or project-specific personal data.
+>
+> **It previously claimed to be gitignored and founder-only. It never was** —
+> `git check-ignore` finds no rule and `git archive HEAD` contains it. That
+> mattered because §2 asks you to write real names and emails into the grep
+> below: a reader who believed the header would have put personal data into a
+> tracked file and published it, which is the leak this runbook exists to
+> prevent. Corrected 2026-09-10.
 >
 > Read this end-to-end before the first public push. Re-read sections
 > 4 and 6 before every subsequent push.
@@ -65,11 +72,16 @@ secrets, watchlists, etc.) on top.
 
 ## 2. Confirm nothing personal lives in tracked content
 
+**Do NOT edit the alternation in place — this file is tracked.** Pass your
+markers on the command line, or keep them in an untracked file. Committing your
+own names here is the leak you are checking for.
+
 ```bash
-# Search every tracked file for personal markers — REPLACE the alternation
-# below with names/companies/emails that identify the founder or the
-# project's customers.
-git ls-files | xargs grep -l -E '<FoundedName>|<Employer1>|<Employer2>|<personal@example.com>' 2>/dev/null || echo "clean"
+# Type your markers INLINE. Nothing personal is saved to disk.
+git ls-files | xargs grep -l -E 'YourName|YourEmployer|you@example.com' 2>/dev/null || echo "clean"
+
+# Or keep the list untracked and out of the tree entirely:
+#   git ls-files | xargs grep -l -f ~/.config/struct2flow/personal-markers 2>/dev/null || echo "clean"
 ```
 
 Expected output: `clean` — or a path that needs fixing.

@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFile, writeFile, stat } from 'node:fs/promises'
+import { readFile, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
 import { RealStateCanary } from './canary.js'
@@ -191,6 +191,15 @@ describe('harness — workspace teardown (BUG-049)', () => {
 })
 
 describe('harness — filesystem writes cannot escape (Andreas, Codex)', () => {
+  it('BUG-058 REFUSES a write through an in-workspace symlink to the outside', async () => {
+    await scenario('fs-escape-symlink', async (s) => {
+      await symlink('/tmp', s.workspace.path('escape-link'))
+      await expect(s.fs.write('escape-link/escaped.txt', 'nope')).rejects.toThrow(
+        /Refusing to write outside/,
+      )
+    })
+  })
+
   // The gap Andreas found: the first version enforced isolation for processes
   // and merely asked for it politely for files. writeFile is one import away
   // while spawning is not, so the weaker standard governed the easier mistake.

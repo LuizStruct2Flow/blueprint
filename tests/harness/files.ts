@@ -29,7 +29,7 @@
  * it was worth more than the migration it was asked to do.
  */
 
-import { mkdir, writeFile, readFile, chmod, stat, rm, copyFile } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, chmod, stat, rm, copyFile, realpath } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
 
 export class OutsideWorkspaceError extends Error {
@@ -58,14 +58,34 @@ export class ScopedFs {
   constructor(private readonly root: string) {}
 
   /** Resolve a path and prove it stays inside. Public so specs can assert on it. */
-  resolve(relOrAbs: string): string {
-    const target = resolve(this.root, relOrAbs)
-    // `startsWith(root + sep)` and not `startsWith(root)`: the latter would
-    // accept a sibling directory whose name merely begins with the root's.
+  private assertLexicalContainment(target: string): void {
     if (target !== this.root && !target.startsWith(this.root + sep)) {
       throw new OutsideWorkspaceError(target, this.root)
     }
-    return target
+  }
+
+  /** Resolve the nearest existing ancestor so a symlink cannot redirect a write. */
+  async resolve(relOrAbs: string): Promise<string> {
+    const target = resolve(this.root, relOrAbs)
+    // `startsWith(root + sep)` and not `startsWith(root)`: the latter would
+    // accept a sibling directory whose name merely begins with the root's.
+    this.assertLexicalContainment(target)
+
+    let ancestor = target
+    for (;;) {
+      try {
+        const physicalAncestor = await realpath(ancestor)
+        const suffix = target.slice(ancestor.length).replace(/^[/\\]+/, '')
+        const physicalTarget = resolve(physicalAncestor, suffix)
+        this.assertLexicalContainment(physicalTarget)
+        return physicalTarget
+      } catch (error) {
+        if (error instanceof OutsideWorkspaceError) throw error
+        const parent = dirname(ancestor)
+        if (parent === ancestor) throw error
+        ancestor = parent
+      }
+    }
   }
 
   async write(
@@ -73,7 +93,7 @@ export class ScopedFs {
     content: string,
     options: { mode?: number } = {},
   ): Promise<string> {
-    const target = this.resolve(relPath)
+    const target = await this.resolve(relPath)
     await mkdir(dirname(target), { recursive: true })
     await writeFile(target, content, 'utf8')
     if (options.mode !== undefined) await chmod(target, options.mode)
@@ -81,12 +101,12 @@ export class ScopedFs {
   }
 
   async read(relPath: string): Promise<string> {
-    return readFile(this.resolve(relPath), 'utf8')
+    return readFile(await this.resolve(relPath), 'utf8')
   }
 
   async exists(relPath: string): Promise<boolean> {
     try {
-      await stat(this.resolve(relPath))
+      await stat(await this.resolve(relPath))
       return true
     } catch {
       return false
@@ -94,23 +114,23 @@ export class ScopedFs {
   }
 
   async chmod(relPath: string, mode: number): Promise<void> {
-    await chmod(this.resolve(relPath), mode)
+    await chmod(await this.resolve(relPath), mode)
   }
 
   /** The permission bits, as the octal string the shell suites compare on. */
   async mode(relPath: string): Promise<string> {
-    const s = await stat(this.resolve(relPath))
+    const s = await stat(await this.resolve(relPath))
     return (s.mode & 0o7777).toString(8)
   }
 
   async mkdirp(relPath: string): Promise<string> {
-    const target = this.resolve(relPath)
+    const target = await this.resolve(relPath)
     await mkdir(target, { recursive: true })
     return target
   }
 
   async rm(relPath: string): Promise<void> {
-    await rm(this.resolve(relPath), { recursive: true, force: true })
+    await rm(await this.resolve(relPath), { recursive: true, force: true })
   }
 
   /**
@@ -121,7 +141,7 @@ export class ScopedFs {
    * not. Reading real files is fine; writing them is the defect.
    */
   async copyIn(absSource: string, relDest: string): Promise<string> {
-    const target = this.resolve(relDest)
+    const target = await this.resolve(relDest)
     await mkdir(dirname(target), { recursive: true })
     await copyFile(absSource, target)
     return target

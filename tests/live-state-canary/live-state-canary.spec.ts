@@ -65,12 +65,27 @@ describe('TASK-021 §5.5 — the live-state canaries cannot pass vacuously', () 
       const r = await resolveLive(s, 'bp_state_root', join(REPO_ROOT, 'scripts'))
       expect(r.code).toBe(0)
       expect(r.stdout.trim()).toBe(REPO_ROOT)
-      // …and it really is a project root, not merely a directory that existed
-      const marker = await readFile(join(REPO_ROOT, '.blueprint-root'), 'utf8').then(
-        () => true,
-        () => false,
-      )
-      expect(marker).toBe(true)
+
+      // …and it really is a project root, not merely a directory that existed.
+      //
+      // ANY of the three accepted terminators, not `.blueprint-root`. This
+      // suite SHIPS, so it also runs inside every derived project — where
+      // `.blueprint-root` is deliberately absent (it is export-ignore'd, and
+      // its whole job is to distinguish the blueprint from its descendants).
+      // The first version asserted that one file and failed the derived
+      // project's own gate under tests/bootstrap-gate #3, which is precisely
+      // the check that exists to catch a suite that only works here.
+      const terminators = ['.blueprint-root', '.blueprint-source', '.git']
+      const found: string[] = []
+      for (const t of terminators) {
+        const ok = await readFile(join(REPO_ROOT, t), 'utf8').then(
+          () => true,
+          // a `.git` DIRECTORY is EISDIR on read, which is still a terminator
+          (e: NodeJS.ErrnoException) => e.code === 'EISDIR',
+        )
+        if (ok) found.push(t)
+      }
+      expect(found, `no accepted terminator at ${REPO_ROOT}`).not.toEqual([])
     })
   })
 

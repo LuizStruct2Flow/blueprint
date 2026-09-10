@@ -134,9 +134,9 @@ tests/bootstrap-gate/              export-ignore
 #
 # THE PHASE-2 TRANSITION IS THEREFORE ALL-OR-NOTHING, and deliberately awkward
 # to half-do. Migrating the first `both`-tier suite means, in ONE change:
-#   1. delete the four export-ignore lines below,
-#   2. add package.json, tsconfig.json and vitest.config.ts to MANAGED_FILES,
-#      or a pulling project gets specs it cannot run,
+#   1. delete the export-ignore lines below,
+#   2. add package.json, package-lock.json, tsconfig.json and vitest.config.ts
+#      to MANAGED_FILES, or a pulling project gets specs it cannot run,
 #   3. teach tests/bootstrap-gate to `npm ci` before the nested gate, or a
 #      freshly bootstrapped project fails its own first push,
 #   4. land BUG-045 — the lockfile removes osv-scanner's "No package sources
@@ -144,6 +144,15 @@ tests/bootstrap-gate/              export-ignore
 #      MEDIUM+ only.
 # tests/manifest enforces (1) and (2) against each other. (3) and (4) are rowed.
 package.json                       export-ignore
+# BUG-061. This one SHIPPED ALONE for the whole of phase 1: it was never added
+# to the list above, and nothing noticed because tests/manifest computed the
+# toolchain from a hand-written subset that also omitted it. The lockfile is the
+# file that makes `npm ci` possible, so shipping it without package.json is
+# strictly worse than shipping neither — .github/workflows/security.yml is
+# managed, its `ts-tests` job runs `npm ci`, and in a derived project that job
+# died on `ENOENT ... package.json` on the project's first push, on a job it
+# never wrote. tests/manifest #2c now checks the WHOLE set for partial ship.
+package-lock.json                  export-ignore
 tsconfig.json                      export-ignore
 vitest.config.ts                   export-ignore
 tests/harness/                     export-ignore

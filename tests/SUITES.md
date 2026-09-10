@@ -228,6 +228,7 @@ run, so the number that is meant to reach zero is visible rather than remembered
 | `pull-exec-bit` | Remove the mode-preservation block from `scripts/lib/placeholders.sh`, so a pulled hook lands without its executable bit | `#1` — the spec goes red on the mode assertion, observing 600 where 755 is required, which is the BUG-008 defect itself |
 | `template-source` | Delete the `project_config_overview.md         export-ignore` line from `.gitattributes` **and commit it** — `git archive` reads that file from the commit, not the working tree, so an uncommitted deletion changes nothing and both runners stay green | `#2` — the spec goes red exactly where the shell runner did, reporting `project_config_overview.md` as shipping, which is BUG-009 itself |
 
+| `bootstrap-identity` | Replace the `unset AGENT_SIGNAL_FILE AGENT_STATE_HOME` in `scripts/new-project.sh`'s seed subshell with a no-op, so the seeded baton is published over whatever the caller had | `#6` — both runners go red reporting that bootstrap REPUBLISHED the caller's live baton, which is BUG-046 itself |
 <!-- RETIRED-SHELL-RUNNERS:END -->
 
 <!-- BLUEPRINT:END -->

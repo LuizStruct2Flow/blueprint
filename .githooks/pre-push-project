@@ -794,19 +794,11 @@ fi
 
 # A-14 — bootstrap must INHERIT the operator's git identity, never write one,
 # and must fail before creating anything when no identity is resolvable.
-if [ -f tests/bootstrap-identity/test.sh ]; then
-  _st_bootstrap_identity(){
-    bash tests/bootstrap-identity/test.sh || {
-      echo "❌ tests/bootstrap-identity/test.sh failed."
-      echo "   Bootstrap must inherit the git author identity (never hardcode one)"
-      echo "   and must not leave a half-bootstrapped directory behind."
-      return 1
-    }
-  }
-  pipe_stage "bootstrap-identity" _st_bootstrap_identity
-else
-  pipe_skip "bootstrap-identity" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
+# Equivalence proven by mutation first: replacing the
+# `unset AGENT_SIGNAL_FILE AGENT_STATE_HOME` in new-project.sh's seed subshell
+# turns case 6 red in both runners, reporting that bootstrap REPUBLISHED the
+# caller's live baton — BUG-046 itself.
 
 # BUG-028 — the end-to-end one. The three suites above assert what the archive
 # CONTAINS; none of them ever ran the thing a new project runs first. So a

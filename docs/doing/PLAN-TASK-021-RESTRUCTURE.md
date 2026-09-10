@@ -62,19 +62,27 @@ is split, which I would not recommend.
 
 ## 0.1 §0 RESOLVED — founder decision + verified mechanism (2026-09-10)
 
-**Decision: the root file is a STUB, the content lives in `scaffolding/`.** Two of
-the three files support that. The third does not, and it is the exception rather
-than a reason to abandon the approach.
+> **SUPERSEDED in part, 2026-09-10.** This section resolved §0 as *"the root file
+> is a stub"* and counted two of three files as supporting it. Cross-provider
+> review knocked out the CI row, and the founder re-decided. **The current answer
+> is decision 1 in the ANSWERED table: a named `ROOT_SHIPPED` class.** The
+> mechanism research below is still accurate and still load-bearing — it is *why*
+> the stub works for one file and cannot work for the other two — so it stays.
+> Read the verdict row, not the old conclusion.
 
 | File | Stub viable | Mechanism, verified |
 |---|---|---|
 | `CLAUDE.md` | **YES** | A root `CLAUDE.md` containing `@scaffolding/CLAUDE.md`. The `@path` import is **expanded at launch and treated identically to inline content** — not lazily, not summarised. Paths resolve relative to the FILE CONTAINING the import, so `@scaffolding/CLAUDE.md` from the root works. Recursive imports allowed to 4 hops. |
-| `.github/workflows/security.yml` | **YES** | The root workflow stays as GitHub's entry point and `run:`s a script under `scaffolding/`. A workflow may invoke any path in the checkout; only the workflow FILE is root-pinned. |
-| `.claude/settings.json` | **NO** | Settings are plain JSON with **no extends, include or import of any kind**, and a settings file may only live in a `.claude/` directory. There is no pointer mechanism to use. |
+| `.github/workflows/security.yml` | **NO** — *revised* | The root workflow can `run:` a script under `scaffolding/`, and that much is true. But a workflow is not shell logic: it declares triggers, permissions, containers, pinned actions, caches, job-level conditions and multiple jobs, and none of that can be delegated to a YAML file outside `.github/workflows/`. A reusable workflow must live there too, so it does not move the boundary either. A "stub" retaining all GitHub-specific structure and delegating only `run:` bodies IS coherent — but it is not "content lives in scaffolding", it is a root shipping artefact with a smaller surface. Call it what it is. |
+| `.claude/settings.json` | **NO** | Settings are plain JSON with **no extends, include or import of any kind**, and a settings file may only live in a `.claude/` directory. There is no pointer mechanism to use. **And the delivery gap is worse than the pointer gap:** Stage B bootstraps from `git archive HEAD scaffolding` and manages only `scaffolding/`, so a file left at root participates in NEITHER path. New projects would not receive it and existing projects could not pull it. It is not merely un-stubbable; it is undeliverable without an explicit second archive path. |
 
-**Therefore `.claude/settings.json` stays at the repository root and ships from
-there.** It is the one root-anchored shipping file, not a category — which is a
-far smaller reversal of §2's two-bucket rule than the map's option (a) implied.
+**Therefore two files, not one, are root-anchored AND shipping — which makes it a
+class.** The distinguishing property is not "we could not find a pointer": it is
+that the tool reading the file hardcodes the repository root, so location cannot
+determine propagation for these files no matter where we put them. That is a
+delivery mechanism, not the third audience bucket §2 rejected — but it needs to be
+a NAMED, short, explicit list, because a class nobody enumerated is how the third
+bucket returns by drift instead of by decision.
 
 **Do NOT solve it with two copies.** `permissions.allow` lists MERGE across all
 active settings files rather than overriding, so a root copy and a

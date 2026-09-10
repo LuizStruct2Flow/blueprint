@@ -46,6 +46,7 @@ import { describe, it, expect } from 'vitest'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { inspect } from '../manifest/manifest.js'
 
 /** Hermetic identity: bootstrap REFUSES without one (A-14). */
 const IDENTITY = {
@@ -436,14 +437,22 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
         'pull found work to do on a zero-second-old bootstrap — bootstrap and pull disagree about what the project should contain',
       ).toContain('Nothing to pull')
 
-      const manifest = await s.run('bash', ['tests/manifest/test.sh'], {
-        cwd: target,
-        timeoutMs: 300_000,
-      })
+      // TASK-018: tests/manifest is TypeScript now, so its checks are IMPORTED
+      // and aimed at the bootstrapped tree rather than driven as a subprocess
+      // inside it. That is why `inspect` takes its root — the alternative was
+      // `npm ci` in a fixture on every push, for a control that reads files.
+      const manifest = await inspect(target, s.run)
+      const report = manifest.map((c) => `${c.ok ? '  ok — ' : 'FAIL: '}${c.message}`).join('\n')
       expect(
-        manifest.code,
-        `the derived project's own tests/manifest fails after a full pull — its suites and its gate are out of step:\n${manifest.output}`,
-      ).toBe(0)
+        manifest.filter((c) => !c.ok).map((c) => c.id),
+        `the derived project's own tests/manifest fails after a full pull — its suites and its gate are out of step:\n${report}`,
+      ).toEqual([])
+      // A DERIVED PROJECT ANSWERS FEWER CHECKS THAN THE BLUEPRINT, and which
+      // ones is the point: #2b and #2c are about an export boundary only a
+      // blueprint has. Asserting the id set stops "manifest passed" from
+      // meaning "manifest ran over nothing", which is the shape #7 exists for
+      // one level down.
+      expect(manifest.map((c) => c.id), report).toEqual(['#1', '#1b', '#4', '#5', '#7', '#7b'])
     })
   })
 

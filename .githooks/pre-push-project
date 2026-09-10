@@ -445,20 +445,20 @@ fi
 # The manifest is the control that makes every stage above checkable (BUG-005 /
 # Codex F1). Without it, omitting a pipe_stage block is a silent, one-line
 # coverage cut — which is how signal-dispatch and drift-in-blueprint went
-# unnoticed. ~0.1 s.
-if [ -f tests/manifest/test.sh ]; then
-  _st_manifest(){
-    bash tests/manifest/test.sh || {
-      echo "❌ tests/manifest/test.sh failed (BUG-005)."
-      echo "   Every runner under tests/ must belong to a suite, be invoked here"
-      echo "   and in CI, and the export boundary must behave as .gitattributes says."
-      return 1
-    }
-  }
-  pipe_stage "manifest · BUG-005" _st_manifest
-else
-  pipe_skip "manifest · BUG-005" "suite absent"
-fi
+# unnoticed.
+#
+# MIGRATED to TypeScript (TASK-018). The shell runner is gone, so this stage is
+# gone with it — the suite now runs inside the single vitest batch at the end of
+# this file and still renders as its own line, with its own timing, through
+# pipe_stage_report. Its equivalence was proven before the shell runner was
+# retired, and not by reading: twenty-one perturbed trees were built and BOTH
+# implementations run over each one, with the per-check verdict sets compared
+# mechanically. They agreed everywhere, and the single divergence found was a
+# defect in the SHELL version (BUG-074), isolated as its own case.
+#
+# Leaving a `[ -f … ]` guard here would be worse than deleting it: it would
+# pipe_skip "suite absent" forever, which reads as a deliberate exclusion rather
+# than as a completed migration.
 
 # BUG-055 — the manifest proves the vitest bridge is INVOKED; this proves it
 # WORKS. The bridge only ever ran by hand, where GIT_DIR is absent. Under a real

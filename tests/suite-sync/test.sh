@@ -65,13 +65,12 @@ git_c(){ git -C "$1" -c user.email=t@t.io -c user.name=T "${@:2}"; }
 # ===========================================================================
 BP="$WORK/bp"
 mkdir -p "$BP/docs" "$BP/scripts" "$BP/.githooks" \
-         "$BP/tests/alpha" "$BP/tests/beta" "$BP/tests/bponly" "$BP/tests/manifest"
+         "$BP/tests/alpha" "$BP/tests/beta" "$BP/tests/bponly"
 
 printf '# CLAUDE for {{PROJECT_NAME}}\n' > "$BP/CLAUDE.md"
 printf '# DoD\n'                         > "$BP/docs/DoD.md"
 cp "$ROOT/scripts/blueprint" "$BP/scripts/blueprint"
 cp -r "$ROOT/scripts/lib" "$BP/scripts/lib"
-cp "$ROOT/tests/manifest/test.sh" "$BP/tests/manifest/test.sh"
 touch "$BP/.blueprint-root"
 
 printf 'echo alpha v1\n'                     > "$BP/tests/alpha/test.sh"
@@ -102,7 +101,7 @@ bp_hook(){
     printf '# BLUEPRINT:END\n'
   } > "$BP/.githooks/pre-push-project"
 }
-bp_hook 1 alpha beta manifest
+bp_hook 1 alpha beta
 
 git_c "$BP" init -q
 git_c "$BP" add -A
@@ -250,8 +249,7 @@ else
 fi
 
 # ===========================================================================
-# 5. A SUITE THE BLUEPRINT DROPS IS LEFT IN PLACE — and tests/manifest is what
-#    announces it.
+# 5. A SUITE THE BLUEPRINT DROPS IS LEFT IN PLACE, AND ITS STAGE GOES WITH IT.
 #
 #    There is deliberately NO delete path. The information that distinguishes
 #    "the blueprint deleted this" from "the project wrote this" does not exist
@@ -260,33 +258,36 @@ fi
 #    #4 fails the derived push on a suite the gate does not invoke.
 #    Fail-closed, by name, with nothing new to build.
 #
-#    TASK-020 moved which case says so, and made the claim stronger rather than
-#    weaker. It used to be #1, "a suite directory with no row in SUITES.md" —
-#    which detected the drop only because the blueprint also deleted the row. The
-#    row is gone; what the blueprint deletes now is the suite's STAGE, and a
-#    runner nothing invokes is exactly what #4 refuses. The assertion below pins
-#    both halves: `alpha` is named and `beta`, still invoked, is not.
+#    TASK-018 SPLIT THAT CLAIM IN TWO, AND THIS SUITE KEEPS ONLY ITS HALF.
+#
+#    This used to copy tests/manifest's shell runner into the fixture and grep
+#    its `#4` line for `alpha`. tests/manifest is TypeScript now and cannot be
+#    driven out of a shell fixture — but the split is an improvement rather than
+#    a concession, because reaching across into another suite's runner to prove
+#    that suite's assertion was always the wrong shape. What tests/suite-sync
+#    owns is what PULL does: the orphan survives, and the stage that invoked it
+#    does not. That the manifest then names it — `alpha` named, `beta` still
+#    invoked and NOT named — is asserted where the check lives, in
+#    tests/manifest/manifest.spec.ts, "#4 a suite whose gate stage is DELETED is
+#    named, and the suites still wired in are not".
+#
+#    Both halves still execute on every push. Neither is inferred from the other.
 # ===========================================================================
 git_c "$BP" rm -q -r tests/alpha
-bp_hook 1 beta manifest
+bp_hook 1 beta
 git_c "$BP" add -A
 git_c "$BP" commit -qm "drop alpha"
 ( cd "$P" && bash "$BP/scripts/blueprint" pull --yes ) </dev/null >/dev/null 2>&1
 
+hook5="$(cat "$P/.githooks/pre-push-project" 2>/dev/null || true)"
 if [ ! -f "$P/tests/alpha/test.sh" ]; then
   fail "#5 pull deleted a suite the blueprint dropped — it cannot tell that from deleting a project's own"
+elif printf '%s\n' "$hook5" | grep -q 'bash tests/alpha/test.sh'; then
+  fail "#5 the dropped suite's stage survived the pull — the gate would still invoke a suite the blueprint no longer ships"
+elif ! printf '%s\n' "$hook5" | grep -q 'bash tests/beta/test.sh'; then
+  fail "#5 the pull removed MORE than the dropped suite's stage — 'beta' is still shipped and still has to be invoked"
 else
-  man="$( cd "$P" && bash tests/manifest/test.sh 2>&1 )"
-  man4="$(printf '%s\n' "$man" | grep '#4 ' || true)"
-  if ! printf '%s\n' "$man4" | grep -q 'alpha'; then
-    fail "#5 the dropped suite stays but nothing announces it — tests/manifest #4 did not name 'alpha':
-$(printf '%s\n' "$man4" | sed 's/^/      /')"
-  elif printf '%s\n' "$man4" | grep -q 'beta'; then
-    fail "#5 tests/manifest #4 also named 'beta', which the gate DOES invoke — the check is firing on everything rather than on the orphan:
-$(printf '%s\n' "$man4" | sed 's/^/      /')"
-  else
-    pass "#5 the dropped suite stays, and tests/manifest #4 fails the derived push naming it and not the suites still wired in"
-  fi
+  pass "#5 the dropped suite's files stay while its gate stage goes, leaving exactly the orphan tests/manifest #4 refuses"
 fi
 
 # ===========================================================================
@@ -311,7 +312,7 @@ mkdir -p "$P6/.githooks"
   printf 'echo "my project guard"\n'
 } > "$P6/.githooks/pre-push-project"
 
-bp_hook 2 beta manifest
+bp_hook 2 beta
 git_c "$BP" add -A
 git_c "$BP" commit -qm "hook v2"
 ( cd "$P6" && bash "$BP/scripts/blueprint" pull --yes ) </dev/null >/dev/null 2>&1

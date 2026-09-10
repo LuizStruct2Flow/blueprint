@@ -67,13 +67,16 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
     }
   })
 
-  it('ACCEPTS a forbidden variable that is a name, a label or a count', async () => {
+  it('ACCEPTS a forbidden variable that is a name or a label', async () => {
     // The containment rule is only meaningful for values that are paths.
-    // AGENT_PERSONA is a persona name, AGENT_BACKING a backing-agent label,
-    // AGENT_GATE_PROFILE a profile name and GIT_CONFIG_COUNT a number — none of
-    // them names anything on disk, and refusing them "because the path must be
-    // inside the workspace" is a guard blaming a value for a property it never
-    // had. tests/codex-persona-label and tests/roster deal in exactly these.
+    // AGENT_PERSONA is a persona name, AGENT_BACKING a backing-agent label and
+    // AGENT_GATE_PROFILE a profile name — none of them names anything on disk,
+    // and refusing them "because the path must be inside the workspace" is a
+    // guard blaming a value for a property it never had. tests/codex-persona-label
+    // and tests/roster deal in exactly these.
+    //
+    // GIT_CONFIG_COUNT USED TO BE IN THIS LIST, on the same reasoning, and the
+    // case below is why it is not: a count is not a name, it is a switch.
     const ws = await createWorkspace('forbidden-env-opaque')
     try {
       const env = fixtureEnv(
@@ -81,17 +84,101 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
           AGENT_PERSONA: 'Vitali',
           AGENT_BACKING: 'Codex',
           AGENT_GATE_PROFILE: 'bootstrap',
-          GIT_CONFIG_COUNT: '2',
+          // Declared 'inert': the identity a bootstrap fixture commits with.
+          GIT_AUTHOR_NAME: 'T',
         },
         ws.root,
       )
       expect(env.AGENT_PERSONA).toBe('Vitali')
       expect(env.AGENT_BACKING).toBe('Codex')
       expect(env.AGENT_GATE_PROFILE).toBe('bootstrap')
-      expect(env.GIT_CONFIG_COUNT).toBe('2')
+      expect(env.GIT_AUTHOR_NAME).toBe('T')
     } finally {
       await ws.dispose()
     }
+  })
+
+  it('BUG-060 REFUSES the GIT_CONFIG_* switches, and every undeclared GIT_*/AGENT_*', async () => {
+    // GIT_CONFIG_COUNT was classified 'opaque' — a number, redirecting no write
+    // and naming nothing on disk. True of the count ALONE, and it is never
+    // alone: it activates GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n>, which were in
+    // no list and therefore went through no check, so a caller could set
+    // core.hooksPath — the A-22 vector, produced from inside a test as BUG-047 —
+    // straight past the containment model. The next case proves the injection
+    // works on this machine's git; these are the refusals.
+    const ws = await createWorkspace('forbidden-env-git-config')
+    const carried = ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0']
+    const original = Object.fromEntries(carried.map((k) => [k, process.env[k]]))
+    try {
+      expect(() => fixtureEnv({ GIT_CONFIG_COUNT: '2' }, ws.root)).toThrow(
+        /Refusing forbidden environment override GIT_CONFIG_COUNT/,
+      )
+      expect(() =>
+        fixtureEnv(
+          {
+            GIT_CONFIG_COUNT: '1',
+            GIT_CONFIG_KEY_0: 'core.hooksPath',
+            // Contained, and still refused: the harness does not model what a
+            // config KEY does with its value, so "the value is inside the
+            // workspace" is not the question. include.path with a contained
+            // file would be contained and would still pull in whatever that
+            // file says.
+            GIT_CONFIG_VALUE_0: join(ws.root, 'hooks'),
+          },
+          ws.root,
+        ),
+      ).toThrow(/GIT_CONFIG_COUNT/)
+      // The pairs are inert without a switch — but "inert unless someone flips
+      // the other switch" is not a property to leave undeclared.
+      expect(() =>
+        fixtureEnv({ GIT_CONFIG_KEY_0: 'include.path' }, ws.root),
+      ).toThrow(/Refusing UNDECLARED environment override GIT_CONFIG_KEY_0/)
+      expect(() =>
+        fixtureEnv({ GIT_CONFIG_PARAMETERS: "'core.hooksPath'='/tmp/evil'" }, ws.root),
+      ).toThrow(/Refusing forbidden environment override GIT_CONFIG_PARAMETERS/)
+      // The same shape one level up: an unclassified name in either namespace
+      // was previously copied into the child untouched. GIT_SSH_COMMAND is one
+      // of many — the point is that no list has to name it.
+      expect(() =>
+        fixtureEnv({ GIT_SSH_COMMAND: 'sh -c "touch /tmp/pwned"' }, ws.root),
+      ).toThrow(/Refusing UNDECLARED environment override GIT_SSH_COMMAND/)
+
+      // And INHERITED pairs are scrubbed, so a fixture that sets a count of its
+      // own finds nothing to activate.
+      process.env.GIT_CONFIG_COUNT = '1'
+      process.env.GIT_CONFIG_KEY_0 = 'core.hooksPath'
+      process.env.GIT_CONFIG_VALUE_0 = '/tmp/evil-hooks'
+      const env = fixtureEnv({}, ws.root)
+      for (const k of carried) {
+        expect(env[k], `${k} must not reach a fixture child`).toBeUndefined()
+      }
+    } finally {
+      for (const k of carried) {
+        if (original[k] === undefined) delete process.env[k]
+        else process.env[k] = original[k]
+      }
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-060 the injection those refusals prevent is REAL, on this git', async () => {
+    // Not a thought experiment, and not an assertion about git's documentation:
+    // the fixture's own shell sets the trio (nothing here goes through the
+    // harness, which now refuses it) and git applies core.hooksPath from it.
+    // If a future git stops honouring this, this case says so and the denial
+    // can be revisited on evidence rather than left as folklore.
+    await scenario('git-config-count-real', async (s) => {
+      const r = await s.run(
+        'sh',
+        [
+          '-c',
+          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath ' +
+            'GIT_CONFIG_VALUE_0=/tmp/evil-hooks git config --get core.hooksPath',
+        ],
+        { cwd: s.workspace.root },
+      )
+      expect(r.stdout.trim(), r.output).toBe('/tmp/evil-hooks')
+    })
   })
 
   it('validates a colon-separated path LIST element by element', async () => {

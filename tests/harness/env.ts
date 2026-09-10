@@ -21,9 +21,11 @@ import { dirname, resolve, sep } from 'node:path'
  */
 
 /**
- * Variables that MUST NOT reach a fixture child.
+ * Every GIT_* / AGENT_* variable this harness knows about, and the KIND of
+ * value each one holds.
  *
- * Two families, both proven dangerous by execution rather than by reasoning:
+ * Two families are dangerous to INHERIT, both proven by execution rather than
+ * by reasoning:
  *
  *  - git's repo pointers. With GIT_DIR set, `git -C <fixture> init` returns 0,
  *    creates no .git in the fixture, and every later commit lands in the
@@ -33,30 +35,40 @@ import { dirname, resolve, sep } from 'node:path'
  *    AGENT_SIGNAL_FILE into every dispatched wake — which is why BUG-046 struck
  *    during a Codex review and not during ordinary local runs.
  *
- * EACH ONE DECLARES THE KIND OF VALUE IT HOLDS, because the containment check
- * below is only meaningful for some of them:
+ * THE KIND DECIDES WHAT A DELIBERATE OVERRIDE GETS, because one check is not
+ * meaningful for all of them:
  *
- *   'path'      one filesystem path. A deliberate override must land inside the
- *               scenario's own workspace.
- *   'path-list' a COLON-SEPARATED list of paths. git accepts several of these,
- *               and validating the joined string as one path rejects every
+ *   'path'      scrubbed; an override must resolve inside the workspace.
+ *   'path-list' scrubbed; a COLON-SEPARATED list of paths — git accepts
+ *               several — validated element by element, because the joined
+ *               string is not a path and judging it as one refuses every
  *               legitimate multi-element value.
- *   'opaque'    a name, a label or a count. There is nothing to contain: these
- *               redirect no write and name nothing on disk. They are forbidden
- *               because INHERITING one silently mislabels or misconfigures a
- *               fixture, not because setting one can reach outside — so the
- *               right check for them is none, and a containment check is worse
- *               than none. It rejects `AGENT_PERSONA=Vitali` with a message
- *               about paths, which is the BUG-041/BUG-042 misdirection class
- *               (a guard indicting the thing it was pointed at) reintroduced
- *               inside the guard. tests/codex-persona-label and tests/roster
- *               deal in persona labels and would have hit exactly that.
+ *   'opaque'    scrubbed; an override is NOT checked, because a name has
+ *               nothing to contain. A containment check here is worse than
+ *               none: it rejects `AGENT_PERSONA=Vitali` with a message about
+ *               paths, which is the BUG-041/BUG-042 misdirection class — a
+ *               guard indicting the thing it was pointed at — rebuilt inside
+ *               the guard.
+ *   'inert'     NOT scrubbed and not checked. Declared safe both ways: git's
+ *               author/committer identity and two feed labels carry no path,
+ *               redirect nothing, and are what tests/bootstrap-* and
+ *               tests/template-source legitimately pass.
+ *   'denied'    scrubbed, and an override is REFUSED outright — there is no
+ *               contained form of it. See the GIT_CONFIG_* switches below.
  *
- * The kinds and the list are ONE declaration, not two: FORBIDDEN_ENV is derived
- * from it. A second hand-written copy is how BUG-051, BUG-053 and BUG-061 each
- * went stale — an enumeration cannot see what it was never told about.
+ * AND AN UNDECLARED GIT_* / AGENT_* OVERRIDE IS REFUSED TOO. That is the half
+ * this table was missing: it said what happens to the names in it and nothing
+ * at all about the rest, so every other variable in both namespaces passed
+ * through no check whatsoever — the same shape as GIT_CONFIG_COUNT one level
+ * up, and it is how GIT_CONFIG_KEY_<n> was reachable. Declaring a variable is
+ * now the only way to pass one, and the refusal says so.
+ *
+ * The kinds and the scrub list are ONE declaration, not two: FORBIDDEN_ENV is
+ * derived from it. A second hand-written copy is how BUG-051, BUG-053 and
+ * BUG-061 each went stale — an enumeration cannot see what it was never told
+ * about.
  */
-const FORBIDDEN_ENV_KIND = {
+const ENV_KIND = {
   // git repo pointers (BUG-014 / BUG-047)
   GIT_DIR: 'path',
   GIT_WORK_TREE: 'path',
@@ -69,9 +81,26 @@ const FORBIDDEN_ENV_KIND = {
   GIT_CONFIG: 'path',
   GIT_CONFIG_GLOBAL: 'path',
   GIT_CONFIG_SYSTEM: 'path',
-  // A COUNT of the GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> pairs git should
-  // apply in memory. It writes nothing and points at nothing.
-  GIT_CONFIG_COUNT: 'opaque',
+  // THE CONFIG-INJECTION SWITCHES, and the reason 'opaque' was wrong for the
+  // count. "A number redirects no write and names nothing on disk" is true of
+  // GIT_CONFIG_COUNT alone, and it is never alone: it is the SWITCH that
+  // activates GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n>, and GIT_CONFIG_PARAMETERS
+  // carries the same pairs inline. Probed on this machine's git before this
+  // line was written:
+  //
+  //   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+  //     GIT_CONFIG_VALUE_0=/tmp/evil-hooks git config --get core.hooksPath
+  //   → /tmp/evil-hooks
+  //
+  // That is A-22/BUG-004 — the failure BUG-047 produced from inside a test —
+  // arriving past every containment check in this file, with the guard's own
+  // classification saying the value was harmless. Denied rather than validated:
+  // a fixture that needs configuration has two contained ways to get it (set it
+  // in its own repository, or point GIT_CONFIG_GLOBAL at a file inside the
+  // workspace), so validating a third — which would mean modelling what every
+  // git config key does with its value — buys nothing.
+  GIT_CONFIG_COUNT: 'denied',
+  GIT_CONFIG_PARAMETERS: 'denied',
   // blueprint coordination state (BUG-046 / BUG-030)
   AGENT_SIGNAL_FILE: 'path',
   AGENT_STATE_HOME: 'path',
@@ -80,11 +109,40 @@ const FORBIDDEN_ENV_KIND = {
   AGENT_PERSONA: 'opaque',
   AGENT_BACKING: 'opaque',
   AGENT_GATE_PROFILE: 'opaque',
-} as const satisfies Record<string, 'path' | 'path-list' | 'opaque'>
+  // Declared safe to inherit as well as to set. The identity four are what a
+  // bootstrap fixture needs in order to commit at all; AGENT_CI_WATCH=0 is how
+  // a fixture gate is told not to background a CI watcher; AGENT_FEED_TAG is a
+  // feed label that scenarioEnv sets on every scenario anyway, so an ambient
+  // one never reaches a fixture through the harness.
+  GIT_AUTHOR_NAME: 'inert',
+  GIT_AUTHOR_EMAIL: 'inert',
+  GIT_COMMITTER_NAME: 'inert',
+  GIT_COMMITTER_EMAIL: 'inert',
+  AGENT_CI_WATCH: 'inert',
+  AGENT_FEED_TAG: 'inert',
+} as const satisfies Record<string, EnvKind>
 
-export type ForbiddenVar = keyof typeof FORBIDDEN_ENV_KIND
+type EnvKind = 'path' | 'path-list' | 'opaque' | 'inert' | 'denied'
 
-export const FORBIDDEN_ENV = Object.keys(FORBIDDEN_ENV_KIND) as readonly ForbiddenVar[]
+export type ForbiddenVar = keyof typeof ENV_KIND
+
+/** Everything the scrub removes: every declared variable that is not 'inert'. */
+export const FORBIDDEN_ENV = (Object.keys(ENV_KIND) as ForbiddenVar[]).filter(
+  (k) => ENV_KIND[k] !== 'inert',
+) as readonly ForbiddenVar[]
+
+/**
+ * The kind that governs an override of `key`.
+ *
+ * Undeclared names in the GIT_* / AGENT_* namespaces are DENIED rather than
+ * waved through — see the table above. Anything else (PATH, HOME, TMPDIR,
+ * LC_ALL) is not this harness's business and returns undefined.
+ */
+function overrideKind(key: string): EnvKind | undefined {
+  const declared = (ENV_KIND as Record<string, EnvKind>)[key]
+  if (declared !== undefined) return declared
+  return /^(GIT|AGENT)_/.test(key) ? 'denied' : undefined
+}
 
 /**
  * Does this path, resolved PHYSICALLY, land inside the workspace?
@@ -126,7 +184,73 @@ function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean 
  * that a hostile GIT_DIR cannot reach the real repo — sets it explicitly and
  * visibly, rather than inheriting it by accident. Deliberate is fine; ambient
  * is the defect.
+ *
+ * Deliberate is not unconditional, though: an override is checked against the
+ * KIND declared for it, and a GIT_* / AGENT_* name with no declaration — or one
+ * declared 'denied' — is refused rather than passed on. "The spec author meant
+ * it" is not a containment argument; it is how GIT_CONFIG_COUNT would have
+ * carried `core.hooksPath` into a fixture with every check reporting green.
  */
+/**
+ * Refuse an override the declared kind does not permit. Silent when it does.
+ *
+ * Split out of fixtureEnv so the refusal reads as one decision per variable
+ * rather than as three nested branches inside a loop.
+ */
+function assertOverrideAllowed(
+  key: string,
+  value: string,
+  workspaceRoot?: string,
+): void {
+  const kind = overrideKind(key)
+
+  if (kind === 'denied') {
+    throw new Error(
+      key in ENV_KIND
+        ? `Refusing forbidden environment override ${key}=${value}: the ` +
+            `GIT_CONFIG_* switches apply configuration no file ever held — ` +
+            `GIT_CONFIG_COUNT activates GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n>, ` +
+            `GIT_CONFIG_PARAMETERS carries the pairs inline — so this sets ` +
+            `core.hooksPath or include.path past every containment check here. ` +
+            `Set the config in the fixture's own repository, or point ` +
+            `GIT_CONFIG_GLOBAL at a file inside the workspace.`
+        : `Refusing UNDECLARED environment override ${key}=${value}: every ` +
+            `GIT_* and AGENT_* variable a fixture may receive is declared in ` +
+            `tests/harness/env.ts with the kind of value it holds, and an ` +
+            `undeclared one has been through no check at all. Declare it with ` +
+            `its kind (and why that kind is right), or use one already declared.`,
+    )
+  }
+
+  if (kind !== 'path' && kind !== 'path-list') return
+
+  // `/dev/null` is the standard read-only way to suppress a developer's real
+  // git config, and it is outside every workspace by definition.
+  if (
+    (key === 'GIT_CONFIG_GLOBAL' || key === 'GIT_CONFIG_SYSTEM') &&
+    value === '/dev/null'
+  ) {
+    return
+  }
+
+  // A list is validated ELEMENT BY ELEMENT. Joined, it is not a path, so a
+  // value with two perfectly contained entries would be refused.
+  const paths = kind === 'path-list' ? value.split(':').filter(Boolean) : [value]
+  for (const path of paths) {
+    if (
+      workspaceRoot !== undefined &&
+      resolvesInsideWorkspace(path, workspaceRoot)
+    ) {
+      continue
+    }
+    throw new Error(
+      `Refusing forbidden environment override ${key}=${value}: ` +
+        `the path ${path} must be inside the scenario workspace ` +
+        `${workspaceRoot ?? '(missing)'}`,
+    )
+  }
+}
+
 export function fixtureEnv(
   overrides: Record<string, string | undefined> = {},
   workspaceRoot?: string,
@@ -137,38 +261,28 @@ export function fixtureEnv(
     delete env[key]
   }
 
+  // The pair variables have no fixed names, so the scrub is by PREFIX: git
+  // reads GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> for any n. They are inert
+  // without one of the two switches above, and both are denied — but a prefix
+  // covers the next switch git invents before anyone here has heard of it,
+  // which a name list cannot.
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT_CONFIG')) delete env[key]
+  }
+
+  // The pair variables have no fixed names, so the scrub is by PREFIX: git
+  // reads GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> for any n. They are inert
+  // without one of the two switches above, and both are denied — but a prefix
+  // covers the next switch git invents before anyone here has heard of it,
+  // which a name list cannot.
+
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) {
       delete env[key]
-    } else {
-      const kind = FORBIDDEN_ENV_KIND[key as ForbiddenVar]
-      if (kind !== undefined && kind !== 'opaque') {
-        // `/dev/null` is the standard read-only way to suppress a developer's
-        // real git config, and it is outside every workspace by definition.
-        const isNullGitConfig =
-          (key === 'GIT_CONFIG_GLOBAL' || key === 'GIT_CONFIG_SYSTEM') &&
-          value === '/dev/null'
-        // A list is validated ELEMENT BY ELEMENT. Joined, it is not a path, so
-        // a value with two perfectly contained entries would be refused.
-        const paths =
-          kind === 'path-list' ? value.split(':').filter(Boolean) : [value]
-        for (const path of paths) {
-          if (isNullGitConfig) continue
-          if (
-            workspaceRoot !== undefined &&
-            resolvesInsideWorkspace(path, workspaceRoot)
-          ) {
-            continue
-          }
-          throw new Error(
-            `Refusing forbidden environment override ${key}=${value}: ` +
-              `the path ${path} must be inside the scenario workspace ` +
-              `${workspaceRoot ?? '(missing)'}`,
-          )
-        }
-      }
-      env[key] = value
+      continue
     }
+    assertOverrideAllowed(key, value, workspaceRoot)
+    env[key] = value
   }
 
   return env

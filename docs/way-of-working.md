@@ -238,7 +238,7 @@ A configurable team of **named personas**, each backed by whichever agent you ac
 
 - **The roster is the single source of identity** — **role** is the key, name is data, so renaming a persona is editing one cell. Every reader resolves through one parser (`scripts/lib/roster.sh`); `--whoami` prints who a session thinks it is and which roster said so. Until BUG-010 the names were *literals inside the scripts*, so renaming did nothing and one fleet's names shipped to every project
 - **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
-- **The live baton is untracked, and that is load-bearing** — it lives in `logs/state/signal.md`, not in a tracked file. Git *owns* tracked files in the working tree, so `switch` / `checkout` / `stash` / `rebase` rewrite them — including under a running dispatch, which silently left the dispatched agent with nothing to claim (BUG-019). Rare until every change became a branch + PR; then routine. One writer (`scripts/signal-set.sh`) publishes atomically, so no poller can sample a half-written baton. Hand-off history moved from `git log` to an append-only journal, which also captures flips that were never committed
+- **The live baton is untracked, and that is load-bearing** — it lives in `logs/state/signal.md`, not in a tracked file. Git *owns* tracked files in the working tree, so `switch` / `checkout` / `stash` / `rebase` rewrite them — including under a running dispatch, which silently left the dispatched agent with nothing to claim (BUG-019). Rare until a spell of branch-per-change made it routine, and the hazard outlives that: any `switch` under a live dispatch does it. One writer (`scripts/signal-set.sh`) publishes atomically, so no poller can sample a half-written baton. Hand-off history moved from `git log` to an append-only journal, which also captures flips that were never committed
 - **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_<A>` ≠ `OVER_TO_<B>`)
 - **Read-only + out-of-scope work** allowed in parallel
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
@@ -302,10 +302,13 @@ all eight concerns below, plus the agent infra, live in one git repo.
   it a boundary needs a separate credential or a fork. Claiming more than that
   would be the kind of drift this deck exists to prevent.
 
-- **One door, and it is a pull request** — nothing reaches the blueprint's
-  `main` any other way. Not a founder-authorized edit, not a one-line typo
-  fix, not "it's only committed locally". Our own trunk-based rule stops at
-  the blueprint's edge, because a commit here is a commit in *every* project.
+- **One door for OUTSIDE work, and it is a pull request** — a derived project
+  reaches the blueprint only by filing one, which `blueprint a2bp` does. The
+  blueprint's own owner commits to `main` like anyone else: a PR is a request
+  made *of* someone, and a repo where the author and the reviewer are the same
+  person was gating that person against themselves. What protects `main` is the
+  pre-push gate and the fact that a back-propagation still needs a human to
+  merge it — not a ceremony the owner performs alone.
 
 > A rule tightened once in any project benefits every project. The blueprint is the multiplier.
 > Which is exactly why the upstream door is the one that has to be guarded.
@@ -417,7 +420,7 @@ Eight rules, each the gate to the next (`docs/DoD.md` §1b):
 3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`)
 4. **A review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude
 5. **All gates green** — no demotions, no bypass flags
-6. **Land it** — trunk-based push for a product repo; branch + PR + merge for the blueprint, whose `main` every project pulls from
+6. **Land it** — trunk-based push, for a product repo and for the blueprint alike. A branch is a tool for a change you want isolated, not a rule
 7. **Landing moves it to `waiting-acceptance/`**
 8. **Artefacts always travel with their parent item** — the half that gets forgotten, because a row is one line and a folder is not
 

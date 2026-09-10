@@ -47,6 +47,8 @@ export class ProcessRegistry {
   private readonly live = new Set<ChildProcess>()
   private readonly groups = new Set<number>()
 
+  constructor(private readonly workspaceRoot: string) {}
+
   /**
    * Spawn a process and wait for it to exit.
    *
@@ -62,7 +64,7 @@ export class ProcessRegistry {
   ): Promise<RunResult> {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: fixtureEnv(options.env),
+      env: fixtureEnv(options.env, this.workspaceRoot),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -127,7 +129,7 @@ export class ProcessRegistry {
   ): ChildProcess {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: fixtureEnv(options.env),
+      env: fixtureEnv(options.env, this.workspaceRoot),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })

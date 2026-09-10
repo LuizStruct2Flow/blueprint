@@ -135,7 +135,7 @@ export async function scenario(
   assertProcessEnvClean()
 
   const workspace = await createWorkspace(label)
-  const registry = new ProcessRegistry()
+  const registry = new ProcessRegistry(workspace.root)
   const canary = await RealStateCanary.capture(realStateTargets(REPO_ROOT))
   const escapeToken = RealStateCanary.escapeToken(label)
 

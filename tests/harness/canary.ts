@@ -79,15 +79,35 @@ export class RealStateCanary {
   /**
    * Throw if any watched file changed.
    *
-   * NOTE ON THE ACTIVITY FEED. It is append-only and legitimately written by a
-   * live feed daemon the developer may be running, so a naive byte comparison
-   * would fail for an innocent reason. We therefore assert the PREFIX is intact
-   * — the fixture must not have rewritten or truncated history — and leave
-   * "did the fixture append?" to a token canary, which is the half of
-   * tests/pipeline:284 that survives concurrency. Being explicit about which
-   * half is load-bearing is the point: the count half of that check cannot
-   * survive a parallel gate, and pretending otherwise would bake in a test that
-   * fails for reasons unrelated to the defect it guards.
+   * THE ACTIVITY FEED IS THE ONE PARTIAL CHECK HERE, AND THIS IS ITS EXACT
+   * SCOPE. The feed is append-only, and a live `agent-activity.sh --daemon` the
+   * developer is running appends to it during a test run, so a byte comparison
+   * would go red for an innocent reason. That leaves two checks and one hole:
+   *
+   *   CAUGHT      a rewrite or a truncation — what was captured is no longer a
+   *               prefix of what is there now.
+   *   CAUGHT      an append CARRYING this scenario's token, which is what
+   *               AGENT_FEED_TAG and AGENT_PERSONA put on the lines of the two
+   *               dominant writers (scenarioEnv in index.ts names them, and
+   *               names the writers they do not reach).
+   *   NOT CAUGHT  an append carrying no token. An append leaves the captured
+   *               content intact as a prefix, so the prefix check passes by
+   *               construction, and there is no token for the token check to
+   *               find. Nothing here sees it.
+   *
+   * That third row read "caught only by the prefix check" until Codex pointed
+   * out that the prefix check passes on EVERY append — a claim of coverage
+   * inside the commit whose purpose was to retract a claim of coverage, which
+   * is this repo's signature failure committed twice in the same place.
+   *
+   * It is stated rather than closed because closing it means ATTRIBUTING an
+   * append, and the feed carries nothing to attribute by: a concurrent daemon's
+   * line and a fixture's leaked line are the same bytes, written by the same
+   * user, at the same moment. Forbidding new bytes outright would fail honest
+   * runs, and a check that goes red for innocent reasons gets muted, which
+   * leaves less coverage than admitting the gap. harness.spec.ts pins this
+   * behaviour with a case, so the limit cannot quietly drift away from the
+   * prose again in either direction.
    */
   async assertUnchanged(escapeToken?: string): Promise<void> {
     const problems: string[] = []

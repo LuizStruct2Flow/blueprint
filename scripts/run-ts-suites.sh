@@ -169,8 +169,19 @@ ts_suites_stage(){
     # That was the third iteration of one mistake: BUG-055 fixed the silence,
     # the next fix printed a path to a deleted file, the next printed the wrong
     # forty lines. Verify what is printed is USABLE, not merely present.
+    #
+    # `|| true` is HARDENING, not a fix — there is no defect here today. Under
+    # the caller's `set -e` alone, this pipeline reports `head`'s status (0), so
+    # neither a zero-match `grep` (rc=1) nor a SIGPIPE'd one (141) can abort
+    # anything. It matters because this file is a sourced LIBRARY and does not
+    # own its caller's shell options: a future caller that adds `pipefail` — a
+    # normal thing for a gate to do — would kill the hook here, taking the
+    # remaining stages and the summary with it, and present as "the gate stopped
+    # reporting" rather than as anything pointing at this line. This file has
+    # twice been burned by reasoning about what its caller DOES instead of what
+    # it COULD do (BUG-055, both halves). One token closes that class.
     echo "  ── vitest failed (rc=$_ts_rc) ──"
-    grep -nE 'FAIL|AssertionError|✗|×|Error:|not ok' "$_ts_out" | head -40
+    grep -nE 'FAIL|AssertionError|✗|×|Error:|not ok' "$_ts_out" | head -40 || true
     echo "  ── last 15 lines ──"
     tail -15 "$_ts_out"
     echo "  ── end vitest output ──"

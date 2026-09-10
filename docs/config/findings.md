@@ -68,7 +68,7 @@ of `.githooks/pre-push-project`, or if any gate file on that chain adopts
 
 ## F-002 — the recurring shape: a check that infers a property from a proxy that is satisfiable without it
 
-**Raised by** Eto (Orchestrator), 2026-09-10, from five instances found within one
+**Raised by** Eto (Orchestrator), 2026-09-10, from six instances found within one
 week. Not a bug row: there is no single site to fix. It is a claim about how
 checks in this repo get written, recorded so the sixth instance is recognised as
 the sixth rather than investigated as a novelty.
@@ -82,19 +82,20 @@ the sixth rather than investigated as a novelty.
 | BUG-035 | semgrep exits 0 | a JS/TS ruleset found no JS/TS | the OWASP top-10 are covered |
 | BUG-066 | `grep` the hook's text for `bash tests/<suite>/…` | the text mentions the suite | the suite is invoked |
 | BUG-067 | `feed_is_running` after `setsid` | the lock is held **by anyone** | my child started |
+| BUG-068 | `console.warn` emitted the note | a string was written to a buffer | the operator sees it |
 
 **The shape.** Each check tests a **proxy** for the property it is trusted to
 establish, and in each case the proxy is satisfiable **without** the property. The
 gap is never visible at the call site, because the proxy's name reads like the
 property: `feed_is_running`, `suite absent`, a green SAST stage.
 
-**The part that makes it expensive is the direction of failure.** In all five, the
+**The part that makes it expensive is the direction of failure.** In all six, the
 unknown case resolves toward **pass**. A guard that cannot tell says "fine". So
 the failure is not merely undetected — it is actively vouched for, with the full
 credibility of a green gate. `BUG-066` is the extreme: a push landed with 47 of 51
 stages skipped and the gate printed `PASSED`.
 
-**Two questions that would have caught all five**, and they are cheap enough to
+**Two questions that would have caught all six**, and they are cheap enough to
 ask every time a check is written:
 
 1. **What else satisfies this predicate?** If anything other than the property
@@ -108,9 +109,22 @@ ask every time a check is written:
 **Not a rule proposal yet.** Per §"The blueprint is derived, not designed", this
 wants to prove itself before it becomes doctrine — the honest test is whether the
 next few guards written after this entry avoid the shape. Recorded now because
-five instances in a week is the evidence, and it will be harder to reconstruct
+six instances in a week is the evidence, and it will be harder to reconstruct
 later.
 
-**Re-open / promote when** a sixth instance lands, or when the BUG-066 and
-BUG-067 fixes are both in and someone can say whether the questions above would
-have been enough. At that point it belongs in CLAUDE.md, not here.
+**The sixth landed the same day, while the fifth was being fixed**, and it is the
+first one found by someone *looking* for the shape rather than tripping over it.
+BUG-068's canary reports a legitimate concurrent mic flip instead of failing on
+it. The report was a `console.warn` — and `run-ts-suites.sh` captures vitest's
+output to a temp file it deletes unless `rc != 0`. The witnessed verdict is a
+**pass**. So on exactly the run where the note matters, it was being thrown away.
+"A warning was emitted" read as "the operator sees it", failing toward *we
+reported it*. Caught before landing, by asking question 1 of a report path rather
+than of a guard — which is the wider reading: **this applies to anything that
+vouches, not only to things that block.**
+
+**Re-open / promote when** the BUG-066 and BUG-067 fixes are both in and someone
+can say whether the two questions would have been enough. At that point it belongs
+in CLAUDE.md, not here — six instances is past the point where the blueprint's
+"prove it downstream first" rule is asking for more evidence rather than for
+someone to write it down.

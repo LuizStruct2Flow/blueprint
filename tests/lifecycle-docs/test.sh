@@ -134,6 +134,96 @@ else
   pass "#5 no empty table forwards to where its items went"
 fi
 
+# ===========================================================================
+# 6. NO BUG NUMBER IS CARRIED BY MORE THAN ONE ROW. (BUG-071)
+#
+#    A number is allocated by reading "the highest in use" out of a BUGS.md.
+#    That is racy until committed, and with concurrent agents it collides —
+#    three times in two days. BUG-057 went to two defects in parallel; BUG-066
+#    and BUG-067 were re-issued by a second session working from a copy of the
+#    table that predated the first session's push; and BUG-052 and BUG-053 each
+#    carried TWO rows on `main`, unnoticed, for a day.
+#
+#    It is not cosmetic. The commit convention and DoD §2's regression-test
+#    check both key off the number, so a duplicate makes §2 satisfiable by the
+#    WRONG test: a bug with no test passes because its twin has one.
+#
+#    BUG-062's row already documents the mechanism in its own text — "the next
+#    number is not a per-file maximum, it is the maximum across
+#    docs/{doing,backlog,waiting-acceptance,done}/BUGS.md, and it is racy until
+#    it is committed". It had been written down for a day and had stopped
+#    nothing, which is the point: a rule that must be remembered at the moment
+#    the author is busy is the wrong shape of fix (BUG-004, BUG-014, the
+#    no-chain hook).
+#
+#    THERE IS NO LEGITIMATE MID-PROMOTION DUPLICATE. Promotion is a MOVE of the
+#    row — `doing/` → `waiting-acceptance/` → `done/` — so a number in two
+#    lifecycle states is a half-completed move or a collision, and both want
+#    fixing. Nor is this only a CROSS-file check: both BUG-052 rows and both
+#    BUG-053 rows sat in `doing/BUGS.md` together, so a same-file duplicate is
+#    the case that actually happened and is caught here too.
+# ===========================================================================
+
+# A ROW, not a mention. These files quote other numbers constantly in prose —
+# BUG-062's row alone names half a dozen — so only a line that OPENS a table
+# row for that number counts. Anything looser is unusable noise.
+row_ids_in() { # $1 = file, $2 = label  ->  "BUG-XXX label:line" per row
+  grep -nE '^\|[[:space:]]*\*\*BUG-[0-9]+\*\*' "$1" \
+    | sed -E "s#^([0-9]+):\|[[:space:]]*\*\*(BUG-[0-9]+)\*\*.*#\2 $2:\1#"
+}
+
+# THE DETECTOR PROVES IT CAN FIRE BEFORE ITS SILENCE IS BELIEVED.
+# A row extractor is a parser, and a parser whose subject changes form goes
+# quiet rather than red — BUG-063's class, and the sixth instance of "a check
+# inferring a property from a proxy satisfiable without it" that F-002 counted.
+# This fixture asserts BOTH halves of the contract on every run: the duplicate
+# IS seen, and the two prose mentions on a non-row line are NOT.
+_sc="$(mktemp)"
+printf '| **BUG-900** | first |\n| **BUG-901** | other |\nprose naming BUG-900 and BUG-900 again\n| **BUG-900** | second |\n' > "$_sc"
+_sc_got="$(row_ids_in "$_sc" self | awk '{print $1}' | sort | uniq -d | tr '\n' ' ')"
+rm -f "$_sc"
+
+if [ "$_sc_got" != "BUG-900 " ]; then
+  fail "#6 the duplicate detector cannot see its own fixture (got '$_sc_got', want 'BUG-900 ') — its silence over the real files proves nothing"
+else
+  # ABSENT is legitimate; UNREADABLE is not. A freshly bootstrapped project is
+  # seeded with `backlog/BUGS.md` alone (new-project.sh), so demanding all four
+  # would fail every derived project on its first push — BUG-028's class. But a
+  # file that EXISTS and cannot be read is this check failing, and it fails
+  # closed rather than scanning what it could reach and printing ok.
+  _rows=""
+  _unreadable=""
+  _scanned=0
+  for state in backlog doing waiting-acceptance done; do
+    f="$DOCS/$state/BUGS.md"
+    [ -e "$f" ] || continue
+    if [ ! -r "$f" ]; then
+      _unreadable="$_unreadable docs/$state/BUGS.md"
+      continue
+    fi
+    _scanned=$((_scanned + 1))
+    _rows="$_rows
+$(row_ids_in "$f" "docs/$state/BUGS.md")"
+  done
+
+  if [ -n "$_unreadable" ]; then
+    fail "#6 could not read a lifecycle bug table, so a duplicate there would be invisible:$_unreadable"
+  fi
+
+  _dups="$(printf '%s\n' "$_rows" | grep -E '^BUG-' | awk '{print $1}' | sort | uniq -d)"
+  if [ -n "$_dups" ]; then
+    for id in $_dups; do
+      # Name BOTH locations — file and line — so the reader can act without
+      # grepping four files for a number that is by definition ambiguous.
+      where="$(printf '%s\n' "$_rows" | awk -v i="$id" '$1 == i { printf " %s", $2 }')"
+      fail "#6 $id is the number of $(printf '%s\n' "$_rows" | grep -c "^$id ") different rows —$where"
+    done
+  elif [ -z "$_unreadable" ]; then
+    _n="$(printf '%s\n' "$_rows" | grep -cE '^BUG-')"
+    pass "#6 all $_n bug row(s) across $_scanned lifecycle table(s) carry distinct numbers"
+  fi
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: the lifecycle documents agree with the folders."
   exit 0

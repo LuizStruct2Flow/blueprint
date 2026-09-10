@@ -778,19 +778,11 @@ fi
 
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.
-if [ -f tests/bootstrap-contents/test.sh ]; then
-  _st_bootstrap_contents(){
-    bash tests/bootstrap-contents/test.sh || {
-      echo "❌ tests/bootstrap-contents/test.sh failed (A-05)."
-      echo "   Bootstrap must not leak secrets, runtime state, or the blueprint's"
-      echo "   own work items into a derived project."
-      return 1
-    }
-  }
-  pipe_stage "bootstrap-contents · A-05" _st_bootstrap_contents
-else
-  pipe_skip "bootstrap-contents · A-05" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
+# Equivalence proven by mutation first, and note the same wrinkle template-source
+# has: the fixture is built from `git archive HEAD`, so EVERY mutant here has to
+# be committed to exist at all. Deleting the `.blueprint-root export-ignore` line
+# and committing it turns #1 red in both runners.
 
 # A-14 — bootstrap must INHERIT the operator's git identity, never write one,
 # and must fail before creating anything when no identity is resolvable.

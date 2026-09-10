@@ -229,6 +229,7 @@ run, so the number that is meant to reach zero is visible rather than remembered
 | `template-source` | Delete the `project_config_overview.md         export-ignore` line from `.gitattributes` **and commit it** — `git archive` reads that file from the commit, not the working tree, so an uncommitted deletion changes nothing and both runners stay green | `#2` — the spec goes red exactly where the shell runner did, reporting `project_config_overview.md` as shipping, which is BUG-009 itself |
 
 | `bootstrap-identity` | Replace the `unset AGENT_SIGNAL_FILE AGENT_STATE_HOME` in `scripts/new-project.sh`'s seed subshell with a no-op, so the seeded baton is published over whatever the caller had | `#6` — both runners go red reporting that bootstrap REPUBLISHED the caller's live baton, which is BUG-046 itself |
+| `bootstrap-contents` | Delete the `.blueprint-root                    export-ignore` line from `.gitattributes` **and commit it** — the fixture is built from `git archive HEAD`, so an uncommitted mutant does not exist as far as this suite is concerned | `#1` — both runners go red reporting that `.blueprint-root` shipped, which would make every derived project claim to BE the blueprint and `drift` compare nothing (BUG-013) |
 <!-- RETIRED-SHELL-RUNNERS:END -->
 
 <!-- BLUEPRINT:END -->

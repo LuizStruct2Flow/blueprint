@@ -342,6 +342,16 @@ else fail "#3 a file that went quiet stopped being followed"; fi
 # ===========================================================================
 stop_feed >/dev/null 2>&1; wait_sup 0
 MAXFRAG=64 start_feed >/dev/null 2>&1; wait_sup 1
+# BUG-065 — the same handshake #10/#18/#5f/#7 already use, and this case was the
+# one restart that skipped it. wait_sup proves the supervisor is RESIDENT; the
+# payload below must not be appended until it has SEEDED this run log, because
+# seed_offset records the file's size and anything already past that offset is
+# folded into the baseline and skipped PERMANENTLY (case #16's contract).
+# Measured with a 5 s delay injected in front of seed_offset: "force-flushed"
+# never arrived in 184 s, so this is not the too-tight-bound weakness R4 names —
+# raising the 8 s bound below changes nothing at all. With the handshake, the
+# same injected delay costs 5.3 s of waiting and the case passes in 0.26 s.
+reader_ready "$RUNLOG" maxfrag || fail "#12 reader never registered the run log - the force-flush assertions below cannot tell a stalled writer from an unseeded start"
 printf 'X%.0s' $(seq 1 200) >>"$RUNLOG"
 if wait_for "force-flushed" 8; then
   sleep 1
@@ -354,6 +364,15 @@ if wait_for "force-flushed" 8; then
 else fail "#12 MAX_FRAGMENT force-flush never fired; a newline-less writer would re-read forever"; fi
 printf '\n' >>"$RUNLOG"; stop_feed >/dev/null 2>&1; wait_sup 0
 unset MAXFRAG; start_feed >/dev/null 2>&1; wait_sup 1
+# BUG-065 — the third restart without a handshake, and the one whose absence
+# assertion races it. A new supervisor TRUNCATES the log, emits "feed started",
+# then emits signal_line ONCE, and only then seeds the run log. Sampling `base`
+# between the truncate and that signal_line reads 0, the startup line lands
+# inside the 1.5 s window below, and #9 reports "re-emitted every tick" about a
+# supervisor that emitted exactly once. reader_ready proves the seed happened,
+# which is strictly after signal_line, so `base` is sampled on a settled log.
+# This was the most frequent failure in the repeat-run harness: 5 of 8 runs.
+reader_ready "$RUNLOG" rc6 || fail "#9 reader never registered the run log - the count below cannot tell a re-emitting supervisor from a starting one"
 
 # ===========================================================================
 # #9 Unchanged signal file emits ONCE, not once per tick (RC-6).
@@ -480,6 +499,17 @@ printf 'SPACED-PATH-OK\n' >>"$SPACEY/gemini-runs.log"
 if wait_for "SPACED-PATH-OK" 8; then pass "#7 state dir containing spaces handled"
 else fail "#7 a path with spaces broke the reader (word splitting)"; fi
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$SPACEY" bash scripts/agent-activity.sh --stop ) >/dev/null 2>&1
+# BUG-065 — the only teardown in this file that did not wait for the supervisor
+# to be GONE, and the next case starts a new feed immediately. The lock is per
+# REPO ROOT ($REPO/logs/.agent-activity.lock), not per state dir, so this
+# supervisor and #2's are mutually exclusive: while this one is still holding
+# the lock, cmd_daemon's `flock -n` child loses it and exits, and cmd_daemon
+# reports "started (daemon)" on the strength of a lock that is not its own. #2
+# then measures zero supervisors and blames a leak: "process count grew with
+# transcripts (sup 0→0)", which is the BUG-041/042 misdirection class — the
+# message names the one thing that demonstrably did not happen. Reproduced under
+# 96-way load, first run.
+wait_sup 0
 
 # ===========================================================================
 # #2 Process bound is independent of transcript count: 40 then 80 files.
@@ -487,7 +517,14 @@ else fail "#7 a path with spaces broke the reader (word splitting)"; fi
 PROJ="$HOMEDIR/.claude/projects/$(printf '%s' "$REPO" | sed 's#/#-#g')/sess/subagents"
 mkdir -p "$PROJ"
 i=0; while [ $i -lt 40 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"a%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
-start_feed >/dev/null 2>&1; wait_sup 1; sleep 1
+start_feed >/dev/null 2>&1
+# BUG-065 — a guard whose failure mode is invisible is not a guard, the same
+# reason reader_ready is called with `|| fail`. Every other `wait_sup 1` in this
+# file discards its status too, but here the downstream assertion counts
+# PROCESSES, so "the feed never started" and "the feed leaked processes" produce
+# adjacent numbers and only one of them is named.
+wait_sup 1 || fail "#2 the feed never started - the counts below cannot tell an RC-2 leak from a supervisor that never existed"
+sleep 1
 n1="$(supervisors)"; t1="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
 i=40; while [ $i -lt 80 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"b%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
 sleep 1

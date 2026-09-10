@@ -53,6 +53,10 @@ export class ProcessRegistry {
    * AGENT_FEED_TAG must still carry the token" is enforced (BUG-062). It is
    * threaded rather than looked up because there is exactly one token per
    * scenario and the environment builder cannot invent it.
+   *
+   * `options.cwd` is handed over for the same reason: with AGENT_FEED_LOG unset
+   * the feed a child writes to is derived from where it RUNS, so whether the
+   * token may be dropped is a question only the spawn site can answer.
    */
   constructor(
     private readonly workspaceRoot: string,
@@ -74,7 +78,7 @@ export class ProcessRegistry {
   ): Promise<RunResult> {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: fixtureEnv(options.env, this.workspaceRoot, this.escapeToken),
+      env: fixtureEnv(options.env, this.workspaceRoot, this.escapeToken, options.cwd),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -139,7 +143,7 @@ export class ProcessRegistry {
   ): ChildProcess {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: fixtureEnv(options.env, this.workspaceRoot, this.escapeToken),
+      env: fixtureEnv(options.env, this.workspaceRoot, this.escapeToken, options.cwd),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })

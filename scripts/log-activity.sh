@@ -113,7 +113,8 @@ if [ -r "$ROSTER_LIB" ]; then
   # to observe.
   #
   # `timeout` is NOT guaranteed present — macOS ships none in the base system,
-  # which is why the Brewfile pulls coreutils for `gtimeout`. That question is
+  # which is why scripts/install-toolchain.sh pulls coreutils in for its
+  # `gtimeout`. That question is
   # already answered once, by bp_staleness_timeout_cmd, so it is answered there
   # rather than a second time here. staleness.sh is itself read in a subshell,
   # for exactly the reason roster.sh is.

@@ -30,6 +30,9 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# BUG-041 — portable in-place sed. Bare `sed -i` is GNU-only and fails on BSD
+# with "invalid command code", silently skipping the fixture edit.
+. "$ROOT/tests/helpers/sed-inplace.sh"
 RESUME="$ROOT/scripts/session-resume.sh"
 FAILED=0
 
@@ -140,7 +143,7 @@ fi
 # ===========================================================================
 p="$(fixture)"
 bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-sed -i 's/session-marker: [0-9a-f]*/session-marker: deadbeef/' "$p/docs/doing/HANDOVER.md"
+bp_sed_i 's/session-marker: [0-9a-f]*/session-marker: deadbeef/' "$p/docs/doing/HANDOVER.md"
 out="$(resume "$p")"
 rc="$(resume_rc "$p")"
 if ! printf '%s' "$out" | grep -q 'deadbeef'; then
@@ -337,14 +340,14 @@ p="$(fixture)"
 bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
 old="$(grep -oE '<[0-9a-f]+>' "$p/logs/state/signal-history.log" | tail -1 | tr -d '<>')"
 bash "$RESUME" --root "$p" --mark >/dev/null 2>&1
-sed -i "s/session-marker: [0-9a-f]*/session-marker: $old/" "$p/docs/doing/HANDOVER.md"
+bp_sed_i "s/session-marker: [0-9a-f]*/session-marker: $old/" "$p/docs/doing/HANDOVER.md"
 out="$(resume "$p")"
 if ! printf '%s' "$out" | grep -qi 'older snapshot id'; then
   fail "#11 a known PAST id was reported as an unbacked claim: [$out]"
 elif ! printf '%s' "$out" | grep -q -- '--mark'; then
   fail "#11 the warning does not name the one-command fix: [$out]"
 else
-  sed -i 's/session-marker: [0-9a-f]*/session-marker: cafebabe/' "$p/docs/doing/HANDOVER.md"
+  bp_sed_i 's/session-marker: [0-9a-f]*/session-marker: cafebabe/' "$p/docs/doing/HANDOVER.md"
   out="$(resume "$p")"
   if ! printf '%s' "$out" | grep -qi 'appears NOWHERE'; then
     fail "#11 an id from no known mark was not distinguished from an older one: [$out]"

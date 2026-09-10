@@ -31,22 +31,41 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 
 **Security + IaC tooling install** (each developer's machine):
 ```bash
-brew bundle   # uses ./Brewfile at the repo root
+bash scripts/install-toolchain.sh           # the security gate
+bash scripts/install-toolchain.sh --infra   # ...plus the IaC set
+bash scripts/install-toolchain.sh check     # report what's present, install nothing
 ```
-The blueprint Brewfile pins the security gate (`gitleaks`, `semgrep`,
-`osv-scanner`) plus the IaC tooling (`awscli`, `aws-cdk`, `terraform`,
-`helm` — install only what your recipe needs).
+One script, per-OS mechanism: Homebrew on macOS, pinned release binaries into
+`~/.local/bin` (no sudo) on Linux, with `semgrep` via `pipx`. The tool *list* is
+the same either way — that is the point of it being a script rather than a
+package manifest only one OS can act on, since a list of requirements a machine
+cannot read is a list of requirements for somebody else's machine. The default
+set is the security gate
+(`gitleaks`, `semgrep`, `osv-scanner`, `jq`, plus a `timeout` provider);
+`--infra` adds the IaC tooling (`aws-cdk`, `terraform`, `helm`, `awscli`) —
+on Linux `cdk` and `terraform` are deliberately left to you, because the CDK
+version has to track your `infra/` library and a project on OpenTofu would get
+the wrong binary. The script names the command to run in both cases.
 
-If a binary is missing, the pre-push hook **skips** its step with a
-warning rather than blocking — CI re-runs the same gate as a backstop.
+If a binary is missing, the pre-push hook **skips** its step with a warning
+rather than blocking, and CI re-runs the same gate as a backstop. Read that as a
+hazard, not a reassurance: a skipped stage still ends in a gate that prints
+PASSED, so on an unprepared machine "the gate is green" and "the gate checked
+this" are different statements. Run `bash scripts/install-toolchain.sh check`
+before trusting a local pass.
 See [docs/SECURITY.md](docs/SECURITY.md) and
 [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) for the full per-stack
 recipes (CI deep-SAST packs, container scan, plan-diff posting,
 nightly drift watch, DAST baseline).
 
-Project-specific tooling (Node version pin, `kubectl`, `argocd`,
-etc.) goes in the `Brewfile` below the `# Project-specific extensions`
-marker — the blueprint sync preserves your additions.
+Project-specific tooling (Node version pin, `kubectl`, `argocd`, etc.) goes in
+`scripts/install-toolchain-project.sh` — sourced automatically at the end of the
+run if it exists, the same pattern as `.githooks/pre-push-project`. It is a
+separate, unmanaged file rather than a marked-off region, so `blueprint pull`
+never touches it and there is no marker to edit above by accident. Install per-OS
+there too if your tools need it (`uname -s`), and follow the parent script's
+convention of reporting a per-tool failure rather than aborting the whole run —
+one missing tool must not block the others.
 
 ## Coverage mode (DoD §3.6)
 

@@ -84,7 +84,6 @@ MANAGED_FILES=(
   "AGENTS.md"
   "AGENT_ROSTER.example.md"
   "STACK_DEFAULTS.md"
-  "Brewfile"
 
   # docs/ — the canonical reference docs
   "docs/DoD.md"
@@ -97,6 +96,7 @@ MANAGED_FILES=(
   "docs/way-of-working.md"
 
   # scripts/ — the agent infra
+  "scripts/install-toolchain.sh"
   "scripts/codex-signal-watch.sh"
   "scripts/start-codex-signal-watch.sh"
   "scripts/start-gemini-signal-watch.sh"
@@ -138,6 +138,15 @@ MANAGED_FILES=(
   # CLOSED without it (deliberately), so a project that pulls the hook and not
   # this file cannot push at all until it lands.
   "scripts/lib/pipeline.sh"
+  # TASK-018. Both are sourced BY a managed hook, so managing the hook without
+  # managing them delivers a call to a file the recipient never receives: the
+  # derived gate takes the `else` branch and pipe_skips the vitest stage on
+  # every push, permanently, with a reason that reads as deliberate. Worse, that
+  # reason said `blueprint pull scripts/run-ts-suites.sh`, which cannot work on
+  # an unmanaged file — the message sent the operator to a dead end. Found by
+  # tests/manifest #2c the day the bridge landed.
+  "scripts/lib/suites.sh"
+  "scripts/run-ts-suites.sh"
   # THE roster parser, shared by the feed and team-kickoff. MUST ship: both of
   # those are managed files, and without this one they have nowhere to resolve
   # persona identity from — which is BUG-010, where a fleet's persona names were
@@ -558,7 +567,8 @@ read_blueprint_source() {
     # what this used to do — is both false and useless, because the operator IS
     # standing in the project root and will go looking for a bug in their cwd.
     local markers=0 m
-    for m in AGENT_SIGNAL.md AGENTS.md CLAUDE.md STACK_DEFAULTS.md Brewfile \
+    for m in AGENT_SIGNAL.md AGENTS.md CLAUDE.md STACK_DEFAULTS.md \
+             scripts/install-toolchain.sh \
              .githooks/pre-push scripts/blueprint scripts/agent-activity.sh docs/DoD.md; do
       [ -e "$m" ] && markers=$((markers+1))
     done
@@ -848,6 +858,10 @@ cmd_drift() {
   _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
   # shellcheck source=scripts/lib/gate.sh
   [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  # BUG-032 — the push keepalive rides the same two wake paths, for the same
+  # reason: it is repo-local config, so a clone starts without it.
+  command -v arm_push_keepalive >/dev/null 2>&1 \
+    && arm_push_keepalive "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
   # BUG-007: the wake ritual runs `blueprint drift` in EVERY struct2flow repo,
   # and this one has no `.blueprint-source` because it is the source. It used to
@@ -1018,23 +1032,37 @@ cmd_pull() {
     fi
     [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
     if [ "$auto_yes" -eq 0 ]; then
-      # BUG-018 — degrade, do not die. `read </dev/tty` is unguarded in a
-      # non-interactive context (CI, a spawned agent, a piped run), where it
-      # fails with "No such device or address" AFTER the diff has been printed.
-      # `drift` already handles this and is pinned by a test; pull differed from
-      # it by accident rather than by decision.
+      # BUG-018 — degrade, do not die. An unguarded prompt in a
+      # non-interactive context (CI, a spawned agent, a piped run) either dies
+      # on the device or reads EOF and silently skips. `drift` already handles
+      # this and is pinned by a test; pull differed from it by accident rather
+      # than by decision.
       #
       # Refusing is the safe default: this is the branch where the operator has
       # NOT said yes, so proceeding would pull unreviewed content. It names
       # --yes rather than only reporting the problem.
-      # `[ -r /dev/tty ]` is NOT sufficient and was my first attempt: the device
-      # node exists and passes the readability test even when the process has no
-      # controlling terminal — it is the OPEN that fails. So actually open it.
-      # Redirection ORDER matters: they are processed left to right, so
-      # `: </dev/tty 2>/dev/null` attempts the open BEFORE stderr is silenced
-      # and bash's "No such device" message escapes to the real stderr — which
-      # is exactly the noise this guard exists to remove. Silence stderr first.
-      if ! : 2>/dev/null </dev/tty; then
+      #
+      # BUG-054 — ASK ABOUT STDIN, NOT ABOUT /dev/tty. Two earlier attempts
+      # tested the wrong thing and each passed its test in the environment it
+      # was written in:
+      #
+      #   `[ -r /dev/tty ]` — the device node exists and is readable even with
+      #   no controlling terminal. Rejected correctly; it is the OPEN that fails.
+      #
+      #   `: 2>/dev/null </dev/tty` — actually opens it, and still answers the
+      #   wrong question. It asks "does this PROCESS have a controlling
+      #   terminal?" when the question is "did my CALLER hand me an interactive
+      #   stdin?". Those differ exactly when a script with a terminal invokes
+      #   pull with redirected stdin — which is every pre-push gate run started
+      #   from an interactive shell. There the guard does not fire, pull prompts
+      #   on the operator's real terminal, `read` returns empty, and the `*)`
+      #   arm skips the file and exits 0: the precise outcome acceptance
+      #   rejected, reintroduced by the guard meant to prevent it.
+      #
+      # `[ -t 0 ]` asks the caller. The file loop below is `for f in
+      # "${files[@]}"` — an array, not a `while read` — so it never consumes
+      # stdin and there is no reason to reach past it to the terminal.
+      if [ ! -t 0 ]; then
         echo "  ${C_YELLOW}not interactive${C_RESET} — cannot prompt, so nothing is pulled."
         echo "  ${C_DIM}Re-run with --yes to accept without prompting, or run from a terminal.${C_RESET}"
         # REFUSED is not the same as NOTHING TO DO, and the exit code has to say
@@ -1051,7 +1079,7 @@ cmd_pull() {
         break
       fi
       printf "  Pull this file? [y/N/q] "
-      read -r ans </dev/tty
+      read -r ans || ans=""
       case "$ans" in
         y|Y) ;;
         q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; break ;;

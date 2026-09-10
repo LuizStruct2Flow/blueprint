@@ -1,11 +1,20 @@
 #!/bin/sh
-# BLUEPRINT:BEGIN — blueprint-managed. Put YOUR guards after BLUEPRINT:END.
+# BLUEPRINT:BEGIN — blueprint-managed. Put YOUR guards below the end marker.
 #
 # Everything between the markers is owned by the blueprint and is REPLACED by
-# `blueprint pull`; everything after BLUEPRINT:END is yours and is preserved
+# `blueprint pull`; everything below the end marker is yours and is preserved
 # byte-for-byte (marker_aware_merge, scripts/blueprint). Editing inside the
 # region means losing the edit at the next pull — back-propagate it instead:
 # `blueprint a2bp .githooks/pre-push-project`.
+#
+# THE PROSE ABOVE DELIBERATELY DOES NOT SPELL THE END MARKER (BUG-053).
+# marker_aware_merge counts the marker tokens as SUBSTRINGS and refuses to merge
+# unless BEGIN and END balance. Two sentences here mentioned the end token by
+# name, giving this file a count of 1 and 3 — so the merge never ran, `pull`
+# fell back to a whole-file copy, and every derived project's own guards below
+# the region were REPLACED on every pull. The guarantee stated in this very
+# paragraph was broken by the paragraph stating it. tests/manifest #7b now
+# asserts the balance on both managed files.
 #
 # It is managed because it MUST travel with tests/ (BUG-029). A suite is
 # coherent only as three things — the files, its row in tests/SUITES.md, and its
@@ -131,6 +140,21 @@ fi
 # unrun regression is the A-15 defect this repo already carried once: deleting
 # the shared helper or restoring a literal state path could otherwise push green
 # while cross-project log contamination silently returns. ~0.1s.
+if [ -f tests/proc-cwd/test.sh ]; then
+  _st_proc_cwd(){
+    bash tests/proc-cwd/test.sh || {
+      echo "❌ tests/proc-cwd/test.sh failed (BUG-036)."
+      echo "   Process-cwd lookup must work on this OS (procfs on Linux, lsof on"
+      echo "   BSD/macOS) via tests/helpers/proc-cwd.sh. Without it every suite"
+      echo "   that counts 'my running processes' counts 0 and fails closed."
+      return 1
+    }
+  }
+  pipe_stage "proc-cwd · BUG-036" _st_proc_cwd
+else
+  pipe_skip "proc-cwd · BUG-036" "suite absent"
+fi
+
 if [ -f tests/state-dir/test.sh ]; then
   _st_state_dir(){
     bash tests/state-dir/test.sh || {
@@ -421,18 +445,16 @@ fi
 # exactly ("a suite nothing executes"). It guards BUG-007: `blueprint drift`
 # dying inside the blueprint itself, which is the command every agent runs on
 # every wake. 1.7 s.
-if [ -f tests/drift-in-blueprint/test.sh ]; then
-  _st_drift_in_blueprint(){
-    bash tests/drift-in-blueprint/test.sh || {
-      echo "❌ tests/drift-in-blueprint/test.sh failed (BUG-007)."
-      echo "   drift must report 'this IS the blueprint' and exit 0, not die."
-      return 1
-    }
-  }
-  pipe_stage "drift-in-blueprint · BUG-007" _st_drift_in_blueprint
-else
-  pipe_skip "drift-in-blueprint · BUG-007" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). The shell runner is gone, so this stage is
+# gone with it — the suite now runs inside the single vitest batch at the end of
+# this file and still renders as its own line, with its own timing, through
+# pipe_stage_report. Its equivalence was proven by mutation before the shell
+# runner was retired: making `_bp_is_blueprint_itself()` always return failure
+# turns #1 and #1b red in the spec, which is the bar PLAN-TASK-018 §5 sets.
+#
+# Leaving a `[ -f … ]` guard here would be worse than deleting it: it would
+# pipe_skip "suite absent" forever, which reads as a deliberate exclusion rather
+# than as a completed migration.
 
 # The manifest is the control that makes every tier above checkable (BUG-005 /
 # Codex F1). Without it, omitting a pipe_stage block is a silent, one-line
@@ -450,6 +472,26 @@ if [ -f tests/manifest/test.sh ]; then
   pipe_stage "manifest · BUG-005" _st_manifest
 else
   pipe_skip "manifest · BUG-005" "suite absent"
+fi
+
+# BUG-055 — the manifest proves the vitest bridge is INVOKED; this proves it
+# WORKS. The bridge only ever ran by hand, where GIT_DIR is absent. Under a real
+# `git push` git exports it, the TS harness correctly refuses every scenario,
+# and `set -e` killed the hook before one stage printed — a refused push with
+# the stage list truncated and no error anywhere. Runs before the stage it
+# guards, and hermetic (~0.1 s, stubbed npx).
+if [ -f tests/ts-bridge/test.sh ]; then
+  _st_tsbridge(){
+    bash tests/ts-bridge/test.sh || {
+      echo "❌ tests/ts-bridge/test.sh failed (BUG-055)."
+      echo "   The vitest bridge must scrub git's environment before invoking the"
+      echo "   runner, and must report its own failure instead of aborting the gate."
+      return 1
+    }
+  }
+  pipe_stage "ts-bridge · BUG-055" _st_tsbridge
+else
+  pipe_skip "ts-bridge · BUG-055" "suite absent"
 fi
 
 # BUG-029 — `tests/` is a managed DIRECTORY, and this is what makes that safe.
@@ -552,19 +594,10 @@ fi
 # skips a non-executable hook without a word. This bug was "fixed" once and
 # shipped broken because there was no test; the suite pins the PRIMITIVE, since
 # the previous repair fixed the four callers and the primitive undid them.
-if [ -f tests/pull-exec-bit/test.sh ]; then
-  _st_pull_exec_bit(){
-    bash tests/pull-exec-bit/test.sh || {
-      echo "❌ tests/pull-exec-bit/test.sh failed (BUG-008)."
-      echo "   A pulled executable must stay executable, or the gate is armed"
-      echo "   and silently skipped in every project that pulls it."
-      return 1
-    }
-  }
-  pipe_stage "pull-exec-bit · BUG-008" _st_pull_exec_bit
-else
-  pipe_skip "pull-exec-bit · BUG-008" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
+# Equivalence proven by mutation first: removing the mode-preservation block
+# before `mv "$tmp" "$f"` in scripts/lib/placeholders.sh turns #1 red with
+# `755 -> 600`, and #5 catches .githooks/pre-push becoming non-executable.
 
 # BUG-006 — a managed script must carry no project-specific env namespace.
 # `LWA_FEED_*` was one project's initials in a file that ships to every project,
@@ -862,6 +895,35 @@ else
   # Fails LOUD rather than silently dropping four stages: a shorter run is
   # exactly the signal the founder watches for, so it must carry its reason.
   pipe_skip "DoD checklist" "scripts/lib/dod-gate.sh absent — run: blueprint pull scripts/lib/dod-gate.sh"
+fi
+
+# --- TASK-018: the TypeScript suites ----------------------------------------
+#
+# ONE vitest process, rendered as one stage PER SUITE.
+#
+# Forty-two separate invocations would mean forty-two Node startups and would
+# discard the parallelism that is the whole point. But collapsing them into a
+# single "vitest" stage breaks two things that matter: tests/bootstrap-gate #3
+# requires a derived project's gate to pass >= 25 stages as an explicit
+# non-vacuity guard, and `slowest: vitest 200s` names nothing anyone can act
+# on. scripts/run-ts-suites.sh bridges the two through pipeline.sh's batch API
+# (PLAN-TASK-018 §7.3).
+#
+# The expected suite list comes from tests/SUITES.md, never from vitest's own
+# output — otherwise every guard reduces to trusting the runner, and a suite
+# dropped from the include glob vanishes with the gate still green. Verified by
+# breaking it: narrowing the glob produces both a named per-suite failure and a
+# runner-contradicts-its-report failure.
+#
+# Placed here, at the END of the managed region, deliberately. It is the only
+# stage that needs a toolchain the rest of the gate does not, so a machine
+# missing it fails one clearly-named stage rather than poisoning earlier ones.
+if [ -f scripts/run-ts-suites.sh ]; then
+  # shellcheck source=scripts/run-ts-suites.sh
+  . ./scripts/run-ts-suites.sh
+  ts_suites_stage "$(pwd)"
+else
+  pipe_skip "vitest · TASK-018" "scripts/run-ts-suites.sh absent — run: blueprint pull scripts/run-ts-suites.sh"
 fi
 # BLUEPRINT:END
 #

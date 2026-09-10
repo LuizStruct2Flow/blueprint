@@ -138,10 +138,19 @@ fi
 #                      arguments whose repeated spaces are deliberate.
 #   INTERIOR tabs    → preserved as tabs. Markdown renders them in a cell.
 #   BOUNDARY         → TRIMMED, both ends: every byte `sed` matches as POSIX
-#                      `[[:space:]]` in the current locale. That is space and
-#                      tab, and also vertical tab and form feed — stating only
-#                      "spaces and tabs" was narrower than the code, which is
-#                      the same overclaim this comment has now made twice.
+#                      `[[:space:]]` **under LC_ALL=C**, which is space, tab,
+#                      newline, carriage return, vertical tab and form feed —
+#                      stating only "spaces and tabs" was narrower than the
+#                      code, which is the same overclaim this comment has now
+#                      made twice.
+#
+#                      The locale is PINNED rather than inherited (BUG-043).
+#                      `[[:space:]]` is locale-dependent by definition, and in
+#                      a UTF-8 locale on BSD/macOS it also matches U+00A0, so
+#                      the same command trimmed differently on the founder's
+#                      Mac than on Linux and broke the "NOT SUPPORTED" promise
+#                      below. A baton every agent parses must not depend on the
+#                      LANG of whoever published it.
 #                      Deliberate: `--task-file` almost always ends in a
 #                      newline, which becomes a trailing space, and leading
 #                      indentation of a one-line cell carries no meaning. If
@@ -155,7 +164,7 @@ fi
 #                      would be a lot of machinery for a case that has never
 #                      occurred. Say so rather than let the next reader assume
 #                      the trim is total.
-TASK="$(printf '%s' "$TASK" | tr '\n\r' '  ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+TASK="$(printf '%s' "$TASK" | tr '\n\r' '  ' | LC_ALL=C sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 
 # A literal `|` would end the table cell early and truncate the instruction.
 # ESCAPE it rather than refuse: `\|` renders as a pipe inside a markdown table,

@@ -225,8 +225,10 @@ fi
 #    than a nicer error string.
 #
 #    `linkedin-watcher-agent` has AGENT_SIGNAL.md, .githooks/pre-push,
-#    scripts/blueprint, STACK_DEFAULTS.md, Brewfile — it is unmistakably a
-#    struct2flow project — and NO .blueprint-source. Measured 2026-07-30: three
+#    scripts/blueprint, STACK_DEFAULTS.md (and, at the time, a Brewfile) — it is
+#    unmistakably a struct2flow project — and NO .blueprint-source. The fixture
+#    below tracks the CURRENT marker list, which dropped Brewfile for
+#    scripts/install-toolchain.sh in TASK-017. Measured 2026-07-30: three
 #    of the four derived projects are in this state, so `drift` and `pull` have
 #    never worked in any of them, and the sync model was silently doing nothing.
 #
@@ -240,7 +242,7 @@ mkdir -p "$U/.githooks" "$U/scripts" "$U/docs"
 git init -q "$U" 2>/dev/null
 printf 'sig\n'   > "$U/AGENT_SIGNAL.md"
 printf 'stack\n' > "$U/STACK_DEFAULTS.md"
-printf 'brew\n'  > "$U/Brewfile"
+printf '#!/usr/bin/env bash\n' > "$U/scripts/install-toolchain.sh"
 printf '#!/bin/sh\nexit 0\n' > "$U/.githooks/pre-push"
 cp "$ROOT/scripts/blueprint" "$U/scripts/blueprint"
 

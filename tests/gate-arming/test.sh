@@ -204,6 +204,60 @@ else
   fi
 fi
 
+# ===========================================================================
+# 10. BUG-032 — the push keepalive arms on the same paths, with the same
+#     non-clobber rule.
+#
+#     git opens the SSH connection, THEN runs pre-push, THEN transfers on that
+#     same connection. A ~380 s gate outlives the remote's idle timeout, so the
+#     gate prints PASSED and the push dies with "Connection to <host> closed by
+#     remote host" — or with nothing at all. It is armed here, beside the gate,
+#     because it is repo-LOCAL config and a clone therefore starts without it:
+#     the identical trap as core.hooksPath, and the reason BUG-004 exists.
+# ===========================================================================
+C="$WORK/c10"; mk_clone "$C"
+git -C "$C" config --unset core.sshCommand 2>/dev/null || true
+( cd "$C" && . scripts/lib/gate.sh && arm_push_keepalive "$C" ) >"$WORK/o10" 2>&1
+ka="$(git -C "$C" config --get core.sshCommand 2>/dev/null || true)"
+case "$ka" in
+  *ServerAliveInterval*) pass "#10 BUG-032: an unset core.sshCommand is armed with a keepalive" ;;
+  "") fail "#10 BUG-032: core.sshCommand was left unset — a gate longer than the remote's idle timeout kills the push after a green run, and a clone starts without it" ;;
+  *)  fail "#10 BUG-032: core.sshCommand is '$ka', which carries no ServerAliveInterval" ;;
+esac
+
+# 10b. Idempotent: arming twice must not restate or rewrite.
+( cd "$C" && . scripts/lib/gate.sh && arm_push_keepalive "$C" ) >"$WORK/o10b" 2>&1
+if [ -s "$WORK/o10b" ]; then
+  fail "#10b BUG-032: a second arm printed '$(cat "$WORK/o10b")' — it runs on every wake, so it must be silent once armed"
+else
+  pass "#10b BUG-032: arming an already-armed keepalive is a silent no-op"
+fi
+
+# 10c. A deliberate foreign core.sshCommand is NEVER clobbered — same contract
+#      as #5 for core.hooksPath. Silently rewriting another tool's transport is
+#      worse than a slow push.
+C="$WORK/c10c"; mk_clone "$C"
+git -C "$C" config core.sshCommand 'ssh -i /custom/key'
+( cd "$C" && . scripts/lib/gate.sh && arm_push_keepalive "$C" ) >"$WORK/o10c" 2>&1
+ka2="$(git -C "$C" config --get core.sshCommand 2>/dev/null || true)"
+if [ "$ka2" != 'ssh -i /custom/key' ]; then
+  fail "#10c BUG-032: CLOBBERED a deliberate core.sshCommand — it is now '$ka2'"
+elif grep -qi 'leaving it alone' "$WORK/o10c"; then
+  pass "#10c BUG-032: a deliberate core.sshCommand is preserved, and the operator is told the push is unprotected"
+else
+  fail "#10c BUG-032: it preserved the setting but said nothing — a silent non-arm reads as armed"
+fi
+
+# 10d. Never fails its caller. It runs on the wake path, where an exit would
+#      take the feed or drift down with it.
+( cd "$C" && . scripts/lib/gate.sh && arm_push_keepalive /nonexistent-dir-for-bug-032 ) >/dev/null 2>&1
+rc10="$?"
+if [ "$rc10" -eq 0 ]; then
+  pass "#10d BUG-032: arm_push_keepalive returns 0 even outside a repo — it never fails its caller"
+else
+  fail "#10d BUG-032: returned $rc10 outside a repo — this runs on every wake and must never break it"
+fi
+
 elapsed=$(( SECONDS - START ))
 if [ "$FAILED" -eq 0 ]; then
   # Self-reported so nobody has to wrap this call to learn the cost. The whole

@@ -52,8 +52,17 @@ FAST=0
 skip(){ [ "$FAST" -eq 1 ] && { echo "  – skipped in --fast (runs in CI): $*"; return 0; }; return 1; }
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# BUG-036 — portable process-cwd lookup. Sourced rather than inlined because
+# the same assumption was duplicated across three call sites in two suites.
+. "$ROOT/tests/helpers/proc-cwd.sh"
 SCRIPT="$ROOT/scripts/agent-activity.sh"
-WORK="$(mktemp -d)"
+# BUG-036 — normalise to the PHYSICAL path. On macOS `mktemp -d` hands back
+# /var/folders/... while /var is a symlink to /private/var, so a process's real
+# cwd is reported as /private/var/... and `case "$cwd" in "$WORK"*)` never
+# matched. Every ownership test then counted 0 of its own processes. Resolve it
+# once here rather than at each comparison, so the whole suite compares like
+# with like.
+WORK="$(cd "$(mktemp -d)" && pwd -P)"
 FAILED=0
 
 cleanup(){
@@ -77,8 +86,17 @@ pass(){ echo "  ok — $*"; }
 # very implementation it exists to catch. Select one explicitly.
 UTF8_LOCALE=""
 [ -n "${AGENT_FEED_TEST_NO_UTF8:-}" ] || \
+# BUG-036 — this normalised the candidate to the glibc spelling (`en_US.utf8`)
+# and grepped for THAT only. macOS lists `en_US.UTF-8`, dash and all, so on a
+# Mac the match never fired and the suite announced "no UTF-8 locale available"
+# on a host whose LANG *is* en_US.UTF-8 and whose `locale -a` lists it. #19 was
+# then skipped for a reason that was not true. Match either spelling.
 for l in "${LANG:-}" en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
-  case "$l" in *[Uu][Tt][Ff]*) locale -a 2>/dev/null | grep -qix "$(printf '%s' "$l" | sed 's/UTF-8/utf8/I')" && { UTF8_LOCALE="$l"; break; } ;;
+  case "$l" in *[Uu][Tt][Ff]*)
+    _l_glibc="$(printf '%s' "$l" | sed 's/UTF-8/utf8/I')"
+    _l_bsd="$(printf '%s' "$l" | sed 's/utf8/UTF-8/I')"
+    locale -a 2>/dev/null | grep -qix -e "$_l_glibc" -e "$_l_bsd" \
+      && { UTF8_LOCALE="$l"; break; } ;;
   esac
 done
 if [ -n "$UTF8_LOCALE" ]; then
@@ -156,7 +174,10 @@ status_feed(){ feed --status; }
 supervisors(){
   local n=0 p cwd
   for p in $(ps -eo pid,args 2>/dev/null | grep '[a]gent-activity.sh --supervise' | awk '{print $1}'); do
-    cwd="$(readlink -f "/proc/$p/cwd" 2>/dev/null)"
+    # BUG-036: this read /proc/<pid>/cwd directly, which macOS does not have,
+    # so the count was 0 on a Mac no matter what was running and six cases
+    # below failed closed. bp_proc_cwd falls back to lsof.
+    cwd="$(bp_proc_cwd "$p")"
     case "$cwd" in "$WORK"*) n=$((n+1)) ;; esac
   done
   echo "$n"
@@ -172,6 +193,59 @@ count_in_log(){ grep -cF -- "$1" "$LOG" 2>/dev/null | head -1; }
 # bulk of this suite's wall-clock and the pre-push gate has a 30s ceiling.
 wait_sup(){ local want="$1" i=0
   while [ "$i" -lt 40 ]; do [ "$(supervisors)" -eq "$want" ] && return 0; sleep 0.1; i=$((i+1)); done
+  return 1; }
+
+# BUG-038 — wait_sup proves a supervisor is RESIDENT. It does not prove the
+# supervisor has finished its initial scan and registered a baseline offset for
+# a given run log, and those two are not the same instant.
+#
+# The gap is load-bearing because the feed deliberately does NOT replay
+# pre-existing content (case #16). A payload appended after wait_sup returns but
+# before the supervisor registers the file is folded into the baseline and is
+# never emitted — so the suite reports "the reader lost it", which is
+# indistinguishable from the regression these cases exist to catch.
+#
+# On a fast Linux box registration lands inside the same tick and nobody sees
+# it. On macOS here it does not, and #7/#10/#18/#5f all failed for this one
+# reason. A `sleep 2` makes them pass, which is how the mechanism was isolated —
+# and is exactly the fixed-interval guess BUG-037 was about, so it is not the
+# fix. Handshake instead: write a unique sentinel to the very file the case will
+# use and wait until it comes out the other end. That proves liveness AND that
+# THIS file is registered, which is the property the case actually needs.
+# THE SENTINEL IS RE-WRITTEN, and that is the whole point — waiting longer does
+# not work, which cost a wrong diagnosis before it was understood.
+#
+# seed_offset() records a run log's size at seeding time so pre-existing content
+# is never replayed. A sentinel appended BEFORE seeding is therefore behind the
+# offset and is skipped PERMANENTLY, not merely delayed. A single write plus a
+# longer timeout cannot close that: the bound was tried at 45s against a
+# measured 32.6s first-record latency, changed no outcome at all, and added
+# 2m41s to the run. The write has to be repeated until one of them lands after
+# the seed.
+#
+# Measured, for whoever tunes this next: first record after `--daemon` is 32.6s
+# (twice, at 32.60 and 32.59 — deterministic, not load), every subsequent record
+# 0.25-0.47s, and running `--supervise` directly has no delay whatsoever. The
+# underlying defect is that `--daemon` returns when the supervisor is RESIDENT
+# rather than PUMPING (BUG-039); 32s of silence after starting the feed is an
+# operator problem, not just a test problem. When that is fixed this helper can
+# lose most of its patience.
+#
+# A handshake that FAILS must be loud. The first version of this returned a
+# status nobody checked, so a failed handshake silently degraded to exactly the
+# unsynchronised behaviour it exists to prevent — a guard whose failure mode is
+# invisible is not a guard. Callers use `reader_ready … || fail`.
+reader_ready(){ local f="$1" tag i=0 j
+  tag="READY-$$-${2:-x}-$(date +%s)"
+  while [ "$i" -lt 20 ]; do
+    printf '%s\n' "$tag" >>"$f"
+    j=0
+    while [ "$j" -lt 4 ]; do
+      grep -qF -- "$tag" "$LOG" 2>/dev/null && return 0
+      sleep 0.25; j=$((j+1))
+    done
+    i=$((i+1))
+  done
   return 1; }
 
 # ===========================================================================
@@ -399,6 +473,9 @@ SPACEY="$WORK/state dir with spaces"; mkdir -p "$SPACEY"; : >"$SPACEY/gemini-run
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$SPACEY" AGENT_FEED_TICK="${TICKVAL:-0.25}" \
   bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 wait_sup 1
+# Handshake on the spacey path itself: it is also the first proof the reader
+# opened a path containing spaces at all.
+reader_ready "$SPACEY/gemini-runs.log" spacey || fail "#7 reader never registered the spacey run log - the case below cannot tell a lost record from an unsynchronised start"
 printf 'SPACED-PATH-OK\n' >>"$SPACEY/gemini-runs.log"
 if wait_for "SPACED-PATH-OK" 8; then pass "#7 state dir containing spaces handled"
 else fail "#7 a path with spaces broke the reader (word splitting)"; fi
@@ -417,7 +494,7 @@ sleep 1
 n2="$(supervisors)"; t2="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
 if [ "$n1" -eq 1 ] && [ "$n2" -eq 1 ] && [ "$t1" -eq 0 ] && [ "$t2" -eq 0 ]; then
   pass "#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)"
-else fail "#2 process count grew with transcripts (sup $n1→$n2, tails $t1→$t2) — the RC-2 leak"; fi
+else fail "#2 process count grew with transcripts (sup ${n1}→${n2}, tails ${t1}→${t2}) — the RC-2 leak"; fi
 stop_feed >/dev/null 2>&1
 
 # ===========================================================================
@@ -432,12 +509,24 @@ stop_feed >/dev/null 2>&1; wait_sup 0
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   AGENT_FEED_TEST_SLOW_READ=1 bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 if wait_sup 1; then
+  # BUG-038 — RACE-A used to be appended the instant a supervisor was resident.
+  # If registration had not happened yet it was absorbed into the baseline and
+  # never emitted, giving A=0 B=0 C=0: read as "the reader lost every record",
+  # which is precisely the regression this case exists to detect.
+  reader_ready "$RUNLOG" race || fail "#10 reader never registered the run log - the RACE counts below are not trustworthy"
   printf 'RACE-A\n' >>"$RUNLOG"     # in the snapshot
   sleep 0.3
   printf 'RACE-B\n' >>"$RUNLOG"     # lands DURING the slowed read
   sleep 0.3
   printf 'RACE-C\n' >>"$RUNLOG"
-  wait_for RACE-C 6; sleep 1
+  # BUG-038 — 6s was too tight to survive the full gate. These two cases run
+  # with a deliberately SLOWED read seam, on a host where a tick is already
+  # ~10s once #2's 80 transcripts exist, while the rest of the gate competes
+  # for the machine. They passed standalone and failed under load, which is the
+  # worst way for a suite to be wrong. The assertion here is exactly-once
+  # delivery, not latency, so a generous bound costs nothing when things work
+  # and removes a false failure when they are merely slow.
+  wait_for RACE-C 30; sleep 1
   a="$(count_in_log RACE-A)"; b="$(count_in_log RACE-B)"; c="$(count_in_log RACE-C)"
   if [ "$a" -eq 1 ] && [ "$b" -eq 1 ] && [ "$c" -eq 1 ]; then
     pass "#10 append during a slowed read: every record emitted exactly once"
@@ -452,17 +541,24 @@ stop_feed >/dev/null 2>&1; wait_sup 0
 #     restart would legitimately re-seed at EOF and mask the property.
 # ===========================================================================
 : >"$RUNLOG"
-SENTINEL="$WORK/short-sink-active"; : >"$SENTINEL"
+SENTINEL="$WORK/short-sink-active"
 ( cd "$REPO" && HOME="$HOMEDIR" AGENT_STATE_HOME="$STATE" AGENT_FEED_TICK=0.25 \
   AGENT_FEED_TEST_SHORT_SINK="$SENTINEL" bash scripts/agent-activity.sh --daemon ) >/dev/null 2>&1
 if wait_sup 1; then
+  # BUG-038 — the handshake must happen while the sink is HEALTHY, because the
+  # seam's whole purpose is to suppress emission. So the sentinel is created
+  # here, after the reader has proven it is registered, rather than before the
+  # daemon starts. The property under test is unchanged: the payload below is
+  # still written with the short sink armed, on the same supervisor.
+  reader_ready "$RUNLOG" shortsink || fail "#18 reader never registered the run log before the short sink was armed"
+  : >"$SENTINEL"                                     # arm the short sink NOW
   printf 'SHORTSINK-PAYLOAD\n' >>"$RUNLOG"
   sleep 1.5
   if [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 0 ]; then
     pass "#18 short sink emits nothing and consumes nothing"
   else fail "#18 a short capture was emitted — partial bytes escaped the bounded read"; fi
   rm -f "$SENTINEL"                                  # sink healthy again
-  if wait_for "SHORTSINK-PAYLOAD" 5; then
+  if wait_for "SHORTSINK-PAYLOAD" 30; then   # BUG-038 — was 5s; see #10 above
     [ "$(count_in_log "SHORTSINK-PAYLOAD")" -eq 1 ] \
       && pass "#18 deferred range delivered intact, exactly once, by the same supervisor" \
       || fail "#18 range delivered $(count_in_log "SHORTSINK-PAYLOAD") times after recovery"
@@ -488,8 +584,18 @@ kids="$(ps -eo ppid,args 2>/dev/null | awk -v P="$fgpid" '$1==P' | grep -c '[t]e
 if [ "$kids" -eq 0 ]; then pass "#15f foreground spawns no 'tee' (supervisor writes both sinks)"
 else fail "#15f foreground spawned a 'tee' — the one-resident-process contract is false"; fi
 
+# BUG-038 — same handshake. Foreground is not exempt: it becomes the pumping
+# supervisor at its own pace, and both #5f assertions failed here because the
+# line was appended before it had registered $RUNLOG.
+reader_ready "$RUNLOG" fg || fail "#5f foreground never registered the run log - the assertions below cannot tell a reader fault from a slow start"
 printf 'FOREGROUND-LINE\n' >>"$RUNLOG"
-sleep 1.5
+# BUG-038 — was `sleep 1.5`. By this point #2 has created 80 subagent
+# transcripts and every tick scans them, so the effective tick here is ~10s,
+# not the configured 0.25s: the handshake above needed 10s of retries and its
+# sentinels came out in one burst. A fixed 1.5s wait against a 10s tick reports
+# "foreground did not write" about a supervisor that writes perfectly well.
+# Poll for the line instead of guessing how long a tick costs.
+wait_for "FOREGROUND-LINE" 30
 if grep -qF "FOREGROUND-LINE" "$FGOUT" 2>/dev/null; then pass "#5f foreground writes to stdout"
 else fail "#5f foreground did not write to stdout"; fi
 if grep -qF "FOREGROUND-LINE" "$LOG" 2>/dev/null; then pass "#5f foreground also writes the log itself"

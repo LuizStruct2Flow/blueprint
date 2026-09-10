@@ -86,7 +86,22 @@ fi
 # of the blueprint, run the merge, then verify.
 
 # Create a temp blueprint-clone so we don't dirty the real blueprint.
-BP_CLONE="$(mktemp -d)/bp-clone"
+#
+# BUG-049 — the clone lives UNDER $WORK, which the trap above already owns.
+#
+# It used to be `BP_CLONE="$(mktemp -d)/bp-clone"`: the parent `mktemp -d`
+# was never captured in a variable, so nothing could ever remove it, and the
+# trap covered only $WORK. Every run therefore left a full `git archive HEAD`
+# of the blueprint behind — 23 of them, 133 MB, measured in $TMPDIR — and two
+# per gated push, because tests/git-isolation runs this suite a second time.
+#
+# Not just waste: a2bp-e2e:309 scans that same directory for leaked dirs, so
+# debris accumulating there is a live cross-suite hazard.
+#
+# The fix is to stop allocating a second temp root at all rather than to add a
+# second trap. One suite, one owned root, one cleanup path — a suite cannot
+# forget to remove a directory it never allocated.
+BP_CLONE="$WORK/bp-clone"
 mkdir -p "$BP_CLONE"
 ( cd "$ROOT" && git archive HEAD | tar -x -C "$BP_CLONE" )
 cp "$BP" "$BP_CLONE/docs/mocks/README.md"

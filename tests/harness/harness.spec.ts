@@ -273,7 +273,7 @@ describe('harness — git fixtures (Andreas, Codex)', () => {
 
   it('the repo is real: git init created a .git INSIDE the fixture (BUG-047)', async () => {
     await scenario('git-real', async (s) => {
-      const repo = await s.gitRepo('proj')
+      await s.gitRepo('proj')
       // Under an inherited GIT_DIR, `git init` returns 0 and creates NO .git
       // here, and every later commit lands in the real repository. That is the
       // defect, and this is the assertion that would catch it coming back.

@@ -167,8 +167,7 @@ describe('A-14 — bootstrap inherits the git identity and fails safely without 
       expect(r.code, r.output).toBe(0)
 
       // So a WRONG identity is visible rather than silent.
-      expect(r.output).toContain('Committing as:')
-      expect(r.output).toContain(EMAIL)
+      expect(r.output).toContain(`Committing as: ${NAME} <${EMAIL}>`)
     })
   })
 

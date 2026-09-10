@@ -509,14 +509,31 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
 
     # CAN A DERIVED PROJECT EXECUTE A `.spec.ts`? Derived from the archive, not
     # declared, so phase 2 flips it by deleting export-ignore lines and this
-    # file needs no edit. All four parts are required: the three root files AND
-    # the harness, because a spec whose fixture API is absent is as unrunnable
-    # as one with no vitest at all.
+    # file needs no edit. Every part is required: the root files AND the
+    # harness, because a spec whose fixture API is absent is as unrunnable as
+    # one with no vitest at all, and a lockfile with no package.json is an
+    # `npm ci` that dies on ENOENT.
+    #
+    # THE SET IS DECLARED ONCE, and both this check and #2c's MANAGED_FILES
+    # check read it. It used to be two hand-written lists, and BUG-061 walked
+    # straight through the gap between them: package-lock.json was in neither
+    # list nor the export-ignore block, so it shipped ALONE to every derived
+    # project while both checks printed "phase 1 is whole". An AND over a
+    # remembered subset cannot see a file it does not know about — so the
+    # partial-ship tally below is what actually closes the class, not the list.
+    TS_TOOLCHAIN='package.json package-lock.json tsconfig.json vitest.config.ts'
     TS_SHIPS=1
-    for _f in package.json tsconfig.json vitest.config.ts; do
-      _ships "$_f" || TS_SHIPS=0
+    ts_shipping=""
+    ts_absent=""
+    for _f in $TS_TOOLCHAIN; do
+      if _ships "$_f"; then ts_shipping="$ts_shipping $_f"; else TS_SHIPS=0; ts_absent="$ts_absent $_f"; fi
     done
-    grep -q '^tests/harness/' "$_listing" || TS_SHIPS=0
+    if grep -q '^tests/harness/' "$_listing"; then
+      ts_shipping="$ts_shipping tests/harness/"
+    else
+      TS_SHIPS=0
+      ts_absent="$ts_absent tests/harness/"
+    fi
 
     SPECS_SHIP=0
     grep -q '^tests/.*\.spec\.ts$' "$_listing" && SPECS_SHIP=1
@@ -672,9 +689,16 @@ EOF
     _mf_n="$(printf '%s\n' "$_mf" | grep -c .)"
     _managed(){ printf '%s\n' "$_mf" | grep -qxF "$1"; }
 
+    # Same set as #2b, same reason: one declaration, so a file added to the
+    # toolchain is covered by both propagation checks or by neither, never by
+    # one of them. (tests/harness/ is not listed — it travels under the managed
+    # `tests/` directory automatically, which is exactly why the ROOT files are
+    # the ones that need naming.)
     TS_MANAGED=1
-    for _f in package.json tsconfig.json vitest.config.ts; do
-      _managed "$_f" || TS_MANAGED=0
+    ts_managed_some=""
+    ts_managed_none=""
+    for _f in $TS_TOOLCHAIN; do
+      if _managed "$_f"; then ts_managed_some="$ts_managed_some $_f"; else TS_MANAGED=0; ts_managed_none="$ts_managed_none $_f"; fi
     done
 
     # Every file the managed hook sources must travel exactly as the hook does.
@@ -702,6 +726,16 @@ EOF
       echo "        'else' branch and pipe_skips that stage on every push, permanently, with a"
       echo "        reason that reads as deliberate. Add the file to MANAGED_FILES, or"
       echo "        export-ignore it so no project is told it should have been there."
+    elif [ "$TS_SHIPS" -eq 0 ] && [ -n "$ts_shipping" ]; then
+      fail "#2c the TS toolchain ships in PART —$ts_shipping reach every derived project while$ts_absent do not"
+      echo "        A partial toolchain is worse than none: the recipient gets machinery it"
+      echo "        cannot use, and .github/workflows/security.yml is MANAGED, so its ts-tests"
+      echo "        job runs 'npm ci' in a project holding half a toolchain and goes red on the"
+      echo "        first push, on a job that project never wrote (BUG-061). Either export-ignore"
+      echo "        the shipping half in .gitattributes, or make the phase-2 move whole."
+    elif [ "$TS_MANAGED" -eq 0 ] && [ -n "$ts_managed_some" ]; then
+      fail "#2c the TS toolchain is MANAGED in part —$ts_managed_some are in MANAGED_FILES while$ts_managed_none are not"
+      echo "        'blueprint pull' would deliver half a toolchain to every existing project."
     elif [ "$SPECS_SHIP" -eq 1 ] && [ "$TS_SHIPS" -eq 0 ]; then
       fail "#2c *.spec.ts files ship to derived projects while the TS toolchain does not — every recipient gets specs with no runner"
       echo "        Ship package.json, tsconfig.json, vitest.config.ts and tests/harness/,"

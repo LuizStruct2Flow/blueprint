@@ -7,7 +7,7 @@
 # region means losing the edit at the next pull — back-propagate it instead:
 # `blueprint a2bp .githooks/pre-push-project`.
 #
-# THE PROSE ABOVE DELIBERATELY DOES NOT SPELL THE END MARKER (BUG-053).
+# THE PROSE ABOVE DELIBERATELY DOES NOT SPELL THE END MARKER (BUG-052).
 # marker_aware_merge counts the marker tokens as SUBSTRINGS and refuses to merge
 # unless BEGIN and END balance. Two sentences here mentioned the end token by
 # name, giving this file a count of 1 and 3 — so the merge never ran, `pull`

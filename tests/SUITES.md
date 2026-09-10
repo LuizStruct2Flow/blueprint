@@ -230,6 +230,7 @@ run, so the number that is meant to reach zero is visible rather than remembered
 
 | `bootstrap-identity` | Replace the `unset AGENT_SIGNAL_FILE AGENT_STATE_HOME` in `scripts/new-project.sh`'s seed subshell with a no-op, so the seeded baton is published over whatever the caller had | `#6` — both runners go red reporting that bootstrap REPUBLISHED the caller's live baton, which is BUG-046 itself |
 | `bootstrap-contents` | Delete the `.blueprint-root                    export-ignore` line from `.gitattributes` **and commit it** — the fixture is built from `git archive HEAD`, so an uncommitted mutant does not exist as far as this suite is concerned | `#1` — both runners go red reporting that `.blueprint-root` shipped, which would make every derived project claim to BE the blueprint and `drift` compare nothing (BUG-013) |
+| `bootstrap-gate` | Replace the `if ! … blueprint files …; then … exit 1; fi` refusal in `scripts/new-project.sh` with a plain invocation **and commit it** — the fixture is materialised from HEAD with `checkout-index`, so an uncommitted mutant does not exist as far as this suite is concerned | `#7` — both runners go red on the same assertion: `set -e` kills bootstrap with the CLI's own status and no output, so the refusal names no cause (BUG-029 R3). `#7b` stays green, because the empty-list refusal is a separate branch |
 <!-- RETIRED-SHELL-RUNNERS:END -->
 
 <!-- BLUEPRINT:END -->

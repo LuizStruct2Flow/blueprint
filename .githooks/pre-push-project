@@ -802,21 +802,17 @@ fi
 # bootstraps a project from HEAD — the tree about to be pushed — and runs that
 # project's ENTIRE pre-push gate. That is the cost of the only assertion that
 # speaks for the people downstream.
-if [ -f tests/bootstrap-gate/test.sh ]; then
-  _st_bootstrap_gate(){
-    bash tests/bootstrap-gate/test.sh || {
-      echo "❌ tests/bootstrap-gate/test.sh failed (BUG-028)."
-      echo "   A project bootstrapped from this commit cannot pass its own"
-      echo "   pre-push gate, or is not drift-clean against its own source."
-      echo "   Every project bootstrapped from here is affected, and the"
-      echo "   failure arrives on someone else's machine."
-      return 1
-    }
-  }
-  pipe_stage "bootstrap-gate · BUG-028" _st_bootstrap_gate
-else
-  pipe_skip "bootstrap-gate · BUG-028" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
+# Equivalence proven by mutation first, and it shares the wrinkle every
+# bootstrap suite has: the fixture is materialised from HEAD with
+# `checkout-index`, so an uncommitted mutant does not exist as far as the suite
+# is concerned and both runners stay green over it. Committed, replacing the
+# `if ! … blueprint files …; then … exit 1; fi` refusal in scripts/new-project.sh
+# with a plain invocation turns #7 red in both runners, on the same assertion
+# and with the same evidence: `set -e` then kills
+# bootstrap with the CLI's own status and prints nothing at all, so the refusal
+# names no cause and the operator has nothing to act on. #7b stays green, which
+# is the point of having both — the empty-list refusal is a different branch.
 
 # ============================================================================
 # DoD handoff checklist — rendered as STAGES, tagged [DoD-Gate] in the feed.

@@ -556,6 +556,156 @@ describe('harness — the real-state canary (BUG-030)', () => {
     }
   })
 
+  // ---------------------------------------------------------------------
+  // BUG-068 — a concurrent agent's mic flip is not a fixture escape.
+  //
+  // The canary snapshots the real baton and fails on any byte change. This
+  // repo's whole premise is concurrent agents, and an agent claiming or
+  // releasing the mic changes exactly those bytes — legitimately. So
+  // bootstrap-gate began throwing in TEARDOWN, its own assertions having
+  // passed, whenever anyone else flipped the baton during the run. Three
+  // consecutive runs, each with a matching flip in signal-history.log from
+  // another agent. A control that goes red for innocent reasons gets muted,
+  // which is how coverage is lost (canary.ts says this about the feed already).
+  //
+  // THE DISCRIMINATOR IS ALREADY IN THE REPO, and it is exact:
+  //   - BUG-030's clobber writes signal.md DIRECTLY, appending NOTHING to
+  //     logs/state/signal-history.log.
+  //   - A real flip goes through scripts/signal-set.sh, which ALWAYS appends
+  //     one line to that journal.
+  // So the journal is the witness, and it is already a watched target — no new
+  // plumbing, just the correlation between the two.
+  //
+  // These cases use fixture files with the REAL labels, because the labels are
+  // what carry the correlation (realStateTargets is their only producer).
+
+  it('BUG-068: a baton change WITNESSED by a journal append is reported, not failed', async () => {
+    const ws = await createWorkspace('canary-baton-witnessed')
+    try {
+      const baton = join(ws.root, 'signal.md')
+      const journal = join(ws.root, 'signal-history.log')
+      await writeFile(baton, 'Holder | Vitali\n', 'utf8')
+      await writeFile(journal, '2026-09-10 12:00 Vitali ACTIVE\n', 'utf8')
+
+      const canary = await RealStateCanary.capture([
+        { label: 'live baton', path: baton },
+        { label: 'baton journal', path: journal },
+      ])
+
+      // Exactly what scripts/signal-set.sh does: rewrite the baton, append one
+      // line to the journal. Order matches the script's (baton, then journal).
+      await writeFile(baton, 'Holder | Elias\n', 'utf8')
+      await appendFile(journal, '2026-09-10 12:05 Elias ACTIVE\n', 'utf8')
+
+      await expect(canary.assertUnchanged()).resolves.toBeUndefined()
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-068: the report is VISIBLE, not a silent pass', async () => {
+    // A silent pass would make this canary indistinguishable from one that was
+    // switched off, which is this repo's signature failure (BUG-004, A-22,
+    // BUG-066). The operator has to be told the canary saw a change and judged
+    // it legitimate.
+    const ws = await createWorkspace('canary-baton-visible')
+    try {
+      const baton = join(ws.root, 'signal.md')
+      const journal = join(ws.root, 'signal-history.log')
+      await writeFile(baton, 'Holder | Vitali\n', 'utf8')
+      await writeFile(journal, 'one\n', 'utf8')
+
+      const canary = await RealStateCanary.capture([
+        { label: 'live baton', path: baton },
+        { label: 'baton journal', path: journal },
+      ])
+      await writeFile(baton, 'Holder | Elias\n', 'utf8')
+      await appendFile(journal, 'two\n', 'utf8')
+
+      const said: string[] = []
+      const realWarn = console.warn
+      console.warn = (...args: unknown[]) => {
+        said.push(args.map(String).join(' '))
+      }
+      try {
+        await canary.assertUnchanged()
+      } finally {
+        console.warn = realWarn
+      }
+
+      // CANARY-NOTE: is the marker scripts/run-ts-suites.sh greps for, so this
+      // string is load-bearing in the gate, not merely in this assertion.
+      expect(said.join('\n')).toMatch(/CANARY-NOTE:/)
+      expect(said.join('\n')).toMatch(/live baton/)
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-068: a baton change with NO journal append still FAILS (BUG-030)', async () => {
+    // The guarded defect itself. tests/bootstrap-gate really did reset the live
+    // baton to the bootstrap default mid-review. That write never goes through
+    // signal-set.sh, so the journal does not move — and this must stay red.
+    const ws = await createWorkspace('canary-baton-unwitnessed')
+    try {
+      const baton = join(ws.root, 'signal.md')
+      const journal = join(ws.root, 'signal-history.log')
+      await writeFile(baton, 'Holder | Vitali\n', 'utf8')
+      await writeFile(journal, '2026-09-10 12:00 Vitali ACTIVE\n', 'utf8')
+
+      const canary = await RealStateCanary.capture([
+        { label: 'live baton', path: baton },
+        { label: 'baton journal', path: journal },
+      ])
+
+      await writeFile(baton, 'Bootstrapped from the blueprint\n', 'utf8')
+
+      await expect(canary.assertUnchanged()).rejects.toThrow(/live baton/)
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-068: an unwitnessed baton change fails even with no journal watched', async () => {
+    // Fail CLOSED when there is no witness to consult at all. Otherwise the
+    // absence of a journal target would be a way to switch the guard off.
+    const ws = await createWorkspace('canary-baton-nowitness')
+    try {
+      const baton = join(ws.root, 'signal.md')
+      await writeFile(baton, 'Holder | Vitali\n', 'utf8')
+      const canary = await RealStateCanary.capture([
+        { label: 'live baton', path: baton },
+      ])
+      await writeFile(baton, 'Holder | Nobody\n', 'utf8')
+      await expect(canary.assertUnchanged()).rejects.toThrow(/live baton/)
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-068: the journal itself may grow, but may not be rewritten', async () => {
+    // signal-set.sh only ever appends. A journal that shrank or was rewritten
+    // is damage regardless of what the baton did.
+    const ws = await createWorkspace('canary-journal')
+    try {
+      const journal = join(ws.root, 'signal-history.log')
+      await writeFile(journal, 'one\n', 'utf8')
+      const canary = await RealStateCanary.capture([
+        { label: 'baton journal', path: journal },
+      ])
+
+      await appendFile(journal, 'two\n', 'utf8')
+      await expect(canary.assertUnchanged()).resolves.toBeUndefined()
+
+      await writeFile(journal, 'history replaced\n', 'utf8')
+      await expect(canary.assertUnchanged()).rejects.toThrow(
+        /rewritten or truncated/,
+      )
+    } finally {
+      await ws.dispose()
+    }
+  })
+
   it('the real baton is genuinely being watched, and is intact', async () => {
     // Guards against the canary silently watching nothing — the vacuity trap.
     // If the repo has a live baton, the canary must be pointed at it.

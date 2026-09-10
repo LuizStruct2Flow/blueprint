@@ -89,7 +89,7 @@ export class RealStateCanary {
    * survive a parallel gate, and pretending otherwise would bake in a test that
    * fails for reasons unrelated to the defect it guards.
    */
-  async assertUnchanged(): Promise<void> {
+  async assertUnchanged(escapeToken?: string): Promise<void> {
     const problems: string[] = []
 
     for (const before of this.before) {
@@ -116,6 +116,12 @@ export class RealStateCanary {
         if (!after.content!.startsWith(before.content!)) {
           problems.push(
             `${before.target.label} was rewritten or truncated, not appended to ` +
+              `(${before.target.path})`,
+          )
+        }
+        if (escapeToken && after.content!.includes(escapeToken)) {
+          problems.push(
+            `${before.target.label} contains this scenario's unique escape token ` +
               `(${before.target.path})`,
           )
         }

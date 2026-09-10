@@ -261,21 +261,6 @@ else
   pipe_skip "watcher-liveness · BUG-022" "suite absent"
 fi
 
-# TASK-003 — no commit or push on the BLUEPRINT's main, and the guard stays
-# INERT in derived projects, which are trunk-based. ~0.5s.
-if [ -f tests/branch-guard/test.sh ]; then
-  _st_bguard(){
-    bash tests/branch-guard/test.sh || {
-      echo "❌ tests/branch-guard/test.sh failed (TASK-003)."
-      echo "   Either the blueprint's main is open, or the guard fires in derived"
-      echo "   projects — which would break every trunk-based project that pulls it."
-      return 1
-    }
-  }
-  pipe_stage "branch-guard · TASK-003" _st_bguard
-else
-  pipe_skip "branch-guard · TASK-003" "suite absent"
-fi
 
 # FEATURE-005 — the mic waiter must exit on a handoff and ONLY on a handoff. A
 # spurious exit is worse than the always-on Monitor it replaces: silence is

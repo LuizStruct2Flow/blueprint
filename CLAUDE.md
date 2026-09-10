@@ -267,12 +267,12 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
    - Behaviour changes (no underlying defect) → row in
      `waiting-acceptance/CHANGES.md`.
 
-   **The trigger is the MERGE, not the push.** This used to say "after
-   pushing", and while pushing meant landing on `main` the two were the same
-   event. §"Never push to the blueprint's `main`" separated them: you now push a
-   branch, and the work reaches `main` only when its PR merges. An item whose PR
-   is still open belongs in `doing/` — it is not waiting on the founder, it is
-   waiting on review.
+   **The trigger is landing on `main`.** For most work that is the push
+   itself, since §"The blueprint's `main` is its trunk" means you push straight
+   to it. When a change does travel on a branch — a risky one you chose to
+   isolate, or an `a2bp` request from a derived project — the trigger is the
+   MERGE, not the push: an item whose PR is still open belongs in `doing/`,
+   because it is not waiting on the founder, it is waiting on review.
 
    This is not pedantry about wording; it caused a real failure the day the PR
    rule landed. Five fixed bugs sat in `doing/` across an afternoon of pushing
@@ -923,44 +923,40 @@ After a non-empty pull, **review with `git diff` and commit in the
 project repo**. `.blueprint-source` bootstrap_sha is updated by
 `blueprint pull` automatically — don't edit it by hand.
 
-### Never push to the blueprint's `main`
+### The blueprint's `main` is its trunk
 
-**Every change to the blueprint reaches `main` through a pull request. No
-exceptions, no matter who authorized the change.** An agent never runs
-`git push` with `main` checked out in a blueprint checkout.
+**Commit and push to `main` like any other struct2flow project.** No branch is
+required, no pull request is required, and nothing enforces one.
 
-This is not a style preference and it is not the same question as
-trunk-based development. The blueprint's `main` is the trunk **every derived
-project pulls from**, so anything landing there fans out to all of them on
-their next `blueprint pull`. That reach is precisely what a review step
-exists to gate — it is the same reasoning that makes `a2bp` a *request*
-rather than a delivery (§"Back-propagating"), applied to the one door `a2bp`
-does not cover.
+This used to say the opposite, emphatically, and pre-closed three
+rationalisations for ignoring it. It was removed on 2026-09-10 by founder
+decision, and the reason is worth keeping because the rule was not silly:
 
-Three ways agents have talked themselves past this, all closed:
+- **What it was protecting is real.** The blueprint's `main` is the trunk every
+  derived project pulls from, so anything landing there fans out on their next
+  `blueprint pull`. That reach is exactly what a review step would gate.
+- **What it got wrong is who was being gated.** A pull request is a request
+  made OF someone. On this repo the author, the reviewer and the owner are the
+  same person, so the PR was a step taken against oneself — and one that
+  `git push` refused to let you skip. **Pull requests exist for external
+  collaboration, which is what `blueprint a2bp` files.** That door still works
+  exactly as before and is still the only way a derived project reaches this
+  repo (§"Back-propagating").
+- **The enforcement had become the problem.** A `pre-commit` hook refused the
+  commit, `pre-push` refused the push, and `tests/branch-guard` pinned both. So
+  the owner's ordinary workflow required disabling a guard, and a gate someone
+  must route around to do their job protects nothing — the same argument BUG-031
+  makes about a red CI everyone merges over, and BUG-045 about a local scan
+  harsher than CI.
 
-1. **"Trunk-based development only — no branches."** That rule governs
-   product repos (§"Team Workflow"). The blueprint is not one.
-2. **"The founder explicitly asked for this blueprint-level edit."** That
-   authorizes the edit, not the push. File it as a PR.
-3. **"It is only committed locally, I have not pushed it."** *A local commit
-   on a shared branch is not isolation.* Whoever pushes next carries your
-   commits out with theirs, and on a repo with concurrent sessions that is
-   routine rather than unlucky. Verified on 2026-08-02: three commits went
-   public across two pushes, none of them ours. **Commit on a branch, or do
-   not commit yet.**
+**What still holds, and is now the whole protection:** the pre-push gate runs on
+every push, `blueprint a2bp` is still a request rather than a delivery, and a
+back-propagation from a derived project still requires a human to merge it.
+Nothing about the reach of `main` changed — only who is asked for permission to
+use it.
 
-Practically, with a concurrent session in the blueprint checkout, use a
-separate worktree so you never disturb the other session's working tree:
-
-```bash
-git -C <blueprint> worktree add <tmp>/bp-<topic> -b <topic> origin/main
-# edit + commit in that worktree, push the BRANCH, open the PR
-```
-
-Before committing in the blueprint at all, **read that repo's own
-`AGENT_SIGNAL.md`** — it is a different baton from the one in the project
-you are working in, and it may say `Do not push`.
+If you want isolation for a risky change, a branch is still available and still
+works. It is a tool now, not a rule.
 
 ### Back-propagating (apply-to-blueprint)
 
@@ -1155,9 +1151,8 @@ What this means for the agent:
   travel up. The exception is when the founder explicitly asks for
   a blueprint-level edit (this file, `docs/DoD.md`, the recipe docs,
   etc.) — those are evolutionary improvements based on lessons
-  already accumulated. **That exception authorizes the EDIT, never a
-  push to `main`** — it still lands as a branch + pull request, same
-  as everything else (§"Never push to the blueprint's `main`").
+  already accumulated. Commit them to `main` like anything else
+  (§"The blueprint's `main` is its trunk`").
 - **There is a third class the two rules above do not cover:
   blueprint-only machinery.** `scripts/new-project.sh` runs only ever
   *from* the blueprint, because bootstrapping is the one thing a derived

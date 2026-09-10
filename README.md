@@ -125,7 +125,6 @@ blueprint/
 ├── .githooks/
 │   ├── pre-push                    ← generic security + build/lint/format/coverage gate
 │   ├── commit-msg                  ← rejects a commit that does not name its backlog item
-│   ├── pre-commit                  ← refuses a commit on the BLUEPRINT's main (inert in derived projects)
 │   ├── pre-push-project            ← managed between the BLUEPRINT markers (wires the suites); APPEND your guards after BLUEPRINT:END
 │   └── pre-push-project.example    ← a menu of guard shapes to copy FROM (never over)
 ├── .claude/
@@ -309,7 +308,7 @@ it. Current contents:
   with them. Sync here is **additive only** — files the blueprint ships are
   created and updated, and nothing is ever deleted, because the project has no
   way to tell "the blueprint dropped this" from "we wrote this"
-- **`.githooks/`:** `pre-push`, `commit-msg`, `pre-commit`,
+- **`.githooks/`:** `pre-push`, `commit-msg`,
   `pre-push-project.example`, and `pre-push-project` **between its
   `BLUEPRINT:BEGIN`/`END` markers** (it wires the suites, so it must travel
   with them; the region after `END` stays yours)

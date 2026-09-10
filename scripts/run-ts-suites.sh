@@ -145,7 +145,12 @@ ts_suites_stage(){
     for _v in $(env | sed -nE 's/^((GIT|AGENT)_[A-Za-z0-9_]*)=.*/\1/p'); do
       unset "$_v"
     done
-    npx vitest run --reporter=json --outputFile="$_ts_json"
+    # TWO reporters, deliberately. `json` feeds pipe_stage_report below;
+    # `default` is the only thing that tells a human WHICH assertion failed.
+    # With json alone the captured output is a path to a file this function
+    # deletes seconds later — BUG-055 fixed the silence and left the
+    # uselessness, which cost three ~200s re-runs to notice.
+    npx vitest run --reporter=default --reporter=json --outputFile="$_ts_json"
   ) >"$_ts_out" 2>&1
   then
     _ts_rc=0

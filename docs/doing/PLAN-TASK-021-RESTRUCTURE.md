@@ -502,10 +502,39 @@ moment `scripts/` moves, the blueprint's own gate cannot source
 `scripts/lib/pipeline.sh`. Nothing staged can fix that, because the gate is what
 would have proven the stage green. **So the `scripts/` slice is atomic.**
 
-`docs/` and `tests/` are not: nothing sources them, so with a per-path resolver
-each can move in its own green, pushable commit. Take them first. The value is
-not tidiness — it is that ~185 moves landing as one commit means the first
-failure is the only signal you get, and you get it after ~390 s.
+**NARROWED 2026-09-10, after round 3 of the review loop.** The paragraph above
+originally continued: *"`docs/` and `tests/` are not: nothing sources them, so
+with a per-path resolver each can move in its own green, pushable commit. Take
+them first."* That was true of the tree as it stood when I wrote it, and it is
+false of the tree the mechanism creates.
+
+The hook now derives its **code root** by locating `scripts/lib/pipeline.sh` from
+git-guaranteed cwd (§5.3 of the root-split design), and every suite path hangs off
+that root. So the two halves cannot be separated:
+
+- move `tests/` first → the probe finds root `scripts/lib/pipeline.sh`, resolves
+  the code root to the repo root, and looks for suites at a root that no longer
+  has them;
+- move `scripts/` first → the probe finds `scaffolding/scripts/lib/pipeline.sh`,
+  resolves to `scaffolding/`, and looks for suites there before they arrive.
+
+Both fail **loudly** rather than silently — that is the whole point of the
+resolver's no-match refusal, and it is a large improvement on BUG-066's green.
+But loud is still red, so neither ordering is a pushable slice.
+
+**Therefore `scripts/` + `tests/` move in one commit**, together with whatever
+part of `docs/` decision 3 sends to `scaffolding/docs/` — the suites that read
+`$ROOT/docs` follow the same code root. What remains genuinely separable is the
+`forge/` half and this repo's own root content, which nothing on the gate path
+resolves through.
+
+**Which is not a return to "necessarily atomic".** The original verdict said ~185
+moves in one commit because the Stage A′ probe left no alternative. The constraint
+now has a stated cause, a much smaller scope, and a loud failure mode — and it
+comes from a mechanism chosen deliberately, not from an artefact nobody had
+examined. The practical warning stands unchanged: one commit means the first
+failure is the only signal you get, and you get it after ~390 s. §BUG-057
+mitigation below is not optional for this stage.
 
 Size, if it does land as one: **~185 file moves**, plus 7 CLI
 sites, 1 bootstrap archive line, the `.gitattributes` split, the 37 CI lines, the

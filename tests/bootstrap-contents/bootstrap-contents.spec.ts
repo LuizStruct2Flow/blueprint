@@ -137,7 +137,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       const found = await s.run('bash', ['-c', 'ls scripts/lib/*.sh'], { cwd: REPO_ROOT })
       const libs = found.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
 
-      expect(libs.length, 'discovery is broken, so this would prove nothing').toBeGreaterThan(3)
+      expect(libs.length, 'discovery is broken, so this would prove nothing').toBeGreaterThanOrEqual(5)
 
       const unshipped = libs.filter((l) => !listed.has(l))
       expect(

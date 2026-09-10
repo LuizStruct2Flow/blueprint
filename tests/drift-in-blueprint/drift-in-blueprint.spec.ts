@@ -202,6 +202,8 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
 
       const r = await s.run(CLI, ['drift'], { cwd: p })
 
+      // Drift is a report, not an error: differences are expected and rc=0.
+      expect(r.code, r.output).toBe(0)
       expect(r.output).toContain('docs/DoD.md')
       expect(r.output).not.toMatch(/is the blueprint/i)
     })
@@ -216,6 +218,8 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
 
       const r = await run(s, 'bash scripts/blueprint drift 2>&1 </dev/null', p)
 
+      // The project's own copy has the same reporting contract: drift is rc=0.
+      expect(r.code, r.output).toBe(0)
       expect(r.output).not.toMatch(/is the blueprint/i)
       expect(r.output).toContain('docs/DoD.md')
     })

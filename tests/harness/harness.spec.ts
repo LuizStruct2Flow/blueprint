@@ -45,13 +45,26 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
     }
   })
 
-  it('lets a scenario set a forbidden variable DELIBERATELY', () => {
+  it('BUG-060 lets a scenario set a forbidden variable only inside its workspace', async () => {
     // git-isolation exists to prove a hostile GIT_DIR cannot reach the real
     // repo, so it must be able to set one on purpose. Deliberate is fine;
     // ambient is the defect. If this ever stops working, that suite cannot be
     // migrated at all.
-    const env = fixtureEnv({ GIT_DIR: '/deliberate/fixture/.git' })
-    expect(env.GIT_DIR).toBe('/deliberate/fixture/.git')
+    const ws = await createWorkspace('forbidden-env-inside')
+    try {
+      const gitDir = join(ws.root, 'victim/.git')
+      const env = fixtureEnv({ GIT_DIR: gitDir }, ws.root)
+      expect(env.GIT_DIR).toBe(gitDir)
+      expect(() =>
+        fixtureEnv({ GIT_DIR: '/real/repository/.git' }, ws.root),
+      ).toThrow(/Refusing forbidden environment override/)
+      await symlink('/tmp', join(ws.root, 'escape-link'))
+      expect(() =>
+        fixtureEnv({ GIT_DIR: join(ws.root, 'escape-link/victim.git') }, ws.root),
+      ).toThrow(/Refusing forbidden environment override/)
+    } finally {
+      await ws.dispose()
+    }
   })
 
   it('a real child process sees none of the forbidden variables', async () => {

@@ -1,3 +1,6 @@
+import { realpathSync } from 'node:fs'
+import { dirname, resolve, sep } from 'node:path'
+
 /**
  * tests/harness/env.ts — the environment a fixture child process may inherit.
  *
@@ -68,6 +71,7 @@ export const FORBIDDEN_ENV = [
  */
 export function fixtureEnv(
   overrides: Record<string, string | undefined> = {},
+  workspaceRoot?: string,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
 
@@ -79,6 +83,36 @@ export function fixtureEnv(
     if (value === undefined) {
       delete env[key]
     } else {
+      if ((FORBIDDEN_ENV as readonly string[]).includes(key)) {
+        const isNullGitConfig =
+          (key === 'GIT_CONFIG_GLOBAL' || key === 'GIT_CONFIG_SYSTEM') &&
+          value === '/dev/null'
+        let insideWorkspace = false
+        if (workspaceRoot !== undefined) {
+          let ancestor = resolve(value)
+          for (;;) {
+            try {
+              const physicalAncestor = realpathSync(ancestor)
+              const suffix = resolve(value).slice(ancestor.length).replace(/^[/\\]+/, '')
+              const physicalValue = resolve(physicalAncestor, suffix)
+              insideWorkspace =
+                physicalValue === workspaceRoot ||
+                physicalValue.startsWith(workspaceRoot + sep)
+              break
+            } catch {
+              const parent = dirname(ancestor)
+              if (parent === ancestor) break
+              ancestor = parent
+            }
+          }
+        }
+        if (!isNullGitConfig && !insideWorkspace) {
+          throw new Error(
+            `Refusing forbidden environment override ${key}=${value}: ` +
+              `the path must be inside the scenario workspace ${workspaceRoot ?? '(missing)'}`,
+          )
+        }
+      }
       env[key] = value
     }
   }

@@ -45,22 +45,27 @@
  * RUN; the red set is what was observed, not what was expected.
  *
  *   Mutant A: drop the `^\|` anchor from ROW_START (a row becomes a mention).
- *     Red: #3, #6. #3 is the named guard; #6 goes red as collateral because
- *     the real tables cite other numbers constantly.
- *   Mutant B: `counts.get(id)! > 1` -> `>= 1` in duplicateNumbers.
+ *     Red: #3, #6. AND #3 ONLY AFTER THE FIXTURE WAS FIXED — on the first run
+ *     mutant A went red on #6 alone, because #3's mentions were plain text
+ *     while ROW_START also requires `**`. So the NAMED guard did not catch it
+ *     and only the real tables did, which would have left a derived project
+ *     whose prose happens not to bold a number with no guard at all. The
+ *     fixture's mentions are bold now. This is the one thing running the
+ *     mutant bought that reading the test could not.
+ *   Mutant B: `places.length > 1` -> `>= 1` in duplicateNumbers.
  *     Red: #1, #2, #3, #5, #6. Every non-duplicate becomes a duplicate.
- *   Mutant C: readTables treats an unreadable table as absent (swallow the
- *     error and `continue`).
+ *   Mutant C: readTables treats an unreadable table as absent (`if (code)
+ *     continue`, swallowing everything that is not ENOENT).
  *     Red: #4 only. #4 is the only thing standing between this check and the
  *     F-002 class — six checks found today inferring a property from a proxy
  *     satisfiable without it, every one failing toward "pass".
  *   Mutant D: LIFECYCLE_STATES narrowed to ['doing'].
- *     Red: #1, #5. Same-file detection (#2) survives it, which is the point:
- *     the two halves are independent and both are needed.
- *   Mutant E: ROW_START loses its `\*\*` so it matches the separator and any
- *     pipe-prefixed line.
- *     Red: #3. The prose fixture's `| a table row that is not a bug row |`
- *     is what catches it.
+ *     Red: #1, #4, #5. #2 survives it, which is the point: cross-file and
+ *     same-file detection are independent and both are needed.
+ *   Mutant E: ROW_START loses its `\*\*` so it matches any pipe-prefixed line.
+ *     Red: #1, #2, #3, #5. The prose fixture's `| a table row that is not a
+ *     bug row |` is what catches it. #6 survives — the real tables have no
+ *     such line today, which is exactly why the fixture carries one.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -92,8 +97,8 @@ interface RowLocation {
 function rowsIn(file: string, text: string): RowLocation[] {
   const out: RowLocation[] = []
   text.split('\n').forEach((line, i) => {
-    const m = ROW_START.exec(line)
-    if (m) out.push({ id: m[1], file, line: i + 1 })
+    const id = ROW_START.exec(line)?.[1]
+    if (id) out.push({ id, file, line: i + 1 })
   })
   return out
 }
@@ -212,12 +217,19 @@ describe('BUG-071 — one bug number, one row', () => {
 
   it('#3 a mention is not a row, however many times it is mentioned', async () => {
     await scenario('bug-numbers-3', async (s) => {
+      // THE MENTIONS ARE BOLD, and that is the whole point of the fixture.
+      // With plain-text mentions this case survives dropping the `^\|`
+      // anchor — measured, mutant A went red only on #6, i.e. only against
+      // the real tables, which means a derived project whose prose happened
+      // not to bold a number would have had no guard at all. A row cell
+      // routinely says `**BUG-052** is anchored in code`, so bold is the
+      // realistic shape as well as the dangerous one.
       const docs = await fixtureDocs(s, {
         doing:
           HEADER +
-          row('BUG-200', 'cites BUG-201 and BUG-201 again, and BUG-200 in its own prose') +
-          'Prose about BUG-201, BUG-201, BUG-200 and BUG-200 outside any table.\n' +
-          '| a table row that is not a bug row | BUG-201 | BUG-201 |\n' +
+          row('BUG-200', 'cites **BUG-201** and BUG-201 again, and **BUG-200** in its own prose') +
+          'Prose about **BUG-201**, BUG-201, **BUG-200** and BUG-200 outside any table.\n' +
+          '| a table row that is not a bug row | **BUG-201** | BUG-201 |\n' +
           row('BUG-201', 'the only other row'),
       })
 

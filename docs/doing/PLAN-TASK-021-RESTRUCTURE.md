@@ -453,7 +453,7 @@ latter.
 
 ## 5. Sequencing
 
-**Stages are possible, and there are three. Only the middle one is atomic.**
+**Stages are possible, and there are three. Within the middle one, the `scripts/` slice is atomic; `docs/` and `tests/` are not — see Stage B.**
 
 ### Stage A — `forge/` alone. Green and pushable on its own.
 
@@ -475,11 +475,31 @@ prefixes if present. While the blueprint is still flat the probe finds nothing
 and behaviour is byte-identical, so this stage is trivially green. Push it, and
 give the three derived projects a window to pull it.
 
-### Stage B — `scaffolding/`. **Necessarily atomic.**
+### Stage B — `scaffolding/`. **One slice of it is atomic; the stage is not.**
 
-Nothing in this stage is individually green: the moment `scripts/` moves, the
-blueprint's own gate cannot source `scripts/lib/pipeline.sh`, and `blueprint
-drift` dies in `bp_expand_managed_dirs`. Size: **~185 file moves**, plus 7 CLI
+**Corrected 2026-09-10.** This section read *"necessarily atomic"*, and that
+verdict rested on two legs that were never checked separately.
+
+The first leg does not hold. It was `blueprint drift` dying in
+`bp_expand_managed_dirs` — but that death is caused by the Stage A′ probe
+`[ -d "$BLUEPRINT_ROOT/scaffolding" ]`, which prefixes EVERY source path the
+instant `scaffolding/` exists, including the files still sitting at root. The
+probe manufactured the atomicity it was then cited as evidence for. A per-path
+resolver — prefer `scaffolding/$f` when that exact path exists at committed HEAD,
+else root `$f` — resolves a half-moved tree correctly for both halves, and the
+constraint disappears. See decision 8.
+
+The second leg holds, and it is about THIS repo rather than the derived ones: the
+moment `scripts/` moves, the blueprint's own gate cannot source
+`scripts/lib/pipeline.sh`. Nothing staged can fix that, because the gate is what
+would have proven the stage green. **So the `scripts/` slice is atomic.**
+
+`docs/` and `tests/` are not: nothing sources them, so with a per-path resolver
+each can move in its own green, pushable commit. Take them first. The value is
+not tidiness — it is that ~185 moves landing as one commit means the first
+failure is the only signal you get, and you get it after ~390 s.
+
+Size, if it does land as one: **~185 file moves**, plus 7 CLI
 sites, 1 bootstrap archive line, the `.gitattributes` split, the 37 CI lines, the
 38 hook blocks (if `.githooks` moves), 13 shell-suite fixture fixes, 5 TS sites,
 and whatever §0 decides about `.github`/`CLAUDE.md`/`.claude`.
@@ -491,7 +511,7 @@ and the vitest set unconditionally, collecting every failure, and iterate on
 *that*. Run the gate once at the end as confirmation. This is the same reasoning
 `pipe_batch_begin` already applies to vitest.
 
-Order within the atomic commit, so the first thing that breaks is the most
+Order within the `scripts/` slice, so the first thing that breaks is the most
 informative:
 
 1. `.gitattributes` split (nested file) — verify with `git archive HEAD
@@ -590,8 +610,11 @@ anywhere.
 
 ## Founder decisions — ANSWERED 2026-09-10
 
-All eight are settled. The list that follows this section is the original
-statement of the questions; keep it for the reasoning, but these are the answers.
+**Four of these were revised on 2026-09-10 after cross-provider review** —
+decisions 1, 4, 7 and 8 were ruled wrong or incomplete by Codex and re-decided
+by the founder. The cells below carry the REVISED answers; §"Revisions" after
+the table records what changed and why. The list further down is the original
+statement of the questions; keep it for the reasoning.
 
 **THE RULE, in the founder's words:** *"forge is everything needed to run this
 very project but not needed by the derived projects."*
@@ -607,14 +630,63 @@ decides the cases §2 did not anticipate:
 
 | # | Question | Answer |
 |---|---|---|
-| 1 | Root-anchored files | **Root file is a STUB, content in `scaffolding/`.** Viable for `CLAUDE.md` (`@scaffolding/CLAUDE.md`) and the CI workflow (`run:`s a scaffolding script). NOT viable for `.claude/settings.json` — no import mechanism exists — so that ONE file stays root-anchored and ships from root. See §0.1. |
+| 1 | Root-anchored files | **REVISED: a named third class, `ROOT_SHIPPED`.** `CLAUDE.md` keeps the `@scaffolding/CLAUDE.md` stub — that one works. The CI workflow and `.claude/settings.json` do NOT: GitHub reads workflows only from the repo root and a stub can delegate `run:` bodies but not triggers, permissions, containers or job structure; Claude Code reads settings only from the repo root and there is no import. Both therefore live at root, ship from root, and are archived and managed through an explicit named list rather than through `scaffolding/`. This is a DELIVERY class, not the third audience bucket §2 rejected — the distinguishing property is that the reading tool hardcodes the path, so location cannot determine propagation for these files no matter where we put them. Cost, stated: `MANAGED_FILES` is no longer purely "everything under `scaffolding/`" but that plus a short exception list, and the list must be short enough to read at a glance or it becomes the third bucket after all. |
 | 2 | `forge/` scope | **Bootstrap + templates + the suites that test them.** `scripts/blueprint` goes to `scaffolding/`: it implements `drift`, `pull` and `a2bp`, all of which a DERIVED project runs, and `a2bp` cannot even run here. `scripts/new-project.sh` moves to `forge/` and STOPS SHIPPING — a deliberate behaviour change, and a correct one: every project carries a bootstrap script it cannot use. |
 | 3 | `docs/` split | **By audience, three destinations.** `scaffolding/docs/`: `DoD.md`, `SECURITY.md`, `OBSERVABILITY.md`, `INFRASTRUCTURE.md`, `DOCUMENTATION.md`, and the `config/` `mocks/` `requirements/` READMEs — every project needs these and CLAUDE.md names them as the rules. `forge/docs/`: `A2BP_PLAYBOOK.md`, which says outright it addresses *"the implementer — whoever makes the change in the blueprint. Not the requester."* Root: `way-of-working.md` + `.pdf` + `assets/brand/` — struct2flow's own pitch and brand. Cost: ~29 links rewritten, and this repo reads its own DoD out of `scaffolding/docs/`. |
-| 4 | `LICENSE` | **`forge/templates/LICENSE`, seeded with the holder substituted at bootstrap.** It currently ships unmanaged, so every derived project declares `Copyright (c) 2026 Luiz Scheidegger` permanently and no pull can ever correct it. Same shape as A-14 (a founder identity baked into every derived repo), in a different file. |
+| 4 | `LICENSE` | **REVISED: `forge/templates/LICENSE` with a new `{{COPYRIGHT_HOLDER}}` token, PROMPTED at bootstrap, defaulting to `git config user.name`.** The original answer said "the holder" and no such token exists — the vocabulary is `{{PROJECT_NAME}}` and `{{PROJECT_NAME_UPPER}}` only — and "holder" was ambiguous in a repo where that word already means the mic holder. The token name now says which holder it means. Prompted rather than derived silently, because deriving from `git config` is silently wrong for anyone bootstrapping on a machine configured for someone else and nothing would surface it. Cost: a second substitution token, which the placeholder guard and the `a2bp` restore both have to learn. It currently ships unmanaged, so every derived project declares `Copyright (c) 2026 Luiz Scheidegger` permanently and no pull can ever correct it. Same shape as A-14 (a founder identity baked into every derived repo), in a different file. |
 | 5 | `scripts/accept-bug-022.sh` | **Delete.** BUG-022 is accepted in `done/`, and `tests/watcher-liveness` is the actual guard (it names the bug twice). The script is an acceptance DEMO that never travelled with its item and has been shipping to every project since. |
 | 6 | `docs/assets/brand/` | **Resolved by #3.** `README.md:150` claims they are "blueprint-only; not synced to projects". The sync half is true (unmanaged); the SHIP half is false (they are in `git archive`). Moving them to root makes the prose true without editing it. |
-| 7 | `MANAGED_FILES` | **`("scaffolding/")`.** Location determines propagation, which is R2's actual promise, and it deletes a 69-entry hand-maintained array. It also fixes `wait-mic.sh`, `session-resume.sh` and `no-chain-guard.sh`, which ship today while unmanaged — so derived projects run regression suites against scripts frozen at their bootstrap commit (BUG-029's shape). **Cost accepted:** the per-file comments explaining WHY each file must travel are real knowledge and will be lost; carry anything load-bearing into the files' own headers before deleting the array. |
-| 8 | Stage A′ | **AUTHORIZED, and required before Stage B.** Without it all three derived projects lose every `blueprint` subcommand at once — including `blueprint pull scripts/blueprint`, the recovery — because `bp_expand_managed_dirs` fails inside `read_blueprint_source`, which every subcommand goes through. Ship the probing CLI while the tree is still flat, confirm all three have pulled it, then move. |
+| 7 | `MANAGED_FILES` | **REVISED: derived from `scaffolding/`, but expressed in PROJECT coordinates.** A literal `("scaffolding/")` breaks two consumers that read the raw array and never reach the blueprint-side resolver: bootstrap substitutes at `$TARGET_DIR/$f`, which after `--strip-components=1` does not exist, so a new project ships with literal `{{PROJECT_NAME}}` throughout and reports zero substitutions rather than failing; and `a2bp` validates each requested path against the raw array, so `scripts/blueprint` is not beneath `scaffolding/` and EVERY legitimate request is rejected before staging. The intent survives intact — the set is still derived from location and the 69-entry hand-maintained array still dies. It becomes a FUNCTION: enumerate `scaffolding/` at the blueprint's committed HEAD and strip the prefix. One coordinate system on the outside, the prefix applied only where the blueprint's own tree is read. It also fixes `wait-mic.sh`, `session-resume.sh` and `no-chain-guard.sh`, which ship today while unmanaged — so derived projects run regression suites against scripts frozen at their bootstrap commit (BUG-029's shape). **Cost accepted:** the per-file comments explaining WHY each file must travel are real knowledge and will be lost; carry anything load-bearing into the files' own headers before deleting the array. |
+| 8 | Stage A′ | **AUTHORIZED and required — but the stated reason was wrong, and so was the probe.** What is true: `read_blueprint_source` does call `bp_expand_managed_dirs`, so `drift` and `pull` die after root `tests/` disappears, and `blueprint pull scripts/blueprint` — the recovery — dies with them. That alone requires the stage. What is FALSE is "which every subcommand goes through": `files` reads the array directly, `a2bp` and `prs` load config and validate directly, `help` is local. `a2bp` does break after the move, for path-coordinate reasons (decision 7), not this chain. And the probe `[ -d "$BLUEPRINT_ROOT/scaffolding" ]` is too coarse: the first creation of `scaffolding/` prefixes every source path including files still at root, which is what FORCED §5's "Stage B is necessarily atomic" verdict. A per-path resolver — prefer `scaffolding/$f` when that exact path exists at committed HEAD, else root `$f` — supports staged moves, so the atomicity was an artefact of the probe rather than a property of the restructure. §5 is corrected accordingly. |
+
+### Revisions — what the cross-provider review changed
+
+Codex reviewed all eight answers on 2026-09-10 and ruled 1, 4, 7 and 8 wrong or
+incomplete. Its verdict on the whole design was *"does not yet hold; findings 1–6
+are implementation blockers before Stage B."*
+
+Two of those four were repairable without changing the founder's intent. Decision
+7's rule — location determines propagation — survives exactly as stated; only the
+coordinate system was wrong. Decision 8's conclusion was right and its premise was
+false, which matters because the premise is what a future reader would check the
+decision against.
+
+The other two were genuinely re-decided by the founder (see the cells).
+
+**Finding 6 was investigated and does NOT hold.** Codex reported a fourth
+failure-reporting bug in `scripts/run-ts-suites.sh` — `grep … | head -40` aborting
+the outer gate under `set -e` + `pipefail`. Traced and measured: `pipefail` is set
+nowhere on the path from `.githooks/pre-push` through `pre-push-project` to
+`ts_suites_stage`, so the pipeline reports `head`'s status and both mechanisms are
+masked. The precondition cannot be introduced by a derived project either — a
+project's own guards run after `BLUEPRINT:END`, by which point the bridge has
+already run. Recorded in `docs/config/findings.md` so the next review does not
+re-raise it.
+
+**Decision 9 — retiring a file that already shipped.** Decisions 2 and 4 both
+create orphans: existing projects hold a `scripts/new-project.sh` that will stop
+shipping and a `LICENSE` carrying the founder's copyright, and neither was ever in
+`MANAGED_FILES`, so no `pull` can reach them. Founder decision: `pull` gains a
+one-time migration, built on two ingredients.
+
+*Inference is not one of them.* "Absent from `MANAGED_FILES`" is not evidence of
+orphanhood — every file a project authored itself is also absent, so inference
+alone turns `pull` into a delete-anything-unrecognised command.
+
+1. **An explicit `RETIRED_FILES` manifest** — paths the blueprint once shipped and
+   no longer does, each with the commit that retired it. Nothing is a candidate
+   unless the blueprint declares it shipped it.
+2. **Content proof before removal.** Compare the project's copy against what the
+   blueprint shipped at that path, substituted for this project. Identical → offer
+   deletion through the per-file `y/n/quit` prompt `pull` already has. Differs →
+   the project edited it; never delete, report once as *"blueprint-shipped, now
+   retired, and you have modified it — it is yours now."* Absent → silent.
+
+The comparison is the alignment idea `a2bp` already uses for the placeholder
+restore, so it is not a new primitive. The failure mode is safe by construction:
+anything the blueprint cannot prove it wrote is left alone. `LICENSE` then needs no
+special case — it is always in the "differs, is yours now" class, because a
+project's licence is a legal decision and `pull` has no business rewriting it.
 
 **One thing found while answering these, NOT part of the restructure and rowed
 separately:** `docs/PUBLISHING.md` opens with *"This file is gitignored (under

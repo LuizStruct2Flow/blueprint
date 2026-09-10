@@ -87,6 +87,34 @@ ts_suites_stage(){
     return 1
   fi
 
+  # TASK-018 PHASE 2 — THE SPECS SHIP NOW, so this stage is reached in projects
+  # that have never run `npm ci`, and `npx` treats a missing local vitest as an
+  # invitation to FETCH ONE.
+  #
+  # Measured, not assumed (.scratch/probe-npx.sh): in a tree holding
+  # package.json, package-lock.json and a spec but no node_modules,
+  # `npx vitest run` requests https://registry.npmjs.org/vitest. Offline that is
+  # `ENOTCACHED`; ONLINE it silently downloads an unpinned resolution of the very
+  # package the lockfile exists to pin, and runs the push gate against something
+  # nobody reviewed and osv-scanner never scanned. A gate that installs its own
+  # tooling mid-push is worse than one that stops.
+  #
+  # BLOCK, do not skip — the same argument as the npx check above. Skipping is
+  # how a project gets a green gate over suites it never ran (TASK-017, BUG-066),
+  # and here it would be green over EVERY TypeScript suite at once.
+  if [ ! -d "$_ts_root/tests/node_modules" ]; then
+    echo "❌ The TypeScript suites cannot run: tests/node_modules is absent."
+    echo "   Install the pinned tree once, then push again:"
+    echo ""
+    echo "       (cd tests && npm ci)"
+    echo ""
+    echo "   'npm ci' and not 'npm install': the lockfile is the tree osv-scanner"
+    echo "   scans and CI resolves, so anything else runs the gate against a"
+    echo "   different set of packages than the one that was reviewed."
+    pipe_stage "vitest · TASK-018" false
+    return 1
+  fi
+
   # THE LIST IS THE CONTRACT, NOT THE STATUS — and `|| true` is load-bearing.
   #
   # scripts/lib/suites.sh says of bp_suites_with_spec: "a final suite without a

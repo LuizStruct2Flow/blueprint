@@ -255,24 +255,30 @@ jobs:
       # of GHSA-82fw-gwwq-j7x9 (CVSS 5.9, which osv-scanner blocks), and it
       # needs ^20.19 || >=22.12 — enforced at runtime, not merely warned, since
       # on 20.11 it dies importing styleText from node:util.
-      # TASK-018 PHASE 1: THIS JOB IS BLUEPRINT-ONLY MACHINERY INSIDE A MANAGED,
-      # SHIPPING FILE, and that is a combination .gitattributes cannot resolve —
-      # you can export-ignore a file, not a job inside one. So every derived
-      # project inherits these steps while `.gitattributes` deliberately
-      # withholds tests/package.json, tests/tsconfig.json, tests/vitest.config.ts
-      # and tests/harness/ from it. (TASK-020 moved the harness manifest under
-      # tests/, so the guard below reads tests/package.json.) Unguarded, setup-node's npm cache dies on
-      # "Dependencies lock file is not found", `npm ci` dies on ENOENT
-      # package.json, and that project's FIRST push goes red on a job it never
-      # wrote (BUG-061) — the failure tests/bootstrap-gate exists to prevent,
-      # landing on someone else's machine.
+      # TASK-018 PHASE 2 HAS LANDED, AND THIS JOB NOW RUNS EVERYWHERE.
+      # `tests/package.json`, `tests/package-lock.json`, `tests/tsconfig.json`,
+      # `tests/vitest.config.ts`, `tests/harness/` and the shipping suites'
+      # `*.spec.ts` all reach derived projects, so the steps below execute there
+      # exactly as they execute here. That is the intent, not a side effect: a
+      # project that receives the specs must be able to run them.
       #
-      # `hashFiles` is evaluated per STEP, after the checkout has populated the
-      # workspace; at job level it would see an empty workspace and skip here
-      # too. The guard is the same `if [ -f … ]` idiom .githooks/pre-push-project
-      # uses, and it dissolves at phase 2 without an edit: the moment the
-      # toolchain stops being export-ignore'd, package.json is there and every
-      # step below runs downstream exactly as it does here.
+      # THE `hashFiles` GUARDS BELOW ARE KEPT, and they are no longer about the
+      # phase. During phase 1 they existed because this job is blueprint-only
+      # machinery inside a MANAGED, SHIPPING file — a combination
+      # .gitattributes cannot resolve, since you can export-ignore a file but
+      # not a job inside one — and without them a derived project's FIRST push
+      # went red on `npm ci` dying with ENOENT, on a job it never wrote
+      # (BUG-061). They were designed to dissolve at phase 2 with no edit, and
+      # they have: `tests/package.json` is present downstream now, so every
+      # guard is true and every step runs.
+      #
+      # They stay because the condition they test is still real, just rarer: a
+      # project that has deliberately removed the harness, or a checkout of this
+      # repo from before the toolchain shipped. Deleting them would trade a
+      # clean announced skip for an ENOENT crash in those cases, and buy
+      # nothing. `hashFiles` is evaluated per STEP, after checkout populates the
+      # workspace; at job level it would see an empty workspace and skip
+      # everything.
       #
       # The skip is ANNOUNCED, not silent — see the final step. A job whose
       # steps all skip renders green, and "green because it checked nothing"
@@ -305,4 +311,4 @@ jobs:
       # suite that ran and passed.
       - name: No TypeScript harness in this project
         if: hashFiles('tests/package.json') == ''
-        run: echo "::notice::No tests/package.json — the TypeScript harness is blueprint-only during TASK-018 phase 1 (BUG-061). Nothing to run here, and this job becomes live when the toolchain ships."
+        run: echo "::notice::No tests/package.json in this checkout, so the TypeScript suites did not run. Since TASK-018 phase 2 the harness ships to every project, so this is unexpected — either the harness was removed deliberately, or this checkout predates the toolchain shipping. Restore it with: blueprint pull tests/"

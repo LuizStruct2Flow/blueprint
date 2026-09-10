@@ -82,12 +82,15 @@ bp_suite_names() {
 # archive, one per line.
 #
 # A DIRECTORY-LEVEL `tests/<suite>/  export-ignore` line, and nothing else. Not
-# "no file of this suite happens to be in the archive": during TASK-018 phase 1
-# `tests/**/*.spec.ts` is export-ignore'd wholesale, so a suite migrated to
-# TypeScript would ship nothing and derive as blueprint-tier — a shipping suite
-# silently reclassified into one that never ships, which is BUG-005 wearing a
-# legal tier. The directory line is a deliberate, reviewable act; the absence of
-# shipped files is a side effect. Only the first is a declaration.
+# "no file of this suite happens to be in the archive". During TASK-018 phase 1
+# `tests/**/*.spec.ts` WAS export-ignore'd wholesale, so a suite migrated to
+# TypeScript shipped nothing and would have derived as blueprint-tier — a
+# shipping suite silently reclassified into one that never ships, which is
+# BUG-005 wearing a legal tier. Phase 2 deleted that line, so today the trap
+# needs a different accident to spring it (an unmigrated suite, a spec excluded
+# by some future glob) and the rule is unchanged: the directory line is a
+# deliberate, reviewable act; the absence of shipped files is a side effect.
+# Only the first is a declaration.
 #
 # tests/manifest #2b is what keeps the declaration honest, by comparing it
 # against a real `git archive`: a line that does not take effect fails, and so

@@ -122,7 +122,24 @@ SH
 # the only one that reaches call >=2 — and mk_shim's counter-based "repeat the
 # last code" branch resolves wrong there (its $# is captured at heredoc-write
 # time, not shim runtime). A trivial exit-0 shim sidesteps that entirely.
-mk_osv_neutral(){ printf '#!/bin/sh\nexit 0\n' >"$FIX/bin/osv-scanner"; chmod +x "$FIX/bin/osv-scanner"; }
+# A CLEAN SCAN, IN THE FORM THE TOOL ACTUALLY EMITS. This shim used to be a
+# bare `exit 0` with no output, which was a faithful stand-in while the stage
+# judged osv-scanner by its exit code alone. BUG-045 made the stage read
+# --format=json and apply CI's MEDIUM+ threshold, and a scan that prints nothing
+# is now — correctly — a TOOL FAILURE rather than a clean result, because
+# "trust an empty document" is precisely the fail-open the new stage refuses.
+#
+# So this is the shim catching up with the contract, not a weakened assertion:
+# every case below still asks what it always asked, and #0's isolation probe
+# still needs a shim that PASSES when it wins PATH.
+mk_osv_neutral(){
+  cat >"$FIX/bin/osv-scanner" <<'OSVSHIM'
+#!/bin/sh
+echo '{"results":[]}'
+exit 0
+OSVSHIM
+  chmod +x "$FIX/bin/osv-scanner"
+}
 mk_osv_neutral
 
 # Run the hook in the fixture with shims first on PATH.

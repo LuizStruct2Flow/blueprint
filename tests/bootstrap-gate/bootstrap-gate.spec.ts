@@ -133,6 +133,42 @@ async function bootstrapped(s: Scenario) {
   return { bp, target }
 }
 
+/**
+ * Give the derived project its dependency tree — what `(cd tests && npm ci)`
+ * leaves behind, without running npm.
+ *
+ * WHY NOT `npm ci` ITSELF, since that is the operator's real command. It needs
+ * the registry, and R3 is that a test which cannot be mocked runs in a sandbox
+ * it cannot escape — a network fetch escapes it by definition. It would also be
+ * slow, flaky on a plane or a rate-limited runner, and it would be testing npm
+ * rather than testing us. The property THIS suite exists to assert is that a
+ * freshly bootstrapped project's gate genuinely runs its TypeScript suites; the
+ * post-install state is what that needs, and `npm ci` is one way to reach it.
+ *
+ * THE REAL `npm ci` IS PROVEN CONTINUOUSLY, ELSEWHERE AND BETTER.
+ * `.github/workflows/security.yml`'s `ts-tests` job runs it on every push, on a
+ * clean runner, from this same lockfile — so the install path has a real,
+ * repeated, end-to-end proof on infrastructure that legitimately has a network.
+ * Duplicating it here would buy a worse copy of a check that already exists.
+ *
+ * Copied rather than symlinked ON PURPOSE. A symlink out to the operator's tree
+ * is a read path leaving the workspace, which is the escape BUG-058 closed; and
+ * a symlink that got committed into a fixture blueprint is what made this very
+ * suite report a phantom `! tests/node_modules` drift failure for one run while
+ * I read it as a phase-2 defect.
+ */
+async function provisionHarness(s: Scenario, target: string) {
+  const src = join(REPO_ROOT, 'tests/node_modules')
+  const r = await s.run('cp', ['-R', src, join(target, 'tests/node_modules')], {
+    cwd: target,
+  })
+  expect(
+    r.code,
+    `could not provision the derived project's node_modules — this suite cannot ` +
+      `speak for a project that has run 'npm ci' if it never reaches that state:\n${r.output}`,
+  ).toBe(0)
+}
+
 describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean', () => {
   it('#1 bootstrap completed', async () => {
     await scenario('bootstrap-gate-1', async (s) => {
@@ -149,6 +185,10 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
   it('#2 and #3 a freshly bootstrapped project passes its own pre-push gate, non-vacuously', async () => {
     await scenario('bootstrap-gate-2', async (s) => {
       const { target } = await bootstrapped(s)
+      // TASK-018 phase 2: the specs ship, so the gate below runs them and the
+      // project needs its dependency tree first. This stands in for the
+      // operator's `(cd tests && npm ci)` — see provisionHarness.
+      await provisionHarness(s, target)
 
       // The operator's SECOND command is `git push`. The whole suite exists for
       // this. AGENT_CI_WATCH=0 so the derived gate does not background a CI
@@ -219,6 +259,68 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
         Number(m![1]),
         'the derived gate is green because it runs almost nothing, which is the A-22 defect',
       ).toBeGreaterThanOrEqual(25)
+    })
+  })
+
+  it('#3c a bootstrapped project that has NOT run npm ci is told so, and does not reach the registry', async () => {
+    await scenario('bootstrap-gate-3c', async (s) => {
+      // THE STATE EVERY OPERATOR IS IN FIRST. #2/#3 provision the tree because
+      // they are asking a different question; this asks what happens before
+      // anyone has. Phase 2 created this state — before it, no spec shipped and
+      // a derived project had nothing to install.
+      //
+      // The failure being prevented is not "the gate is red". It is that `npx`
+      // treats a missing local vitest as an invitation to FETCH ONE: measured
+      // in .scratch/probe-npx.sh, `npx vitest run` requests
+      // https://registry.npmjs.org/vitest. Online, a derived project's FIRST
+      // push would silently download an unpinned resolution of the package its
+      // own lockfile exists to pin, and gate itself against something nobody
+      // reviewed and osv-scanner never scanned.
+      const { target } = await bootstrapped(s)
+
+      // DRIVES THE ONE STAGE, NOT THE WHOLE GATE. Running `.githooks/pre-push`
+      // here cost 187s re-executing the forty shell suites #2 had just run, for
+      // an assertion about a single stage — and #2 already proves the gate
+      // reaches that stage. This keeps what is being asked and drops the
+      // duplicate work; measured 382s -> 195s for the file.
+      const driver = await s.fs.write(
+        'drive-ts-stage.sh',
+        [
+          '. ./scripts/lib/pipeline.sh',
+          '. ./scripts/run-ts-suites.sh',
+          'pipe_begin "probe" 2>/dev/null || true',
+          'ts_suites_stage "$(pwd)"',
+          'echo "STAGE_RC=$?"',
+          '',
+        ].join('\n'),
+      )
+      const gate = await s.run('sh', [driver], {
+        cwd: target,
+        env: {
+          AGENT_CI_WATCH: '0',
+          AGENT_SIGNAL_FILE: undefined,
+          AGENT_STATE_HOME: undefined,
+          AGENT_FEED_LOG: undefined,
+          AGENT_FEED_TAG: undefined,
+          // Any registry request fails loudly instead of succeeding quietly, so
+          // "did not reach the network" is asserted rather than hoped for.
+          // Without this the case would PASS on a laptop with no wifi and FAIL
+          // — by downloading — on CI, which is the wrong way round.
+          npm_config_offline: 'true',
+          npm_config_registry: 'http://127.0.0.1:9',
+        },
+        timeoutMs: 300_000,
+      })
+
+      expect(gate.output, `the stage passed without ever running its suites:\n${gate.output}`)
+        .not.toContain('STAGE_RC=0')
+      // BLOCKED, and blocked for the RIGHT reason with the fix in hand. A gate
+      // that dies on an unresolved import is also non-zero, and it teaches the
+      // operator nothing — the BUG-041/042 misdirection class.
+      expect(gate.output).toContain('tests/node_modules is absent')
+      expect(gate.output).toContain('npm ci')
+      // And it must be the SUITES stage that stopped, not vitest half-running.
+      expect(gate.output).not.toContain('ENOTCACHED')
     })
   })
 

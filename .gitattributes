@@ -120,77 +120,60 @@ tests/bootstrap-gate/              export-ignore
 # has none.
 tests/blueprint-relocation/        export-ignore
 
-# --- TASK-018 PHASE 1: the TypeScript harness does not ship YET --------------
+# --- TASK-018 PHASE 2: the TypeScript harness SHIPS -------------------------
 #
-# THE INVARIANT, and it is asserted rather than remembered:
+# THE INVARIANT IS UNCHANGED, and it is asserted rather than remembered:
 #
 #     the TS toolchain ships  IF AND ONLY IF  a SHIPPING suite is TypeScript.
 #
-# Phase 1 migrates only the `blueprint`-tier suites above, which never leave
-# this repo. So no shipping suite is TypeScript, and the toolchain must not
-# ship either — a derived project would otherwise inherit a Node devDependency
-# and a vitest config it has no use for yet.
+# What changed is which side of it we are on. `tests/bug-numbers` (BUG-071)
+# is a shipping suite and is TypeScript: every project has its own BUGS.md
+# files and its own bug numbers, so every project has the defect it catches.
+# Phase 1's two exits were both wrong for it — export-ignoring it would have
+# removed the check from the projects that need it, and a shell twin would
+# have been a second implementation of one check, the copy-that-drifts this
+# repo has now deleted twice (INDEX.md, tests/SUITES.md). The invariant's own
+# logic named the resolution: ship the toolchain. That is BUG-073.
 #
-# THESE `tests/<suite>/  export-ignore` LINES ARE ALSO WHERE THE TIER LIVES.
-# TASK-020 deleted tests/SUITES.md, whose Tier column was a second description
-# of exactly this boundary. `scripts/lib/suites.sh` now derives the tier from
-# the directory lines above: a suite named there is blueprint-only, every other
-# suite ships. tests/manifest #2b keeps the declaration honest by comparing it
-# against a real `git archive` — a line that does not take effect fails the
-# push, and so does a suite with no line whose files do not arrive.
-#
-# WHY THIS BLOCK EXISTS AT ALL, rather than "we'll add it when we get there".
-# The two propagation paths disagree by construction, and the disagreement is
-# silent:
+# THE SIX LINES THAT WERE HERE ARE GONE, and nothing replaces them. Under
+# `tests/` — a managed directory no derived project owns a copy of — an
+# export-ignore'd file travels by NEITHER propagation path and a file with no
+# line travels by BOTH:
 #
 #   bootstrap  ships the WHOLE archive (new-project.sh: git archive HEAD).
-#   pull       ships MANAGED_FILES only, and a managed DIRECTORY expands through
-#              `git archive HEAD <dir>` — so an EXISTING project pulling would
-#              receive *.spec.ts and tests/harness/ with no runner if the
-#              toolchain were withheld from it separately.
+#   pull       ships MANAGED_FILES only, and a managed DIRECTORY expands
+#              through `git archive HEAD <dir>`.
 #
-# That project's gate would then carry specs nothing can execute, and nothing
-# would tell it. Same shape as BUG-028: machinery shipped downstream that the
-# recipient cannot run, discovered on someone else's machine.
+# Both answer the same query for anything under `tests/`, so the two paths
+# cannot disagree about the toolchain. That property is what made this move one
+# edit instead of two that have to agree, and it is why the block is short.
 #
-# TASK-020 — THE MANIFEST MOVED UNDER tests/, AND THAT IS WHY THIS BLOCK IS
-# SHORT NOW. These four files used to sit at the repo ROOT, where the two paths
-# diverge by construction: root files belong to no managed directory, so `pull`
-# delivered them only if each was listed in MANAGED_FILES by name. Listing them
-# was not an option — `pull_file` has no marker vocabulary for JSON and falls
-# back to a whole-file `cp` with no `.bp-bak`, and every derived project has its
-# own root package.json (STACK_DEFAULTS.md). Managing ours would have silently
-# REPLACED a project's real dependency manifest, on the command every wake runs.
+# WHAT STILL DECIDES A SUITE'S TIER: the `tests/<suite>/ export-ignore` lines
+# ABOVE, unchanged. TASK-020 deleted tests/SUITES.md, whose Tier column was a
+# second description of exactly this boundary, and `scripts/lib/suites.sh`
+# derives the tier from those directory lines. A blueprint-only suite's spec
+# does not ship because its DIRECTORY is named there — not because specs were
+# withheld wholesale, which is what the deleted `tests/**/*.spec.ts` line did.
+# So deleting that line ships the shipping suites' specs and nothing else, and
+# tests/manifest #2b proves it against a real `git archive` rather than
+# describing it here.
 #
-# Under `tests/` — a managed directory no project owns a copy of — `pull` lists
-# it with `git archive HEAD tests`, the same query `git archive HEAD` answers for
-# bootstrap. So an export-ignore'd file under tests/ travels by NEITHER path, and
-# deleting its line makes it travel by BOTH. Collision became impossible rather
-# than merely avoided, and the phase-2 move is one edit instead of two that have
-# to agree.
+# BUG-061 IS WHY package-lock.json IS STILL WORTH NAMING even with no line to
+# write. It once SHIPPED ALONE for the whole of phase 1, because nothing listed
+# it and the manifest computed the toolchain from a hand-written subset that
+# also omitted it — so both checks printed "phase 1 is whole" while
+# .github/workflows/security.yml (MANAGED, and running `npm ci`) went red on
+# every derived project's first push, on a job it never wrote. The lesson
+# survives the phase change: #2c's partial-ship tally, not any list, is what
+# catches a toolchain that travels in pieces. It is symmetric and guards phase 2
+# exactly as it guarded phase 1.
 #
-# THE PHASE-2 TRANSITION IS STILL ALL-OR-NOTHING, and deliberately awkward to
-# half-do. Migrating the first shipping suite means, in ONE change:
-#   1. delete the export-ignore lines below,
-#   2. teach tests/bootstrap-gate to `npm ci` before the nested gate, or a
-#      freshly bootstrapped project fails its own first push,
-#   3. land BUG-045 — the lockfile removes osv-scanner's "No package sources
-#      found" no-op, and the local gate blocks on ANY finding while CI blocks
-#      MEDIUM+ only.
-# tests/manifest #2b and #2c enforce (1) against the specs. (2) and (3) are rowed.
-#
-# BUG-061 is why the lockfile is named explicitly rather than assumed: it once
-# SHIPPED ALONE for the whole of phase 1, because nothing listed it and the
-# manifest computed the toolchain from a hand-written subset that also omitted
-# it. .github/workflows/security.yml is managed, its `ts-tests` job runs
-# `npm ci`, and in a derived project that job died on `ENOENT ... package.json`
-# on the project's first push, on a job it never wrote.
-tests/package.json                 export-ignore
-tests/package-lock.json            export-ignore
-tests/tsconfig.json                export-ignore
-tests/vitest.config.ts             export-ignore
-tests/harness/                     export-ignore
-tests/**/*.spec.ts                 export-ignore
+# THE CI JOB NEEDED NO EDIT, and that was designed in. security.yml's `ts-tests`
+# steps are guarded on `hashFiles('tests/package.json') != ''`; the moment the
+# toolchain stops being export-ignore'd that file is present downstream and
+# every step runs there exactly as it does here. Its final step — the one that
+# ANNOUNCES the skip, because a job whose steps all skip renders green — now
+# goes quiet on its own.
 
 # This repo's own audit register. Same class as docs/doing/** above: it is a
 # real work item of THIS repo, not template material, and its ten relative links

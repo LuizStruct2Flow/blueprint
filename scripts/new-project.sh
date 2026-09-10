@@ -246,59 +246,36 @@ while IFS= read -r f; do
 done <<< "$SYNCED_FILES"
 echo "🔤 Substituted placeholders in $_subst_count file(s)."
 
-# --- Seed the LIVE baton (BUG-019) ---
-# AGENT_SIGNAL.md is the protocol; the baton itself is untracked per-checkout
-# state under logs/state/, so a freshly bootstrapped project has none. Seed it
-# here for the same reason the roster is copied from its .example: a new project
-# should be able to run the ceremony without a manual first step.
-#
-# BUG-046 — the seed is scrubbed of the CALLER's baton pointers, because the
-# only baton this line may ever write is the NEW PROJECT'S.
-#
-# `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.sh:87) and
-# $AGENT_STATE_HOME (:56), and `codex-signal-watch.sh` EXPORTS
-# AGENT_SIGNAL_FILE into every dispatched wake command. So bootstrapping from a
-# dispatched agent — or from any suite that drives this script without scrubbing
-# its own environment — resolved the seed to the CALLER's live mic and published
-# `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a
-# real hand-off, silently, while everything reported success. That is BUG-030,
-# reproduced here from four different suites.
-#
-# Fixed at the source rather than in the callers: an override that means "this
-# session's baton" cannot also mean "the baton of a project that does not exist
-# yet", so it is not an override this call may honour AT ALL. Unsetting inside
-# the subshell — rather than computing a path and passing `--file` — keeps the
-# target's own scripts/lib/state-dir.sh as the SINGLE derivation of where its
-# baton lives (A-09; tests/state-dir #7), instead of adding a second copy of
-# that rule here that could drift from it.
-if [[ -f "$TARGET_DIR/scripts/signal-set.sh" ]]; then
-  (
-    cd "$TARGET_DIR" || exit 0
-    unset AGENT_SIGNAL_FILE AGENT_STATE_HOME
-    bash scripts/signal-set.sh \
-      --holder Nobody --state IDLE \
-      --task "Bootstrapped from the blueprint. Claim the mic to begin."
-  ) >/dev/null 2>&1 || true
-fi
-
-# --- Today's date in HANDOVER + AGENT_SIGNAL stamps ---
+# --- Today's date — needed by the provenance record below and the stamps later ---
 TODAY="$(date '+%Y-%m-%d')"
-for f in "$TARGET_DIR/AGENT_SIGNAL.md" "$TARGET_DIR/docs/doing/HANDOVER.md"; do
-  if [[ -f "$f" ]]; then
-    sed -i.bak "s/{{YYYY-MM-DD}}/$TODAY/g" "$f"
-    rm "$f.bak"
-  fi
-done
 
-# --- Seed the per-engineer agent roster (the .env model) ---
-# AGENT_ROSTER.example.md is tracked and blueprint-managed; AGENT_ROSTER.md is
-# gitignored and personal, because each engineer runs a different fleet. Seed a
-# copy so the project works out of the box, but never overwrite an existing one
-# (a re-run must not clobber a roster someone has customised).
-if [[ -f "$TARGET_DIR/AGENT_ROSTER.example.md" && ! -f "$TARGET_DIR/AGENT_ROSTER.md" ]]; then
-  cp "$TARGET_DIR/AGENT_ROSTER.example.md" "$TARGET_DIR/AGENT_ROSTER.md"
-  echo "👥 Seeded AGENT_ROSTER.md from the example (gitignored — edit it to match your fleet)."
-fi
+# ORDERING (TASK-021): the provenance marker is written BEFORE anything that
+# resolves a project root, and the baton seed below is the first such thing.
+#
+# `.blueprint-source` is what says "this is a derived project", so every root
+# resolution downstream of it depends on it existing. It used to be written
+# ~80 lines later, after the baton seed and after `git init`, which left a
+# window in which the target had NO terminator at all: not this marker, not
+# `.git`. `scripts/lib/state-dir.sh`'s walk correctly refused to guess, so
+# `signal-set.sh` exited 9 and the new project was bootstrapped with no baton —
+# caught by tests/bootstrap-identity #6 and tests/bootstrap-gate #2/#3.
+#
+# The old order was arbitrary; nothing required the baton to precede the marker.
+# This order is the correct one on its own terms, not merely the convenient one.
+#
+# Checked rather than assumed:
+#   * NOTHING between the two positions depends on the marker being ABSENT. The
+#     only in-bootstrap references are prose. `blueprint` self-identifies as the
+#     blueprint via `.blueprint-root` (blueprint:602), never via this file, and
+#     reads `.blueprint-source` only when a subcommand runs from a project root
+#     (blueprint:647), which bootstrap does not do against the target.
+#   * A bootstrap that FAILS after this point leaves a partial project carrying
+#     a valid-looking marker. That is not a new class: a failure after the old
+#     position already left a partial project carrying a seeded baton and a
+#     fully substituted tree, and `blueprint` already treats a missing marker as
+#     "never registered" rather than as corruption. If anything the marker makes
+#     a half-built project MORE recoverable, because its own tooling can now
+#     locate its state instead of refusing.
 
 # --- Record blueprint provenance ---
 #
@@ -368,6 +345,58 @@ bootstrap_date   = $TODAY
 blueprint_remote = FILL-ME-IN
 blueprint_branch = main
 EOF
+
+# --- Seed the LIVE baton (BUG-019) ---
+# AGENT_SIGNAL.md is the protocol; the baton itself is untracked per-checkout
+# state under logs/state/, so a freshly bootstrapped project has none. Seed it
+# here for the same reason the roster is copied from its .example: a new project
+# should be able to run the ceremony without a manual first step.
+#
+# BUG-046 — the seed is scrubbed of the CALLER's baton pointers, because the
+# only baton this line may ever write is the NEW PROJECT'S.
+#
+# `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.sh:87) and
+# $AGENT_STATE_HOME (:56), and `codex-signal-watch.sh` EXPORTS
+# AGENT_SIGNAL_FILE into every dispatched wake command. So bootstrapping from a
+# dispatched agent — or from any suite that drives this script without scrubbing
+# its own environment — resolved the seed to the CALLER's live mic and published
+# `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a
+# real hand-off, silently, while everything reported success. That is BUG-030,
+# reproduced here from four different suites.
+#
+# Fixed at the source rather than in the callers: an override that means "this
+# session's baton" cannot also mean "the baton of a project that does not exist
+# yet", so it is not an override this call may honour AT ALL. Unsetting inside
+# the subshell — rather than computing a path and passing `--file` — keeps the
+# target's own scripts/lib/state-dir.sh as the SINGLE derivation of where its
+# baton lives (A-09; tests/state-dir #7), instead of adding a second copy of
+# that rule here that could drift from it.
+if [[ -f "$TARGET_DIR/scripts/signal-set.sh" ]]; then
+  (
+    cd "$TARGET_DIR" || exit 0
+    unset AGENT_SIGNAL_FILE AGENT_STATE_HOME
+    bash scripts/signal-set.sh \
+      --holder Nobody --state IDLE \
+      --task "Bootstrapped from the blueprint. Claim the mic to begin."
+  ) >/dev/null 2>&1 || true
+fi
+
+for f in "$TARGET_DIR/AGENT_SIGNAL.md" "$TARGET_DIR/docs/doing/HANDOVER.md"; do
+  if [[ -f "$f" ]]; then
+    sed -i.bak "s/{{YYYY-MM-DD}}/$TODAY/g" "$f"
+    rm "$f.bak"
+  fi
+done
+
+# --- Seed the per-engineer agent roster (the .env model) ---
+# AGENT_ROSTER.example.md is tracked and blueprint-managed; AGENT_ROSTER.md is
+# gitignored and personal, because each engineer runs a different fleet. Seed a
+# copy so the project works out of the box, but never overwrite an existing one
+# (a re-run must not clobber a roster someone has customised).
+if [[ -f "$TARGET_DIR/AGENT_ROSTER.example.md" && ! -f "$TARGET_DIR/AGENT_ROSTER.md" ]]; then
+  cp "$TARGET_DIR/AGENT_ROSTER.example.md" "$TARGET_DIR/AGENT_ROSTER.md"
+  echo "👥 Seeded AGENT_ROSTER.md from the example (gitignored — edit it to match your fleet)."
+fi
 
 # --- git init + hook wire ---
 (

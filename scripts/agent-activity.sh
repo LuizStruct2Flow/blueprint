@@ -65,15 +65,17 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+BP_CODE_ROOT="$_bp_root"
 repo_root="$_bp_root"
 # Sourced here rather than further down, because agent_signal_file() lives in
 # the same lib and the baton is resolved immediately below. A use-before-source
 # yields an empty path silently instead of failing.
 . "$repo_root/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
 # BUG-019: the LIVE baton is untracked state, resolved through the one shared
 # helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
 # and — worse, before the split — a file git rewrites under a live dispatch.
-signal_file="$(agent_signal_file "$repo_root")"
+signal_file="$(agent_signal_file)"
 log_dir="$repo_root/logs"; mkdir -p "$log_dir"
 out="$log_dir/agent-activity.log"
 lock_file="$log_dir/.agent-activity.lock"
@@ -85,7 +87,7 @@ state_file="$log_dir/.agent-activity.state"
 # path is the incident record, quoted in a comment, not a live path. The derivation is
 # shared with the dispatchers via scripts/lib/state-dir.sh so both sides compute
 # the identical directory — one mechanism, never two (A-09). Sourced above.
-state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
+state_dir="$(agent_state_dir)"; mkdir -p "$state_dir"
 
 # --- who is this session? (BUG-010) ----------------------------------------
 # The roster's Orchestrator row is the source of truth. AGENT_PERSONA is an
@@ -112,13 +114,13 @@ state_dir="$(agent_state_dir "$repo_root")"; mkdir -p "$state_dir"
 resolve_identity(){
   persona="${AGENT_PERSONA:-}"
   if [ -z "$persona" ]; then
-    persona="$(bp_roster_name_for_role "$repo_root" Orchestrator)"
+    persona="$(bp_roster_name_for_role "$BP_STATE_ROOT" Orchestrator)"
     # Fail visibly, and fall back to the ROLE rather than to somebody's name: a
     # feed labelled [Orchestrator] is obviously unresolved, where a feed labelled
     # with a plausible name is indistinguishable from a correct one.
     [ -n "$persona" ] || persona="Orchestrator"
   fi
-  backing="${AGENT_BACKING:-$(bp_roster_backing_for_name "$repo_root" "$persona")}"
+  backing="${AGENT_BACKING:-$(bp_roster_backing_for_name "$BP_STATE_ROOT" "$persona")}"
   self_label="$persona${backing:+ - $backing}"
 }
 
@@ -126,7 +128,7 @@ resolve_identity(){
 # shape as the signal file's size+inode token — an unchanged roster costs one
 # stat per tick and emits nothing.
 roster_token(){
-  local f; f="$(bp_roster_file "$repo_root" 2>/dev/null)" || { printf 'none'; return; }
+  local f; f="$(bp_roster_file "$BP_STATE_ROOT" 2>/dev/null)" || { printf 'none'; return; }
   printf '%s:%s:%s' "$f" "$(f_size "$f")" "$(f_mtime "$f")"
 }
 
@@ -164,7 +166,7 @@ ts(){ date +%H:%M:%S; }
 # had no way to produce the same label and every Codex line arrived as a bare
 # [CODEX] (BUG-021).
 persona_label(){
-  bp_roster_label "$repo_root" "$1"
+  bp_roster_label "$BP_STATE_ROOT" "$1"
 }
 
 # --- who is behind one subagent transcript? (BUG-027) ------------------------
@@ -188,10 +190,10 @@ persona_label(){
 # race is ever actually observed.
 subagent_label(){
   local f="$1" aid="$2" name
-  name="$(bp_roster_name_in_text "$repo_root" \
+  name="$(bp_roster_name_in_text "$BP_STATE_ROOT" \
           "$(jq -r '.description // empty' "${f%.jsonl}.meta.json" 2>/dev/null)" 2>/dev/null)"
   if [ -n "$name" ]; then
-    bp_roster_label "$repo_root" "$name"
+    bp_roster_label "$BP_STATE_ROOT" "$name"
     return 0
   fi
   name="$(grep -m1 "^$aid " "$log_dir/.subagent-map" 2>/dev/null | awk '{print $2}')"
@@ -648,7 +650,7 @@ supervise_body(){
 # provenance are checkable without starting the feed.
 cmd_whoami(){
   printf '%s\n' "$self_label"
-  printf 'roster: %s\n' "$(bp_roster_file "$repo_root" 2>/dev/null || echo '<none found>')" >&2
+  printf 'roster: %s\n' "$(bp_roster_file "$BP_STATE_ROOT" 2>/dev/null || echo '<none found>')" >&2
   [ -n "${AGENT_PERSONA:-}" ] && printf 'persona: AGENT_PERSONA override\n' >&2
   [ -n "${AGENT_BACKING:-}" ] && printf 'backing: AGENT_BACKING override\n' >&2
   return 0

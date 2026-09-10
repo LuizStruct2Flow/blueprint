@@ -46,6 +46,7 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+BP_CODE_ROOT="$_bp_root"
 ROOT="$_bp_root"
 
 # Discover the Gemini binary.
@@ -91,8 +92,10 @@ set -u
 # Resolved HERE, on every dispatch — not baked in when the watcher started.
 # A watcher lives for days; the derivation can change under it, and a frozen
 # path fails silently (BUG-020, Codex review round 2 finding 3).
+BP_CODE_ROOT="$ROOT"
 . "$ROOT/scripts/lib/state-dir.sh"
-STATE_DIR="$(agent_state_dir "$ROOT")"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
+STATE_DIR="$(agent_state_dir)"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/gemini-runs.log"
 OUTPUT_LAST="$STATE_DIR/gemini-last-message.md"

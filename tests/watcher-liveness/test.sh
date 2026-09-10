@@ -202,6 +202,7 @@ E2E="$(mktemp -d)"
 e2e_repo(){ # $1 = name → echoes the repo path
   _r="$E2E/$1"
   mkdir -p "$_r/scripts/lib" "$_r/logs" "$E2E/home" "$_r/state"
+  : > "$_r/.blueprint-source"   # TASK-021: project-shaped fixture root marker
   cp "$ROOT/scripts/agent-activity.sh" "$_r/scripts/"
   cp -R "$ROOT/scripts/lib/." "$_r/scripts/lib/" 2>/dev/null
   cp "$ROOT/AGENT_ROSTER.example.md" "$_r/" 2>/dev/null
@@ -279,7 +280,19 @@ FIX="$(mktemp -d)"
 mkdir -p "$FIX/state"
 printf '| Field | Value |\n|---|---|\n| Holder | X |\n| State | ACTIVE |\n| Task | t |\n' \
   > "$FIX/state/signal.md"
-live_lock="$ROOT/logs/state/.watch-over_to_codex.lock"
+# TASK-021: the live lock lives under the STATE root, not this suite's code
+# root. Reading "$ROOT/logs/state/..." would watch scaffolding/ after the
+# split — a path the watcher never touches, so the guard could not fire.
+BP_CODE_ROOT="$ROOT"
+. "$ROOT/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || fail "#7 could not resolve the live state root"
+# NOT agent_state_dir: this suite exports AGENT_STATE_HOME at fixture dirs,
+# and that override is the FIRST thing agent_state_dir honours — so calling
+# it here would name a fixture path and the case would accuse the watcher of
+# polluting "the LIVE repo" while pointing at a temp directory. What is
+# wanted is the live repo REGARDLESS of overrides, so derive it from the
+# resolved state ROOT directly.
+live_lock="$BP_STATE_ROOT/logs/state/.watch-over_to_codex.lock"
 had_live_lock=0
 [ -e "$live_lock" ] && had_live_lock=1
 
@@ -287,7 +300,11 @@ had_live_lock=0
     --file "$FIX/state/signal.md" --poll 1 --log "$FIX/signal.log" -- true ) \
   >/dev/null 2>&1 || true
 
-if [ "$had_live_lock" -eq 0 ] && [ -e "$live_lock" ]; then
+# TASK-021: the `[ "$had_live_lock" -eq 0 ] &&` conjunct is DELETED. It made
+# this assertion skip itself whenever a lock already existed at the watched
+# path — so a canary pointed at the wrong root passed on every run, which is
+# the shape tests/live-state-canary now pins.
+if [ -e "$live_lock" ]; then
   fail "#7 the watcher created a lock in the LIVE repo while watching a fixture baton"
   rm -f "$live_lock"
 else

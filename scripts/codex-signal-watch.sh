@@ -81,6 +81,7 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+BP_CODE_ROOT="$_bp_root"
 repo_root() { printf '%s\n' "$_bp_root"; }
 
 trim() {
@@ -117,10 +118,11 @@ ROOT="$(repo_root)"
 # Sourced BEFORE anything calls into it: agent_signal_file() lives here too now,
 # and a use-before-source silently yielded an empty path rather than failing.
 . "$ROOT/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
 # BUG-019: the LIVE baton is untracked state, resolved through the one shared
 # helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
 # and — worse, before the split — a file git rewrites under a live dispatch.
-SIGNAL_FILE="$(agent_signal_file "$ROOT")"
+SIGNAL_FILE="$(agent_signal_file)"
 # Was the path PINNED by an operator, or merely derived? Captured before any of
 # our own exports, because trigger_if_needed exports AGENT_SIGNAL_FILE for the
 # wake command and that would otherwise look like an operator override on the
@@ -129,7 +131,7 @@ SIGNAL_FILE_EXPLICIT=0
 [[ -n "${AGENT_SIGNAL_FILE:-}" ]] && SIGNAL_FILE_EXPLICIT=1
 TARGET_STATE="OVER_TO_CODEX"
 POLL_SECONDS=2
-LOG_FILE="$(agent_state_dir "$ROOT")/signal.log"
+LOG_FILE="$(agent_state_dir)/signal.log"
 ONCE=0
 COMMAND=()
 
@@ -282,7 +284,7 @@ refresh_signal_file() {
   [[ "$SIGNAL_FILE_EXPLICIT" -eq 1 ]] && return 0
   local now_file
   # Computed with our own export cleared, for the same reason.
-  now_file="$( AGENT_SIGNAL_FILE=; agent_signal_file "$ROOT" )"
+  now_file="$( AGENT_SIGNAL_FILE=; agent_signal_file )"
   [[ -n "$now_file" && "$now_file" != "$SIGNAL_FILE" ]] || return 0
   printf '[%s] signal path moved: %s -> %s\n' \
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$SIGNAL_FILE" "$now_file" | tee -a "$LOG_FILE"

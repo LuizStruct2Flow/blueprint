@@ -67,8 +67,8 @@ if [ ! -f "$HELPER" ]; then
 else
   # Source in a subshell so nothing leaks; HOME is pinned so the assertion is
   # exact rather than host-dependent.
-  a="$( HOME=/h AGENT_STATE_HOME= ; . "$HELPER"; agent_state_dir /tmp/x/proj-A )"
-  b="$( HOME=/h AGENT_STATE_HOME= ; . "$HELPER"; agent_state_dir /tmp/x/proj-B )"
+  a="$( HOME=/h AGENT_STATE_HOME= ; . "$HELPER"; agent_state_dir_for /tmp/x/proj-A )"
+  b="$( HOME=/h AGENT_STATE_HOME= ; . "$HELPER"; agent_state_dir_for /tmp/x/proj-B )"
 
   # A-09's property is DISTINCTNESS, not a particular path. This used to assert
   # the literal `/h/.proj-A`, which pinned the implementation rather than the
@@ -91,7 +91,7 @@ fi
 # 2. $AGENT_STATE_HOME override is honored (feed precedence preserved).
 # ===========================================================================
 if [ -f "$HELPER" ]; then
-  o="$( HOME=/h AGENT_STATE_HOME=/explicit/dir ; . "$HELPER"; agent_state_dir /tmp/x/proj-A )"
+  o="$( HOME=/h AGENT_STATE_HOME=/explicit/dir ; . "$HELPER"; agent_state_dir_for /tmp/x/proj-A )"
   [ "$o" = "/explicit/dir" ] \
     && pass "#2 AGENT_STATE_HOME overrides the derived dir (matches the feed)" \
     || fail "#2 AGENT_STATE_HOME ignored — derived '$o', expected /explicit/dir"
@@ -146,7 +146,7 @@ done
 #    anything else.
 # ===========================================================================
 if [ -f "$HELPER" ]; then
-  d="$( HOME=/h AGENT_STATE_HOME= ; . "$HELPER"; agent_state_dir /tmp/x/proj-C )"
+  d="$( HOME=/h AGENT_STATE_HOME= ; . "$HELPER"; agent_state_dir_for /tmp/x/proj-C )"
   case "$d" in
     /tmp/x/proj-C/*) pass "#5 the state dir resolves inside the project" ;;
     *) fail "#5 the state dir resolved OUTSIDE the project: $d" ;;
@@ -154,7 +154,7 @@ if [ -f "$HELPER" ]; then
 
   # The override must still work — an operator pointing several checkouts at one
   # dir is a deliberate choice A-09 supports and this must not remove.
-  o="$( HOME=/h AGENT_STATE_HOME=/explicit ; . "$HELPER"; agent_state_dir /tmp/x/proj-C )"
+  o="$( HOME=/h AGENT_STATE_HOME=/explicit ; . "$HELPER"; agent_state_dir_for /tmp/x/proj-C )"
   [ "$o" = "/explicit" ] \
     && pass "#5 AGENT_STATE_HOME still overrides (the deliberate shared-dir case)" \
     || fail "#5 AGENT_STATE_HOME no longer overrides — got '$o'"
@@ -313,23 +313,13 @@ else
 fi
 export BP_DECOY_GIT_DIR="$hostile2/decoy/.git"
 
-# #6c — structural sweep. #6 evaluates an extracted `ROOT="$(...)"` line, so it
-# cannot reach codex-signal-watch.sh (whose anchor is a function) or any script
-# added later. The rule is simple enough to assert directly: nothing on the
-# state-dir path may anchor its repo root with `git rev-parse`, because that
-# answers about the caller's exported GIT_DIR rather than the script's own tree.
-revparse=""
-for f in scripts/agent-activity.sh $DISPATCHERS; do
-  [ -f "$ROOT/$f" ] || continue
-  if sed 's/#.*//' "$ROOT/$f" | grep -q 'rev-parse --show-toplevel'; then
-    revparse="$revparse $f"
-  fi
-done
-if [ -n "$revparse" ]; then
-  fail "#6c anchors its root with git rev-parse, which an exported GIT_DIR redirects:$revparse"
-else
-  pass "#6c no state-dir consumer anchors its root with git rev-parse"
-fi
+# #6c HAS MOVED to tests/state-root #H (BUG-076). It swept scripts/ but NOT
+# scripts/lib/ — and scripts/lib/state-dir.sh was the one file that actually
+# contained the forbidden `git rev-parse --show-toplevel`, as the default for
+# the positional root. The guard banned an expression everywhere except where
+# it lived, and stayed green. The port widens the sweep and matches the
+# COMMAND rather than the substring "git", so bp_state_root's `.git` test is
+# not flagged.
 
 # ===========================================================================
 # 7. The physical-root block is byte-identical in every consumer.
@@ -376,6 +366,7 @@ done
 WORK="$(sd_tmpdir work)"
 LINKS="$(sd_tmpdir links)"
 mkdir -p "$WORK/scripts/lib"
+: > "$WORK/.blueprint-source"   # TASK-021: project-shaped fixture root marker
 cp "$ROOT/scripts/start-codex-signal-watch.sh" \
    "$ROOT/scripts/codex-signal-watch.sh" \
    "$ROOT/scripts/codex-feed-filter.sh" "$WORK/scripts/" 2>/dev/null

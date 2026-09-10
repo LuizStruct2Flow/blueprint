@@ -51,9 +51,11 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+BP_CODE_ROOT="$_bp_root"
 
 . "$_bp_root/scripts/lib/state-dir.sh"
-SIGNAL="$(agent_signal_file "$_bp_root")"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
+SIGNAL="$(agent_signal_file)"
 # JOURNAL is derived AFTER argument parsing, from the baton actually in use.
 # Deriving it here missed `--file`, which is parsed below: tests/signal-set/
 # points the baton at a fixture with `--file` and its eleven rows still landed

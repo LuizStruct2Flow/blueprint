@@ -86,15 +86,23 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+BP_CODE_ROOT="$_bp_root"
 
 . "$_bp_root/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
 
 MODE="report"
-# The DATA root defaults to this script's own tree and is overridable. Code and
-# data are resolved separately on purpose: the libs must come from the checkout
-# this script belongs to, while the state being reported on may be another one
-# (a fixture, or a second worktree).
-DATA_ROOT="$_bp_root"
+# The DATA root defaults to the RESOLVED PROJECT root and is overridable. Code
+# and data are resolved separately on purpose: the libs must come from the
+# checkout this script belongs to, while the state being reported on may be
+# another one (a fixture, or a second worktree).
+#
+# TASK-021: this used to be `$_bp_root`, i.e. the CODE root. Identical today;
+# after the scaffolding/ split it would report on scaffolding/ — an empty
+# lifecycle (0 backlog / 0 doing / 0 waiting-acceptance / 0 done) beside a
+# correct GIT section, warning only about a missing snapshot marker. Half a
+# report that looks whole is the failure this task exists to stop.
+DATA_ROOT="$BP_STATE_ROOT"
 
 # A HERE-DOC, not a line range out of the header. This was `sed -n '2,50p' "$0"`,
 # and the header outgrew it — `--help` printed no usage at all, just commentary
@@ -126,7 +134,7 @@ done
 [ -d "$DATA_ROOT" ] || { echo "session-resume: no such --root: $DATA_ROOT" >&2; exit 2; }
 DATA_ROOT="$(cd -P "$DATA_ROOT" && pwd)"
 
-SIGNAL="$(agent_signal_file "$DATA_ROOT")"
+SIGNAL="$(agent_signal_file_for "$DATA_ROOT")"
 JOURNAL="$(dirname "$SIGNAL")/signal-history.log"
 HANDOVER="$DATA_ROOT/docs/doing/HANDOVER.md"
 

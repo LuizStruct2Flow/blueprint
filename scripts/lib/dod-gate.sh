@@ -176,7 +176,9 @@ dod_stage_signal() {
   if [ -f scripts/lib/state-dir.sh ]; then
     # shellcheck source=scripts/lib/state-dir.sh
     . ./scripts/lib/state-dir.sh
-    _dg_sig="$(agent_signal_file "$(pwd)" 2>/dev/null)"
+    BP_CODE_ROOT="$(pwd)"   # git runs hooks from the work-tree root
+    BP_STATE_ROOT="$(bp_state_root)" || return 1
+    _dg_sig="$(agent_signal_file 2>/dev/null)"
   fi
   if [ -z "$_dg_sig" ] || [ ! -f "$_dg_sig" ]; then
     echo "no live baton at ${_dg_sig:-<unresolved>} — seed it with scripts/signal-set.sh"

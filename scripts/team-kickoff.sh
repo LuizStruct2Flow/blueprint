@@ -27,11 +27,13 @@
 set -uo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/state-dir.sh
+BP_CODE_ROOT="$repo_root"
 . "$repo_root/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
 # BUG-019: the LIVE baton is untracked state, resolved through the one shared
 # helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
 # and — worse, before the split — a file git rewrites under a live dispatch.
-sig="$(agent_signal_file "$repo_root")"
+sig="$(agent_signal_file)"
 
 # shellcheck source=scripts/lib/roster.sh
 . "$repo_root/scripts/lib/roster.sh"
@@ -92,16 +94,16 @@ roles=(); names=()
 while IFS="$(printf '\t')" read -r role name _; do
   [ -n "$name" ] || continue
   roles+=("$role"); names+=("$name")
-done < <(bp_roster_rows "$repo_root")
+done < <(bp_roster_rows "$BP_STATE_ROOT")
 
 n=${#names[@]}
 if [ "$n" -eq 0 ]; then
-  echo "[team-kickoff] no members found in $(bp_roster_file "$repo_root" 2>/dev/null || echo '<no roster>')" >&2
+  echo "[team-kickoff] no members found in $(bp_roster_file "$BP_STATE_ROOT" 2>/dev/null || echo '<no roster>')" >&2
   echo "[team-kickoff] copy AGENT_ROSTER.example.md to AGENT_ROSTER.md and edit it." >&2
   exit 1
 fi
 
-orchestrator="$(bp_roster_name_for_role "$repo_root" Orchestrator)"
+orchestrator="$(bp_roster_name_for_role "$BP_STATE_ROOT" Orchestrator)"
 [ -n "$orchestrator" ] || orchestrator="${names[0]}"
 
 for i in $(seq 0 $((n-1))); do
@@ -117,4 +119,4 @@ for i in $(seq 0 $((n-1))); do
 done
 
 step "$orchestrator" OVER_TO_USER "Team kick-off complete: all $n personas presented and the mic travelled the full table. $orchestrator (Orchestrator) holding; mic to founder."
-echo "[team-kickoff] done — $n personas from $(bp_roster_file "$repo_root" 2>/dev/null)"
+echo "[team-kickoff] done — $n personas from $(bp_roster_file "$BP_STATE_ROOT" 2>/dev/null)"

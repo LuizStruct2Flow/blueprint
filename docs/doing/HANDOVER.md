@@ -12,6 +12,7 @@ things should be documented in the tasks/bugs || commits || md files."*
 | what changed and why | `git log` — commit bodies carry the reasoning |
 | what a fix taught | the item's own row in `BUGS.md` |
 | the rules | `CLAUDE.md`, `docs/DoD.md`, and **`docs/doing/TASK-018-RULES.md`** |
+| **the TARGET this is all aimed at** | **`docs/doing/TASK-018-TARGET.md`** — read it BEFORE writing any test |
 | host quirks, standing founder decisions | `project_config_overview.md` |
 
 **Anything derivable from a command does not belong here.** The previous version
@@ -83,38 +84,56 @@ only real contention. 4–6 agents on disjoint sets is the practical ceiling.
 
 ---
 
-## 3. WHAT TO DO NEXT, AND WHY IT IS NOT MORE MIGRATION
+## 3. WHAT TO DO NEXT — the restructure, decided 2026-09-10
 
-**TASK-013 — the declared bootstrap profile.** Parked in `backlog/`, and the item
-that actually buys wall-clock:
+**Read `docs/doing/TASK-018-TARGET.md` first. It is the agreed target and this
+session implemented against it without having been told it.** Four of the seven
+rules are not yet true; that is by design, not defect.
+
+**Next: the `scaffolding/` + `forge/` restructure (TARGET §2).**
 
 ```
-389 s   full gate
-189 s   of it is bootstrap-gate #2/#3 — A COMPLETE SECOND GATE
+docs/  AGENT_ROSTER.md  logs/     ← this repo's OWN state, like any project
+scaffolding/                      ← everything a project RECEIVES
+forge/                            ← bootstrap, sync, a2bp, templates. NEVER ships
 ```
 
-`#2`/`#3` bootstraps a derived project and runs its whole pre-push gate: 41
-stages from the project hook (36 shell suites + a probe + 4 DoD) plus ~4 generic
-ones. Every one of those 36 was just run by the outer gate, from the same file.
+Chosen to come first for the same reason TARGET §3.2 gives about tests: porting
+into a tree that is about to move costs the move twice. Every spec, every
+`MANAGED_FILES` entry and every path in `a2bp`/`drift`/`pull` is affected.
 
-**It is not pure duplication, and that is what makes it delicate.** The two runs
-have different SUBJECTS — the outer against the blueprint's working tree, the
-inner against a project bootstrapped from `git archive`, placeholders
-substituted, no `templates/`, no `.blueprint-root`. That configuration is what
-BUG-028 exists for, and `bootstrap-gate` #6 caught BUG-053 precisely there. So
-the profile must be **declared per suite** — which suites can behave differently
-downstream — and checkable, never a hand-picked list that rots.
+**The two hazards in it, both named in TARGET §2:**
 
-**Do this BEFORE the 36-suite fan-out.** Every suite migrated from here runs
-twice per push until the profile lands.
+- **The terminology inverts.** Today `blueprint`-tier means *does not ship*. In
+  the target, `scaffolding` ships and `forge` does not. Every comment,
+  `.gitattributes` line and bug row uses the old sense, so **the rename must be
+  total or it is worse than either**.
+- **Bootstrap grows a path-mapping step**, since `scaffolding/scripts/x` must
+  land at `scripts/x` downstream. `git archive`, `MANAGED_FILES` and the
+  `a2bp`/`drift`/`pull` path handling change **together**. `bootstrap-gate` is
+  what proves the strip is correct, which makes it both the riskiest suite and
+  the one that will tell you.
 
-Parallelism is NOT the lever, by measurement. `fileParallelism: false` today;
-flipping it saves ~8% because one case is 97% of its suite, and parallelising
-*within* `bootstrap-gate` saves 3% while adding contention to a suite that
-already has a live flake. `PLAN-TASK-018` §3 ranks the profile #1 and parallelism
-#3; that ranking still holds.
+**After the restructure: internals component by component** (TARGET §3.2), in
+this order — `state-dir`, `commit-subject`, `placeholders`, `suites`,
+`signal-set`, then `pipeline`, then the `blueprint` CLI, then `new-project`, and
+**`agent-activity` last** (it holds a `flock` with no native Node equivalent, and
+BUG-001 was a fork bomb that ran 2.7 days).
 
----
+Port the script to TypeScript, write its spec against the TypeScript, retire the
+shell script and its shell suite **together**. Do NOT port a suite against a
+shell script: that writes the test twice, and the first version is the slow kind.
+Measured here — `drift-in-blueprint` 0.83 s shell → 1.44 s as a faithful port,
+while `proc-cwd`, rewritten against logic, is 0.027 s.
+
+**The six suites migrated on 2026-09-10 are faithful ports.** They are isolated
+and their mutants are recorded, but they drive shell scripts and will be
+rewritten as those scripts become TypeScript. That is expected, not waste.
+
+**TASK-013 (the declared bootstrap profile) is still real but is NOT next.** 189
+of 389 gate seconds are `bootstrap-gate` #2/#3 running a complete second gate.
+Worth doing — after the restructure, since the profile would have to be
+rewritten for the new paths anyway.
 
 ## 4. LIVE HAZARDS
 

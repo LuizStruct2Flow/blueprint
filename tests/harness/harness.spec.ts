@@ -180,6 +180,40 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
     }
   })
 
+  it('BUG-060 accepts the exact environment tests/bootstrap-gate passes', async () => {
+    // That suite costs ~180s, so it is not what should discover that a change
+    // to this table broke it. Everything it passes goes through this door:
+    // AGENT_CI_WATCH=0 to suppress the CI watcher, a private index inside the
+    // workspace for `checkout-index`, and three AGENT_* pointers UNSET so the
+    // derived project's gate derives its own state paths instead of inheriting
+    // this scenario's. Deleting a declared 'path' variable stays legitimate —
+    // only the two kinds a scenario OWNS refuse it.
+    const ws = await createWorkspace('bootstrap-gate-env')
+    try {
+      const index = join(ws.root, 'fixture-index')
+      const env = fixtureEnv(
+        {
+          AGENT_CI_WATCH: '0',
+          AGENT_SIGNAL_FILE: undefined,
+          AGENT_STATE_HOME: undefined,
+          AGENT_FEED_LOG: undefined,
+          GIT_INDEX_FILE: index,
+          GIT_AUTHOR_NAME: 'T',
+          GIT_AUTHOR_EMAIL: 't@t.io',
+        },
+        ws.root,
+      )
+      expect(env.AGENT_CI_WATCH).toBe('0')
+      expect(env.GIT_INDEX_FILE).toBe(index)
+      expect(env.GIT_AUTHOR_EMAIL).toBe('t@t.io')
+      for (const k of ['AGENT_SIGNAL_FILE', 'AGENT_STATE_HOME', 'AGENT_FEED_LOG']) {
+        expect(env[k], `${k} must still be UNSETTABLE — bootstrap-gate #2 depends on it`).toBeUndefined()
+      }
+    } finally {
+      await ws.dispose()
+    }
+  })
+
   it('BUG-060 REFUSES the GIT_CONFIG_* switches, and every undeclared GIT_*/AGENT_*', async () => {
     // GIT_CONFIG_COUNT was classified 'opaque' — a number, redirecting no write
     // and naming nothing on disk. True of the count ALONE, and it is never

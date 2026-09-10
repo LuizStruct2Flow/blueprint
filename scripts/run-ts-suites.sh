@@ -14,15 +14,22 @@
 # So one process runs, and its per-file results are injected as individual
 # stages through pipeline.sh's batch API.
 #
-# THE DECLARATION COMES FROM tests/SUITES.md, NOT FROM VITEST.
+# THE DECLARATION COMES FROM THE FILESYSTEM, NOT FROM VITEST.
 #
 # This is the load-bearing detail, and Philipp stated the residual risk plainly
 # when building the API: if the expected set were derived from the runner's own
 # output, every guard would reduce to trusting the runner. A suite silently
 # dropped from vitest's include glob would then vanish with the gate still
-# green — BUG-005 exactly, and the same door TASK-018 §7.1 just closed in the
-# manifest. The manifest owns the list; vitest reports against it; a declared
-# suite that does not report FAILS BY NAME.
+# green — BUG-005 exactly, and the same door TASK-018 §7.1 closed in the
+# manifest.
+#
+# It used to come from tests/SUITES.md. TASK-020 deleted that table (R1: a
+# second description of a test is a copy that drifts), and the expected set is
+# now the `*.spec.ts` files on disk, via `scripts/lib/suites.sh`. That is not a
+# weaker source, it is the same property from a better one: `find` consults no
+# vitest config, no include glob and no reporter, so the runner cannot edit what
+# it is being checked against. The filesystem owns the list, vitest reports
+# against it, and a declared suite that does not report FAILS BY NAME.
 #
 # Usage (from .githooks/pre-push-project, with pipeline.sh already sourced):
 #   . scripts/run-ts-suites.sh
@@ -37,19 +44,22 @@
 # a truthful skip rather than a failure. Mirrors tests/manifest's own no-Node
 # property: the shell half of this repo keeps working with zero TS present.
 ts_suites_present(){
-  [ -f "${1:-.}/vitest.config.ts" ] || return 1
+  # TASK-020: the harness manifest lives UNDER tests/, which is a managed
+  # directory no derived project owns a copy of — so the toolchain travels by
+  # both propagation paths or by neither, and it can never clobber a project's
+  # own root package.json.
+  [ -f "${1:-.}/tests/vitest.config.ts" ] || return 1
   [ -n "$(find "${1:-.}/tests" -type f -name '*.spec.ts' -print -quit 2>/dev/null)" ]
 }
 
 # ts_declared_suites ROOT — the suite names that own a *.spec.ts.
 #
 # Delegates to scripts/lib/suites.sh. This function used to carry its own copy
-# of the manifest table parse, under a comment claiming "two parsers of one
-# table drift, and this file exists to be the thing that cannot" — while being
-# the second parser. Vitali (QA-1) caught it, and it was already drifting: the
-# manifest's copy emits six fields and gates the parallelism class on the last
-# two, while this one read field 2 and would have accepted a legacy four-column
-# row the manifest rejects.
+# of the suite lookup, under a comment claiming "two parsers of one table drift,
+# and this file exists to be the thing that cannot" — while being the second
+# parser. Vitali (QA-1) caught it, and it was already drifting. The rule did not
+# change when the source did: a second `find` here would be a second answer to
+# "what are the suites", which is the whole hazard.
 ts_declared_suites(){
   _tsd_root="${1:-.}"
   if [ -r "$_tsd_root/scripts/lib/suites.sh" ]; then
@@ -90,7 +100,7 @@ ts_suites_stage(){
   _ts_declrc=0
   _ts_expect="$(ts_declared_suites "$_ts_root")" || _ts_declrc=$?
   if [ -z "$_ts_expect" ]; then
-    pipe_skip "vitest · TASK-018" "no suite in tests/SUITES.md owns a *.spec.ts"
+    pipe_skip "vitest · TASK-018" "no suite under tests/ owns a *.spec.ts"
     return 0
   fi
 
@@ -127,8 +137,11 @@ ts_suites_stage(){
   # AGENT_*, and restating them here would be a second copy that drifts. This
   # file already made that mistake once — `ts_declared_suites` carried a
   # duplicate of the manifest parse under a comment claiming it could not drift.
+  # `cd` into tests/, not into the repo root: that is where the harness manifest
+  # and node_modules live (TASK-020), so it is vitest's root and npx's lookup
+  # start. The include glob in tests/vitest.config.ts is root-relative to match.
   if (
-    cd "$_ts_root" || exit 1
+    cd "$_ts_root/tests" || exit 1
     for _v in $(env | sed -nE 's/^((GIT|AGENT)_[A-Za-z0-9_]*)=.*/\1/p'); do
       unset "$_v"
     done

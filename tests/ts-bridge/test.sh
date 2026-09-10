@@ -41,32 +41,34 @@ pass(){ echo "  ok — $*"; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # --- a fixture project the bridge will accept -------------------------------
-# It needs: a vitest.config.ts, one suite dir holding a *.spec.ts, a SUITES.md
-# row the manifest parser accepts, and the two libs the bridge sources.
+# It needs: a tests/vitest.config.ts, one suite dir holding a *.spec.ts, and the
+# two libs the bridge sources.
+#
+# TASK-020 — THERE IS NO SUITES.md TO BUILD. The bridge's expected set used to
+# come from that table and now comes from the filesystem (R1), so the fixture IS
+# the declaration: creating tests/demo/demo.spec.ts is what makes `demo` a
+# declared suite. The config sits under tests/ because that is where the harness
+# manifest lives, which is what `ts_suites_present` looks for.
 W="$TMP/proj"
 mkdir -p "$W/tests/demo" "$W/scripts/lib" "$W/bin"
 cp "$ROOT/scripts/lib/pipeline.sh" "$ROOT/scripts/lib/suites.sh" "$W/scripts/lib/"
 cp "$ROOT/scripts/run-ts-suites.sh" "$W/scripts/"
-: > "$W/vitest.config.ts"
+: > "$W/tests/vitest.config.ts"
 : > "$W/tests/demo/demo.spec.ts"
-sed -n '1,/^|---/p' "$ROOT/tests/SUITES.md" > "$W/tests/SUITES.md"
-printf '| `demo` | both | fixture | fixture | parallel-safe | fixture |\n' \
-  >> "$W/tests/SUITES.md"
-# THE LAST ROW OWNS NO SPEC, AND THAT IS THE WHOLE POINT.
+# A SECOND SUITE THAT OWNS NO SPEC, SORTING LAST.
 #
-# bp_suites_with_spec ends its loop on `[ -n "$(find … *.spec.ts)" ]`, so the
-# LAST classified row decides the function's exit status. A final row without a
-# spec makes it return 1 while printing a perfectly correct list — the case
-# scripts/lib/suites.sh calls "harmless to the one caller that reads it through
-# `$( )`". Under `set -e` it is fatal to exactly that caller.
+# bp_suites_with_spec used to end its loop on `[ -n "$(find … *.spec.ts)" ]`, so
+# the LAST suite decided the function's exit status: a final suite without a spec
+# made it return 1 while printing a perfectly correct list — "harmless to the one
+# caller that reads it through `$( )`", except that caller runs under `set -e`,
+# where it was fatal (BUG-055).
 #
-# The first version of this fixture had `demo` last, so the function returned 0
-# and every case here passed while the real gate died on the real manifest.
-# A fixture that cannot produce the failing input is not a fixture for it.
+# The first version of this fixture had `demo` alone, so the function returned 0
+# and every case here passed while the real gate died on the real manifest. A
+# fixture that cannot produce the failing input is not a fixture for it. `nospec`
+# sorts after `demo`, which is what puts it last.
 mkdir -p "$W/tests/nospec"
 : > "$W/tests/nospec/test.sh"
-printf '| `nospec` | both | fixture | fixture | parallel-safe | fixture |\n' \
-  >> "$W/tests/SUITES.md"
 
 if [ -z "$( cd "$W" && . ./scripts/lib/suites.sh && bp_suites_with_spec "$W" )" ]; then
   fail "#0 the fixture declares no suite — the cases below would pass vacuously"
@@ -202,10 +204,10 @@ fi
 #     of the masking cannot pass this by accident.
 # ===========================================================================
 #     The status is INJECTED rather than coaxed out of the manifest parser.
-#     Reproducing it through a fixture manifest depends on which row happens to
-#     sort last and on internals of bp_suites_with_spec — so it would silently
-#     stop reproducing the moment either changed, and the case would go green
-#     while guarding nothing. What the bridge must survive is a non-zero status
+#     Reproducing it through the fixture depends on which suite happens to sort
+#     last and on internals of bp_suites_with_spec — so it would silently stop
+#     reproducing the moment either changed, and the case would go green while
+#     guarding nothing. What the bridge must survive is a non-zero status
 #     from that call, whatever produces it. So the case says exactly that.
 make_npx 0
 rm -f "$TMP/seen-env"
@@ -215,8 +217,8 @@ rm -f "$TMP/seen-env"
   . ./scripts/lib/pipeline.sh
   pipe_init "hostile-status fixture" >/dev/null 2>&1 || true
   . ./scripts/run-ts-suites.sh
-  # A correct list, and a failing status. Precisely what the real manifest
-  # parser handed the gate: rc=1 alongside four valid suite names.
+  # A correct list, and a failing status. Precisely what the real derivation
+  # handed the gate: rc=1 alongside four valid suite names.
   ts_declared_suites(){ printf 'demo\n'; return 1; }
   ts_suites_stage "$W"
 ) >"$TMP/out" 2>&1

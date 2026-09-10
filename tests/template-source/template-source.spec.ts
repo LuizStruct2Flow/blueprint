@@ -26,6 +26,18 @@
  *   this port is worth making: the shell original needed four `unset` lines at
  *   the top to be safe (BUG-014, BUG-046), and each was a line someone had to
  *   remember.
+ *
+ * MUTATION RECIPE (TASK-018-RULES R6). This suite's shell runner was deleted
+ * once this spec was proven equivalent to it. R6 requires the way to reintroduce
+ * the bug to be RECORDED, and R1 puts a test's description in the test — so it
+ * lives here rather than in the tier table that used to hold it.
+ *
+ *   Mutant: Delete the `project_config_overview.md  export-ignore` line from
+ * `.gitattributes` AND COMMIT IT — `git archive` reads that file from the commit,
+ * not the working tree, so an uncommitted deletion changes nothing and the spec
+ * stays green.
+ *   Turns red: `#2` goes red exactly where the shell runner did, reporting
+ * `project_config_overview.md` as shipping, which is BUG-009 itself.
  */
 
 import { describe, it, expect } from 'vitest'

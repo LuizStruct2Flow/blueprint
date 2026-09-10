@@ -272,10 +272,10 @@ The shipped code is only as good as the tests that gate it.
    no wall-clock ceiling. A suite worth blocking a push stays in the gate
    however long it takes; move one to CI only when *risk* justifies it —
    it guards something off the push path, where a regression cannot reach
-   a commit. **This is enforced, not merely stated:** `tests/SUITES.md`
-   classifies every suite and `tests/manifest/` fails the push on an
-   unclassified suite, a `pre-push` suite the gate never invokes, or a
-   rationale that argues from cost. A non-blocking SLO warns past 120 s
+   a commit. **This is enforced, not merely stated:** `tests/manifest/`
+   derives the suite set from the runners on disk and fails the push on a
+   runner the gate or CI never invokes, or on an export boundary that does
+   not behave as `.gitattributes` declares. A non-blocking SLO warns past 120 s
    total / 45 s per stage and can demote nothing. A ≤30 s ceiling was
    removed on 2026-08-02 (BUG-005) after it demoted a 41-assertion
    contamination suite to CI-only for growing by 3.7 s; the first version

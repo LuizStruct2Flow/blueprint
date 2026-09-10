@@ -170,8 +170,10 @@ managed directory — and `blueprint pull` replaces the whole region. Everything
 after `BLUEPRINT:END` is the project's and is preserved byte-for-byte. Put your
 guards there; an edit inside the region is lost at the next pull, so send it
 upstream with `blueprint a2bp .githooks/pre-push-project` instead. The two must
-travel together: a suite is only a suite as three things — the files, its row in
-`tests/SUITES.md`, and its invocation in this hook (BUG-029).
+travel together: a suite is only a suite as two things — the files, and its
+invocation in this hook (BUG-029). It used to be three; the third was a row in
+`tests/SUITES.md`, and that table is deleted — a second description of a test is
+a copy that drifts.
 
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
@@ -467,11 +469,14 @@ The rules that replace it, and the two **controls** that make them checkable:
 - **Never demote a suite to CI-only to fit a time budget.** If a suite is worth
   blocking a push, it stays. Move it out only when *risk* says so — it guards
   something off the push path, where a regression cannot reach a commit.
-- **[`tests/SUITES.md`](tests/SUITES.md) classifies every suite** — tier, the
-  risk if it is absent, and why that tier. `tests/manifest/` **fails the push**
-  if a suite on disk is unclassified, if a `pre-push` suite is not actually
-  invoked by the gate, or if a rationale argues from cost ("too slow", "does not
-  fit", "budget", "ceiling" are rejected patterns).
+- **The suite set is the filesystem, and `tests/manifest/` fails the push** if
+  a runner under `tests/` is not actually invoked by the gate and by CI, or if
+  the export boundary does not behave the way `.gitattributes` declares. There
+  is deliberately **no tier table**: a suite is the `*.sh` / `*.spec.ts` files on
+  disk, and its tier — does it ship, or is it blueprint-only — is the
+  `export-ignore` line that already decides shipping. A catalogue describing the
+  tests a second time is a copy that drifts, and the one that existed drifted
+  twice in one afternoon.
 - **The gate reports its total and its slowest stage every run**, and a
   **non-blocking SLO** warns past 120 s total / 45 s per stage. It warns and
   points at optimising; it has no power to demote anything. The old rule blocked,

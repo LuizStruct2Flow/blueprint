@@ -199,17 +199,26 @@ MANAGED_FILES=(
   # A directory rather than 40 rows because suites are added, renamed and
   # dropped constantly, and a hand-maintained list of them is the thing that
   # goes stale (BUG-028's substitution TARGETS array, one directory over).
-  # `tests/SUITES.md` lives inside it and travels with it, which is what keeps
-  # the manifest's classification honest downstream.
+  #
+  # TASK-020 put the TypeScript harness manifest under here too —
+  # tests/package.json, tests/tsconfig.json, tests/vitest.config.ts. At the repo
+  # root those files travelled by bootstrap and not by pull, and could not be
+  # listed by name to fix it: pull_file has no marker vocabulary for JSON, so it
+  # falls back to a whole-file copy with no .bp-bak, and every derived project
+  # has its own root package.json. Under a managed DIRECTORY the expansion is
+  # `git archive HEAD tests`, the same query bootstrap answers — so ships and
+  # managed became the same fact instead of two that have to agree.
   "tests/"
   # .githooks/ — generic gate
   ".githooks/pre-push"
   ".githooks/pre-push-project.example"
   # BUG-029 — this MUST travel with tests/, and the markers are what make that
-  # possible. A suite is coherent only as three things: the files, its SUITES.md
-  # row, and its invocation here. Managing tests/ alone delivers the first two
-  # (SUITES.md is under tests/) and not the third, at which point tests/manifest
-  # #4 fails every derived push on a suite the gate cannot invoke.
+  # possible. A suite is coherent only as two things: the files, and its
+  # invocation here. (It used to be three — TASK-020 deleted tests/SUITES.md,
+  # whose row was a second description of what those two already say.) Managing
+  # tests/ alone delivers the files and not the invocation, at which point
+  # tests/manifest #4 fails every derived push on a suite the gate cannot
+  # invoke.
   #
   # It used to be excluded as "project guards". That was the right instinct
   # about the BOTTOM of the file and wrong about the top: it ships already
@@ -625,9 +634,9 @@ read_blueprint_source() {
 # "the blueprint dropped this suite" from "the project wrote this suite" does
 # not exist in the project, and a prefix-based delete would take out
 # project-authored suites — the one failure mode worse than the bug. The
-# announcement already exists and is fail-closed: when a suite's row leaves
-# tests/SUITES.md, tests/manifest #1 fails the derived push naming the orphan
-# directory.
+# announcement already exists and is fail-closed: when the blueprint drops a
+# suite it also drops that suite's stage from .githooks/pre-push-project, and
+# tests/manifest #4 fails the derived push naming the runner nothing invokes.
 # IT FAILS CLOSED (BUG-029 R2-S1). An expansion that errors, or that yields
 # nothing, is a HARD failure — never an empty list.
 #

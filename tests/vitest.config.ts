@@ -2,6 +2,14 @@ import { defineConfig } from 'vitest/config'
 
 // TASK-018 — the blueprint's own regression suites.
 //
+// THIS FILE LIVES UNDER tests/, WHICH IS THEREFORE VITEST'S ROOT (TASK-020).
+// `tests/` is a blueprint-managed DIRECTORY that no derived project owns a copy
+// of, so the harness manifest beside it travels by both propagation paths or by
+// neither, and a project's own root package.json can never be clobbered by a
+// pull. The include glob below is root-relative in consequence — `**/*.spec.ts`,
+// not `tests/**/*.spec.ts`. tests/manifest #4 asserts it still reaches the
+// specs, because narrowing it is a coverage cut that breaks no other link.
+//
 // READ THIS BEFORE TRUSTING THE POOL SETTINGS. `pool: 'forks'` and
 // `isolate: true` isolate JavaScript modules and worker processes. They do NOT
 // sandbox $HOME, OS files, real git repositories, lock files, spawned child
@@ -11,7 +19,7 @@ import { defineConfig } from 'vitest/config'
 // hazards with better syntax (PLAN-TASK-018 §4.2).
 export default defineConfig({
   test: {
-    include: ['tests/**/*.spec.ts'],
+    include: ['**/*.spec.ts'],
 
     // Forks, not threads: these suites spawn real processes and mutate real
     // environment variables. Worker threads share a process and therefore share
@@ -20,11 +28,11 @@ export default defineConfig({
     pool: 'forks',
     isolate: true,
 
-    // Serial by default. Parallelism is EARNED per suite by declaring
-    // `parallel-safe` in tests/SUITES.md and passing the self-concurrency
-    // check — never assumed. Starting parallel would turn today's latent races
-    // (staleness #8, pre-push-secrets #10, both of which pass largely BECAUSE
-    // the gate is serial) live on day one.
+    // Serial by default. TASK-018-RULES R5 is that tests run in parallel with
+    // no serial category and no escape hatch — but R5 is a property R3's
+    // isolation has to earn first, suite by suite. Starting parallel today
+    // would turn latent races (staleness #8, pre-push-secrets #10, both of
+    // which pass largely BECAUSE the gate is serial) live on day one.
     fileParallelism: false,
 
     // These drive real gates, real bootstraps and real daemons. The shell

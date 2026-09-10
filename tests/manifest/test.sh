@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/manifest/test.sh
 #
-# BUG-005 / Codex F1 — make the tier policy a CONTROL instead of a slogan.
+# BUG-005 / Codex F1 — make the coverage policy a CONTROL instead of a slogan.
 #
 # The 30 s pre-push ceiling was removed because it had become a coverage policy:
 # a suite that outgrew the budget got demoted to CI-only, and the gate carried on
@@ -14,53 +14,80 @@
 # silent skip and the pipeline still renders PASSED. `signal-dispatch` was the
 # live proof: the gate could not report an exclusion it did not know about.
 #
-# So the membership claim is asserted against the FILESYSTEM here, not against a
-# reviewer's memory:
+# ---------------------------------------------------------------------------
+# TASK-020 — THE SUITES ARE THE FILESYSTEM. THERE IS NO LONGER A TABLE.
 #
-#   - every suite that exists is classified,
-#   - every classified suite exists,
-#   - every `pre-push` suite is actually invoked by the gate,
-#   - every suite declares a PARALLELISM CLASS,
-#   - every rationale is present, and none of them argues from the clock.
+# This file used to reconcile the tree against `tests/SUITES.md`: a table naming
+# every suite, its tier, its parallelism class and two paragraphs of rationale.
+# Five of the assertions below existed only to police that table — every suite
+# on disk is listed, every listed suite exists, the tier is one of four legal
+# strings, the parallelism class is one of three, no rationale argues from the
+# clock — and a sixth policed a table of shell runners declared retired.
 #
-# That last one is the point. A slow suite that matters is a suite to make
-# faster: signal-dispatch went 125.4 s → 75.0 s with every assertion intact once
-# someone looked at WHY it was slow instead of where to put it.
+# TASK-018-RULES R1 deletes the table: "No SUITES.md, no tier table, no
+# catalogue of tests. A second description of a test is a copy that drifts."
+# It had already drifted twice in one afternoon while being built.
+#
+# What survives is the half that was never about the table. `scripts/lib/
+# suites.sh` derives the suite set from the runners on disk and the tier from
+# `.gitattributes`, and this file asks the questions a derivation cannot answer
+# by itself:
+#
+#   - does every runner on disk actually get RUN, by the gate and by CI?
+#   - does the export boundary BEHAVE the way `.gitattributes` declares?
+#   - do bootstrap and pull deliver the same thing?
+#
+# Two whole failure classes stopped being expressible rather than being checked
+# harder, which is R2's point: a suite cannot be missing from a list that is not
+# written down, and a suite cannot be mis-tiered when the tier IS the export
+# boundary. What remains checkable is behaviour, and behaviour is what is
+# checked here.
 #
 # ---------------------------------------------------------------------------
-# BUG-051 / TASK-018 — THE SAME DEFECT, THROUGH A DOOR THIS FILE COULD NOT SEE.
+# BUG-051 — THE DEFECT THAT RETURNS THROUGH A DOOR THE CONTROL CANNOT SEE.
 #
-# Every assertion below used to be anchored on `*.sh`. #1 discovered suites with
-# `find tests -name '*.sh'`, #2b counted runners the same way, #4 and #5 required
-# a literal `bash tests/<suite>/<file>.sh`. So the whole control had one shape of
-# blind spot, and it was exactly the shape of the migration about to happen:
+# Every assertion here used to be anchored on `*.sh`, so the whole control had
+# one shape of blind spot, and it was exactly the shape of the TypeScript
+# migration: move a suite to TS, delete its `.sh`, and nothing failed — no
+# discovery error, because no shell file remained to find.
 #
-#     migrate a suite to TypeScript, delete its .sh, delete its SUITES.md row,
-#     and NOTHING FAILS.
-#
-# No unclassified-suite error, because no shell file remained to discover. No
-# missing-invocation error, because no row remained to check. That is BUG-005
-# itself — a silent coverage cut that leaves the gate printing PASSED — walking
-# back in through the one entrance the guard was not watching (PLAN-TASK-018
-# §7.1). A runner is now a `*.sh` OR a `*.spec.ts`, everywhere, including the
-# two directions of the export boundary.
+# A RUNNER is therefore a `*.sh` OR a `*.spec.ts`, everywhere, including both
+# directions of the export boundary. Discovery lives in `scripts/lib/suites.sh`
+# so the two kinds cannot drift apart the way `#1` (any `*.sh`) and the old `#2`
+# (literally `test.sh`) already had.
 #
 # A TS suite is not invoked the way a shell suite is. One `vitest run` covers the
 # whole tree (PLAN-TASK-018 §7.3 — per-suite lines come back via
 # `pipe_stage_report`, not via 42 node startups), so there is no per-suite
 # command to grep for. Nor does the hook run vitest itself: it sources
-# `scripts/run-ts-suites.sh` and calls into it, because that file also reads the
-# expected suite list out of tests/SUITES.md and injects one stage per suite. So
+# `scripts/run-ts-suites.sh` and calls into it, because that file also declares
+# the expected suite list to the pipeline and injects one stage per suite. So
 # the invocation proof is a CHAIN, and every link is checked:
 #
 #     the spec exists   AND   the hook reaches the bridge it sources
 #                       AND   the bridge runs vitest with no path filter
-#                       AND   vitest.config.ts's include actually covers it
+#                       AND   the vitest config's include actually covers it
 #
 # Break any link and #4 fails: delete the spec (1), delete the stage from the
 # hook or delete the bridge (2), give the bridge's run a positional path (3),
 # narrow the include glob (4). What is deliberately NOT accepted is "a spec
-# exists somewhere" — that would be the same nothing-assertion in a new costume.
+# exists somewhere" — that would be a nothing-assertion in a new costume.
+#
+# ---------------------------------------------------------------------------
+# MIGRATION IS REPLACEMENT, NOT ACCUMULATION.
+#
+# There used to be a RETIRED-SHELL-RUNNERS table: a suite could keep a `*.sh`
+# the gate no longer invoked, provided a row named the mutant that proved its
+# spec equivalent. It existed to make a transitional state legal, and #4b spent
+# ninety lines judging whether each declaration held up — because a marker that
+# only has to EXIST is a way to switch #4 off one row at a time.
+#
+# The table is gone with SUITES.md and the six dead runners are deleted. The
+# rule is now the simple one: **every runner on disk is invoked.** A suite
+# migrating to TypeScript deletes its shell runner in the same change that adds
+# its spec, having run the mutant first (R6) — which is what PLAN-TASK-018 §5
+# always required. The `.sh` stays in git history for exactly as long as the
+# comparison needs it, which is one session.
 #
 # ---------------------------------------------------------------------------
 # THIS FILE MUST NOT DEPEND ON NODE.
@@ -80,98 +107,63 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-MANIFEST="$ROOT/tests/SUITES.md"
 GATE="$ROOT/.githooks/pre-push-project"
 HOOK="$ROOT/.githooks/pre-push"
 CI="$ROOT/.github/workflows/security.yml"
-VITEST_CFG="$ROOT/vitest.config.ts"
-PKG="$ROOT/package.json"
+# TASK-020 — the harness manifest lives UNDER tests/, not at the repo root.
+# `tests/` is already a managed directory that no derived project owns a copy
+# of, so the toolchain travels by both propagation paths or by neither, and a
+# project's own root package.json can never be clobbered by a pull. See #2c.
+VITEST_CFG="$ROOT/tests/vitest.config.ts"
+PKG="$ROOT/tests/package.json"
 FAILED=0
 fail(){ echo "FAIL: $*"; FAILED=1; }
 pass(){ echo "  ok — $*"; }
 
 # BUG-014 — the gate runs this suite with GIT_DIR exported, and every git call
-# below (#2b's archive, #4b's history query) would then read whatever that names
-# rather than this repo. Hoisted to the top because it used to sit inside #2b's
-# `if IN_BLUEPRINT` block, which left it unset for a derived project — where #4b
-# now runs git too.
+# below (#2b's archive) would then read whatever that names rather than this
+# repo. Hoisted to the top because it used to sit inside #2b's `if IN_BLUEPRINT`
+# block, which left it unset for a derived project.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
-[ -f "$MANIFEST" ] || { echo "FAIL: tests/SUITES.md is missing — the tier policy has no control"; exit 1; }
-
-# THE TABLE PARSE LIVES IN scripts/lib/suites.sh, AND THIS FILE DOES NOT KEEP
-# A COPY OF IT.
+# THE SUITE DERIVATION LIVES IN scripts/lib/suites.sh, AND THIS FILE DOES NOT
+# KEEP A COPY OF IT.
 #
-# It used to. `scripts/run-ts-suites.sh` then grew a verbatim copy of the same
-# awk, under a comment claiming to be the thing that could not drift — and it
-# had already drifted, taking field 2 only while this file gated the parallelism
-# class on fields 6 and 7. Two parsers of one table is the shape
-# `scripts/lib/commit-subject.sh` and `scripts/lib/roster.sh` exist to refuse,
-# and a control asserting a rule from its own private copy of that rule is
-# asserting less than it appears to.
+# It used to keep a copy of the table parse. `scripts/run-ts-suites.sh` then grew
+# a verbatim copy of the same awk, under a comment claiming to be the thing that
+# could not drift — and it had already drifted. Two readers of one source is the
+# shape `scripts/lib/commit-subject.sh` and `scripts/lib/roster.sh` exist to
+# refuse, and it is just as true of the filesystem as it was of the table: a
+# control that discovers suites its own way is asserting something about its own
+# `find`, not about what runs.
 #
-# Sourced by absolute path and REQUIRED. A missing parser must not degrade to an
-# empty parse: every assertion below passes trivially against no rows, which is
-# precisely the vacuity #7 exists to catch — but it would catch it one step too
-# late and blame the manifest rather than the missing file.
+# Sourced by absolute path and REQUIRED. A missing library must not degrade to
+# an empty derivation: every assertion below passes trivially over zero suites,
+# which is precisely the vacuity #7 exists to catch — but it would catch it one
+# step too late and blame the tree rather than the missing file.
 . "$ROOT/scripts/lib/suites.sh" 2>/dev/null || true
-if ! command -v bp_suite_rows >/dev/null 2>&1 || ! command -v bp_retired_rows >/dev/null 2>&1; then
-  echo "FAIL: scripts/lib/suites.sh did not load — tests/SUITES.md has no parser, so every"
-  echo "      assertion here would pass over zero rows. Run: blueprint pull scripts/lib/suites.sh"
+if ! command -v bp_suite_runners >/dev/null 2>&1 || ! command -v bp_suite_rows >/dev/null 2>&1; then
+  echo "FAIL: scripts/lib/suites.sh did not load — there is no suite derivation, so every"
+  echo "      assertion here would pass over zero suites. Run: blueprint pull scripts/lib/suites.sh"
   exit 1
 fi
 
-# ROOT-bound aliases, not second definitions: one function, curried. They cannot
-# drift from the shared parse because they contain none of it.
-rows(){ bp_suite_rows "$ROOT"; }
-retired_rows(){ bp_retired_rows "$ROOT"; }
-
-RETIRED=" $(retired_rows | cut -f1 | tr '\n' ' ')"
-is_retired(){ case "$RETIRED" in *" $1 "*) return 0 ;; esac; return 1; }
-
-# live_cmds FILE... — the files with COMMENT LINES REMOVED.
-#
-# Codex R2-F1b: membership was checked with an unanchored `grep` for the path,
-# so commenting out an invocation kept the control green while the suite stopped
-# running. Reproduced: `sed -i '/tests\/pipeline/s/^/#/' .githooks/pre-push*`
-# left the manifest passing "every pre-push/both suite is invoked by the gate".
-# Strip comments first, then require an anchored `bash tests/<suite>/<file>.sh`
-# command rather than arbitrary text containing the path.
-live_cmds(){ sed 's/#.*//' "$@" 2>/dev/null; }
-
-# clocky TEXT — true when a rationale argues from cost instead of from risk.
-# Shared by #6 (tier rationale) and #8 (parallelism rationale), because the two
-# fields fail the same way: "it is slow" is not a tier and it is not a
-# parallelism class either.
-clocky(){
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
-    | grep -qE 'too slow|does not fit|doesn.t fit|ceiling|time budget|budget|fits in|no room|too expensive|costs? (only )?[0-9]|[0-9]+ ?s(ec|econds)? (to|for) run'
-}
-
-# --- runners ---------------------------------------------------------------
-# A RUNNER is a shell file or a spec file. Everything that discovers, counts or
-# ships a suite goes through these, so the two kinds cannot drift apart the way
-# `#1` (any *.sh) and `#2` (literally `test.sh`) already had.
-find_runners(){ find "$@" -type f \( -name '*.sh' -o -name '*.spec.ts' \) 2>/dev/null; }
-
-# The runner inventory is taken ONCE and answered from memory. Six assertions
-# ask "does this suite have a shell runner / a spec?" for every row, and a
-# `find` per question turned a 5 s control into a 19 s one — the exact pressure
-# that talked someone into demoting a suite last time (BUG-005). The lists are
-# space-delimited with sentinel spaces so a `case` match cannot see `a2bp-e2e`
-# inside `a2bp-e2e-extra`.
-_dirs_with(){
-  find "$ROOT/tests" -mindepth 2 -type f -name "$1" 2>/dev/null \
-    | sed -e "s#^$ROOT/tests/##" -e 's#/.*##' | sort -u | tr '\n' ' '
-}
-SUITES_WITH_SH=" $(_dirs_with '*.sh')"
-SUITES_WITH_TS=" $(_dirs_with '*.spec.ts')"
+# The runner inventory is taken ONCE and answered from memory. Several
+# assertions ask "does this suite have a shell runner / a spec?" for every
+# suite, and a `find` per question turned a 5 s control into a 19 s one — the
+# exact pressure that talked someone into demoting a suite last time (BUG-005).
+# The lists are space-delimited with sentinel spaces so a `case` match cannot
+# see `a2bp-e2e` inside `a2bp-e2e-extra`.
+RUNNERS="$(bp_suite_runners "$ROOT")"
+_runner_suites(){ printf '%s\n' "$RUNNERS" | awk -F'\t' -v pat="$1" '$1 != "" && $2 ~ pat {print $1}' | sort -u; }
+# Bracket classes, not backslash escapes: awk reads a -v value as a string
+# first, so `\.` there is an unknown escape it warns about and flattens to `.`.
+SUITES_WITH_SH=" $(_runner_suites '[.]sh$' | tr '\n' ' ')"
+SUITES_WITH_TS=" $(_runner_suites '[.]spec[.]ts$' | tr '\n' ' ')"
 has_sh_runner(){ case "$SUITES_WITH_SH" in *" $1 "*) return 0 ;; esac; return 1; }
 has_ts_runner(){ case "$SUITES_WITH_TS" in *" $1 "*) return 0 ;; esac; return 1; }
 
-# Row suite names, likewise parsed once — #1 asked the parser per runner file.
-ROW_SUITES=" $(rows | cut -f1 | tr '\n' ' ')"
-row_exists(){ case "$ROW_SUITES" in *" $1 "*) return 0 ;; esac; return 1; }
+rows(){ bp_suite_rows "$ROOT"; }
 
 TS_PRESENT=0
 [ "$SUITES_WITH_TS" = " " ] || TS_PRESENT=1
@@ -182,6 +174,16 @@ TS_PRESENT=0
 # rather than something intended.
 TS_REQUIRED=0
 
+# live_cmds FILE... — the files with COMMENT LINES REMOVED.
+#
+# Codex R2-F1b: membership was checked with an unanchored `grep` for the path,
+# so commenting out an invocation kept the control green while the suite stopped
+# running. Reproduced: `sed -i '/tests\/pipeline/s/^/#/' .githooks/pre-push*`
+# left the manifest passing "every suite is invoked by the gate". Strip comments
+# first, then require an anchored `bash tests/<suite>/<file>.sh` command rather
+# than arbitrary text containing the path.
+live_cmds(){ sed 's/#.*//' "$@" 2>/dev/null; }
+
 # _classify_cmds — reads command text on stdin, prints one line per invocation
 # of the vitest runner:
 #
@@ -190,8 +192,8 @@ TS_REQUIRED=0
 #   ARGS <words>     a run NARROWED to those paths — proves nothing about a
 #                    suite it does not name
 #
-# The distinction is the whole assertion. `vitest run tests/pipeline` in the gate
-# must not be readable as "every suite is invoked".
+# The distinction is the whole assertion. `vitest run pipeline` in the gate must
+# not be readable as "every suite is invoked".
 _classify_cmds(){
   awk '
     {
@@ -218,14 +220,14 @@ _classify_cmds(){
 #
 # The gate does not run vitest itself. `.githooks/pre-push-project` sources
 # `scripts/run-ts-suites.sh` and calls `ts_suites_stage`, and the actual
-# `npx vitest run` lives in there — because that file also reads the expected
-# suite list out of tests/SUITES.md and injects one `pipe_stage_report` per
-# suite, so `bootstrap-gate` #3's >=25-stage guard and the slowest-stage SLO
-# keep meaning something (PLAN-TASK-018 §7.3). Inlining it would put a jq
-# pipeline in the hook and a second parser of this table.
+# `npx vitest run` lives in there — because that file also declares the expected
+# suite list to the pipeline and injects one `pipe_stage_report` per suite, so
+# `bootstrap-gate` #3's >=25-stage guard and the slowest-stage SLO keep meaning
+# something (PLAN-TASK-018 §7.3). Inlining it would put a jq pipeline in the
+# hook and a second reader of the suite derivation.
 #
-# So "the gate's live commands" now means the hook PLUS the files it sources —
-# but only the ones it genuinely reaches. A sourced file that merely DEFINES a
+# So "the gate's live commands" means the hook PLUS the files it sources — but
+# only the ones it genuinely reaches. A sourced file that merely DEFINES a
 # function is not running anything, and that is precisely the case where text
 # appears without executing. A bridge therefore counts only when all three hold:
 #
@@ -236,10 +238,9 @@ _classify_cmds(){
 #   3. the hook CALLS a function the file defines.
 #
 # Nothing here is specific to `run-ts-suites.sh`: the bridge is discovered, not
-# named, so the pipeline agent can rename or split it and this keeps working.
-# Only ONE hop is followed. A bridge that sources a second bridge fails closed —
-# no blanket run is found and #4 says so — which is the right direction to be
-# wrong in, and the fix is to extend this walk.
+# named. Only ONE hop is followed. A bridge that sources a second bridge fails
+# closed — no blanket run is found and #4 says so — which is the right direction
+# to be wrong in, and the fix is to extend this walk.
 #
 # Pulling `pipeline.sh` and `dod-gate.sh` into the scan set is harmless because
 # `live_cmds` deletes comments first: every `vitest` and `bash tests/…` string
@@ -295,8 +296,9 @@ _blanket_of(){
   return 1
 }
 
-# The `test` script out of package.json, without Node. If this cannot be parsed
-# the result is empty, which classifies as "not a blanket run" — fail closed.
+# The `test` script out of tests/package.json, without Node. If this cannot be
+# parsed the result is empty, which classifies as "not a blanket run" — fail
+# closed.
 _npm_test_script(){
   [ -f "$PKG" ] || return 0
   tr -d '\n' < "$PKG" \
@@ -305,71 +307,44 @@ _npm_test_script(){
     | sed -n -e 's/.*"test"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
-# Link 4 of the chain: the configured include must actually reach
-# tests/<suite>/<file>.spec.ts. Narrowing this glob is a coverage cut that would
-# otherwise leave every other link intact and every assertion green.
+# Link 4 of the chain: the configured include must actually reach the specs.
+# Narrowing this glob is a coverage cut that would otherwise leave every other
+# link intact and every assertion green.
+#
+# The glob is `**/*.spec.ts` and not `tests/**/*.spec.ts` because the config now
+# sits inside tests/, which is therefore vitest's root. Both halves moved
+# together (TASK-020) — a config under tests/ still carrying the old
+# tests-prefixed glob matches nothing at all, and vitest exits saying so.
 _include_ok(){
   [ -f "$VITEST_CFG" ] || return 1
   tr -d ' \n' < "$VITEST_CFG" \
-    | grep -qE "include:\[[^]]*[\"']tests/\*\*/\*\.spec\.ts[\"']"
+    | grep -qE "include:\[[^]]*[\"']\*\*/\*\.spec\.ts[\"']"
 }
 
 # ===========================================================================
-# 1. EVERY SUITE ON DISK IS CLASSIFIED.
-#    This is the assertion that closes F1: an omission is now a failure rather
-#    than an absence nobody can see.
-# ===========================================================================
-# Codex R2-F1a: discovery used to recognise only `tests/*/test.sh`, so renaming
-# a runner — or adding `tests/unclassified/check.sh` — made a suite INVISIBLE to
-# the control while it still passed. Ordinary refactoring was enough; no lying
-# in the manifest required. Classify by DIRECTORY and consider every runner
-# under tests/, so the convention itself is enforced rather than assumed.
+# 1. EVERY RUNNER BELONGS TO A SUITE.
 #
-# TASK-018 widened "runner" from *.sh to *.sh OR *.spec.ts. Without that, the
-# migration's own first step — add the spec, delete the shell file — deleted the
-# suite from this control's field of view (§7.1). The spec is discovered by
-# EXTENSION, not by the `<suite>.spec.ts` naming convention, so a misnamed spec
-# is still classified rather than silently exempt.
-missing=""
-for f in $(find_runners "$ROOT/tests" | sort); do
-  rel="${f#"$ROOT"/tests/}"
-  dir="${rel%%/*}"
-  if [ "$dir" = "$rel" ]; then
-    # A runner sitting directly in tests/ belongs to no suite at all.
-    missing="$missing $rel(top-level)"
-    continue
-  fi
-  # SHARED HELPERS ARE NOT SUITES. CLAUDE.md §"Test directory layout" puts
-  # shared helpers/mocks/fixtures in tests/helpers/ (or tests/__helpers__/)
-  # precisely because they serve several suites and belong to none. They carry
-  # no assertions and the gate never invokes them, so a manifest row would be a
-  # row about nothing — and #4/#5 would then demand the gate and CI "invoke" a
-  # file that is only ever sourced.
-  #
-  # This is a narrowing of the control, so it is deliberately literal — only
-  # these two names, never a prefix match — and #1b below stops the directory
-  # becoming a place where dead code accumulates unnoticed.
-  #
-  # tests/harness/ is NOT on this list on purpose. It holds the TypeScript
-  # fixture API, which is `.ts` and not `.spec.ts`, so nothing there is
-  # discovered as a runner today. If a `harness.spec.ts` ever appears it is a
-  # suite of real assertions and gets a row like any other — widening the
-  # exemption instead would put the isolation contract's own tests in the one
-  # place this file does not look.
-  case "$dir" in helpers|__helpers__) continue ;; esac
-  row_exists "$dir" || \
-    case " $missing " in *" $dir "*) ;; *) missing="$missing $dir" ;; esac
-done
-if [ -n "$missing" ]; then
-  fail "#1 runners (*.sh or *.spec.ts) exist under tests/ whose suite is not classified:$missing"
+#    The derivation classifies by DIRECTORY: `tests/<suite>/<anything>.sh` or
+#    `.spec.ts`. A runner sitting directly in `tests/` belongs to no suite at
+#    all — nothing invokes it, no export rule covers it, and it would execute
+#    nowhere while looking exactly like a test. `bp_suite_runners` emits it with
+#    an empty suite field rather than dropping it, which is the only reason this
+#    is checkable at all: a discovery that silently ignores what it does not
+#    recognise cannot report it.
+# ===========================================================================
+toplevel="$(printf '%s\n' "$RUNNERS" | awk -F'\t' '$1 == "" && $2 != "" {print $2}' | tr '\n' ' ')"
+if [ -n "${toplevel// /}" ]; then
+  fail "#1 runners sit directly in tests/ and belong to no suite: $toplevel"
+  echo "        Move each into tests/<suite>/ — the gate, CI and the export"
+  echo "        boundary all address suites by directory, so a file here runs nowhere."
 else
-  pass "#1 every suite directory containing a runner (*.sh or *.spec.ts) is classified"
+  pass "#1 every runner (*.sh or *.spec.ts) under tests/ belongs to a suite directory"
 fi
 
-# #1b — the compensating control for the helpers exemption above. A helper is
-# exempt from classification because it is sourced rather than run, so the thing
-# to assert is that it IS sourced: an unreferenced file there is dead code that
-# no tier, no gate stage and no CI job would ever have complained about.
+# #1b — the compensating control for the helpers exemption in the derivation. A
+# helper is exempt from being a suite because it is sourced rather than run, so
+# the thing to assert is that it IS sourced: an unreferenced file there is dead
+# code that no gate stage and no CI job would ever have complained about.
 orphans=""
 for f in $(find "$ROOT/tests/helpers" "$ROOT/tests/__helpers__" -type f -name '*.sh' 2>/dev/null | sort); do
   base="$(basename "$f")"
@@ -377,42 +352,18 @@ for f in $(find "$ROOT/tests/helpers" "$ROOT/tests/__helpers__" -type f -name '*
     || orphans="$orphans $base"
 done
 if [ -n "$orphans" ]; then
-  fail "#1b shared helpers that no suite sources:$orphans — exempt from classification, so nothing else would catch them"
+  fail "#1b shared helpers that no suite sources:$orphans — exempt from being a suite, so nothing else would catch them"
 else
   pass "#1b every shared helper is sourced by at least one suite"
 fi
 
-# ===========================================================================
-# 2. EVERY CLASSIFIED SUITE EXISTS — a manifest that names ghosts would let a
-#    deleted suite look covered.
-# ===========================================================================
 # A `blueprint`-tier suite drives machinery that exists ONLY here —
 # new-project.sh, templates/, .blueprint-root. It is export-ignore'd, so in a
-# DERIVED project it is legitimately absent and this manifest still ships and
-# still runs. `.blueprint-root` is the same positive marker `drift` uses.
+# DERIVED project it is legitimately absent — and, since the suite set is
+# derived from disk, absent means it never appears in that project's derivation
+# at all. `.blueprint-root` is the same positive marker `drift` uses.
 IN_BLUEPRINT=0
 [ -f "$ROOT/.blueprint-root" ] && IN_BLUEPRINT=1
-
-# BUG-051, second half. This check used to be `[ -f "$ROOT/tests/$s/test.sh" ]`
-# — the literal filename
-# #1 had already stopped trusting, one assertion further down the same file. A
-# suite whose only runner is `drift-integration.sh` (staleness ships one) or a
-# `.spec.ts` was a GHOST by this test while being perfectly real. It passed only
-# because staleness happens to keep a test.sh as well.
-ghosts=""
-while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
-  [ -n "$s" ] || continue
-  if has_sh_runner "$s" || has_ts_runner "$s"; then continue; fi
-  if [ "$t" = "blueprint" ] && [ "$IN_BLUEPRINT" -eq 0 ]; then continue; fi
-  ghosts="$ghosts $s"
-done <<EOF
-$(rows)
-EOF
-if [ -n "$ghosts" ]; then
-  fail "#2 tests/SUITES.md classifies suites with no runner on disk:$ghosts"
-else
-  pass "#2 every classified suite has a runner on disk"
-fi
 
 # ===========================================================================
 # 2b. THE EXPORT BOUNDARY, BOTH DIRECTIONS (BUG-028).
@@ -422,74 +373,68 @@ fi
 #     `tests/template-source`, `tests/drift-in-blueprint` and
 #     `tests/pull-exec-bit` all shipped to every derived project, wired into its
 #     gate by `.githooks/pre-push-project`, testing machinery that cannot exist
-#     there. Five of the six day-one failures. Nobody saw it because the
-#     failure happens on someone else's machine, after the blueprint's own gate
-#     has gone green over the same suites passing at home.
+#     there. Five of the six day-one failures. Nobody saw it because the failure
+#     happens on someone else's machine, after the blueprint's own gate has gone
+#     green over the same suites passing at home.
 #
-#     Asserted against a REAL `git archive`, the way template-source is: the
-#     export BEHAVIOUR is what matters, and a rule that is present but not
-#     taking effect is exactly the failure mode being guarded. `git check-attr`
-#     was tried first and is unusable here — it reports `unspecified` for a
-#     directory pattern like `templates/` even though `git archive` genuinely
-#     drops it, so it would have called a correct boundary broken.
+#     ---------------------------------------------------------------------
+#     TASK-020 — THE TIER IS NOW DERIVED FROM `.gitattributes`, AND THIS CHECK
+#     IS NOT THEREBY TAUTOLOGICAL.
 #
-#     The archive is taken of HEAD — the tree that is about to be pushed.
-#     It used to be taken of the WORKING TREE, on the argument that HEAD cannot
+#     The tier comes from a directory-level `tests/<suite>/  export-ignore`
+#     LINE. This compares that against a real `git archive`, which is the
+#     BEHAVIOUR. They are two different things and they come apart in both
+#     directions:
+#
+#       - a line that does not take effect — misspelled, shadowed by a later
+#         `-export-ignore`, or written for a directory that no longer exists —
+#         declares a suite blueprint-only while it ships to everyone;
+#       - a suite with no line whose files nevertheless do not arrive — caught
+#         by a broad pattern elsewhere in the file, or simply uncommitted —
+#         is a silent coverage cut for every project but this one.
+#
+#     `git check-attr` was tried first and is unusable here: it reports
+#     `unspecified` for a directory pattern like `templates/` even though
+#     `git archive` genuinely drops it, so it would have called a correct
+#     boundary broken.
+#
+#     The archive is taken of HEAD — the tree that is about to be pushed. It
+#     used to be taken of the WORKING TREE, on the argument that HEAD cannot
 #     answer for a boundary the author has written and not yet committed. That
 #     is true and it is the wrong trade: at pre-push time the change IS already
 #     committed, so the working-tree view guarded a case the gate cannot see and
-#     opened one it can — an uncommitted fix turns the gate green, the author
-#     pushes the commit without it, and the boundary ships broken with a green
-#     gate behind it. HEAD fails CLOSED in that case: it reports the boundary as
-#     it will actually ship, and the fix is to commit.
+#     opened one it can. HEAD fails CLOSED: it reports the boundary as it will
+#     actually ship, and the fix is to commit.
 #
 #     A suite SHIPS when its RUNNERS ship, not when its directory does. `grep
 #     "^tests/<suite>/"` matched any file at all, so export-ignoring
 #     `tests/foo/test.sh` while leaving a sibling README reported the boundary
 #     healthy — while the derived project received a suite directory with no
 #     runner and `.githooks/pre-push-project`'s own `if [ -f tests/foo/test.sh ]`
-#     guard skipped it in silence. That is this repo's recurring defect class,
-#     inside the control written to prevent it. Runners are discovered by
-#     extension rather than by name, the same way #1 discovers suites, because
-#     `tests/staleness/` already ships two of them — and, since TASK-018,
-#     because a `.spec.ts` that fails to ship is the identical hollow suite with
-#     a different file extension.
-#
-#     The reverse direction matters as much: a suite that is NOT blueprint-tier
-#     must actually reach derived projects. Export-ignoring one is a silent
-#     coverage cut for every project but this one — the BUG-005 defect, hidden
-#     one level further down.
-#
-#     `tests/bootstrap-gate` asserts the consequence end-to-end (the archive
-#     really does produce a project whose gate passes). This one names the file.
+#     guard skipped it in silence.
 #
 #     ---------------------------------------------------------------------
-#     TASK-018 PHASE 1 — "SHIPPED" AND "RUNNABLE" ARE NO LONGER THE SAME WORD.
+#     TASK-018 PHASE 1 — "SHIPPED" AND "RUNNABLE" ARE NOT THE SAME WORD.
 #
 #     "every runner must ship" was exactly right while a runner was always a
 #     `*.sh`, because a shell file is executable by any recipient. It stops
 #     being right the moment a suite has two runner kinds and only one of them
-#     is executable downstream. Phase 1 migrates the six `blueprint`-tier
-#     suites, and `.gitattributes` holds the whole TS toolchain back — so
-#     `tests/proc-cwd` legitimately ships its `test.sh`, which a derived project
-#     CAN run, while withholding its `.spec.ts`, which it cannot: no harness, no
-#     `vitest.config.ts`, no `package.json` to install a runner from.
+#     is executable downstream. Phase 1 migrates the blueprint-tier suites, and
+#     `.gitattributes` holds the whole TS toolchain back — so `tests/proc-cwd`
+#     legitimately ships its `test.sh`, which a derived project CAN run, while
+#     withholding its `.spec.ts`, which it cannot: no harness, no vitest config,
+#     no package.json to install a runner from.
 #
-#     Under the old rule that reads as `proc-cwd(1/2 runners)` — a correct
-#     boundary reported as broken, which is the failure mode that gets a control
-#     switched off. The invariant that actually holds in both phases is:
+#     The invariant that holds in both phases is:
 #
 #         a shipping suite ships AT LEAST ONE runner the recipient can execute,
 #         AND ships NO runner the recipient cannot.
 #
 #     Both halves are load-bearing and the second is the one that keeps the old
 #     strength: a suite shipping ONLY a `.spec.ts` in phase 1 is the hollow case
-#     exactly as before — the derived gate's `if [ -f … ]` guard skips it in
-#     silence and the push stays green over a suite that is not there. And "every
-#     runner must ship" survives intact WITHIN each kind: a suite withholding one
-#     of two shell runners is still hollow, and once the toolchain ships, a
-#     withheld spec is hollow too. What changed is that the toolchain's own
-#     export state, not the file extension, decides which kind counts.
+#     exactly as before. And "every runner must ship" survives intact WITHIN
+#     each kind. What changed is that the toolchain's own export state, not the
+#     file extension, decides which kind counts.
 #
 #     `TS_SHIPS` is therefore derived from the archive rather than declared, so
 #     the rule re-reads itself at phase 2 with nothing to remember. #2c below is
@@ -498,9 +443,7 @@ fi
 if [ "$IN_BLUEPRINT" -eq 1 ]; then
   # (GIT_DIR and friends are scrubbed at the top of this file — BUG-014.)
   _listing="$(mktemp)"
-  _runners="$(mktemp)"
   ( cd "$ROOT" && git archive --format=tar HEAD 2>/dev/null | tar -t 2>/dev/null ) >"$_listing"
-  ( cd "$ROOT" && find_runners tests | sort ) >"$_runners"
 
   if [ ! -s "$_listing" ]; then
     fail "#2b could not archive HEAD — the export boundary is unverified, not verified"
@@ -509,19 +452,19 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
 
     # CAN A DERIVED PROJECT EXECUTE A `.spec.ts`? Derived from the archive, not
     # declared, so phase 2 flips it by deleting export-ignore lines and this
-    # file needs no edit. Every part is required: the root files AND the
-    # harness, because a spec whose fixture API is absent is as unrunnable as
-    # one with no vitest at all, and a lockfile with no package.json is an
+    # file needs no edit. Every part is required: the root of the toolchain AND
+    # the harness, because a spec whose fixture API is absent is as unrunnable
+    # as one with no vitest at all, and a lockfile with no package.json is an
     # `npm ci` that dies on ENOENT.
     #
-    # THE SET IS DECLARED ONCE, and both this check and #2c's MANAGED_FILES
-    # check read it. It used to be two hand-written lists, and BUG-061 walked
-    # straight through the gap between them: package-lock.json was in neither
-    # list nor the export-ignore block, so it shipped ALONE to every derived
-    # project while both checks printed "phase 1 is whole". An AND over a
-    # remembered subset cannot see a file it does not know about — so the
-    # partial-ship tally below is what actually closes the class, not the list.
-    TS_TOOLCHAIN='package.json package-lock.json tsconfig.json vitest.config.ts'
+    # THE SET IS DECLARED ONCE, and #2c reads the same variable. It used to be
+    # two hand-written lists, and BUG-061 walked straight through the gap
+    # between them: package-lock.json was in neither list nor the export-ignore
+    # block, so it shipped ALONE to every derived project while both checks
+    # printed "phase 1 is whole". An AND over a remembered subset cannot see a
+    # file it does not know about — so the partial-ship tally below is what
+    # actually closes the class, not the list.
+    TS_TOOLCHAIN='tests/package.json tests/package-lock.json tests/tsconfig.json tests/vitest.config.ts'
     TS_SHIPS=1
     ts_shipping=""
     ts_absent=""
@@ -543,9 +486,8 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
     hollow=""
     unrunnable=""
     tsonly=""
-    while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
+    while IFS="$(printf '\t')" read -r s t; do
       [ -n "$s" ] || continue
-      [ -d "$ROOT/tests/$s" ] || continue
       # Runners counted BY KIND, because only one kind's executability depends
       # on the phase. A directory that arrives without a runner the recipient
       # can execute is worse than an absent one: the derived gate skips it
@@ -554,7 +496,7 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
       _sh_got=0
       _ts_tot=0
       _ts_got=0
-      for _r in $(grep "^tests/$s/" "$_runners"); do
+      for _r in $(printf '%s\n' "$RUNNERS" | awk -F'\t' -v s="$s" '$1 == s {print $2}'); do
         case "$_r" in
           *.spec.ts)
             _ts_tot=$((_ts_tot + 1))
@@ -597,7 +539,8 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
       if [ "$_ts_tot" -gt 0 ] && [ "$_sh_tot" -eq 0 ]; then
         # TypeScript-only, in a phase where TypeScript does not ship. Named
         # separately because "export-ignore'd" would send the reader to
-        # .gitattributes when the answer is the tier, or a retained shell runner.
+        # .gitattributes when the answer is a retained shell runner, or a
+        # deliberate `tests/<suite>/ export-ignore` line making it blueprint-only.
         tsonly="$tsonly $s"
       elif [ "$_any" -eq 0 ]; then
         withheld="$withheld $s"
@@ -608,7 +551,7 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
 $(rows)
 EOF
     if [ -n "$shipped_bp" ]; then
-      fail "#2b blueprint-only suites DO ship, so they run in every derived project's gate against machinery that cannot be there:$shipped_bp"
+      fail "#2b suites declared blueprint-only by .gitattributes DO ship, so they run in every derived project's gate against machinery that cannot be there:$shipped_bp"
     elif [ -n "$unrunnable" ]; then
       fail "#2b suites ship a *.spec.ts while the TS toolchain does NOT ship, so a derived project receives a runner it cannot execute:$unrunnable"
       echo "        Either export-ignore the spec, or make the phase-2 move whole (see #2c)."
@@ -616,13 +559,14 @@ EOF
       fail "#2b suites ship WITHOUT their runners, so the derived gate's 'if [ -f tests/<suite>/<runner> ]' guard skips them in silence:$hollow"
     elif [ -n "$tsonly" ]; then
       fail "#2b suites are TypeScript-ONLY while the TS toolchain does not ship, so they reach a derived project with no runner it can execute:$tsonly"
-      echo "        Keep a shell runner until phase 2, or re-tier the suite to 'blueprint'."
+      echo "        Keep a shell runner until phase 2, or add 'tests/<suite>/ export-ignore'"
+      echo "        to make the suite blueprint-only deliberately."
     elif [ -n "$withheld" ]; then
-      fail "#2b suites classified as shipping are export-ignore'd, so every derived project silently loses them:$withheld"
+      fail "#2b suites that are not declared blueprint-only do not reach the archive, so every derived project silently loses them:$withheld"
     elif [ "$TS_SHIPS" -eq 1 ]; then
-      pass "#2b the export boundary matches the manifest in both directions, runner by runner (HEAD; phase 2 — the TS toolchain ships, so specs count as runners)"
+      pass "#2b the export boundary matches .gitattributes in both directions, runner by runner (HEAD; phase 2 — the TS toolchain ships, so specs count as runners)"
     else
-      pass "#2b the export boundary matches the manifest in both directions, runner by runner (HEAD; phase 1 — the TS toolchain does not ship, so every shipping suite keeps an executable shell runner)"
+      pass "#2b the export boundary matches .gitattributes in both directions, runner by runner (HEAD; phase 1 — the TS toolchain does not ship, so every shipping suite keeps an executable shell runner)"
     fi
     if [ -n "$shipped_bp$hollow$withheld$unrunnable$tsonly" ] && \
        ! git -C "$ROOT" diff --quiet HEAD -- .gitattributes 2>/dev/null; then
@@ -636,30 +580,39 @@ EOF
     #     #2b answers "is each suite coherent?". This answers "do the two
     #     propagation paths agree?", and nothing else in the repo does.
     #
-    #     They disagree by construction, and silently:
-    #
     #       bootstrap  ships the WHOLE archive (new-project.sh: `git archive
-    #                  HEAD`), so package.json and vitest.config.ts reach a NEW
-    #                  project the moment they stop being export-ignore'd.
-    #       pull       ships MANAGED_FILES only. `tests/` is a managed DIRECTORY
-    #                  and expands through `git archive HEAD tests`, so specs and
-    #                  tests/harness/ travel with it automatically — but the three
-    #                  ROOT files are under no managed directory and travel only
-    #                  if someone lists them.
+    #                  HEAD`).
+    #       pull       ships MANAGED_FILES only — and a managed DIRECTORY
+    #                  expands through `git archive HEAD <dir>`, so anything
+    #                  export-ignore'd under it does not travel either.
     #
-    #     So the half-done move has a precise and invisible victim: an EXISTING
-    #     project that pulls receives `*.spec.ts` and `tests/harness/` with no
-    #     vitest, no config and no package.json to install one, while a project
-    #     bootstrapped the same day is fine. Its gate then carries specs nothing
-    #     can execute, and — because `.githooks/pre-push-project` guards each
-    #     stage with `if [ -f … ]` — reports PASSED over them. BUG-028's shape
-    #     exactly: machinery shipped downstream that the recipient cannot run,
-    #     discovered on someone else's machine.
+    #     ---------------------------------------------------------------
+    #     TASK-020 CLOSED THE HALF THAT NEEDED A LIST TO REMEMBER.
     #
-    #     The mirror direction is checked too. Managed-but-not-shipping means
-    #     `pull` delivers a toolchain into projects whose specs are export-
-    #     ignore'd — dead files, and the same two paths disagreeing the other
-    #     way round. Both-or-neither is the only state that is coherent.
+    #     The toolchain used to live at the repo ROOT: package.json,
+    #     package-lock.json, tsconfig.json, vitest.config.ts. Root files are
+    #     under no managed directory, so they travelled by bootstrap and NOT by
+    #     pull unless someone listed each of them in MANAGED_FILES — and the
+    #     half-done move had a precise, invisible victim: an EXISTING project
+    #     that pulls received `*.spec.ts` and `tests/harness/` with no vitest,
+    #     no config and no package.json to install one, while a project
+    #     bootstrapped the same day was fine.
+    #
+    #     Listing them was never the right fix, and not only because a list goes
+    #     stale. `pull_file` has no marker vocabulary for JSON, so it falls to
+    #     the legacy whole-file copy — with no `.bp-bak`, which only the
+    #     marker-mismatch branches write. Every derived project has its own root
+    #     package.json (STACK_DEFAULTS.md), so managing ours would have silently
+    #     REPLACED the project's real dependency manifest. Data loss, on the
+    #     command every wake runs.
+    #
+    #     The toolchain therefore lives under `tests/`, which is already a
+    #     managed directory and which no derived project owns a copy of.
+    #     Collision is impossible rather than merely avoided, and ships ⟺
+    #     managed holds by construction for every file under it. What is left to
+    #     check is that the construction is still standing: that `tests/` is
+    #     genuinely managed, and that no toolchain file has wandered back out
+    #     from under it.
     #
     #     NOT checked, deliberately: a toolchain that ships while no spec ships
     #     yet. That is the sane ordering of the phase-2 move — land the runner,
@@ -669,36 +622,32 @@ EOF
     #     THE SAME CLAIM COVERS THE GATE'S OWN DEPENDENCIES. `.githooks/pre-push`
     #     and `.githooks/pre-push-project` are BOTH managed, so every file they
     #     source has to travel by both paths too, or the hook arrives downstream
-    #     with half of itself. THIS FILE IS SCANNED TOO, for the same reason and
-    #     because it just acquired one: sourcing `scripts/lib/suites.sh` means a
-    #     derived project whose copy of that library never arrives gets a
-    #     manifest that refuses to run at all. The failure is quiet and permanent: a hook whose
-    #     bridge never arrives takes its `else` branch on every push — a
-    #     `pipe_skip` with a reason, which reads as deliberate, forever. This is
-    #     checked generically off the same bridge discovery #4 uses, so a new
-    #     `. ./scripts/<something>.sh` in the hook is covered the day it lands
-    #     rather than the day someone remembers.
+    #     with half of itself. THIS FILE IS SCANNED TOO, because it sources
+    #     `scripts/lib/suites.sh`: a derived project whose copy never arrives
+    #     gets a manifest that refuses to run at all. The failure is quiet and
+    #     permanent — a hook whose bridge never arrives takes its `else` branch
+    #     on every push, a `pipe_skip` with a reason that reads as deliberate,
+    #     forever. Checked generically off the same bridge discovery #4 uses.
     #
     #     Read TEXTUALLY, not by running `blueprint files`: this must stay a
     #     pure text/git-attr inspection (#9), and the CLI touches the real repo.
     #     A textual parse can go stale in silence, and stale here would pass
-    #     vacuously in phase 1 — so the parse asserts its own non-vacuity first.
+    #     vacuously — so the parse asserts its own non-vacuity first.
     # =====================================================================
     _mf="$(awk '/^MANAGED_FILES=\(/{f=1;next} f&&/^\)/{exit} f' "$ROOT/scripts/blueprint" 2>/dev/null \
              | sed -n 's/^[[:space:]]*"\([^"]*\)".*/\1/p')"
     _mf_n="$(printf '%s\n' "$_mf" | grep -c .)"
     _managed(){ printf '%s\n' "$_mf" | grep -qxF "$1"; }
 
-    # Same set as #2b, same reason: one declaration, so a file added to the
-    # toolchain is covered by both propagation checks or by neither, never by
-    # one of them. (tests/harness/ is not listed — it travels under the managed
-    # `tests/` directory automatically, which is exactly why the ROOT files are
-    # the ones that need naming.)
-    TS_MANAGED=1
-    ts_managed_some=""
-    ts_managed_none=""
+    # Every toolchain file must sit under a managed directory, or be managed by
+    # name. This is the assertion that keeps "ships ⟺ managed" structural: move
+    # one back to the repo root and it fails here rather than downstream.
+    ts_stray=""
     for _f in $TS_TOOLCHAIN; do
-      if _managed "$_f"; then ts_managed_some="$ts_managed_some $_f"; else TS_MANAGED=0; ts_managed_none="$ts_managed_none $_f"; fi
+      case "$_f" in
+        tests/*) continue ;;
+      esac
+      _managed "$_f" || ts_stray="$ts_stray $_f"
     done
 
     # Every file the managed hook sources must travel exactly as the hook does.
@@ -717,6 +666,12 @@ EOF
 
     if [ "${_mf_n:-0}" -lt 20 ] || ! _managed 'tests/'; then
       fail "#2c could not read MANAGED_FILES out of scripts/blueprint (parsed ${_mf_n:-0} entries, 'tests/' $(_managed 'tests/' && echo present || echo absent)) — the phase check would pass vacuously, which is the failure mode it exists to prevent"
+    elif [ -n "$ts_stray" ]; then
+      fail "#2c toolchain files live outside the managed 'tests/' directory and are not managed by name:$ts_stray"
+      echo "        Under tests/ the two propagation paths agree by construction. Outside it"
+      echo "        they diverge silently, and MANAGED_FILES cannot be the fix for a JSON file:"
+      echo "        pull_file has no markers for JSON, falls back to a whole-file copy with no"
+      echo "        .bp-bak, and every derived project has its own root package.json."
     elif [ -n "$_bridge_split" ]; then
       fail "#2c the gate sources files whose two propagation paths disagree:$_bridge_split"
       echo "        .githooks/pre-push and .githooks/pre-push-project are managed, so a file"
@@ -733,47 +688,23 @@ EOF
       echo "        job runs 'npm ci' in a project holding half a toolchain and goes red on the"
       echo "        first push, on a job that project never wrote (BUG-061). Either export-ignore"
       echo "        the shipping half in .gitattributes, or make the phase-2 move whole."
-    elif [ "$TS_MANAGED" -eq 0 ] && [ -n "$ts_managed_some" ]; then
-      fail "#2c the TS toolchain is MANAGED in part —$ts_managed_some are in MANAGED_FILES while$ts_managed_none are not"
-      echo "        'blueprint pull' would deliver half a toolchain to every existing project."
     elif [ "$SPECS_SHIP" -eq 1 ] && [ "$TS_SHIPS" -eq 0 ]; then
       fail "#2c *.spec.ts files ship to derived projects while the TS toolchain does not — every recipient gets specs with no runner"
-      echo "        Ship package.json, tsconfig.json, vitest.config.ts and tests/harness/,"
-      echo "        or export-ignore the specs. Half of the phase-2 move is worse than none."
-    elif [ "$TS_SHIPS" -eq 1 ] && [ "$TS_MANAGED" -eq 0 ]; then
-      fail "#2c the TS toolchain SHIPS but is not in MANAGED_FILES — bootstrap delivers it, 'blueprint pull' never will"
-      echo "        A project bootstrapped today gets package.json/tsconfig.json/vitest.config.ts"
-      echo "        and then freezes them forever, while tests/ keeps being pulled forward. That"
-      echo "        is BUG-029 with the two paths swapped. Add the three files to MANAGED_FILES."
-    elif [ "$TS_SHIPS" -eq 0 ] && [ "$TS_MANAGED" -eq 1 ]; then
-      fail "#2c the TS toolchain is in MANAGED_FILES but is export-ignore'd — 'blueprint pull' pushes a toolchain into projects that receive no specs to run with it"
-      echo "        The two propagation paths must agree: both, or neither."
+      echo "        Ship tests/package.json, tests/tsconfig.json, tests/vitest.config.ts and"
+      echo "        tests/harness/, or export-ignore the specs. Half of the move is worse than none."
     elif [ "$TS_SHIPS" -eq 1 ]; then
-      pass "#2c phase 2 is whole — the TS toolchain ships AND is managed, so bootstrap and pull deliver the same thing (checked $_mf_n MANAGED_FILES entries)"
+      pass "#2c phase 2 is whole — the TS toolchain ships from under the managed 'tests/' directory, so bootstrap and pull deliver the same thing (checked $_mf_n MANAGED_FILES entries)"
     else
-      pass "#2c phase 1 is whole — no spec ships, and the TS toolchain is neither shipped nor managed (checked $_mf_n MANAGED_FILES entries)"
+      pass "#2c phase 1 is whole — no spec ships, and the TS toolchain is export-ignore'd from under the managed 'tests/' directory, so neither path delivers it (checked $_mf_n MANAGED_FILES entries)"
     fi
   fi
-  rm -f "$_listing" "$_runners"
+  rm -f "$_listing"
 fi
 
 # ===========================================================================
-# 3. TIER IS ONE OF THE THREE LEGAL VALUES.
-# ===========================================================================
-badtier=""
-while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
-  [ -n "$s" ] || continue
-  case "$t" in pre-push|CI|both|blueprint) ;; *) badtier="$badtier $s($t)" ;; esac
-done <<EOF
-$(rows)
-EOF
-[ -n "$badtier" ] && fail "#3 illegal tier values:$badtier" \
-                  || pass "#3 every tier is pre-push, CI, both or blueprint"
-
-# ===========================================================================
-# 4. EVERY BLOCKING SUITE IS ACTUALLY INVOKED BY THE GATE.
-#    A manifest claiming "pre-push" while the gate never runs it would be a
-#    more convincing version of the same silence.
+# 4. EVERY SUITE IS ACTUALLY INVOKED BY THE GATE.
+#    A tree full of suites the gate never runs would be a more convincing
+#    version of the same silence.
 # ===========================================================================
 # Two runner kinds, two proofs, and a suite mid-migration owes BOTH — a spec
 # that executes nowhere is dead code wearing the name of a suite, which is the
@@ -783,6 +714,13 @@ EOF
 # — so there is one definition of "what the gate runs" rather than two that
 # drift. See §"FOLLOWING A SOURCED BRIDGE" for why a sourced file only counts
 # when the hook calls into it.
+#
+# NO TIER TEST HERE, and none is needed. A `blueprint`-tier suite is `both` plus
+# "does not ship": it still blocks the push HERE, so it is still required to be
+# invoked. Downstream it is not on disk, so it is not in the derivation and
+# there is nothing to skip — which retires the whole BUG-053 skip, a construct
+# that existed only because a shipped TABLE described suites a project had
+# correctly never received.
 GATE_CMDS="$(_deep_cmds "$GATE" "$HOOK")"
 CI_CMDS=""
 [ -f "$CI" ] && CI_CMDS="$(_deep_cmds "$CI")"
@@ -811,7 +749,7 @@ _ts_covered_gate(){
     return 1
   fi
   if ! _include_ok; then
-    TS_WHY="vitest.config.ts include no longer covers tests/**/*.spec.ts"
+    TS_WHY="tests/vitest.config.ts include no longer covers **/*.spec.ts"
     return 1
   fi
   return 0
@@ -824,7 +762,7 @@ _ts_covered_ci(){
     return 1
   fi
   if ! _include_ok; then
-    TS_WHY="vitest.config.ts include no longer covers tests/**/*.spec.ts"
+    TS_WHY="tests/vitest.config.ts include no longer covers **/*.spec.ts"
     return 1
   fi
   return 0
@@ -839,303 +777,61 @@ if [ "$TS_PRESENT" -eq 1 ]; then
 fi
 
 notrun=""
-bp_skipped=0
-enforced=0
-while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
+while IFS= read -r s; do
   [ -n "$s" ] || continue
-  # `blueprint` is `both` plus "does not ship" (see #2b) — it still blocks the
-  # push HERE, so it is still required to be invoked by the gate.
-  case "$t" in pre-push|both|blueprint) ;; *) continue ;; esac
-
-  # BUG-053 — NOT APPLICABLE OUTSIDE A BLUEPRINT.
-  #
-  # tests/SUITES.md ships; the blueprint-tier suite DIRECTORIES deliberately do
-  # not (#2b enforces that here). So a derived project receives rows describing
-  # suites that cannot exist there, and demanding their invocation asks it to
-  # run files it was correctly never given. Invisible until retirement made it
-  # load-bearing — a retirement asserts "the shell runner is not invoked BECAUSE
-  # the spec runs", and downstream neither of them is present.
-  #
-  # KEYED ON `.blueprint-root`, NEVER ON THE DIRECTORY BEING ABSENT. That
-  # distinction is the whole safety of this skip: absence-keying would let a
-  # derived project silently lose a suite it SHOULD run by deleting its
-  # directory, which is BUG-005 with an extra step. Here, deleting a shipping
-  # suite's directory still fails #2 as a ghost and #4 as uninvoked. #2 has made
-  # the identical judgement since it was written; this brings #4/#4b/#5 into
-  # line with it rather than inventing a new rule.
-  #
-  # The other half is enforced where it can be: in the blueprint, #2b fails the
-  # push if a `blueprint`-tier suite ships. So re-tiering a shipping suite to
-  # `blueprint` to buy this skip is refused at the only place that can see it.
-  if [ "$t" = "blueprint" ] && [ "$IN_BLUEPRINT" -eq 0 ]; then
-    bp_skipped=$((bp_skipped + 1))
-    continue
+  if has_sh_runner "$s" && ! _gate_sh_invoked "$s"; then
+    notrun="$notrun $s(shell runner never invoked)"
   fi
-  enforced=$((enforced + 1))
-
-  _sh=0; _ts=0
-  has_sh_runner "$s" && _sh=1
-  has_ts_runner "$s" && _ts=1
-
-  if [ $((_sh + _ts)) -eq 0 ]; then
-    # A shipping suite with no runner on disk. #2 has already reported it as a
-    # ghost; #4 still asks whether the gate believes in it, because the two
-    # failures name different repairs.
-    if _gate_sh_invoked "$s"; then continue; fi
-    if [ "$TS_PRESENT" -eq 1 ] && _ts_covered_gate "$s"; then continue; fi
-    notrun="$notrun $s"
-    continue
-  fi
-
-  # A DECLARED retirement is the only reason a shell runner may sit uninvoked.
-  # It buys nothing on its own: the suite still has to have a spec, and that
-  # spec still has to survive the full chain below — so "lost the shell runner,
-  # gained nothing" cannot be written down. #4b judges the declaration itself.
-  if [ "$_sh" -eq 1 ] && ! _gate_sh_invoked "$s"; then
-    if ! is_retired "$s"; then
-      notrun="$notrun $s(shell runner never invoked, and no retirement declared)"
-    elif [ "$_ts" -eq 0 ]; then
-      notrun="$notrun $s(shell runner retired but the suite has no spec)"
-    fi
-  fi
-  if [ "$_ts" -eq 1 ] && ! _ts_covered_gate "$s"; then
+  if has_ts_runner "$s" && ! _ts_covered_gate "$s"; then
     notrun="$notrun $s($TS_WHY)"
   fi
 done <<EOF
-$(rows)
+$(bp_suite_names "$ROOT")
 EOF
-_bp_note=""
-[ "$bp_skipped" -gt 0 ] && _bp_note=" ($bp_skipped blueprint-only row(s) skipped — not applicable outside a blueprint)"
 if [ -n "$notrun" ]; then
-  fail "#4 declared blocking but the gate never invokes them:$notrun"
+  fail "#4 suites the gate never invokes:$notrun"
   echo "        A shell runner is proven by an anchored 'bash tests/<suite>/<file>.sh'."
   echo "        A spec is proven by a vitest run with NO path filter — in the hook, or in"
   echo "        a bridge the hook sources AND calls into — plus an include glob that"
   echo "        reaches it. A stage naming the spec outright also counts."
-elif [ "$bp_skipped" -gt 0 ] && [ "$enforced" -eq 0 ]; then
-  # Every blocking row skipped as blueprint-only is not a pass, it is a control
-  # that examined nothing — the vacuity #7 exists to catch, one assertion over.
-  # A real derived project inherits ~37 shipping rows; zero means the tiers are
-  # wrong or the parse is.
-  fail "#4 every blocking row was skipped as blueprint-only, so this checked NOTHING ($bp_skipped skipped, 0 enforced)"
+  echo "        A runner nothing invokes is not retired, it is dead: delete it, or wire it in."
 else
-  pass "#4 every pre-push/both suite is invoked by the gate, runner kind by runner kind$_bp_note"
+  pass "#4 every suite is invoked by the gate, runner kind by runner kind"
 fi
 
 # ===========================================================================
-# 4b. A RETIREMENT IS A CLAIM, AND CLAIMS ARE CHECKED.
-#
-#     #4 accepts a declared retirement. This decides whether the declaration is
-#     worth accepting, because a marker that only has to EXIST is a way to
-#     switch #4 off one row at a time — and #4 is the assertion that stopped
-#     BUG-005.
-#
-#     Four things are checked, and the third is the one with teeth:
-#
-#     1. The suite is real and has a spec. (#2 keeps a runner on disk, so this
-#        cannot become a route to a suite with nothing at all.)
-#     2. The recipe names a concrete change — a backticked token, and any
-#        backticked path must actually exist — and names the case ID it turned
-#        red. You cannot write "#4c went red" without having watched it.
-#     3. THE RECIPE MAY NOT ARGUE FROM THE CLOCK. The founder's reason for
-#        retiring these is that running both is slower, and that reason is
-#        correct — but it is a consequence, not a justification. "It is slow" is
-#        the exact sentence that produced BUG-005, and #6 and #8 already refuse
-#        it in the other two rationale fields. A suite stops being run because
-#        something else now proves what it proved; never because of what it
-#        costs.
-#     4. The claim has not gone stale. There is no deadline here — this repo
-#        does not gate on calendars, and a date in a table is upkeep that rots.
-#        But a retired runner that has been MODIFIED more recently than the spec
-#        replacing it is a claim nobody re-proved: someone changed behaviour in
-#        a file nothing executes. Answered with git history rather than a
-#        recorded baseline, so there is nothing to maintain. The remedies are
-#        all good outcomes — delete the dead runner (the intended end state),
-#        revert the edit, or carry it into the spec and re-prove it.
-# ===========================================================================
-ret_n=0
-ret_skipped=0
-ret_bad=""
-ret_stale=""
-# The tier is not in the retirement table — one fact, one place — so it is
-# looked up from the suite row that already carries it.
-tier_of(){ rows | awk -F'\t' -v s="$1" '$1==s{print $2; exit}'; }
-while IFS="$(printf '\t')" read -r s mut cid; do
-  [ -n "$s" ] || continue
-  ret_n=$((ret_n + 1))
-  # Same rule as #4, same reason, same key: a blueprint-tier suite's files are
-  # not downstream, so neither its shell runner nor its spec is there to compare
-  # and the declaration describes nothing a derived project can act on.
-  if [ "$IN_BLUEPRINT" -eq 0 ] && [ "$(tier_of "$s")" = "blueprint" ]; then
-    ret_skipped=$((ret_skipped + 1))
-    continue
-  fi
-  row_exists "$s"   || { ret_bad="$ret_bad $s(not a declared suite)"; continue; }
-  has_ts_runner "$s" || { ret_bad="$ret_bad $s(no *.spec.ts — retiring the shell runner would leave nothing running)"; continue; }
-  has_sh_runner "$s" || { ret_bad="$ret_bad $s(no *.sh on disk — nothing to retire)"; continue; }
-
-  if [ -z "$mut" ] || [ -z "$cid" ]; then
-    ret_bad="$ret_bad $s(recipe or case ID empty)"
-    continue
-  fi
-  if clocky "$mut" || clocky "$cid"; then
-    ret_bad="$ret_bad $s(argues from cost)"
-    continue
-  fi
-  printf '%s' "$cid" | grep -qE '#[0-9]+[a-z]?' \
-    || { ret_bad="$ret_bad $s(names no case ID that went red)"; continue; }
-  printf '%s' "$mut" | grep -q '`' \
-    || { ret_bad="$ret_bad $s(recipe names no concrete symbol or path)"; continue; }
-  # BUG-041's lesson: no GNU-only sed here (`2~2p` would have looked right and
-  # matched nothing on macOS). grep -o extracts the backticked tokens directly.
-  _badpath=""
-  for _tok in $(printf '%s' "$mut" | grep -oE '`[^`]+`' | tr -d '`'); do
-    case "$_tok" in
-      */*) [ -e "$ROOT/$_tok" ] || _badpath="$_badpath $_tok" ;;
-    esac
-  done
-  [ -n "$_badpath" ] && { ret_bad="$ret_bad $s(recipe names paths that do not exist:$_badpath)"; continue; }
-
-  # 4 — is the equivalence claim still current? Newest commit touching a
-  # retired shell runner vs newest touching the specs that replaced it.
-  _sh_ts=0
-  _spec_ts=0
-  for _f in $(find "$ROOT/tests/$s" -maxdepth 1 -type f -name '*.sh' 2>/dev/null | sort); do
-    _c="$(git -C "$ROOT" log -1 --format=%ct -- "$_f" 2>/dev/null)"
-    case "$_c" in ''|*[!0-9]*) continue ;; esac
-    [ "$_c" -gt "$_sh_ts" ] && _sh_ts="$_c"
-  done
-  for _f in $(find "$ROOT/tests/$s" -maxdepth 1 -type f -name '*.spec.ts' 2>/dev/null | sort); do
-    _c="$(git -C "$ROOT" log -1 --format=%ct -- "$_f" 2>/dev/null)"
-    case "$_c" in ''|*[!0-9]*) continue ;; esac
-    [ "$_c" -gt "$_spec_ts" ] && _spec_ts="$_c"
-  done
-  # Either side uncommitted (or no git at all) → no history to compare. Silence
-  # here is correct: #2b already fails an uncommitted runner at push time.
-  if [ "$_sh_ts" -gt 0 ] && [ "$_spec_ts" -gt 0 ] && [ "$_sh_ts" -gt "$_spec_ts" ]; then
-    ret_stale="$ret_stale $s"
-  fi
-done <<EOF
-$(retired_rows)
-EOF
-if [ -n "$ret_bad" ]; then
-  fail "#4b retirement declarations that do not hold up:$ret_bad"
-  echo "        A retirement must name the mutant that proved the spec equivalent and the"
-  echo "        case it turned red (PLAN-TASK-018 §5). A marker that only has to EXIST is a"
-  echo "        way to switch #4 off one row at a time."
-elif [ -n "$ret_stale" ]; then
-  fail "#4b a retired shell runner has been modified more recently than the spec that replaced it, so the equivalence claim under it is stale:$ret_stale"
-  echo "        Nobody runs that file. Delete it — that is the intended end state — or revert"
-  echo "        the edit, or carry the change into the spec and re-run the mutant."
-elif [ "$ret_skipped" -gt 0 ] && [ "$ret_skipped" -eq "$ret_n" ]; then
-  pass "#4b $ret_skipped retirement declaration(s), all for blueprint-only suites — not applicable outside a blueprint"
-elif [ "$ret_n" -gt 0 ]; then
-  pass "#4b $((ret_n - ret_skipped)) shell runner(s) retired, each with a mutation recipe and a live spec (still on disk; the number is meant to reach zero)"
-else
-  pass "#4b no shell runner is declared retired"
-fi
-
-# ===========================================================================
-# 5. EVERY CI-TIER SUITE IS ACTUALLY IN THE WORKFLOW.
+# 5. EVERY SUITE IS ACTUALLY IN THE WORKFLOW.
 # ===========================================================================
 if [ -f "$CI" ]; then
   ci_missing=""
-  ci_bp_skipped=0
-  ci_enforced=0
-  while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
+  while IFS= read -r s; do
     [ -n "$s" ] || continue
-    case "$t" in CI|both|blueprint) ;; *) continue ;; esac
-
-    # See #4: `.blueprint-root`-keyed, never absence-keyed.
-    if [ "$t" = "blueprint" ] && [ "$IN_BLUEPRINT" -eq 0 ]; then
-      ci_bp_skipped=$((ci_bp_skipped + 1))
-      continue
+    if has_sh_runner "$s" && ! _ci_sh_invoked "$s"; then
+      ci_missing="$ci_missing $s(shell runner)"
     fi
-    ci_enforced=$((ci_enforced + 1))
-
-    _sh=0; _ts=0
-    has_sh_runner "$s" && _sh=1
-    has_ts_runner "$s" && _ts=1
-
-    if [ $((_sh + _ts)) -eq 0 ]; then
-      if _ci_sh_invoked "$s"; then continue; fi
-      if [ "$TS_PRESENT" -eq 1 ] && _ts_covered_ci "$s"; then continue; fi
-      ci_missing="$ci_missing $s"
-      continue
-    fi
-
-    if [ "$_sh" -eq 1 ] && ! _ci_sh_invoked "$s"; then
-      # Same declaration, same conditions (see #4). A retirement is one decision
-      # about one suite; it would be incoherent for the gate to honour it and
-      # the workflow not to.
-      if ! is_retired "$s"; then
-        ci_missing="$ci_missing $s(shell runner, and no retirement declared)"
-      elif [ "$_ts" -eq 0 ]; then
-        ci_missing="$ci_missing $s(shell runner retired but the suite has no spec)"
-      fi
-    fi
-    if [ "$_ts" -eq 1 ] && ! _ts_covered_ci "$s"; then
+    if has_ts_runner "$s" && ! _ts_covered_ci "$s"; then
       ci_missing="$ci_missing $s($TS_WHY)"
     fi
   done <<EOF
-$(rows)
+$(bp_suite_names "$ROOT")
 EOF
-  _ci_bp_note=""
-  [ "$ci_bp_skipped" -gt 0 ] && _ci_bp_note=" ($ci_bp_skipped blueprint-only row(s) skipped — not applicable outside a blueprint)"
   if [ -n "$ci_missing" ]; then
-    fail "#5 declared CI but absent from the workflow:$ci_missing"
-  elif [ "$ci_bp_skipped" -gt 0 ] && [ "$ci_enforced" -eq 0 ]; then
-    fail "#5 every CI row was skipped as blueprint-only, so this checked NOTHING ($ci_bp_skipped skipped, 0 enforced)"
+    fail "#5 suites absent from the workflow:$ci_missing"
   else
-    pass "#5 every CI/both suite runs in the workflow, runner kind by runner kind$_ci_bp_note"
+    pass "#5 every suite runs in the workflow, runner kind by runner kind"
   fi
 fi
 
 # ===========================================================================
-# 6. NO RATIONALE ARGUES FROM THE CLOCK.
-#
-#    THE point of this file. Every exclusion that produced BUG-005 was phrased
-#    exactly this way — "does not fit the 30s ceiling", "costs ~6s", "too slow
-#    for pre-push". Each was written down honestly and none was ever challenged,
-#    because nothing checked them.
+# 7. NON-VACUITY — the derivation must actually be finding suites. Every
+#    assertion above passes trivially over an empty tree, which is precisely
+#    the failure mode this file exists to prevent.
 # ===========================================================================
-clocky_rows=""
-while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
-  [ -n "$s" ] || continue
-  if [ -z "$rat" ]; then
-    clocky_rows="$clocky_rows $s(empty)"
-  elif clocky "$rat"; then
-    clocky_rows="$clocky_rows $s"
-  fi
-done <<EOF
-$(rows)
-EOF
-if [ -n "$clocky_rows" ]; then
-  fail "#6 tier rationale argues from cost, not risk (or is empty):$clocky_rows"
-  echo "        A slow suite that matters is a suite to make faster —"
-  echo "        signal-dispatch went 125.4s -> 75.0s once someone asked why."
-else
-  pass "#6 no tier rationale argues from the clock"
-fi
-
-# ===========================================================================
-# 7. NON-VACUITY — the parser must actually be finding rows. Every assertion
-#    above passes trivially against an empty parse, which is precisely the
-#    failure mode this file exists to prevent.
-# ===========================================================================
-n="$(rows | grep -c .)"
-# A suite named twice is a parser that has started reading something that is not
-# the suite table — the RETIRED-SHELL-RUNNERS rows are the live candidate, since
-# they are kept out of `rows` only by having three columns. It is also a real
-# hazard on its own: two rows for one suite means two tiers and two parallelism
-# classes, and every loop above silently honours whichever it reads last.
-dupes="$(rows | cut -f1 | sort | uniq -d | tr '\n' ' ')"
+n="$(bp_suite_names "$ROOT" | grep -c .)"
 if [ "${n:-0}" -lt 10 ]; then
-  fail "#7 parsed only ${n:-0} manifest rows — the parser is broken, so #1-#6 proved nothing"
-elif [ -n "${dupes// /}" ]; then
-  fail "#7 the same suite is declared more than once:$dupes — two rows means two tiers, and every check above honours whichever it read last"
+  fail "#7 derived only ${n:-0} suites from tests/ — the derivation is broken, so #1-#5 proved nothing"
 else
-  pass "#7 parsed $n manifest rows, each suite once (assertions above are non-vacuous)"
+  pass "#7 derived $n suites from the runners on disk (assertions above are non-vacuous)"
 fi
 
 # ===========================================================================
@@ -1148,36 +844,27 @@ fi
 #
 #     It counts SUBSTRINGS, so a sentence explaining "put your rows after
 #     BLUEPRINT:END" counts as an END. Both managed marker files in this repo
-#     were in that state and had been for their whole lives:
-#
-#       tests/SUITES.md            1 BEGIN, 4 END
-#       .githooks/pre-push-project 1 BEGIN, 3 END
-#
-#     So neither file has ever been marker-merged. Every derived project's own
-#     suite rows and its own gate guards — the two things CLAUDE.md promises are
-#     "preserved byte-for-byte" — were being replaced on every pull. Found by
-#     reading the merge's precondition while adding a marker of my own, which is
-#     how I discovered I had just made it worse.
+#     were in that state and had been for their whole lives — tests/SUITES.md at
+#     1 BEGIN / 4 END, .githooks/pre-push-project at 1 / 3 — so neither had ever
+#     been marker-merged, and every derived project's own gate guards were being
+#     replaced on every pull. Found by reading the merge's precondition while
+#     adding a marker, which is how I discovered I had just made it worse.
 #
 #     `tests/marker-merge` does not catch this: it drives the MECHANISM against
 #     fixture files that satisfy the precondition, and never asks whether the
 #     real managed files do. A control that tests the machine and not the
-#     instance — the same gap as `git-isolation` choosing its population from
-#     comments (BUG-047).
+#     instance.
 #
-#     Checked for every marker vocabulary, because the prose trap applies to all
-#     of them equally and the SUITES/RETIRED ones are new enough to have no
-#     history of being right.
+#     tests/SUITES.md is deleted (TASK-020), so the SUITES and
+#     RETIRED-SHELL-RUNNERS vocabularies went with it. The hooks remain.
 # ===========================================================================
 marker_bad=""
-for _mf_file in "$MANIFEST" "$GATE" "$HOOK"; do
+for _mf_file in "$GATE" "$HOOK"; do
   [ -f "$_mf_file" ] || continue
-  for _voc in BLUEPRINT SUITES RETIRED-SHELL-RUNNERS; do
-    set -- $(bp_marker_balance "$_mf_file" "$_voc")
-    [ "$1" -eq 0 ] && [ "$2" -eq 0 ] && continue
-    [ "$1" -eq "$2" ] && continue
-    marker_bad="$marker_bad ${_mf_file#"$ROOT"/}:$_voc($1 BEGIN/$2 END)"
-  done
+  set -- $(bp_marker_balance "$_mf_file" BLUEPRINT)
+  [ "$1" -eq 0 ] && [ "$2" -eq 0 ] && continue
+  [ "$1" -eq "$2" ] && continue
+  marker_bad="$marker_bad ${_mf_file#"$ROOT"/}(${1} BEGIN/${2} END)"
 done
 if [ -n "$marker_bad" ]; then
   fail "#7b marker counts do not balance, so 'blueprint pull' will NOT merge these files — it falls back to a whole-file copy and destroys the project's own content outside the markers:$marker_bad"
@@ -1185,61 +872,6 @@ if [ -n "$marker_bad" ]; then
   echo "        Say 'the managed region' in sentences and keep the literal token for markers."
 else
   pass "#7b every marker vocabulary balances, so pull merges these files instead of clobbering them"
-fi
-
-# ===========================================================================
-# 8. EVERY SUITE DECLARES A PARALLELISM CLASS, AND JUSTIFIES IT FROM THE
-#    HAZARD RATHER THAN FROM THE CLOCK.
-#
-#    TASK-018's requirement is "isolated, independent, deterministic, so they
-#    can be parallelized without side effects". Parallelism is therefore a
-#    property each suite CLAIMS, exactly as a tier is, and it fails the same way
-#    if nothing checks it: a suite that quietly reads the real feed, the real
-#    baton, ${TMPDIR} or the process table looks identical to a clean one right
-#    up to the moment two of them run at once, at which point the failure is a
-#    flake nobody can reproduce and the suite gets deleted rather than fixed.
-#
-#    So an UNCLASSIFIED suite fails, and the safe default is serial: over-
-#    declaring `serial-global` costs wall-clock, under-declaring costs a control.
-#    Six rows currently say `unclassified-pending-verification` out loud, which
-#    is the honest form of "not audited yet" and is checkable — unlike an empty
-#    cell, which is indistinguishable from an oversight.
-#
-#    The rationale gets the same clock test as #6. "It is slow" was never a tier
-#    and it is not a parallelism class either: what belongs here is the name of
-#    the shared thing the suite touches, or the measurement that load would move.
-# ===========================================================================
-badclass=""
-noreason=""
-clocky_class=""
-while IFS="$(printf '\t')" read -r s t risk rat pcls prat; do
-  [ -n "$s" ] || continue
-  case "$pcls" in
-    parallel-safe|serial-timing|serial-global) ;;
-    "") badclass="$badclass $s(none)" ; continue ;;
-    *)  badclass="$badclass $s($pcls)" ; continue ;;
-  esac
-  if [ -z "$prat" ]; then
-    noreason="$noreason $s"
-  elif clocky "$prat"; then
-    clocky_class="$clocky_class $s"
-  fi
-done <<EOF
-$(rows)
-EOF
-if [ -n "$badclass" ]; then
-  fail "#8 suites with no legal parallelism class:$badclass"
-  echo "        Add a 'Parallelism' cell: parallel-safe | serial-timing | serial-global."
-  echo "        When in doubt, serial-global with an 'unclassified-pending-verification'"
-  echo "        rationale — defaulting to serial is safe, defaulting to parallel is not."
-elif [ -n "$noreason" ]; then
-  fail "#8 parallelism class declared with no rationale:$noreason"
-elif [ -n "$clocky_class" ]; then
-  fail "#8 parallelism rationale argues from cost, not from the hazard:$clocky_class"
-  echo "        Name the global it touches, or the measurement load would move."
-else
-  npar="$(rows | cut -f5 | grep -c 'parallel-safe')"
-  pass "#8 every suite declares a parallelism class with a hazard-based rationale ($npar parallel-safe)"
 fi
 
 # ===========================================================================
@@ -1254,7 +886,7 @@ fi
 #    Two halves, both asserted rather than intended:
 #
 #    (a) With no *.spec.ts on disk, no TS-shaped requirement is consulted at all
-#        — no vitest.config.ts, no package.json, no runner stage. Tracked by
+#        — no vitest config, no package.json, no runner stage. Tracked by
 #        TS_REQUIRED rather than argued from the source.
 #    (b) By EXECUTION: re-run this entire file with node/npm/npx/tsc/vitest
 #        replaced by shims that record the call and exit 127. If any is touched,
@@ -1297,7 +929,7 @@ else
 fi
 
 if [ "$FAILED" -eq 0 ]; then
-  echo "PASS: BUG-005 — every suite is classified and declares a parallelism class, every runner (*.sh and *.spec.ts) is invoked, and nothing is justified by the clock."
+  echo "PASS: BUG-005 — every runner (*.sh and *.spec.ts) on disk belongs to a suite, is invoked by the gate and by CI, and the export boundary behaves as .gitattributes declares."
   exit 0
 fi
 echo "FAILED: see the FAIL lines above."

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Test harness for the struct2flow blueprint's own regression suites (TASK-018).",
+  "description": "Test harness for the struct2flow blueprint's own regression suites (TASK-018). Lives under tests/, which is a blueprint-managed directory no derived project owns a copy of — so it cannot collide with a project's own root package.json (TASK-020).",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",

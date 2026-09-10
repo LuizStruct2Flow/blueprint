@@ -27,6 +27,19 @@
  *    the internal serialism the audit describes, written down as a scheduling
  *    constraint. Here #7 and #7b build their own blueprint and break it, so
  *    they can run in any order and cannot reach anything else.
+ *
+ * MUTATION RECIPE (TASK-018-RULES R6). This suite's shell runner was deleted
+ * once this spec was proven equivalent to it. R6 requires the way to reintroduce
+ * the bug to be RECORDED, and R1 puts a test's description in the test — so it
+ * lives here rather than in the tier table that used to hold it.
+ *
+ *   Mutant: Replace the `if ! … blueprint files …` refusal in `scripts/new-project.sh` with
+ * a plain invocation AND COMMIT IT — the fixture is materialised from HEAD with
+ * `checkout-index`, so an uncommitted mutant does not exist as far as this suite
+ * is concerned.
+ *   Turns red: `#7` goes red: `set -e` kills bootstrap with the CLI's own status and no output,
+ * so the refusal names no cause (BUG-029 R3). `#7b` stays green, because the
+ * empty-list refusal is a separate branch.
  */
 
 import { describe, it, expect } from 'vitest'

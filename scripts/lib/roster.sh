@@ -57,11 +57,34 @@ bp_roster_warn(){
 # The live roster is per-engineer and gitignored; the example is the tracked
 # template. Prefer the personal copy, fall back to the example so a fresh clone
 # still labels personas instead of printing blanks.
+# BUG-075 — THE EXAMPLE ROSTER IS NOT A FALLBACK FOR THE LIVE ONE.
+#
+# This used to try `$src/AGENT_ROSTER.md`, then `$src/AGENT_ROSTER.example.md`,
+# and return 0 either way. That converts "no live roster here" into a confident
+# WRONG IDENTITY, silently:
+#
+#   post-move : Sylvia              <- the shipped example
+#   real root : REAL-ORCHESTRATOR   <- the live roster
+#   rc        : 0
+#
+# The live roster is per-engineer and gitignored; the example is TRACKED and
+# SHIPS. So after the scaffolding/ split the example is the file sitting beside
+# the code, and every persona label, every `--whoami`, and every
+# `OVER_TO_<NAME>` handoff would name a template persona nobody is watching.
+# That is BUG-010's shape defeating the `--whoami` instruction added to prevent
+# BUG-010.
+#
+# Callers pass the STATE root (never the code root), and a missing live roster
+# is now an error a caller must handle. The example is reachable only by naming
+# it explicitly as a FILE, which is the first branch and which tests do.
 bp_roster_file(){
   local src="${1:-.}"
   [ -f "$src" ] && { printf '%s' "$src"; return 0; }
   [ -f "$src/AGENT_ROSTER.md" ] && { printf '%s' "$src/AGENT_ROSTER.md"; return 0; }
-  [ -f "$src/AGENT_ROSTER.example.md" ] && { printf '%s' "$src/AGENT_ROSTER.example.md"; return 0; }
+  if [ -f "$src/AGENT_ROSTER.example.md" ]; then
+    bp_roster_warn "example-only" \
+      "no AGENT_ROSTER.md in '$src' — only the shipped AGENT_ROSTER.example.md. Copy it once: cp AGENT_ROSTER.example.md AGENT_ROSTER.md"
+  fi
   return 1
 }
 

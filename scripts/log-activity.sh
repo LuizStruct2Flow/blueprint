@@ -54,6 +54,9 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # and these were undocumented knobs whose defaults are unchanged — a project
 # that never set them sees no difference.
 # shellcheck source=scripts/lib/feed.sh
+BP_CODE_ROOT="$repo_root"
+. "$repo_root/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 0
 . "$repo_root/scripts/lib/feed.sh"
 
 # BUG-027 — the persona is resolved through the ONE roster parser, shared with
@@ -139,7 +142,7 @@ if [ -r "$ROSTER_LIB" ]; then
     persona="$("$tcmd" "$BP_ROSTER_LOOKUP_TIMEOUT" bash -c '
         . "$1" 2>/dev/null || exit 0
         bp_roster_name_in_text "$2" "$3" 2>/dev/null || exit 0
-      ' bp-roster-lookup "$ROSTER_LIB" "$repo_root" "$summary" 2>/dev/null)"
+      ' bp-roster-lookup "$ROSTER_LIB" "$BP_STATE_ROOT" "$summary" 2>/dev/null)"
     [ -n "${persona:-}" ] && plabel="$persona"
   else
     printf '[log-activity] no timeout(1)/gtimeout(1) available — skipping the roster lookup; labelling by agent type\n' >&2

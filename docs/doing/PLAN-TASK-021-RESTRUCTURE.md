@@ -60,6 +60,44 @@ is split, which I would not recommend.
 
 ---
 
+## 0.1 §0 RESOLVED — founder decision + verified mechanism (2026-09-10)
+
+**Decision: the root file is a STUB, the content lives in `scaffolding/`.** Two of
+the three files support that. The third does not, and it is the exception rather
+than a reason to abandon the approach.
+
+| File | Stub viable | Mechanism, verified |
+|---|---|---|
+| `CLAUDE.md` | **YES** | A root `CLAUDE.md` containing `@scaffolding/CLAUDE.md`. The `@path` import is **expanded at launch and treated identically to inline content** — not lazily, not summarised. Paths resolve relative to the FILE CONTAINING the import, so `@scaffolding/CLAUDE.md` from the root works. Recursive imports allowed to 4 hops. |
+| `.github/workflows/security.yml` | **YES** | The root workflow stays as GitHub's entry point and `run:`s a script under `scaffolding/`. A workflow may invoke any path in the checkout; only the workflow FILE is root-pinned. |
+| `.claude/settings.json` | **NO** | Settings are plain JSON with **no extends, include or import of any kind**, and a settings file may only live in a `.claude/` directory. There is no pointer mechanism to use. |
+
+**Therefore `.claude/settings.json` stays at the repository root and ships from
+there.** It is the one root-anchored shipping file, not a category — which is a
+far smaller reversal of §2's two-bucket rule than the map's option (a) implied.
+
+**Do NOT solve it with two copies.** `permissions.allow` lists MERGE across all
+active settings files rather than overriding, so a root copy and a
+`scaffolding/.claude/settings.json` would both apply here and silently diverge —
+one file that is simultaneously this repo's live config and the shipped template
+is BUG-009 exactly, and nothing checks it.
+
+**Two consequences for the move:**
+
+- **Prefer the import over subdirectory discovery.** Claude Code *does* read a
+  `CLAUDE.md` from a subdirectory, but **lazily** — only once it touches a file
+  there. A bare `scaffolding/CLAUDE.md` would therefore be absent from context at
+  session start, which is when the protocol matters most. The root import is what
+  makes it behave like today's file.
+- **Hook paths resolve from the PROJECT ROOT**, verified against this repo's live
+  `PreToolUse` hook. Moving `scripts/no-chain-guard.sh` to
+  `scaffolding/scripts/` requires updating `"command"` in the settings —
+  `${CLAUDE_PROJECT_DIR}` is available if the path should be explicit. Miss this
+  and the no-chain guard silently stops running, which is the class of failure
+  BUG-004 and A-22 are about.
+
+---
+
 ## 1. Bucket inventory
 
 Source: `git ls-files` (216 tracked files) and `git archive HEAD | tar -t` (174
@@ -547,6 +585,44 @@ anywhere.
   project-relative paths. **Unaffected.** Their own tree does not move at all —
   this is the whole point of the strip, and it is the reassuring half of the
   answer.
+
+---
+
+## Founder decisions — ANSWERED 2026-09-10
+
+All eight are settled. The list that follows this section is the original
+statement of the questions; keep it for the reasoning, but these are the answers.
+
+**THE RULE, in the founder's words:** *"forge is everything needed to run this
+very project but not needed by the derived projects."*
+
+That is a TEST, not a list, and it is better than §2's enumeration because it
+decides the cases §2 did not anticipate:
+
+- a derived project needs it → `scaffolding/` (and this repo runs on its own
+  scaffolding — the factory using its own product)
+- only this repo needs it, to operate → `forge/`
+- it is this repo's own CONTENT rather than machinery → root, where a derived
+  project's equivalent lives
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Root-anchored files | **Root file is a STUB, content in `scaffolding/`.** Viable for `CLAUDE.md` (`@scaffolding/CLAUDE.md`) and the CI workflow (`run:`s a scaffolding script). NOT viable for `.claude/settings.json` — no import mechanism exists — so that ONE file stays root-anchored and ships from root. See §0.1. |
+| 2 | `forge/` scope | **Bootstrap + templates + the suites that test them.** `scripts/blueprint` goes to `scaffolding/`: it implements `drift`, `pull` and `a2bp`, all of which a DERIVED project runs, and `a2bp` cannot even run here. `scripts/new-project.sh` moves to `forge/` and STOPS SHIPPING — a deliberate behaviour change, and a correct one: every project carries a bootstrap script it cannot use. |
+| 3 | `docs/` split | **By audience, three destinations.** `scaffolding/docs/`: `DoD.md`, `SECURITY.md`, `OBSERVABILITY.md`, `INFRASTRUCTURE.md`, `DOCUMENTATION.md`, and the `config/` `mocks/` `requirements/` READMEs — every project needs these and CLAUDE.md names them as the rules. `forge/docs/`: `A2BP_PLAYBOOK.md`, which says outright it addresses *"the implementer — whoever makes the change in the blueprint. Not the requester."* Root: `way-of-working.md` + `.pdf` + `assets/brand/` — struct2flow's own pitch and brand. Cost: ~29 links rewritten, and this repo reads its own DoD out of `scaffolding/docs/`. |
+| 4 | `LICENSE` | **`forge/templates/LICENSE`, seeded with the holder substituted at bootstrap.** It currently ships unmanaged, so every derived project declares `Copyright (c) 2026 Luiz Scheidegger` permanently and no pull can ever correct it. Same shape as A-14 (a founder identity baked into every derived repo), in a different file. |
+| 5 | `scripts/accept-bug-022.sh` | **Delete.** BUG-022 is accepted in `done/`, and `tests/watcher-liveness` is the actual guard (it names the bug twice). The script is an acceptance DEMO that never travelled with its item and has been shipping to every project since. |
+| 6 | `docs/assets/brand/` | **Resolved by #3.** `README.md:150` claims they are "blueprint-only; not synced to projects". The sync half is true (unmanaged); the SHIP half is false (they are in `git archive`). Moving them to root makes the prose true without editing it. |
+| 7 | `MANAGED_FILES` | **`("scaffolding/")`.** Location determines propagation, which is R2's actual promise, and it deletes a 69-entry hand-maintained array. It also fixes `wait-mic.sh`, `session-resume.sh` and `no-chain-guard.sh`, which ship today while unmanaged — so derived projects run regression suites against scripts frozen at their bootstrap commit (BUG-029's shape). **Cost accepted:** the per-file comments explaining WHY each file must travel are real knowledge and will be lost; carry anything load-bearing into the files' own headers before deleting the array. |
+| 8 | Stage A′ | **AUTHORIZED, and required before Stage B.** Without it all three derived projects lose every `blueprint` subcommand at once — including `blueprint pull scripts/blueprint`, the recovery — because `bp_expand_managed_dirs` fails inside `read_blueprint_source`, which every subcommand goes through. Ship the probing CLI while the tree is still flat, confirm all three have pulled it, then move. |
+
+**One thing found while answering these, NOT part of the restructure and rowed
+separately:** `docs/PUBLISHING.md` opens with *"This file is gitignored (under
+`docs/`). It exists only on the founder's machine."* It is tracked, it is not
+ignored, and it ships. A runbook describing the founder's personal
+first-public-push process is delivered into every bootstrapped project. A-05
+class, and unusual in that the file documents its own intended boundary while
+the boundary does not exist.
 
 ---
 

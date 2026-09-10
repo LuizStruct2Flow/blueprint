@@ -437,7 +437,7 @@ elif ! grep -qF -- '--force is gone' "$WORK/out"; then
   # calls "the worst outcome": the operator believes the guard was waived and
   # reads the block as a tool malfunction. Verified by mutation (`--force) : ;;`
   # in place of the die): green before this line, red after.
-  fail "#5 --force was SILENTLY IGNORED — the run was refused for the contamination in the fixture, not for the flag; nothing told the operator the flag is gone: $(head -3 "$WORK/out")"
+  fail "#5 BUG-064: --force was SILENTLY IGNORED — the run was refused for the contamination in the fixture, not for the flag; nothing told the operator the flag is gone: $(head -3 "$WORK/out")"
 elif grep -q 'reject.*--force' "$WORK/out"; then
   fail "#5 --force was parsed as a FILENAME rather than refused as a flag"
 elif ! grep -q 'a2bp-allow' "$WORK/out"; then
@@ -445,7 +445,7 @@ elif ! grep -q 'a2bp-allow' "$WORK/out"; then
 elif ! bp_untouched; then
   fail "#5 --force still reached the blueprint"
 else
-  pass "#5 --force is refused, naming a2bp-allow as the way through (the reviewer is the override now)"
+  pass "#5 BUG-064: --force is refused, naming a2bp-allow as the way through (the reviewer is the override now)"
 fi
 
 # ===========================================================================
@@ -493,7 +493,7 @@ rc=$?
 if grep -q '^SENTINEL' "$FAKE_BP/scripts/new-project.sh"; then
   fail "#6 scripts/new-project.sh was not filed (exit $rc) — see $WORK/out"
 elif ! grep -q 'acme-flow' "$FAKE_BP/scripts/new-project.sh"; then
-  fail "#6 scripts/new-project.sh WAS reverse-substituted — the pull-side _should_substitute exemption is not mirrored on the a2bp side; back-propagating the CLI would corrupt it"
+  fail "#6 BUG-064: scripts/new-project.sh WAS reverse-substituted — the pull-side _should_substitute exemption is not mirrored on the a2bp side; back-propagating the CLI would corrupt it"
 elif ! grep -q '{{PROJECT_NAME}}' "$FAKE_BP/scripts/new-project.sh"; then
   fail "#6 the file's own {{PROJECT_NAME}} code token was mangled"
 else
@@ -735,13 +735,13 @@ setup
 run_a2bp "$CARRIER"
 rc=$?
 if [ "$rc" -eq 0 ]; then
-  fail "#13 line 1 was suppressed by line 11's marker — the suppression set is matching substrings, not whole line numbers"
+  fail "#13 BUG-064: line 1 was suppressed by line 11's marker — the suppression set is matching substrings, not whole line numbers"
 elif ! grep -q 'someuser/one' "$WORK/out"; then
-  fail "#13 the unsuppressed line 1 finding was not reported"
+  fail "#13 BUG-064: the unsuppressed line 1 finding was not reported"
 elif grep -q 'someuser/two' "$WORK/out"; then
-  fail "#13 the a2bp-allow marker on line 11 did not suppress its finding"
+  fail "#13 BUG-064: the a2bp-allow marker on line 11 did not suppress its finding"
 else
-  pass "#13 suppression is exact per line number, including multi-digit (F3)"
+  pass "#13 BUG-064: suppression is exact per line number, including multi-digit (F3)"
 fi
 
 # ===========================================================================
@@ -756,7 +756,7 @@ rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#14 a bare 'a2bp-allow:' with no justification suppressed the finding — the justification requirement is not enforced"
 else
-  pass "#14 a suppression without a justification does not suppress (F3)"
+  pass "#14 BUG-064: a suppression without a justification does not suppress (F3)"
 fi
 
 # ===========================================================================

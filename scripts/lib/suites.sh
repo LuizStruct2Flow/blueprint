@@ -1,121 +1,138 @@
 #!/bin/sh
-# scripts/lib/suites.sh — the ONE parse of tests/SUITES.md.
+# scripts/lib/suites.sh — the ONE derivation of "what the suites are".
 #
 # WHY THIS FILE EXISTS, and it is a correction rather than a design.
 #
-# scripts/run-ts-suites.sh grew its own copy of the manifest table parse, under
-# a comment reading "two parsers of one table drift, and this file exists to be
-# the thing that cannot". Vitali (QA-1) pointed out the obvious: the awk was a
-# verbatim copy of tests/manifest's, so the file WAS the second parser, and the
-# comment asserting otherwise was the overclaim this repo keeps catching in its
-# own controls.
+# scripts/run-ts-suites.sh grew its own copy of the suite lookup, under a comment
+# reading "two parsers of one table drift, and this file exists to be the thing
+# that cannot". Vitali (QA-1) pointed out the obvious: the awk was a verbatim
+# copy of tests/manifest's, so the file WAS the second parser, and the comment
+# asserting otherwise was the overclaim this repo keeps catching in its own
+# controls. The shape the repo already chose for this is
+# scripts/lib/commit-subject.sh and scripts/lib/roster.sh: one definition, every
+# caller sources it.
 #
-# It was already drifting. tests/manifest's copy emits six fields and gates the
-# parallelism class on the last two; the bridge's took field 2 only and would
-# happily accept a legacy four-column row that the manifest rejects. Nothing
-# broke today, which is precisely how these last long enough to matter.
-#
-# The shape the repo already chose for this is scripts/lib/commit-subject.sh and
-# scripts/lib/roster.sh: one definition, every caller sources it. A-09 is the
-# same lesson at runtime — the feed and the dispatchers agreeing "only by
-# coincidence" is what produced cross-project contamination.
-#
-# POSIX sh, no Node, no jq. tests/manifest asserts it invokes no toolchain (#9),
-# and a shared parser that pulled one in would break that property for every
-# caller at once rather than one.
+# That correction stands. What changed under TASK-018 is WHAT is derived, and
+# from where.
 #
 # ---------------------------------------------------------------------------
-# MARKER-BOUNDED, NEVER SHAPE-BOUNDED.
+# THE SUITES ARE THE FILESYSTEM. THE TIER IS THE EXPORT BOUNDARY.
 #
-# The first version of this file decided what a row was by counting its fields:
-# six or more meant a suite, and the retirement table fell out only because it
-# happens to have three. That is shape-based parsing, and the manifest had
-# already named the hazard in the abstract — "a way to exempt a suite from #4 by
-# writing a row that happens to look right" — before this file did it concretely.
-# It is not hypothetical: add a fourth column to the retirement table (a
-# "verified by", say) and every row in it silently becomes a SUITE, with an
-# empty tier and an empty parallelism class.
+# This file used to parse `tests/SUITES.md` — a table naming every suite, its
+# tier, its parallelism class and two paragraphs of rationale. That table is
+# deleted (TASK-020). TASK-018-RULES R1: "No SUITES.md, no tier table, no
+# catalogue of tests. A second description of a test is a copy that drifts" —
+# and it had already drifted twice in one afternoon while being built.
 #
-# So each table is delimited, and a row outside every marked region belongs to
-# nothing:
+# Both facts the table carried are derived here instead, each from the artefact
+# that already IS that fact:
 #
-#     SUITES:BEGIN … SUITES:END                    the classified suites
-#     RETIRED-SHELL-RUNNERS:BEGIN … :END           the retirement declarations
+#   the suite set   the *.sh and *.spec.ts files under tests/. Not a
+#                   description of the tests — the tests.
+#   the tier        `.gitattributes`. A tier is a claim about what SHIPS, and
+#                   export-ignore is where shipping is decided. Two descriptions
+#                   of one fact is exactly what R1 deletes.
 #
-# Both appear twice in the file — once inside the blueprint-managed region, once
-# in the project's own section after it — and both are parsed identically, so a
-# project row is enforced exactly as hard as a blueprint one.
+# WHAT THIS COSTS, stated because scripts/lib/pipeline.sh names it as the
+# residual risk of the batch API: the expected set fed to `pipe_batch_begin`
+# must come from "a source the runner cannot edit at run time", or every guard
+# built on it reduces to trusting the runner. The filesystem is such a source.
+# `find` does not consult vitest's include glob, its config or its reporter, so
+# narrowing any of them still leaves a declared suite that never reports — which
+# fails the batch by name. Deliberate fabrication remains out of the threat
+# model, there as here.
 #
-# TWO TRAPS, both of which this repo has already walked into once:
-#
-#   - The marker names must stay distinct AS SUBSTRINGS. `RUNNERS:BEGIN` is not
-#     `SUITES:BEGIN`, and that is load-bearing rather than lucky. Renaming
-#     either one to overlap would silently merge the two tables.
-#   - PROSE MUST NEVER CONTAIN A MARKER TOKEN. A sentence explaining "put your
-#     rows after BLUEPRINT:END" is counted by `marker_aware_merge` in
-#     scripts/blueprint, which requires the BEGIN and END counts to match and
-#     falls back to a whole-file copy when they do not. tests/SUITES.md had a
-#     BEGIN/END count of 1/3 for exactly that reason, so its marker merge had
-#     NEVER run and every derived project's own suite table was being replaced
-#     on every pull — the thing the markers exist to prevent, defeated by a
-#     sentence describing them. tests/manifest #7b now asserts the balance.
+# POSIX sh, no Node, no jq. tests/manifest asserts it invokes no toolchain (#9),
+# and a shared derivation that pulled one in would break that property for every
+# caller at once rather than one.
 
-# bp_suite_rows ROOT — every classified row inside a SUITES region, as:
-#     suite<TAB>tier<TAB>risk<TAB>rationale<TAB>parallelism<TAB>why
+# bp_suite_runners ROOT — every runner file under tests/, as:
+#     suite<TAB>path-relative-to-ROOT
 #
-# Padding-tolerant: a markdown formatter's spaces must not change what a control
-# sees (BUG-010's lesson). Only rows whose suite cell is in backticks count, so
-# header separators are ignored.
+# A RUNNER is a `*.sh` or a `*.spec.ts`. Discovery is by EXTENSION, never by the
+# `test.sh` / `<suite>.spec.ts` naming convention: recognising only `test.sh` is
+# how renaming a runner once made a whole suite invisible to its own control
+# (Codex R2-F1a), and `tests/staleness/` already ships two shell runners.
 #
-# The two trailing fields are emitted even when a row does not carry them, so a
-# row still in the old four-column shape arrives with an EMPTY class rather than
-# being skipped. A parser that silently ignores rows it does not recognise is
-# how a schema change becomes an exemption nobody voted for.
-bp_suite_rows() {
-  awk -F'|' '
-    function trim(s){ gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /SUITES:BEGIN/ { inblock=1; next }
-    /SUITES:END/   { inblock=0; next }
-    !inblock { next }
-    /^[[:space:]]*\|/ {
-      n=split($0,f,"|"); if (n<6) next
-      s=trim(f[2]); t=trim(f[3]); r=trim(f[4]); w=trim(f[5])
-      p=(n>=7 ? trim(f[6]) : ""); q=(n>=8 ? trim(f[7]) : "")
-      if (s !~ /^`.*`$/) next
-      gsub(/`/,"",s)
-      print s "\t" t "\t" r "\t" w "\t" p "\t" q
-    }
-  ' "${1:-.}/tests/SUITES.md" 2>/dev/null
+# A runner sitting directly in `tests/` belongs to no suite, and emits an EMPTY
+# suite field rather than being dropped — a discovery that silently ignores what
+# it does not recognise is how a file ends up executing nowhere.
+#
+# tests/helpers/ and tests/__helpers__/ are NOT suites (CLAUDE.md §"Test
+# directory layout"): they are sourced, never run, and carry no assertions.
+# Deliberately literal, never a prefix match. tests/manifest #1b is the
+# compensating control that stops the exemption becoming a place to hide code.
+bp_suite_runners() {
+  _bsr_root="${1:-.}"
+  find "$_bsr_root/tests" -type f \( -name '*.sh' -o -name '*.spec.ts' \) 2>/dev/null \
+    | sed -e "s#^$_bsr_root/##" \
+    | sort \
+    | awk -F/ '
+        { s = (NF >= 3 ? $2 : "")
+          if (s == "helpers" || s == "__helpers__") next
+          print s "\t" $0 }'
 }
 
-# bp_suite_names ROOT — just the suite names, one per line.
+# bp_suite_names ROOT — the suite names, one per line.
 bp_suite_names() {
-  bp_suite_rows "${1:-.}" | cut -f1
+  bp_suite_runners "${1:-.}" | cut -f1 | grep -v '^$' | sort -u
 }
 
-# bp_retired_rows ROOT — the retirement declarations, as:
-#     suite<TAB>the mutant<TAB>the case it turned red
+# bp_blueprint_only ROOT — the suites `.gitattributes` holds back from the
+# archive, one per line.
 #
-# A migrated suite keeps its *.sh on disk until the migration is finished, but
-# the gate stops RUNNING it once the spec is equivalence-proven. That decision
-# has to be declared, because "we deliberately stopped invoking this" and "this
-# fell out of the gate and nobody noticed" are otherwise the same observation —
-# which is BUG-005. tests/manifest #4 accepts a non-invoked shell runner only
-# for a suite named here, and #4b judges whether the declaration holds up.
-bp_retired_rows() {
-  awk -F'|' '
-    function trim(s){ gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /RETIRED-SHELL-RUNNERS:BEGIN/ { inblock=1; next }
-    /RETIRED-SHELL-RUNNERS:END/   { inblock=0; next }
-    !inblock { next }
-    /^[[:space:]]*\|/ {
-      n=split($0,f,"|"); if (n<4) next
-      s=trim(f[2]); m=trim(f[3]); c=trim(f[4])
-      if (s !~ /^`.*`$/) next
-      gsub(/`/,"",s)
-      print s "\t" m "\t" c
-    }
-  ' "${1:-.}/tests/SUITES.md" 2>/dev/null
+# A DIRECTORY-LEVEL `tests/<suite>/  export-ignore` line, and nothing else. Not
+# "no file of this suite happens to be in the archive": during TASK-018 phase 1
+# `tests/**/*.spec.ts` is export-ignore'd wholesale, so a suite migrated to
+# TypeScript would ship nothing and derive as blueprint-tier — a shipping suite
+# silently reclassified into one that never ships, which is BUG-005 wearing a
+# legal tier. The directory line is a deliberate, reviewable act; the absence of
+# shipped files is a side effect. Only the first is a declaration.
+#
+# tests/manifest #2b is what keeps the declaration honest, by comparing it
+# against a real `git archive`: a line that does not take effect fails, and so
+# does a suite with no line whose files do not arrive.
+bp_blueprint_only() {
+  grep -E '^tests/[A-Za-z0-9._-]+/[[:space:]]+export-ignore' "${1:-.}/.gitattributes" 2>/dev/null \
+    | sed -e 's#^tests/##' -e 's#/[[:space:]].*##'
+}
+
+# bp_suite_rows ROOT — every suite and its tier, as:
+#     suite<TAB>tier          tier is `blueprint` or `both`
+#
+# `blueprint` — drives machinery that exists only in a blueprint
+#               (new-project.sh, templates/, .blueprint-root), so it must not
+#               ship. Downstream it is not skipped, it is simply not there:
+#               the set is derived from disk, so a suite a project never
+#               received cannot appear in that project's own derivation. The
+#               mismatch between "what ships" and "what is declared to ship"
+#               is unrepresentable rather than merely detected (R2).
+# `both`      — ships, and blocks in the gate and in CI.
+bp_suite_rows() {
+  _bsrow_root="${1:-.}"
+  _bsrow_bp=" $(bp_blueprint_only "$_bsrow_root" | tr '\n' ' ')"
+  bp_suite_names "$_bsrow_root" | while IFS= read -r _bsrow_s; do
+    case "$_bsrow_bp" in
+      *" $_bsrow_s "*) printf '%s\tblueprint\n' "$_bsrow_s" ;;
+      *)               printf '%s\tboth\n'      "$_bsrow_s" ;;
+    esac
+  done
+}
+
+# bp_suites_with_spec ROOT — the suites that own a *.spec.ts.
+#
+# This is what the vitest bridge declares to the pipeline before vitest runs.
+# See the header: it is read from the FILESYSTEM, never from vitest's own
+# output, so a suite dropped from the include glob is a declared suite that
+# never reports rather than a suite that quietly stopped existing.
+bp_suites_with_spec() {
+  bp_suite_runners "${1:-.}" \
+    | awk -F'\t' '$1 != "" && $2 ~ /\.spec\.ts$/ { print $1 }' \
+    | sort -u
+  # BUG-055: the one caller runs under `set -e`, where a non-zero status is
+  # fatal however good the list on stdout is. There is deliberately no status
+  # here for a caller to trip over.
+  return 0
 }
 
 # bp_marker_balance FILE PREFIX — prints "<begins> <ends>" for one marker
@@ -125,29 +142,15 @@ bp_retired_rows() {
 # outside the markers. Exposed here because the counting rule belongs beside the
 # markers it counts, and because a prose mention of a marker is invisible until
 # something counts it.
+#
+# PROSE MUST NEVER CONTAIN A MARKER TOKEN. A sentence explaining "put your rows
+# after BLUEPRINT:END" is counted. tests/SUITES.md had a BEGIN/END count of 1/3
+# for exactly that reason, so its marker merge had NEVER run and every derived
+# project's own suite table was replaced on every pull — the thing the markers
+# exist to prevent, defeated by a sentence describing them. tests/manifest #7b
+# asserts the balance for the files that still carry markers.
 bp_marker_balance() {
   _bmb_b=$(grep -c "${2}:BEGIN" "$1" 2>/dev/null || true)
   _bmb_e=$(grep -c "${2}:END" "$1" 2>/dev/null || true)
   printf '%s %s\n' "${_bmb_b:-0}" "${_bmb_e:-0}"
-}
-
-# bp_suites_with_spec ROOT — the classified suites that own a *.spec.ts.
-#
-# This is what the vitest bridge declares to the pipeline, and it is read from
-# the MANIFEST rather than from vitest's own output on purpose. If the expected
-# set came from the runner, every guard built on it would reduce to trusting the
-# runner, and a suite dropped from the include glob would vanish with the gate
-# still green — BUG-005, through the door tests/manifest just closed.
-bp_suites_with_spec() {
-  _bps_root="${1:-.}"
-  bp_suite_names "$_bps_root" | while IFS= read -r _s; do
-    [ -n "$_s" ] || continue
-    [ -n "$(find "$_bps_root/tests/$_s" -maxdepth 1 -type f -name '*.spec.ts' -print -quit 2>/dev/null)" ] \
-      && printf '%s\n' "$_s"
-  done
-  # The loop's status is the last `[ -n … ]`, so a final suite without a spec
-  # made this return 1 with a perfectly good list on stdout. Harmless to the one
-  # caller that reads it through `$( )` — and exactly the trap BUG-048 is about,
-  # where a status nobody looked at turned out to be the whole assertion.
-  return 0
 }

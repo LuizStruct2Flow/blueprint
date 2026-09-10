@@ -18,7 +18,7 @@
 #   1. The expansion is `git archive HEAD <dir>`, and NOT `git check-attr`.
 #      A trailing-slash directory pattern in `.gitattributes` does not propagate
 #      to the files underneath it, so `check-attr` reports `unspecified` for a
-#      suite `git archive` genuinely drops. tests/manifest:139-141 rejected
+#      suite `git archive` genuinely drops. tests/manifest #2b rejected
 #      check-attr for the same reason; this pins the trap so nobody re-walks it.
 #   2. A suite the blueprint adds actually ARRIVES, and drift is quiet after.
 #   3. A suite carrying a literal `{{PROJECT_NAME}}` arrives byte-identical.
@@ -83,26 +83,26 @@ printf 'echo bponly\n'                        > "$BP/tests/bponly/test.sh"
 # non-propagation to contained files makes `git check-attr` the wrong oracle.
 printf 'tests/bponly/   export-ignore\n' > "$BP/.gitattributes"
 
-bp_suites(){
-  {
-    printf '| Suite | Tier | Risk if absent | Rationale for the tier |\n'
-    printf '|---|---|---|---|\n'
-    for s in "$@"; do
-      printf '| `%s` | both | fixture | fixture risk rationale |\n' "$s"
-    done
-  } > "$BP/tests/SUITES.md"
-}
-bp_suites alpha beta manifest
-
+# bp_hook VERSION [SUITE...] — the blueprint's gate, invoking exactly the suites
+# it currently ships.
+#
+# TASK-020: there is no tests/SUITES.md to write. A suite's membership is now the
+# runner file on disk, and the only claim the blueprint makes ABOUT a suite is
+# that its gate invokes it — so the hook is the fixture's whole declaration, and
+# dropping a suite means dropping its stage from here.
 bp_hook(){
   {
     printf '#!/bin/sh\n'
     printf '# BLUEPRINT:BEGIN\n'
     printf 'blueprint_region_version=%s\n' "$1"
+    shift
+    for s in "$@"; do
+      printf 'bash tests/%s/test.sh\n' "$s"
+    done
     printf '# BLUEPRINT:END\n'
   } > "$BP/.githooks/pre-push-project"
 }
-bp_hook 1
+bp_hook 1 alpha beta manifest
 
 git_c "$BP" init -q
 git_c "$BP" add -A
@@ -257,11 +257,18 @@ fi
 #    "the blueprint deleted this" from "the project wrote this" does not exist
 #    in the project, and a prefix-based delete would take out #4's file. So the
 #    orphan stays, and the control that already exists names it: tests/manifest
-#    #1 fails the derived push on a suite directory with no row in SUITES.md.
+#    #4 fails the derived push on a suite the gate does not invoke.
 #    Fail-closed, by name, with nothing new to build.
+#
+#    TASK-020 moved which case says so, and made the claim stronger rather than
+#    weaker. It used to be #1, "a suite directory with no row in SUITES.md" —
+#    which detected the drop only because the blueprint also deleted the row. The
+#    row is gone; what the blueprint deletes now is the suite's STAGE, and a
+#    runner nothing invokes is exactly what #4 refuses. The assertion below pins
+#    both halves: `alpha` is named and `beta`, still invoked, is not.
 # ===========================================================================
 git_c "$BP" rm -q -r tests/alpha
-bp_suites beta manifest
+bp_hook 1 beta manifest
 git_c "$BP" add -A
 git_c "$BP" commit -qm "drop alpha"
 ( cd "$P" && bash "$BP/scripts/blueprint" pull --yes ) </dev/null >/dev/null 2>&1
@@ -270,23 +277,28 @@ if [ ! -f "$P/tests/alpha/test.sh" ]; then
   fail "#5 pull deleted a suite the blueprint dropped — it cannot tell that from deleting a project's own"
 else
   man="$( cd "$P" && bash tests/manifest/test.sh 2>&1 )"
-  if printf '%s\n' "$man" | grep '#1 ' | grep -q 'alpha'; then
-    pass "#5 the dropped suite stays, and tests/manifest #1 fails the derived push naming it"
+  man4="$(printf '%s\n' "$man" | grep '#4 ' || true)"
+  if ! printf '%s\n' "$man4" | grep -q 'alpha'; then
+    fail "#5 the dropped suite stays but nothing announces it — tests/manifest #4 did not name 'alpha':
+$(printf '%s\n' "$man4" | sed 's/^/      /')"
+  elif printf '%s\n' "$man4" | grep -q 'beta'; then
+    fail "#5 tests/manifest #4 also named 'beta', which the gate DOES invoke — the check is firing on everything rather than on the orphan:
+$(printf '%s\n' "$man4" | sed 's/^/      /')"
   else
-    fail "#5 the dropped suite stays but nothing announces it — tests/manifest #1 did not name 'alpha':
-$(printf '%s\n' "$man" | grep '#1 ' | sed 's/^/      /')"
+    pass "#5 the dropped suite stays, and tests/manifest #4 fails the derived push naming it and not the suites still wired in"
   fi
 fi
 
 # ===========================================================================
 # 6. .githooks/pre-push-project TRAVELS, AND PROJECT GUARDS SURVIVE IT.
 #
-#    A suite is coherent only as three things: the files, its SUITES.md row, and
-#    its invocation in the gate. Managing tests/ alone delivers the first two —
-#    SUITES.md lives under tests/ — and not the third, at which point
-#    tests/manifest #4 fails every derived push on a suite the gate cannot
-#    invoke. So the hook is managed too, and the markers are what let it be
-#    managed without eating the project's own guards.
+#    A suite is coherent only as two things: the files, and its invocation in the
+#    gate. (It used to be three — TASK-020 deleted the SUITES.md row, which was a
+#    second description of what the first two already say.) Managing tests/ alone
+#    delivers the files and not the invocation, at which point tests/manifest #4
+#    fails every derived push on a suite the gate cannot invoke. So the hook is
+#    managed too, and the markers are what let it be managed without eating the
+#    project's own guards.
 # ===========================================================================
 P6="$WORK/proj6"
 new_project "$P6"
@@ -299,7 +311,7 @@ mkdir -p "$P6/.githooks"
   printf 'echo "my project guard"\n'
 } > "$P6/.githooks/pre-push-project"
 
-bp_hook 2
+bp_hook 2 beta manifest
 git_c "$BP" add -A
 git_c "$BP" commit -qm "hook v2"
 ( cd "$P6" && bash "$BP/scripts/blueprint" pull --yes ) </dev/null >/dev/null 2>&1

@@ -6,6 +6,16 @@
  *   access is read-only case #5, which is intentionally non-vacuous only in the
  *   blueprint tier: if no executable placeholder-bearing managed file exists,
  *   the suite must fail rather than silently covering nothing.
+ *
+ * MUTATION RECIPE (TASK-018-RULES R6). This suite's shell runner was deleted
+ * once this spec was proven equivalent to it. R6 requires the way to reintroduce
+ * the bug to be RECORDED, and R1 puts a test's description in the test — so it
+ * lives here rather than in the tier table that used to hold it.
+ *
+ *   Mutant: Remove the mode-preservation block from `scripts/lib/placeholders.sh`, so a
+ * pulled hook lands without its executable bit.
+ *   Turns red: `#1` goes red on the mode assertion, observing 600 where 755 is required, which
+ * is the BUG-008 defect itself.
  */
 
 import { describe, it, expect } from 'vitest'

@@ -342,11 +342,12 @@ at bootstrap, then drift on purpose), `BUGS.md`, `HANDOVER.md`,
 **additively** — created and updated, never deleted, because the project cannot
 tell "the blueprint dropped this" from "we wrote this", and a sync that guesses
 wrong deletes the project's own tests. And a file can be **half-managed**:
-`BLUEPRINT:BEGIN`/`END` markers split `.githooks/pre-push-project` and
-`tests/SUITES.md` into a blueprint region the pull replaces and a project region
-it preserves byte-for-byte. Without that split, a suite arrives with nothing to
-invoke it and no row to classify it — three files that are only a suite together
-(BUG-029).
+`BLUEPRINT:BEGIN`/`END` markers split `.githooks/pre-push-project` into a
+blueprint region the pull replaces and a project region it preserves
+byte-for-byte. Without that split, a suite arrives with nothing to invoke it —
+two things that are only a suite together (BUG-029). There is deliberately no
+third: a suite used to also need a row in a `tests/SUITES.md` catalogue, and a
+second description of a test is a copy that drifts.
 
 The agent calls `blueprint drift` on every wake. Drift between blueprint
 and project is treated like drift between code and prod: **detected, not

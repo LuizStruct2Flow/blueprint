@@ -10,8 +10,8 @@ Each file has exactly ONE owner. Do not edit outside your set.
 
 | Owner | Files |
 |---|---|
-| Sylvia (Orchestrator) | `package.json`, `tsconfig.json`, `vitest.config.ts`, `tests/harness/**`, one exemplar spec |
-| Manifest agent | `tests/manifest/test.sh`, `tests/SUITES.md` (schema + rows) |
+| Sylvia (Orchestrator) | `tests/package.json`, `tests/tsconfig.json`, `tests/vitest.config.ts`, `tests/harness/**`, one exemplar spec |
+| Manifest agent | `tests/manifest/test.sh`, `scripts/lib/suites.sh` (the suite derivation) |
 | Pipeline agent | `scripts/lib/pipeline.sh`, `scripts/install-toolchain.sh` |
 | Isolation agent | `scripts/new-project.sh` (seed only), `tests/template-source/`, `tests/bootstrap-contents/`, `tests/bootstrap-gate/`, `tests/bootstrap-identity/`, `tests/commit-subjects/`, `tests/git-isolation/` |
 
@@ -21,16 +21,24 @@ another's.
 ## Layout
 
 ```
-package.json          root, private, "type": "module"
-tsconfig.json         strict
-vitest.config.ts      pool: 'forks', isolate: true
-tests/harness/        the fixture API (TypeScript, blueprint-owned)
+tests/package.json         private, "type": "module"
+tests/tsconfig.json        strict
+tests/vitest.config.ts     pool: 'forks', isolate: true
+tests/harness/             the fixture API (TypeScript, blueprint-owned)
 tests/<suite>/<suite>.spec.ts    migrated suites, one per suite directory
-tests/<suite>/test.sh            shell runner, retained until equivalence proven
+tests/<suite>/test.sh            shell runner, deleted in the migrating change
 ```
 
-A suite directory may hold BOTH runners during migration. That is deliberate:
-§5 of the plan forbids deleting a shell runner before its mutants pass.
+TASK-020 moved the harness manifest under `tests/` — a managed directory no
+derived project owns a copy of, so it cannot collide with a project's own root
+`package.json` and it travels by both propagation paths or by neither.
+
+A suite directory holds ONE runner kind once its migration lands. §5 of the plan
+forbids deleting a shell runner before its mutants pass — run them, record the
+recipe in the spec's docblock (R6), delete the `.sh` in the same change. The
+transitional both-runners state is not legal any more: `tests/manifest` #4
+requires every runner on disk to be invoked, and the RETIRED-SHELL-RUNNERS table
+that used to make an exception is deleted with `SUITES.md`.
 
 ## Naming
 
@@ -67,10 +75,12 @@ Hard requirements of the API, derived from the audit:
    fails the test.
 5. Teardown asserts the temp root is removed — BUG-049 was 133 MB of debris.
 
-## Parallelism class — declared, not assumed
+## Parallelism — a hazard note in the spec, not a declared class
 
-Every spec declares one, and `tests/manifest` fails on a suite that declares
-none (same doctrine as tier and invocation):
+R5 is that tests run in parallel with no serial category and no escape hatch, so
+there is no taxonomy to declare and `tests/manifest` no longer checks one. What
+remains useful is the HAZARD, written in the spec's own docblock where R1 says a
+test's description belongs. The three shapes worth naming when one applies:
 
 - `parallel-safe` — verified by the self-concurrency check.
 - `serial-timing` — asserts something about elapsed wall-clock.
@@ -83,7 +93,7 @@ always paired with the real-state canary.
 
 ## What a migrated suite must prove before its shell runner is deleted
 
-1. Listed in `tests/SUITES.md`, invoked by gate and CI, covered by the manifest.
+1. Invoked by gate and CI, covered by the manifest. (There is no list to be on: TASK-020 deleted `tests/SUITES.md` and the suite set is derived from the runners on disk.)
 2. **Every historical bug it guards has a mutation recipe, and the spec FAILS on
    it with the named scenario.** A suite that cannot fail on the defect it exists
    for is theatre.

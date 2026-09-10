@@ -310,8 +310,11 @@ pipe_skip(){
 #
 #   * **If the declared set is derived from the runner's own output, every check
 #     above reduces to trusting the runner.** The declaration has to come from a
-#     source the runner cannot edit at run time — in this repo that is
-#     `tests/SUITES.md`, the same source the manifest suite reconciles against.
+#     source the runner cannot edit at run time — in this repo that is the
+#     FILESYSTEM, via `scripts/lib/suites.sh`, the same source the manifest suite
+#     reconciles against. (It was `tests/SUITES.md` until TASK-020 deleted that
+#     table. `find` is the same property from a better source: it consults no
+#     config, no include glob and no reporter belonging to the runner.)
 #     Declaring nothing (`pipe_batch_begin LABEL` with no labels) leaves only
 #     checks 1, 3, 4, 5, 6: enough to catch a crashed or self-contradicting
 #     runner, NOT enough to catch a suite silently dropped from its config.
@@ -323,7 +326,7 @@ pipe_skip(){
 # ---------------------------------------------------------------------------
 #
 # Usage:
-#   pipe_batch_begin "vitest" $(suite_labels_from_SUITES_md)
+#   pipe_batch_begin "vitest" $(bp_suites_with_spec "$ROOT")
 #   # ...run the batch, parse its machine-readable report, then per suite:
 #   pipe_stage_report "signal-dispatch" 37500 0
 #   pipe_batch_end "$runner_rc"      # fails closed; does not return on failure

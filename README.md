@@ -96,8 +96,9 @@ After bootstrap:
    Everything between `BLUEPRINT:BEGIN` and `BLUEPRINT:END` is
    blueprint-managed and is replaced by `blueprint pull`; everything after
    `END` is yours and is preserved byte-for-byte (BUG-029). Your own test
-   suites get a row in the *second* table of `tests/SUITES.md`, after that
-   file's own `BLUEPRINT:END`, for the same reason.
+   suites go in `tests/<suite>/` and are invoked from below that marker —
+   there is no table to register them in, because `tests/manifest` derives the
+   suite set from the runners on disk.
    **Do not copy the `.example` over it** — that file ships already populated,
    wiring the regression suites that guard the blueprint-managed machinery your
    project runs (`blueprint pull`/`drift`/`a2bp`, `signal-set.sh`, the feed, the
@@ -304,8 +305,10 @@ it. Current contents:
   `start-codex-signal-watch.sh`, `new-project.sh`, `blueprint` itself
 - **`tests/`** — the whole directory, expanded from `git archive HEAD tests`
   (BUG-029). The regression suites guard blueprint-managed machinery your
-  project runs, so they have to move forward with it; `tests/SUITES.md` travels
-  with them. Sync here is **additive only** — files the blueprint ships are
+  project runs, so they have to move forward with it. The blueprint's own
+  TypeScript harness manifest lives here too and is `export-ignore`d, so it
+  reaches no project until the migration ships it. Sync here is **additive
+  only** — files the blueprint ships are
   created and updated, and nothing is ever deleted, because the project has no
   way to tell "the blueprint dropped this" from "we wrote this"
 - **`.githooks/`:** `pre-push`, `commit-msg`,
@@ -325,9 +328,6 @@ it. Current contents:
   and survives every pull. It used to be excluded wholesale, which was right
   about the bottom and wrong about the top: the blueprint kept adding suites
   that no derived gate could invoke (BUG-029)
-- `tests/SUITES.md` **after `BLUEPRINT:END`** — the second table is where your
-  own suites are classified. `tests/manifest` enforces it exactly as hard as
-  the blueprint's table
 - `AGENT_SIGNAL.md` — stamped at bootstrap, then evolves session-by-session
 - `docs/doing/HANDOVER.md`, `docs/backlog/BACKLOG.md`, `docs/backlog/BUGS.md` —
   seeded from `templates/` at bootstrap (the blueprint's own copies hold its

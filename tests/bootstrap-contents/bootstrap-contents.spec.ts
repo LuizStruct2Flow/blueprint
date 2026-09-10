@@ -29,6 +29,18 @@
  * bootstrap, so none can be made to pass or fail by another, and the suite can
  * be parallelised the moment `fileParallelism` is earned (plan §6 step 6).
  * Until then it costs seconds on a gate that takes minutes.
+ *
+ * MUTATION RECIPE (TASK-018-RULES R6). This suite's shell runner was deleted
+ * once this spec was proven equivalent to it. R6 requires the way to reintroduce
+ * the bug to be RECORDED, and R1 puts a test's description in the test — so it
+ * lives here rather than in the tier table that used to hold it.
+ *
+ *   Mutant: Delete the `.blueprint-root  export-ignore` line from `.gitattributes` AND
+ * COMMIT IT — the fixture is built from `git archive HEAD`, so an uncommitted
+ * mutant does not exist as far as this suite is concerned.
+ *   Turns red: `#1` goes red reporting that `.blueprint-root` shipped, which would make every
+ * derived project claim to BE the blueprint and `drift` compare nothing
+ * (BUG-013).
  */
 
 import { describe, it, expect } from 'vitest'

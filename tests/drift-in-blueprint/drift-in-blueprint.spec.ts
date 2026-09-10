@@ -6,6 +6,17 @@
  *   real CLI in the real checkout, described here as intentional — see
  *   BUG-056 at createBlueprintCheckout below for why that was a defect rather
  *   than a decision, and how it hid.
+ *
+ * MUTATION RECIPE (TASK-018-RULES R6). This suite's shell runner was deleted
+ * once this spec was proven equivalent to it. R6 requires the way to reintroduce
+ * the bug to be RECORDED, and R1 puts a test's description in the test — so it
+ * lives here rather than in the tier table that used to hold it.
+ *
+ *   Mutant: Make `_bp_is_blueprint_itself` (`scripts/blueprint`) always report false, so
+ * `drift` stops recognising the blueprint as itself and takes the derived-project
+ * path.
+ *   Turns red: `#1` goes red exactly where the shell runner did, on the BUG-007 assertion that
+ * `drift` exits 0 in the blueprint.
  */
 
 import { describe, it, expect } from 'vitest'

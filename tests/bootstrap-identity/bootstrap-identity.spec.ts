@@ -19,6 +19,17 @@
  *   bootstrap cannot trample the caller's live mic, and the harness applies
  *   overrides AFTER its scrub precisely so a scenario can exercise a forbidden
  *   variable explicitly and visibly rather than inheriting one by accident.
+ *
+ * MUTATION RECIPE (TASK-018-RULES R6). This suite's shell runner was deleted
+ * once this spec was proven equivalent to it. R6 requires the way to reintroduce
+ * the bug to be RECORDED, and R1 puts a test's description in the test — so it
+ * lives here rather than in the tier table that used to hold it.
+ *
+ *   Mutant: Replace the `unset AGENT_SIGNAL_FILE AGENT_STATE_HOME` in
+ * `scripts/new-project.sh`'s seed subshell with a no-op, so the seeded baton is
+ * published over whatever the caller had.
+ *   Turns red: `#6` goes red reporting that bootstrap REPUBLISHED the caller's live baton,
+ * which is BUG-046 itself.
  */
 
 import { describe, it, expect } from 'vitest'

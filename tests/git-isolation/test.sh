@@ -66,7 +66,8 @@ new_victim(){
 #    `git config --local`. Both ran on every gated push.
 #
 #    BUG-047 added commit-subjects and bootstrap-identity, both reproduced the
-#    same way and both previously invisible to #3 below:
+#    same way and both previously invisible to #3 below (bootstrap-identity is
+#    a spec now and is no longer an anchor here — see the note below the block):
 #      * commit-subjects rewrote the victim's local config — `core.hooksPath`
 #        added, `user.email` / `user.name` overwritten — and still exited 0.
 #        Setting core.hooksPath on a real repo IS the A-22 / BUG-004 failure,
@@ -81,24 +82,28 @@ new_victim(){
 #    which is the whole lesson of #3 (and of BUG-035). ~7 s for the pair; the
 #    cost is paid on risk, not on the clock (CLAUDE.md §"Pre-push tolerance").
 # ===========================================================================
-# BUG-053 — `bootstrap-identity` is blueprint-tier and does not ship, so
-# downstream it is NOT APPLICABLE rather than missing. Keyed on
-# `.blueprint-root`, the same positive marker `drift` and tests/manifest use,
-# and NEVER on the file being absent: keying on absence would let a derived
-# project silently drop an anchor it should have by deleting a directory, which
-# is BUG-005 with an extra step.
+# `bootstrap-identity` WAS THE FOURTH ANCHOR, AND IS NOT ONE ANY MORE.
 #
-# `bootstrap-gate` found this by running a bootstrapped project's own gate —
-# #1 reported "tests/bootstrap-identity/test.sh not found" and #3 reported the
-# predicate had MISSED it. Both were correct about the file and wrong about
-# what that meant.
+# It is a `*.spec.ts` now, with no shell runner to execute here (TASK-018). That
+# is not a coverage loss and it is worth being precise about why: this case
+# proves a suite DEFENDS ITSELF against an inherited GIT_DIR, and a spec cannot
+# fail to. `tests/harness/env.ts` refuses to start any scenario while a
+# forbidden variable is present, so the hazard is structurally absent rather
+# than remembered — which is TASK-018-RULES R3, and which BUG-055 demonstrated
+# from the other side: under a real push every spec refused, correctly, until
+# the bridge scrubbed. `tests/harness/harness.spec.ts` and `tests/ts-bridge`
+# are where that guarantee is tested; re-running it here would need a shell file
+# that no longer exists.
+#
+# It also used to carry a `.blueprint-root` key, because a blueprint-tier suite
+# is legitimately absent downstream and #1 would otherwise report it as missing
+# (BUG-053). That key is gone with the file: the anchors below all ship.
 GI_ANCHORS="marker-merge gate-arming commit-subjects"
-[ -f "$ROOT/.blueprint-root" ] && GI_ANCHORS="$GI_ANCHORS bootstrap-identity"
 
-# The skip must not be able to empty the anchor set. If it ever did, #1 would
-# execute nothing and #3 would find nothing MISSING — both passing over an
-# empty list, which is precisely the vacuous-pass shape this suite exists to
-# refuse. Three is the floor because three anchors ship.
+# The set must not be able to empty. If it ever did, #1 would execute nothing
+# and #3 would find nothing MISSING — both passing over an empty list, which is
+# precisely the vacuous-pass shape this suite exists to refuse. Three is the
+# floor because three anchors ship.
 _gi_n=0
 for _a in $GI_ANCHORS; do _gi_n=$((_gi_n + 1)); done
 [ "$_gi_n" -ge 3 ] || fail "#1 anchor set collapsed to $_gi_n — this suite would prove nothing"

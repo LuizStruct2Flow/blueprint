@@ -57,9 +57,11 @@ HELM_VERSION="3.19.0"
 
 # FLOORS, not pins — a distinction worth keeping straight. The versions above
 # say "install exactly this"; these say "anything at or above this can run the
-# test harness". They must track `engines.node` in the root package.json, which
-# is where npm enforces the same constraint at install time. Modern vitest needs
-# Node 18+; npm 8+ is the floor for a lockfileVersion 2/3 `npm ci`.
+# test harness". They must track `engines.node` in the harness manifest —
+# tests/package.json, which is where npm enforces the same constraint at install
+# time. TASK-020 moved it off the repo root so it cannot collide with a derived
+# project's own package.json. Modern vitest needs Node 18+; npm 8+ is the floor
+# for a lockfileVersion 2/3 `npm ci`.
 NODE_MIN_MAJOR="18"
 NPM_MIN_MAJOR="8"
 

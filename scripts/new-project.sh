@@ -414,8 +414,9 @@ Next steps:
      AFTER its BLUEPRINT:END marker. The region above that marker is
      blueprint-managed and 'blueprint pull' replaces it (that is how a suite
      added upstream arrives with something to invoke it); everything after it is
-     yours and is preserved. Your own test suites get a row in the SECOND table
-     of tests/SUITES.md, after that file's BLUEPRINT:END, for the same reason.
+     yours and is preserved. Your own test suites go in tests/<suite>/ and are
+     invoked from below that marker — there is no table to register them in,
+     because tests/manifest derives the suite set from the runners on disk.
      Copying the .example OVER pre-push-project would take every regression
      suite off your push path. The .example is a menu of guard shapes.
 

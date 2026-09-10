@@ -300,19 +300,27 @@ fi
 # Two changes: the token is unique per run, and the search is scoped to lines
 # this run could have produced. A search for a literal that appears in the
 # repo's own prose is a canary that anyone can trip by documenting it.
-if [ -f "$ROOT/logs/agent-activity.log" ]; then
-  _canary_token="canary-must-not-escape-$$-$(date +%s)"
-  real_before=$(grep -c '\[GATE\]' "$ROOT/logs/agent-activity.log" 2>/dev/null || echo 0)
-  run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage '$_canary_token' true; pipe_finish" >/dev/null
-  real_after=$(grep -c '\[GATE\]' "$ROOT/logs/agent-activity.log" 2>/dev/null || echo 0)
-  if [ "$real_before" = "$real_after" ] \
-     && ! grep -qF "$_canary_token" "$ROOT/logs/agent-activity.log" 2>/dev/null; then
-    pass "#19 the suite writes no [GATE] lines into the real activity feed"
-  else
-    fail "#19 this suite is polluting logs/agent-activity.log ($real_before -> $real_after, token $_canary_token)"
-  fi
+# TASK-021: resolve the feed through the PRODUCTION state root, and treat its
+# absence as a case to test rather than a reason to pass.
+#
+# This used to read "$ROOT/logs/agent-activity.log" — a CODE-root path, which
+# after the scaffolding/ split names a file that does not exist, so the `else`
+# branch below printed `pass "#19 no real feed present to pollute"` forever
+# while lib/feed.sh went on resolving the REAL root. A pollution guard that
+# reports "nothing to pollute" about the wrong file is worse than none.
+BP_CODE_ROOT="$ROOT"
+. "$ROOT/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || fail "#19 could not resolve the live state root"
+_p19_feed="${BP_STATE_ROOT:-$ROOT}/logs/agent-activity.log"
+_canary_token="canary-must-not-escape-$$-$(date +%s)"
+real_before=$(grep -c '\[GATE\]' "$_p19_feed" 2>/dev/null || echo 0)
+run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage '$_canary_token' true; pipe_finish" >/dev/null
+real_after=$(grep -c '\[GATE\]' "$_p19_feed" 2>/dev/null || echo 0)
+if [ "$real_before" = "$real_after" ] \
+   && ! grep -qF "$_canary_token" "$_p19_feed" 2>/dev/null; then
+  pass "#19 the suite writes no [GATE] lines into the real activity feed"
 else
-  pass "#19 no real feed present to pollute"
+  fail "#19 this suite is polluting $_p19_feed ($real_before -> $real_after, token $_canary_token)"
 fi
 
 # ===========================================================================

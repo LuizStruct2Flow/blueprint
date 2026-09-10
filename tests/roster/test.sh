@@ -145,6 +145,7 @@ fi
 # ===========================================================================
 if [ -f "$FEED" ]; then
   mkdir -p "$TMP/p2/scripts"
+  : > "$TMP/p2/.blueprint-source"   # TASK-021: project-shaped fixture root marker
   cp "$FEED" "$TMP/p2/scripts/" 2>/dev/null
   cp -r "$ROOT/scripts/lib" "$TMP/p2/scripts/" 2>/dev/null
   write_roster "$TMP/p2"
@@ -203,6 +204,7 @@ done
 # ===========================================================================
 if [ -f "$KICKOFF" ]; then
   mkdir -p "$TMP/p3/scripts"
+  : > "$TMP/p3/.blueprint-source"   # TASK-021: project-shaped fixture root marker
   cp "$KICKOFF" "$TMP/p3/scripts/" 2>/dev/null
   cp -r "$ROOT/scripts/lib" "$TMP/p3/scripts/" 2>/dev/null
   write_roster "$TMP/p3"
@@ -255,6 +257,7 @@ if [ "${1:-}" = "--fast" ]; then
   echo "  -- #12 skipped (--fast): CI runs it"
 elif [ -f "$FEED" ]; then
   mkdir -p "$TMP/p4/scripts"
+  : > "$TMP/p4/.blueprint-source"   # TASK-021: project-shaped fixture root marker
   cp "$FEED" "$TMP/p4/scripts/" 2>/dev/null
   cp -r "$ROOT/scripts/lib" "$TMP/p4/scripts/" 2>/dev/null
   write_roster "$TMP/p4"

@@ -392,7 +392,8 @@ Two exceptions, and they are the ones to hunt:
      `HEAD:AGENT_ROSTER.example.md`
    - `tests/marker-merge/test.sh:55` (`git -C "$ROOT" rev-parse HEAD`), `:106`
      (`cd "$ROOT" && git archive HEAD | tar -x`)
-   - `tests/manifest/test.sh:110,112` (`$ROOT/.githooks/pre-push-project`,
+   - `tests/manifest` — **PORTED to TypeScript and its `test.sh` DELETED** (`9a85c97`).
+     The two sites this row cited (`$ROOT/.githooks/pre-push-project`,
      `$ROOT/.github/workflows/security.yml` — the second is root-anchored, the
      first is not), `:449` (archive), `:572` (`git -C "$ROOT" diff --quiet HEAD
      -- .gitattributes`), `:586`
@@ -421,7 +422,7 @@ Two exceptions, and they are the ones to hunt:
 | `scripts/lib/suites.sh:95` | **function name `bp_blueprint_only()`** — the public identifier, called at `:113` and from `tests/manifest`, `tests/suite-sync`, `run-ts-suites` |
 | `scripts/lib/suites.sh:113` | `_bsrow_bp=$(bp_blueprint_only …)` |
 | `scripts/lib/suites.sh:104-107` | the `blueprint` / `both` **tier vocabulary** emitted by `bp_suite_rows` — this is the value other code branches on |
-| `tests/manifest/test.sh:543,554,563,565` | #2b failure messages and the tier branch |
+| `tests/manifest/manifest.spec.ts` (was `test.sh:543,554,563,565`) | #2b failure messages and the tier branch. **The shell runner is deleted** (`9a85c97`); the tier vocabulary now lives in the TypeScript port, so the `blueprint`/`both` → `forge`/`scaffolding` flip lands there. Line numbers deliberately omitted — citing them is what made this row stale within a day. |
 | `tests/suite-sync/test.sh:177,185,187,190` | #1d, including a `pass`/`fail` message pair |
 | `tests/ts-bridge/test.sh:143,153` | a `pass` message asserting non-applicability |
 | `tests/git-isolation/test.sh:98` | the anchor-set comment tied to BUG-053's floor-of-three |

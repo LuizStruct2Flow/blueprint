@@ -69,6 +69,7 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is a hard dependency of this p
 # --- fixture ----------------------------------------------------------------
 REPO="$WORK/repo"; HOMEDIR="$WORK/home"; STATE="$WORK/state"
 mkdir -p "$REPO/scripts/lib" "$REPO/logs" "$HOMEDIR" "$STATE"
+: > "$REPO/.blueprint-source"   # TASK-021: project-shaped fixture root marker
 cp "$SCRIPT" "$REPO/scripts/agent-activity.sh"
 cp "$HOOK" "$REPO/scripts/log-activity.sh" 2>/dev/null
 # The whole lib dir, not a named file: the next lib the feed sources must not
@@ -332,6 +333,7 @@ grep -q 'bp_roster_name_in_text' "$HCODE" \
 #    fooled by where a line break falls.
 # ===========================================================================
 POISON="$WORK/poison"; mkdir -p "$POISON/scripts/lib" "$POISON/logs"
+: > "$POISON/.blueprint-source"   # TASK-021: project-shaped fixture root marker
 cp "$HOOK" "$POISON/scripts/log-activity.sh"
 cp -R "$ROOT/scripts/lib/." "$POISON/scripts/lib/"
 cp "$REPO/AGENT_ROSTER.md" "$POISON/AGENT_ROSTER.md"
@@ -380,6 +382,7 @@ if [ -z "${TCMD:-}" ]; then
   echo "  -- skipped — no timeout(1)/gtimeout(1) here, so a hang cannot be bounded safely"
 else
   HANG="$WORK/hang"; mkdir -p "$HANG/scripts/lib" "$HANG/logs"
+  : > "$HANG/.blueprint-source"   # TASK-021: project-shaped fixture root marker
   cp "$HOOK" "$HANG/scripts/log-activity.sh"
   cp -R "$ROOT/scripts/lib/." "$HANG/scripts/lib/"
   cp "$REPO/AGENT_ROSTER.md" "$HANG/AGENT_ROSTER.md"

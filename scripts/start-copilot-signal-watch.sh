@@ -7,11 +7,13 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/state-dir.sh
+BP_CODE_ROOT="$repo_root"
 . "$repo_root/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
 # BUG-019: the LIVE baton is untracked state, resolved through the one shared
 # helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
 # and — worse, before the split — a file git rewrites under a live dispatch.
-signal_file="$(agent_signal_file "$repo_root")"
+signal_file="$(agent_signal_file)"
 last=""
 echo "Starting Copilot signal watcher (watching $signal_file)"
 if [ ! -f "$signal_file" ]; then

@@ -110,6 +110,7 @@ SKIPPED=0
 # --- fixture ----------------------------------------------------------------
 REPO="$WORK/repo"; HOMEDIR="$WORK/home"; STATE="$WORK/state"
 mkdir -p "$REPO/scripts/lib" "$REPO/logs" "$HOMEDIR" "$STATE"
+: > "$REPO/.blueprint-source"   # TASK-021: project-shaped fixture root marker
 cp "$SCRIPT" "$REPO/scripts/agent-activity.sh"
 # The feed sources helpers out of scripts/lib/ (A-09: state-dir.sh today; more as
 # it grows). Copy the WHOLE lib dir, not a named file, so the next lib dependency

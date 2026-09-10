@@ -82,8 +82,20 @@ unset AGENT_SIGNAL_FILE AGENT_STATE_HOME
 _bd_root="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=scripts/lib/state-dir.sh
 . "$_bd_root/scripts/lib/state-dir.sh"
-_real_signal="$(agent_signal_file "$_bd_root")"
-_real_journal="$(agent_signal_journal "$_bd_root")"
+# TASK-021: resolve through the PRODUCTION path, seeded with this suite's CODE
+# root, rather than passing a root. Passing one is what makes the canary watch
+# `<code root>/logs/state/signal.md` after the scaffolding/ split — a file that
+# does not exist, so `_real_before` stays empty, the guard at the foot of this
+# file is skipped, and #0 prints a green claim about a file it never read. The
+# walk turns a code root into the project root; the `_for` seam deliberately
+# does not, which is why it is not used here.
+BP_CODE_ROOT="$_bd_root"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
+_real_signal="$(agent_signal_file)"
+_real_journal="$(agent_signal_journal)"
+# The pre-existence PRECONDITION for this canary lives in
+# tests/live-state-canary (TypeScript). It is new coverage, and new coverage is
+# not written in shell.
 _real_before=""; _real_jbefore=""
 [ -f "$_real_signal" ]  && _real_before="$(cat "$_real_signal")"
 [ -f "$_real_journal" ] && _real_jbefore="$(cat "$_real_journal")"
@@ -214,7 +226,7 @@ rm -rf "$W"
 build_fixture
 ( cd "$W" && bash "$W/scripts/signal-set.sh" --holder Tester --state ACTIVE --task 'durability across branch ops' ) >/dev/null 2>&1
 
-live="$( . "$W/scripts/lib/state-dir.sh"; printf '%s' "$(agent_state_dir "$W")/signal.md" )"
+live="$( . "$W/scripts/lib/state-dir.sh"; printf '%s' "$(agent_state_dir_for "$W")/signal.md" )"
 if [ ! -f "$live" ]; then
   fail "#2 no live signal at $live — the split has not happened yet"
 else
@@ -311,6 +323,7 @@ cat > "$W/scripts/lib/state-dir.sh" <<'SHIM'
 #!/bin/sh
 # Fixture shim: resolve the baton through a pointer file so the path can move
 # under a running watcher. Same contract as the real helper.
+bp_state_root()     { printf '%s\n' "$(cat "$BD_POINTER")"; }
 agent_state_dir()   { printf '%s\n' "$(cat "$BD_POINTER")"; }
 agent_signal_file() { printf '%s\n' "${AGENT_SIGNAL_FILE:-$(cat "$BD_POINTER")/signal.md}"; }
 agent_signal_journal() { printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }
@@ -364,6 +377,7 @@ build_fixture
 export STUB_MARKER="$W/stub-ran"
 cat > "$W/scripts/lib/state-dir.sh" <<'SHIM'
 #!/bin/sh
+bp_state_root()     { printf '%s\n' "$(cat "$BD_POINTER")"; }
 agent_state_dir()   { printf '%s\n' "$(cat "$BD_POINTER")"; }
 agent_signal_file() { printf '%s\n' "${AGENT_SIGNAL_FILE:-$(cat "$BD_POINTER")/signal.md}"; }
 agent_signal_journal() { printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }
@@ -448,6 +462,7 @@ chmod +x "$W/stub-codex"
 
 cat > "$W/scripts/lib/state-dir.sh" <<'SHIM2'
 #!/bin/sh
+bp_state_root()     { printf '%s\n' "$(cat "$BD_POINTER")"; }
 agent_state_dir()   { printf '%s\n' "$(cat "$BD_POINTER")"; }
 agent_signal_file() { printf '%s\n' "${AGENT_SIGNAL_FILE:-$(cat "$BD_POINTER")/signal.md}"; }
 agent_signal_journal() { printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }
@@ -544,7 +559,13 @@ rm -rf "$at"
 #    precondition of the others meaning anything.
 # ===========================================================================
 _bd_leaked=""
-if [ -n "$_real_before" ] && [ "$_real_before" != "$(cat "$_real_signal" 2>/dev/null)" ]; then
+# TASK-021: the `[ -n "$_real_before" ]` conjunct that used to guard this
+# comparison is GONE. It made the assertion skip itself whenever the resolved
+# baton did not exist — so a canary pointed at the wrong root announced
+# "no fixture reached live state" while a fixture was overwriting the real one.
+# Pre-existence is asserted at the top of this file instead, where it is a
+# precondition rather than an excuse.
+if [ "$_real_before" != "$(cat "$_real_signal" 2>/dev/null)" ]; then
   _bd_leaked="$_bd_leaked baton($_real_signal)"
 fi
 # The journal is checked too, because it is append-only: a fixture that wrote it

@@ -45,15 +45,140 @@
 # untouched, because this is still the SINGLE derivation every side sources —
 # moving it moves all of them together, which is the whole point of the file.
 #
-# agent_state_dir [repo_root]
-#   Honors $AGENT_STATE_HOME if set (feed precedence), else `<repo>/logs/state`.
-#   repo_root defaults to the enclosing git work tree, then $PWD.
-agent_state_dir() {
-  _asd_root="${1:-}"
-  if [ -z "$_asd_root" ]; then
-    _asd_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# TASK-021 Stage A — the CODE root and the STATE root are two different things.
+#
+# Today they are the same directory, so nothing below changes any resolved path.
+# That is the point of landing it now: the mechanism is a provable no-op in the
+# flat tree, so it can be proven here rather than debugged during the move.
+#
+# After the scaffolding/ split they diverge. Scripts live at
+# <repo>/scaffolding/scripts/, while the live roster, baton, logs and lifecycle
+# docs stay at <repo>/ — because that is where a DERIVED project's equivalents
+# live, and this repo runs on its own scaffolding.
+#
+# So a script's physical location answers "where is my CODE", never "where is my
+# STATE". Resolving state from it produces a SECOND baton under
+# scaffolding/logs/state/ that no dispatcher watches, a feed split in two, and a
+# roster that falls through to the shipped example — all at exit 0.
+#
+# ---------------------------------------------------------------------------
+# bp_state_root — walk UP from the code root to the enclosing project root.
+#
+# WHY A FILESYSTEM TEST AND NOT `git rev-parse --show-toplevel`.
+# That command answers about the CALLER's exported GIT_DIR, which git sets for
+# every hook, and the gate runs the suites from a pre-push hook — that is
+# BUG-014's mechanism and A-09 is what it reopens. `[ -e "$d/.git" ]` consults
+# no command and no environment variable, so a hostile GIT_DIR cannot move it.
+# Verified: under a decoy GIT_DIR, `rev-parse` answered `<repo>/scripts` while
+# this walk was unmoved.
+#
+# **The #6c guard must match the COMMAND, not the substring "git"**, or it will
+# reject this safe expression.
+#
+# WHY THE TERMINATOR IS THREE THINGS AND NOT ONE.
+#   .blueprint-root    this repo (tracked, export-ignore'd)
+#   .blueprint-source  every bootstrapped project (written by new-project.sh)
+#   .git               every project-shaped tree, including test fixtures
+#
+# The two markers are complete for real CHECKOUTS and NOT for FIXTURES. `.git`
+# covers the fixtures that run `git init` — most of them — with nobody having to
+# think about it, which is the default-correctness that makes it worth having.
+#
+# It is NOT sufficient on its own, and that was measured rather than assumed:
+# three suites build project-shaped fixtures that never `git init`
+# (tests/state-dir's `sd_tmpdir work`, tests/watcher-liveness's `e2e_repo dead`,
+# tests/agent-activity-bound's temp repos). They resolve nothing and fail. So a
+# spec enumerates every project-shaped fixture constructor and fails when one
+# produces no terminator — belt and braces, the same doubling this repo already
+# applies to .blueprint-root (export-ignore AND absent from MANAGED_FILES) and
+# .scratch/ (gitignored AND export-ignored).
+#
+# `-e` and not `-d`: a submodule and a linked `git worktree` carry `.git` as a
+# FILE. Verified against both, plus a nested repo and a vendored derived project.
+#
+# BP_CODE_ROOT IS REQUIRED. There is deliberately no `$PWD` fallback, and that
+# is not caution — it is a bug this change already caused and caught.
+#
+# start-codex-signal-watch.sh builds its wake command as a single-quoted string
+# executed LATER by `sh -c`, where only EXPORTED variables survive. With a $PWD
+# fallback, `bp_state_root` there resolved to whatever directory the dispatch
+# happened to run from — which in tests/state-dir's fixture was the REAL
+# blueprint checkout, so a fixture dispatch wrote codex-last-message.md into
+# live state. Silently, and while the suite that exists to prevent exactly that
+# was watching a different file.
+#
+# So an unset BP_CODE_ROOT is a programming error and says so. Callers that
+# legitimately mean "the directory git handed me" — the pre-push hook and the
+# libs it sources — set it explicitly to `$(pwd)`, which is a claim about git's
+# hook contract rather than an accident of where someone was standing.
+bp_state_root() {
+  if [ -z "${BP_CODE_ROOT:-}" ]; then
+    echo "bp_state_root: BP_CODE_ROOT is unset. Set it from this script's own" >&2
+    echo "  physical location (the block every consumer carries), or to \$(pwd)" >&2
+    echo "  if git invoked you and guarantees cwd is the work-tree root." >&2
+    return 9
   fi
-  printf '%s\n' "${AGENT_STATE_HOME:-$_asd_root/logs/state}"
+  _bsr_d="$BP_CODE_ROOT"
+  while [ ! -f "$_bsr_d/.blueprint-root" ] &&
+        [ ! -f "$_bsr_d/.blueprint-source" ] &&
+        [ ! -e "$_bsr_d/.git" ]; do
+    if [ "$_bsr_d" = "/" ]; then
+      echo "FATAL: no .git, .blueprint-root or .blueprint-source at or above '$BP_CODE_ROOT' — cannot locate the project root" >&2
+      return 9
+    fi
+    _bsr_d="$(cd -P "$_bsr_d/.." 2>/dev/null && pwd)" || return 9
+  done
+  printf '%s\n' "$_bsr_d"
+}
+
+# ---------------------------------------------------------------------------
+# RESOLVE ONCE PER SCRIPT, AT INITIALISATION. Every consumer does, beside the
+# other init and with the guard on the same line:
+#
+#   . "$_bp_root/scripts/lib/state-dir.sh"
+#   BP_STATE_ROOT="$(bp_state_root)" || exit 9
+#
+# A simple assignment's status IS the command substitution's status, so that
+# `|| exit 9` works — the problem was never the idiom, it was doing it at 36
+# call sites instead of one. Every later use reads an already-validated
+# variable, so there is no window in which a consumer holds "" and derives
+# `/gemini-runs.log` at the filesystem root. That empty-root path is the
+# concrete harm and tests/state-root asserts it is unreachable.
+#
+# agent_state_dir            — TAKES NO ARGUMENTS.
+# agent_state_dir_for <dir>  — the named seam, for tests and explicit overrides.
+#
+# The positional root was REMOVED rather than defaulted. A `${1:-...}` that
+# defaults correctly is opt-in: every existing caller already held the wrong
+# post-move value (its own script location), so a tolerant signature would let
+# all of them keep selecting scaffolding/logs/state. Rejecting the argument is
+# what makes a stale call site fail instead of resolving somewhere plausible.
+#
+# The seam exists because tests/state-dir #1/#2/#3 pass synthetic roots to prove
+# two projects derive DIFFERENT state dirs — the assertion A-09 exists to
+# protect. It is named differently so the call-site sweep can forbid it in
+# production without also forbidding the ordinary API.
+agent_state_dir() {
+  if [ "$#" -ne 0 ]; then
+    echo "agent_state_dir: takes no arguments (got $#: '$*'). The state root is" >&2
+    echo "  derived, not passed — a script's location is its CODE root, not its" >&2
+    echo "  state root. For an explicit root use agent_state_dir_for <dir>." >&2
+    return 2
+  fi
+  if [ -n "${AGENT_STATE_HOME:-}" ]; then printf '%s\n' "$AGENT_STATE_HOME"; return 0; fi
+  if [ -z "${BP_STATE_ROOT:-}" ]; then
+    echo "agent_state_dir: BP_STATE_ROOT is unset or empty. Resolve it ONCE at" >&2
+    echo "  script initialisation, right after sourcing this file:" >&2
+    echo "    BP_STATE_ROOT=\"\$(bp_state_root)\" || exit 9" >&2
+    return 9
+  fi
+  printf '%s\n' "$BP_STATE_ROOT/logs/state"
+}
+
+agent_state_dir_for() {
+  [ "$#" -eq 1 ] || { echo "agent_state_dir_for: needs exactly one root" >&2; return 2; }
+  [ -n "$1" ] || { echo "agent_state_dir_for: root is empty" >&2; return 2; }
+  printf '%s\n' "${AGENT_STATE_HOME:-$1/logs/state}"
 }
 
 # BUG-019 — the LIVE coordination baton.
@@ -84,7 +209,16 @@ agent_state_dir() {
 # agent_signal_file [repo_root]
 #   Honors $AGENT_SIGNAL_FILE if set, else `<state dir>/signal.md`.
 agent_signal_file() {
-  printf '%s\n' "${AGENT_SIGNAL_FILE:-$(agent_state_dir "${1:-}")/signal.md}"
+  [ "$#" -eq 0 ] || { echo "agent_signal_file: takes no arguments (got $#: '$*') — use agent_signal_file_for <dir>" >&2; return 2; }
+  if [ -n "${AGENT_SIGNAL_FILE:-}" ]; then printf '%s\n' "$AGENT_SIGNAL_FILE"; return 0; fi
+  _asf_d="$(agent_state_dir)" || return 9
+  printf '%s\n' "$_asf_d/signal.md"
+}
+
+agent_signal_file_for() {
+  [ "$#" -eq 1 ] || { echo "agent_signal_file_for: needs exactly one root" >&2; return 2; }
+  _asff_d="$(agent_state_dir_for "$1")" || return 2
+  printf '%s\n' "${AGENT_SIGNAL_FILE:-$_asff_d/signal.md}"
 }
 
 # agent_signal_journal [repo_root]
@@ -115,5 +249,13 @@ agent_signal_file() {
 #   independent derivations of one location is the A-09 defect, and I had just
 #   reintroduced it in the file that documents it.
 agent_signal_journal() {
-  printf '%s\n' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"
+  [ "$#" -eq 0 ] || { echo "agent_signal_journal: takes no arguments (got $#: '$*') — use agent_signal_journal_for <dir>" >&2; return 2; }
+  _asj_f="$(agent_signal_file)" || return 9
+  printf '%s\n' "$(dirname "$_asj_f")/signal-history.log"
+}
+
+agent_signal_journal_for() {
+  [ "$#" -eq 1 ] || { echo "agent_signal_journal_for: needs exactly one root" >&2; return 2; }
+  _asjf_f="$(agent_signal_file_for "$1")" || return 2
+  printf '%s\n' "$(dirname "$_asjf_f")/signal-history.log"
 }

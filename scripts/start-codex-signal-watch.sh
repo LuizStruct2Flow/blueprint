@@ -47,6 +47,7 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
+BP_CODE_ROOT="$_bp_root"
 ROOT="$_bp_root"
 
 # Discover the Codex binary. Prefer an explicit override, otherwise
@@ -92,8 +93,10 @@ set -u
 # Resolved HERE, on every dispatch — not baked in when the watcher started.
 # A watcher lives for days; the derivation can change under it, and a frozen
 # path fails silently (BUG-020, Codex review round 2 finding 3).
+BP_CODE_ROOT="$ROOT"
 . "$ROOT/scripts/lib/state-dir.sh"
-STATE_DIR="$(agent_state_dir "$ROOT")"
+BP_STATE_ROOT="$(bp_state_root)" || exit 9
+STATE_DIR="$(agent_state_dir)"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/codex-runs.log"
 OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
@@ -120,7 +123,7 @@ OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 FEED_LABEL="Codex"
 if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
   . "$ROOT/scripts/lib/roster.sh"
-  __label="$(bp_roster_label "$ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" 2>/dev/null)"
+  __label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" 2>/dev/null)"
   [ -n "$__label" ] && FEED_LABEL="$__label"
 fi
 if [ -r "$ROOT/scripts/lib/feed.sh" ]; then

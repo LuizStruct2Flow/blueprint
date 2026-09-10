@@ -98,6 +98,88 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
     }
   })
 
+  it('BUG-060 REFUSES a HOME or TMPDIR override that leaves the workspace, and refuses unsetting them', async () => {
+    // R3 requires every scenario to own both. They are in NEITHER validated
+    // namespace, so before this they were the one pair of harness-owned
+    // variables a per-call `env` could replace with anything at all — the
+    // operator's real home included, which is precisely the dotfile and
+    // temp-debris exposure the per-scenario values exist to remove.
+    //
+    // Unsetting is checked too, and is the sharper case: with HOME absent git
+    // falls back to getpwuid — the real home — and with TMPDIR absent mktemp
+    // writes to /tmp. "Removed" looks safe and behaves like a redirect.
+    const ws = await createWorkspace('scenario-owned-paths')
+    try {
+      const inside = join(ws.root, 'home')
+      expect(fixtureEnv({ HOME: inside }, ws.root).HOME).toBe(inside)
+
+      expect(() =>
+        fixtureEnv({ HOME: process.env.HOME ?? '/root' }, ws.root),
+      ).toThrow(/Refusing forbidden environment override HOME=/)
+      expect(() => fixtureEnv({ TMPDIR: '/tmp' }, ws.root)).toThrow(
+        /Refusing forbidden environment override TMPDIR=/,
+      )
+      expect(() => fixtureEnv({ HOME: undefined }, ws.root)).toThrow(
+        /Refusing to UNSET HOME/,
+      )
+      expect(() => fixtureEnv({ TMPDIR: undefined }, ws.root)).toThrow(
+        /Refusing to UNSET TMPDIR/,
+      )
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-060 the HOME escape is refused at the door a spec actually uses', async () => {
+    // The check above is on the primitive. This is on `s.run`, which is where a
+    // scenario would really do it — and the two were NOT the same door: index.ts
+    // merges the caller's env over the harness's before fixtureEnv sees it, so
+    // a check that lived only in the merge would have been the convention this
+    // harness exists to replace.
+    await scenario('home-escape-door', async (s) => {
+      await expect(
+        s.run('sh', ['-c', 'echo $HOME'], {
+          cwd: s.workspace.root,
+          env: { HOME: process.env.HOME ?? '/root' },
+        }),
+      ).rejects.toThrow(/Refusing forbidden environment override HOME=/)
+
+      const r = await s.run('sh', ['-c', 'echo "$HOME|$TMPDIR"'], {
+        cwd: s.workspace.root,
+      })
+      expect(r.stdout.trim()).toBe(`${s.home}|${join(s.workspace.root, 'tmp')}`)
+    })
+  })
+
+  it('BUG-060 SCRUBS an inherited AGENT_CI_WATCH, and still lets a fixture pass its own', async () => {
+    // AGENT_CI_WATCH was declared 'inert' — "a feed label, carrying no path".
+    // It is not a label, it is a SWITCH: .githooks/pre-push:569 backgrounds
+    // scripts/watch-ci.sh whenever "${AGENT_CI_WATCH:-1}" is 1, so an inherited
+    // 1 makes any fixture that runs a gate spawn a real CI watcher against the
+    // operator's repository, from inside a test.
+    //
+    // Both halves matter: tests/bootstrap-gate passes 0 deliberately to
+    // suppress that watcher, and a fix that scrubbed the inherited value by
+    // forbidding the variable outright would break it.
+    const ws = await createWorkspace('ci-watch-switch')
+    const original = process.env.AGENT_CI_WATCH
+    try {
+      process.env.AGENT_CI_WATCH = '1'
+      expect(
+        fixtureEnv({}, ws.root).AGENT_CI_WATCH,
+        'an inherited AGENT_CI_WATCH=1 reaches a fixture gate and backgrounds a real CI watcher',
+      ).toBeUndefined()
+      expect(
+        fixtureEnv({ AGENT_CI_WATCH: '0' }, ws.root).AGENT_CI_WATCH,
+        'tests/bootstrap-gate passes 0 to suppress the watcher — that must keep working',
+      ).toBe('0')
+    } finally {
+      if (original === undefined) delete process.env.AGENT_CI_WATCH
+      else process.env.AGENT_CI_WATCH = original
+      await ws.dispose()
+    }
+  })
+
   it('BUG-060 REFUSES the GIT_CONFIG_* switches, and every undeclared GIT_*/AGENT_*', async () => {
     // GIT_CONFIG_COUNT was classified 'opaque' — a number, redirecting no write
     // and naming nothing on disk. True of the count ALONE, and it is never
@@ -265,6 +347,40 @@ describe('harness — the real-state canary (BUG-030)', () => {
       const r = await s.run('bash', [script], { cwd: s.workspace.root })
       expect(r.code, r.output).toBe(0)
       expect(await s.fs.read('logs/agent-activity.log')).toContain(s.escapeToken)
+    })
+  })
+
+  it('BUG-062 REFUSES an AGENT_FEED_TAG override that drops the escape token', async () => {
+    // The route by which the fix for BUG-062 defeated itself. scenarioEnv sets
+    // AGENT_FEED_TAG to the scenario's token so every line pipeline.sh renders
+    // carries it; a per-call `env` merges OVER that, so one override turned the
+    // detectable leak back into the untagged append the case below pins as
+    // undetectable. `DoD-Gate` is not a hypothetical value either — it is what
+    // .githooks/pre-push-project sets while running the gate.
+    //
+    // Composition is the door that stays open: a fixture that needs its own
+    // label keeps the token in the value, so detection survives the label.
+    await scenario('feed-tag-preserved', async (s) => {
+      await expect(
+        s.run('sh', ['-c', 'true'], {
+          cwd: s.workspace.root,
+          env: { AGENT_FEED_TAG: 'DoD-Gate' },
+        }),
+      ).rejects.toThrow(/Refusing forbidden environment override AGENT_FEED_TAG=/)
+
+      await expect(
+        s.run('sh', ['-c', 'true'], {
+          cwd: s.workspace.root,
+          env: { AGENT_FEED_TAG: undefined },
+        }),
+      ).rejects.toThrow(/Refusing to UNSET AGENT_FEED_TAG/)
+
+      const composed = `${s.escapeToken}-DoD-Gate`
+      const r = await s.run('sh', ['-c', 'echo "$AGENT_FEED_TAG"'], {
+        cwd: s.workspace.root,
+        env: { AGENT_FEED_TAG: composed },
+      })
+      expect(r.stdout.trim(), r.output).toBe(composed)
     })
   })
 

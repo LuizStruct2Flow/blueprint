@@ -55,6 +55,18 @@ import { dirname, resolve, sep } from 'node:path'
  *               tests/template-source legitimately pass.
  *   'denied'    scrubbed, and an override is REFUSED outright — there is no
  *               contained form of it. See the GIT_CONFIG_* switches below.
+ *   'scenario-path'
+ *               the scenario OWNS it: scenarioEnv sets it on every child, an
+ *               override must resolve inside the workspace, and it may not be
+ *               UNSET either. Not scrubbed, because it is replaced rather than
+ *               removed — a child with no HOME does not get "no home", it gets
+ *               the operator's real one from getpwuid, and a child with no
+ *               TMPDIR writes to /tmp.
+ *   'scenario-token'
+ *               the scenario owns it AND its value is load-bearing: it carries
+ *               the escape token that makes a leak into the operator's real
+ *               feed visible (BUG-062). An override must still contain the
+ *               token; unsetting it is refused.
  *
  * AND AN UNDECLARED GIT_* / AGENT_* OVERRIDE IS REFUSED TOO. That is the half
  * this table was missing: it said what happens to the names in it and nothing
@@ -109,34 +121,78 @@ const ENV_KIND = {
   AGENT_PERSONA: 'opaque',
   AGENT_BACKING: 'opaque',
   AGENT_GATE_PROFILE: 'opaque',
-  // Declared safe to inherit as well as to set. The identity four are what a
-  // bootstrap fixture needs in order to commit at all; AGENT_CI_WATCH=0 is how
-  // a fixture gate is told not to background a CI watcher; AGENT_FEED_TAG is a
-  // feed label that scenarioEnv sets on every scenario anyway, so an ambient
-  // one never reaches a fixture through the harness.
+  // AGENT_CI_WATCH IS A BEHAVIOURAL SWITCH, NOT A LABEL, and 'inert' was wrong
+  // for it in both directions. .githooks/pre-push:569 backgrounds
+  // scripts/watch-ci.sh when "${AGENT_CI_WATCH:-1}" is 1 — so an INHERITED 1
+  // (or an inherited empty-but-set value, or anything that is not 0) makes a
+  // fixture that runs a gate spawn a real CI watcher against the operator's
+  // repository, out of a test. Scrubbed for that reason; an override is not
+  // checked because "0"/"1" contains nothing to contain, and tests/bootstrap-gate
+  // passes 0 deliberately to suppress exactly this.
+  AGENT_CI_WATCH: 'opaque',
+  // AGENT_FEED_TAG CARRIES THE ESCAPE TOKEN (BUG-062). scenarioEnv sets it to
+  // this scenario's token so every gate line pipeline.sh renders carries it and
+  // a leak into the operator's real feed is DETECTED. A per-call override that
+  // replaced it would turn a detectable leak into the untagged append that
+  // BUG-062's row documents as the known, undetected hole — i.e. the fix would
+  // have shipped with a one-line route to defeat itself.
+  AGENT_FEED_TAG: 'scenario-token',
+  // The two the scenario owns from OUTSIDE both namespaces. R3 requires every
+  // scenario to own its HOME and its TMPDIR, and until these were declared here
+  // nothing refused `{ env: { HOME: '/home/<operator>' } }`: the override merge
+  // in index.ts happens before this check, and this check looked only at GIT_*
+  // and AGENT_*. That made "own HOME, own temp dir" a convention again — the
+  // exact distinction the harness exists to remove, and the shape of BUG-046
+  // and BUG-047, which were each one forgotten line.
+  HOME: 'scenario-path',
+  TMPDIR: 'scenario-path',
+  // Declared safe to inherit as well as to set: git's author/committer identity
+  // carries no path, redirects nothing, and is what tests/bootstrap-* and
+  // tests/template-source legitimately pass.
   GIT_AUTHOR_NAME: 'inert',
   GIT_AUTHOR_EMAIL: 'inert',
   GIT_COMMITTER_NAME: 'inert',
   GIT_COMMITTER_EMAIL: 'inert',
-  AGENT_CI_WATCH: 'inert',
-  AGENT_FEED_TAG: 'inert',
 } as const satisfies Record<string, EnvKind>
 
-type EnvKind = 'path' | 'path-list' | 'opaque' | 'inert' | 'denied'
+type EnvKind =
+  | 'path'
+  | 'path-list'
+  | 'opaque'
+  | 'inert'
+  | 'denied'
+  | 'scenario-path'
+  | 'scenario-token'
 
 export type ForbiddenVar = keyof typeof ENV_KIND
 
-/** Everything the scrub removes: every declared variable that is not 'inert'. */
+/**
+ * Everything the scrub removes: every declared GIT_* / AGENT_* variable that is
+ * not 'inert'.
+ *
+ * THE NAMESPACE FILTER IS LOAD-BEARING, not decoration. This list is also what
+ * assertProcessEnvClean requires the TEST process not to be carrying, and the
+ * test process always carries HOME — so a scenario-path name in here would
+ * refuse every scenario on every machine. Those two are REPLACED per scenario
+ * rather than removed (there is no such thing as a child with no home
+ * directory), which is a different mechanism, checked in a different place.
+ *
+ * It also keeps the invariant scripts/run-ts-suites.sh depends on: every name
+ * here is GIT_* or AGENT_*, so its prefix-based scrub covers the whole list
+ * without restating it, and tests/ts-bridge #1c can cross-check that from this
+ * file rather than from a second copy.
+ */
 export const FORBIDDEN_ENV = (Object.keys(ENV_KIND) as ForbiddenVar[]).filter(
-  (k) => ENV_KIND[k] !== 'inert',
+  (k) => ENV_KIND[k] !== 'inert' && /^(GIT|AGENT)_/.test(k),
 ) as readonly ForbiddenVar[]
 
 /**
  * The kind that governs an override of `key`.
  *
  * Undeclared names in the GIT_* / AGENT_* namespaces are DENIED rather than
- * waved through — see the table above. Anything else (PATH, HOME, TMPDIR,
- * LC_ALL) is not this harness's business and returns undefined.
+ * waved through — see the table above. Anything else (PATH, LC_ALL) is not this
+ * harness's business and returns undefined; HOME and TMPDIR used to fall in
+ * that gap and are now declared, because the scenario owns them.
  */
 function overrideKind(key: string): EnvKind | undefined {
   const declared = (ENV_KIND as Record<string, EnvKind>)[key]
@@ -199,10 +255,53 @@ function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean 
  */
 function assertOverrideAllowed(
   key: string,
-  value: string,
+  value: string | undefined,
   workspaceRoot?: string,
+  escapeToken?: string,
 ): void {
   const kind = overrideKind(key)
+
+  // UNSETTING IS AN OVERRIDE TOO, and for the two kinds the scenario owns it is
+  // the more dangerous one: it looks like removal and behaves like a redirect.
+  // With HOME unset git and friends fall back to getpwuid — the operator's real
+  // home, the very thing the per-scenario HOME exists to hide; with TMPDIR
+  // unset mktemp writes to /tmp, which is the $TMPDIR debris BUG-049 measured
+  // at 133 MB; with AGENT_FEED_TAG unset pipeline.sh renders "[GATE]" and every
+  // line a leaking fixture emits becomes the untagged, UNDETECTED append.
+  //
+  // Deleting any other declared variable stays legitimate and is how
+  // tests/bootstrap-gate stops a derived gate inheriting this scenario's baton,
+  // journal and feed pointers.
+  if (value === undefined) {
+    if (kind === 'scenario-path' || kind === 'scenario-token') {
+      throw new Error(
+        `Refusing to UNSET ${key}: the scenario owns it, and its absence is ` +
+          `not neutral — an unset HOME resolves to the operator's real home ` +
+          `via getpwuid, an unset TMPDIR to /tmp, and an unset AGENT_FEED_TAG ` +
+          `strips the escape token from every gate line a fixture emits ` +
+          `(BUG-062). Set it to a value inside this scenario instead.`,
+      )
+    }
+    return
+  }
+
+  if (kind === 'scenario-token') {
+    if (escapeToken !== undefined && value.includes(escapeToken)) return
+    throw new Error(
+      `Refusing forbidden environment override ${key}=${value}: the harness ` +
+        `sets it to this scenario's escape token so that every gate line ` +
+        `pipeline.sh renders carries the token, which is what makes a leak ` +
+        `into the operator's real activity feed DETECTABLE (BUG-062). ` +
+        `Replacing it restores the untagged-append hole that BUG-062's row ` +
+        `documents as the part the canary cannot see. If a fixture needs its ` +
+        `own label, COMPOSE it with the token — \`\${s.escapeToken}-my-tag\` — ` +
+        `so detection survives.` +
+        (escapeToken === undefined
+          ? ` (No escape token was supplied to fixtureEnv, so no override of ` +
+            `${key} can be checked here; go through scenario().)`
+          : ''),
+    )
+  }
 
   if (kind === 'denied') {
     throw new Error(
@@ -222,7 +321,9 @@ function assertOverrideAllowed(
     )
   }
 
-  if (kind !== 'path' && kind !== 'path-list') return
+  if (kind !== 'path' && kind !== 'path-list' && kind !== 'scenario-path') {
+    return
+  }
 
   // `/dev/null` is the standard read-only way to suppress a developer's real
   // git config, and it is outside every workspace by definition.
@@ -246,7 +347,12 @@ function assertOverrideAllowed(
     throw new Error(
       `Refusing forbidden environment override ${key}=${value}: ` +
         `the path ${path} must be inside the scenario workspace ` +
-        `${workspaceRoot ?? '(missing)'}`,
+        `${workspaceRoot ?? '(missing)'}` +
+        (kind === 'scenario-path'
+          ? `. Every scenario owns its ${key} (R3) precisely so a fixture ` +
+            `cannot read the operator's real dotfiles or scatter temp files ` +
+            `outside its workspace. Use s.home, or s.workspace.path(...).`
+          : ''),
     )
   }
 }
@@ -254,6 +360,7 @@ function assertOverrideAllowed(
 export function fixtureEnv(
   overrides: Record<string, string | undefined> = {},
   workspaceRoot?: string,
+  escapeToken?: string,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
 
@@ -277,12 +384,9 @@ export function fixtureEnv(
   // which a name list cannot.
 
   for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) {
-      delete env[key]
-      continue
-    }
-    assertOverrideAllowed(key, value, workspaceRoot)
-    env[key] = value
+    assertOverrideAllowed(key, value, workspaceRoot, escapeToken)
+    if (value === undefined) delete env[key]
+    else env[key] = value
   }
 
   return env

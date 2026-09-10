@@ -163,8 +163,16 @@ ts_suites_stage(){
   # because it is removed below, and a path to a deleted file is worse than no
   # path at all.
   if [ "$_ts_rc" -ne 0 ]; then
+    # The FAILURE lines, not the last lines. A nested-gate failure prints its
+    # FAIL lines and then dozens of passing cases, so `tail` shows the passing
+    # tail and the operator reads "see the FAIL lines above" with none in view.
+    # That was the third iteration of one mistake: BUG-055 fixed the silence,
+    # the next fix printed a path to a deleted file, the next printed the wrong
+    # forty lines. Verify what is printed is USABLE, not merely present.
     echo "  ── vitest failed (rc=$_ts_rc) ──"
-    tail -40 "$_ts_out"
+    grep -nE 'FAIL|AssertionError|✗|×|Error:|not ok' "$_ts_out" | head -40
+    echo "  ── last 15 lines ──"
+    tail -15 "$_ts_out"
     echo "  ── end vitest output ──"
   fi
   rm -f "$_ts_out"

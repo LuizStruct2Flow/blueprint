@@ -159,6 +159,44 @@ bp_request_transport_env() {
       "$@"
 }
 
+# --- bp_base_path BARE BASE PROJECT_RELATIVE --------------------------------
+# Where does this project-relative path live in the BLUEPRINT's tree?
+#
+# TASK-021 Stage A′. The blueprint is being restructured so that everything a
+# project receives lives under `scaffolding/`. `scaffolding/` is shaped exactly
+# like a project root, so a request for `docs/DoD.md` has to be filed against
+# `scaffolding/docs/DoD.md` once the move lands — otherwise a2bp proposes
+# creating a second `docs/DoD.md` at the blueprint root, next to the real one.
+# That is quieter than a crash and worse: a plausible-looking PR at the wrong
+# coordinate.
+#
+# THE ORACLE IS THE FETCHED BASE, NOT A LOCAL CHECKOUT. a2bp deliberately needs
+# no local blueprint at all (see bp_file_base_content), and a stale local
+# checkout would misplace the request in exactly the situation this exists for —
+# the days around the move. The base is the tree the request is diffed against,
+# so it is the only tree whose shape can be right.
+#
+# PER PATH, not per tree: during the move some files are under `scaffolding/`
+# and some are still at the root, and asking per path is what lets the move land
+# as slices instead of one atomic commit.
+#
+# The last branch is the only guess in here, and it is confined to CREATIONS —
+# a path neither half holds. There is nothing to align against, so it follows
+# the tree: if the base has a `scaffolding/` at all, a new managed file belongs
+# inside it.
+bp_base_path() {
+  local bare="$1" base="$2" path="$3"
+  if bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding/$path" 2>/dev/null; then
+    printf 'scaffolding/%s' "$path"
+  elif bp_request_hermetic git -C "$bare" cat-file -e "$base:$path" 2>/dev/null; then
+    printf '%s' "$path"
+  elif bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding" 2>/dev/null; then
+    printf 'scaffolding/%s' "$path"
+  else
+    printf '%s' "$path"
+  fi
+}
+
 # --- Minimum git version ----------------------------------------------------
 # 2.32 is set by GIT_CONFIG_GLOBAL, which is how the global config is scrubbed
 # without editing the operator's files. `init --object-format` needs 2.29 and

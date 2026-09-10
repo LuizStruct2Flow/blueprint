@@ -23,10 +23,14 @@
 # by hand.
 bp_build_validate_base() {
   local bare="$1" base="$2"; shift 2
-  local path entry mode type parent rc=0
+  local path tpath entry mode type parent rc=0
 
   for path in "$@"; do
-    entry=$(bp_request_hermetic git -C "$bare" ls-tree "$base" -- "$path" 2>/dev/null)
+    # TASK-021 — the argument is project-relative; the base may hold it under
+    # `scaffolding/`. Every git-object lookup below is base-side, so it uses the
+    # resolved coordinate, while the operator-facing messages keep naming it.
+    tpath=$(bp_base_path "$bare" "$base" "$path")
+    entry=$(bp_request_hermetic git -C "$bare" ls-tree "$base" -- "$tpath" 2>/dev/null)
     if [ -n "$entry" ]; then
       mode=$(printf '%s' "$entry" | awk '{print $1}')
       type=$(printf '%s' "$entry" | awk '{print $2}')
@@ -48,7 +52,7 @@ bp_build_validate_base() {
     else
       # Absent: every existing parent component must be a real tree, or the
       # entry cannot be created without restructuring the base.
-      parent=$(dirname "$path")
+      parent=$(dirname "$tpath")
       while [ "$parent" != "." ] && [ "$parent" != "/" ]; do
         entry=$(bp_request_hermetic git -C "$bare" ls-tree "$base" -- "$parent" 2>/dev/null)
         if [ -n "$entry" ]; then
@@ -90,17 +94,20 @@ bp_build_request() {
     return 1
   fi
 
-  local spec path mode cfile blob
+  local spec path tpath mode cfile blob
   for spec in "${specs[@]}"; do
     path=${spec%%:*}
     mode=${spec#*:}; mode=${mode%%:*}
     cfile=${spec#*:*:}
+    # TASK-021 — the index entry is written at the BASE's coordinate for this
+    # path, which is `scaffolding/<path>` once the blueprint has moved.
+    tpath=$(bp_base_path "$bare" "$base" "$path")
 
     # --no-filters is the point: it bypasses .gitattributes and clean filters,
     # which is why no working tree is used anywhere in this function.
     blob=$(bp_request_hermetic git -C "$bare" hash-object -w --no-filters --stdin < "$cfile") || return 1
     GIT_INDEX_FILE="$idx" bp_request_hermetic git -C "$bare" \
-      update-index --add --cacheinfo "$mode,$blob,$path" || return 1
+      update-index --add --cacheinfo "$mode,$blob,$tpath" || return 1
   done
 
   local tree
@@ -159,8 +166,11 @@ bp_build_assert() {
     return 1
   fi
 
+  # TASK-021 — `got` is base-side, so `want` has to be too.
   local want got spec
-  want=$(for spec in "${specs[@]}"; do printf '%s\n' "${spec%%:*}"; done | LC_ALL=C sort)
+  want=$(for spec in "${specs[@]}"; do
+           bp_base_path "$bare" "$base" "${spec%%:*}"; printf '\n'
+         done | LC_ALL=C sort)
   got=$(bp_request_hermetic git -C "$bare" diff --name-only "$base" "$commit" | LC_ALL=C sort)
   if [ "$want" != "$got" ]; then
     echo "bp_build_assert: the commit changes a different set of paths than requested." >&2
@@ -170,18 +180,21 @@ bp_build_assert() {
     return 1
   fi
 
-  local path mode cfile actual_mode
+  local path tpath mode cfile actual_mode
   for spec in "${specs[@]}"; do
     path=${spec%%:*}
     mode=${spec#*:}; mode=${mode%%:*}
     cfile=${spec#*:*:}
-    actual_mode=$(bp_request_hermetic git -C "$bare" ls-tree "$commit" -- "$path" | awk '{print $1}')
+    # TASK-021 — the commit was built at the base's coordinate for this path, so
+    # that is where the blob has to be looked for.
+    tpath=$(bp_base_path "$bare" "$base" "$path")
+    actual_mode=$(bp_request_hermetic git -C "$bare" ls-tree "$commit" -- "$tpath" | awk '{print $1}')
     if [ "$actual_mode" != "$mode" ]; then
-      echo "bp_build_assert: $path has mode $actual_mode, expected $mode" >&2
+      echo "bp_build_assert: $tpath has mode $actual_mode, expected $mode" >&2
       return 1
     fi
-    if ! bp_request_hermetic git -C "$bare" show "$commit:$path" | cmp -s - "$cfile"; then
-      echo "bp_build_assert: $path in the commit does not match the staged bytes" >&2
+    if ! bp_request_hermetic git -C "$bare" show "$commit:$tpath" | cmp -s - "$cfile"; then
+      echo "bp_build_assert: $tpath in the commit does not match the staged bytes" >&2
       return 1
     fi
   done

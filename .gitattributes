@@ -109,6 +109,17 @@ tests/drift-in-blueprint/          export-ignore
 tests/pull-exec-bit/               export-ignore
 tests/bootstrap-gate/              export-ignore
 
+# TASK-021 — `blueprint-relocation` is the seventh, and it is here for the PHASE
+# 1 reason rather than the blueprint-only one: it is TypeScript, and no
+# TypeScript suite ships yet (the block below). Its subject — the shipped CLI
+# resolving against a blueprint whose tree has moved under `scaffolding/` — is
+# something a derived project would genuinely want to run, so this line is a
+# phase-1 consequence to REVISIT at phase 2, not a statement that the suite is
+# blueprint-only machinery. It is also, today, the only place the property is
+# checkable at all: the fixtures it needs are blueprints, and a derived project
+# has none.
+tests/blueprint-relocation/        export-ignore
+
 # --- TASK-018 PHASE 1: the TypeScript harness does not ship YET --------------
 #
 # THE INVARIANT, and it is asserted rather than remembered:

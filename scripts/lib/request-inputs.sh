@@ -170,19 +170,24 @@ bp_inputs_validate() {
 # "nothing to request" is a refusal, not a no-op success.
 bp_inputs_drop_unchanged() {
   local bare="$1" base="$2"; shift 2
-  local spec path mode cfile kept="" dropped=0
+  local spec path tpath mode cfile kept="" dropped=0
 
   for spec in "$@"; do
     path=${spec%%:*}
     mode=${spec#*:}; mode=${mode%%:*}
     cfile=${spec#*:*:}
+    # TASK-021 — "already identical to the blueprint" has to be asked at the
+    # coordinate the blueprint actually holds the file at. Asking at the root
+    # after the move finds nothing, so nothing is ever dropped and every request
+    # carries files the blueprint already has.
+    tpath=$(bp_base_path "$bare" "$base" "$path")
 
     local base_mode base_entry
-    base_entry=$(bp_request_hermetic git -C "$bare" ls-tree "$base" -- "$path" 2>/dev/null)
+    base_entry=$(bp_request_hermetic git -C "$bare" ls-tree "$base" -- "$tpath" 2>/dev/null)
     if [ -n "$base_entry" ]; then
       base_mode=$(printf '%s' "$base_entry" | awk '{print $1}')
       if [ "$base_mode" = "$mode" ] && \
-         bp_request_hermetic git -C "$bare" show "$base:$path" 2>/dev/null | cmp -s - "$cfile"; then
+         bp_request_hermetic git -C "$bare" show "$base:$tpath" 2>/dev/null | cmp -s - "$cfile"; then
         echo "  dropped (identical to the blueprint): $path" >&2
         dropped=$((dropped+1))
         continue

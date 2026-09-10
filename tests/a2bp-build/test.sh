@@ -34,7 +34,7 @@ trap 'rm -rf "$WORK"' EXIT
 fail() { echo "FAIL: $*"; FAILED=1; }
 pass() { echo "  ok — $*"; }
 
-for lib in request.sh request-build.sh; do
+for lib in request.sh request-build.sh request-inputs.sh; do
   if [ ! -r "$ROOT/scripts/lib/$lib" ]; then
     echo "FAIL: scripts/lib/$lib is missing"
     exit 1
@@ -44,6 +44,10 @@ done
 . "$ROOT/scripts/lib/request.sh"
 # shellcheck source=../../scripts/lib/request-build.sh
 . "$ROOT/scripts/lib/request-build.sh"
+# TASK-021 #9e — the drop-unchanged check reads the base at the resolved
+# coordinate too, so it belongs in the same suite as the rest of the mapping.
+# shellcheck source=../../scripts/lib/request-inputs.sh
+. "$ROOT/scripts/lib/request-inputs.sh"
 
 # --- a stand-in blueprint with several files, only one of which is targeted --
 UP="$WORK/upstream"
@@ -271,6 +275,100 @@ elif ! bp_build_assert "$BARE7" "$BASE" "$BAD_COMMIT" "docs/DoD.md:100644:$CF" 2
   fail "#8 refused, but not for the changed-path-set reason"
 else
   pass "#8 the assertion catches an unseeded index — the defect that survived ten plan reviews"
+fi
+
+# ===========================================================================
+# 9. TASK-021 — the base's own shape decides where a request is filed.
+#
+#    The blueprint is moving everything a project receives under `scaffolding/`.
+#    a2bp takes PROJECT-relative paths (`docs/DoD.md`) and, unlike drift and
+#    pull, does not die when the blueprint moves — it does something quieter and
+#    worse: it proposes creating a SECOND `docs/DoD.md` at the blueprint root,
+#    beside the real one, in a PR that looks entirely plausible.
+#
+#    The oracle is the FETCHED BASE, not a local checkout: a2bp deliberately
+#    needs no local blueprint (bp_file_base_content says so), and a stale one
+#    would misplace the request in exactly the days this matters.
+#
+#    Resolution is PER PATH. `UP9` is a HALF-MOVED blueprint — the state the
+#    real one is in for the duration of a sliced restructure — so a tree-level
+#    probe passes #9a and #9b and fails #9c.
+# ===========================================================================
+UP9="$WORK/upstream-scaffolded"
+mkdir -p "$UP9"
+(
+  cd "$UP9"
+  git init -q -b main .
+  git config user.email t@local; git config user.name t
+  mkdir -p scaffolding/docs scripts
+  printf 'the DoD\n'          > scaffolding/docs/DoD.md
+  printf 'not yet moved\n'    > scripts/blueprint
+  printf '# forge readme\n'   > README.md
+  git add -A
+  git -c commit.gpgsign=false commit -q -m base
+) 2>/dev/null
+BASE9=$(git -C "$UP9" rev-parse HEAD)
+
+new_bare9() {
+  local d="$WORK/bare9$RANDOM"
+  bp_request_hermetic git init -q --bare --object-format=sha1 "$d"
+  bp_request_transport_env git -C "$d" fetch -q --depth 1 "$UP9" main
+  printf '%s' "$d"
+}
+BARE9=$(new_bare9)
+
+# --- 9a. a path the base holds under scaffolding/ resolves there -------------
+if [ "$(bp_base_path "$BARE9" "$BASE9" docs/DoD.md)" != "scaffolding/docs/DoD.md" ]; then
+  fail "#9a a moved file did not resolve to its scaffolding/ coordinate"
+else
+  pass "#9a a project-relative path resolves to the base's scaffolding/ coordinate"
+fi
+
+# --- 9b. a creation follows the tree ----------------------------------------
+if [ "$(bp_base_path "$BARE9" "$BASE9" docs/NEW.md)" != "scaffolding/docs/NEW.md" ]; then
+  fail "#9b a NEW managed file was not placed inside the shipping tree"
+else
+  pass "#9b a creation follows the tree the base actually has"
+fi
+
+# --- 9c. a path still at the root resolves at the root ----------------------
+#     This is the case a `[ -e scaffolding ]` tree probe gets wrong, and getting
+#     it right is what lets the restructure land as slices instead of one
+#     atomic 185-file commit.
+if [ "$(bp_base_path "$BARE9" "$BASE9" scripts/blueprint)" != "scripts/blueprint" ]; then
+  fail "#9c a not-yet-moved file was prefixed anyway — a half-moved base cannot be filed against"
+else
+  pass "#9c a half-moved base resolves each path on its own merits"
+fi
+
+# --- 9d. the request commit lands at the resolved coordinate ----------------
+S9=$(spec docs/DoD.md 100644 "the DoD, improved")
+C9=$(bp_build_request "$BARE9" "$BASE9" "a2bp/acme/test9" "acme" "$S9")
+CHANGED9=$(bp_request_hermetic git -C "$BARE9" diff --name-only "$BASE9" "$C9")
+if [ "$CHANGED9" != "scaffolding/docs/DoD.md" ]; then
+  fail "#9d the request touched '$CHANGED9', not scaffolding/docs/DoD.md"
+elif ! bp_build_assert "$BARE9" "$BASE9" "$C9" "$S9"; then
+  fail "#9d the build assertion rejected its own correctly-placed commit"
+else
+  pass "#9d the request edits the file the blueprint actually has, not a new root copy"
+fi
+
+# --- 9e. an unchanged file is still recognised as unchanged -----------------
+#     Asked at the wrong coordinate this finds nothing, so nothing is ever
+#     dropped and every request carries files the blueprint already has.
+SAME9=$(spec docs/DoD.md 100644 "the DoD
+")
+if bp_inputs_drop_unchanged "$BARE9" "$BASE9" "$SAME9" >/dev/null 2>&1; then
+  fail "#9e a file identical to the moved blueprint copy was not dropped"
+else
+  pass "#9e 'identical to the blueprint' is asked at the coordinate the blueprint uses"
+fi
+
+# --- 9f. a FLAT base is untouched by any of this ----------------------------
+if [ "$(bp_base_path "$BARE" "$BASE" docs/DoD.md)" != "docs/DoD.md" ]; then
+  fail "#9f a flat base gained a prefix it has no directory for"
+else
+  pass "#9f a flat base resolves exactly as it always did"
 fi
 
 echo

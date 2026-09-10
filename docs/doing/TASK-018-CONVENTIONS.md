@@ -11,7 +11,7 @@ Each file has exactly ONE owner. Do not edit outside your set.
 | Owner | Files |
 |---|---|
 | Sylvia (Orchestrator) | `tests/package.json`, `tests/tsconfig.json`, `tests/vitest.config.ts`, `tests/harness/**`, one exemplar spec |
-| Manifest agent | `tests/manifest/test.sh`, `scripts/lib/suites.sh` (the suite derivation) |
+| Manifest agent | `tests/manifest/**` (`manifest.ts` holds the checks, `manifest.spec.ts` the cases, `fixture.ts` the synthetic tree; the shell runner was retired by TASK-018), `scripts/lib/suites.sh` (the suite derivation) |
 | Pipeline agent | `scripts/lib/pipeline.sh`, `scripts/install-toolchain.sh` |
 | Isolation agent | `scripts/new-project.sh` (seed only), `tests/template-source/`, `tests/bootstrap-contents/`, `tests/bootstrap-gate/`, `tests/bootstrap-identity/`, `tests/commit-subjects/`, `tests/git-isolation/` |
 

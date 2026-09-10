@@ -59,10 +59,16 @@ bp_file_remote_tip() {
 # This is what frees a2bp from needing a local blueprint checkout at all: the
 # guard used to align against $BLUEPRINT_ROOT/$f, which meant staging was
 # computed against whatever stale copy the operator happened to have.
+#
+# TASK-021 — PATH is project-relative; the base may hold it under `scaffolding/`
+# (see bp_base_path). Aligning against the root path after the move would hand
+# the contamination guard an empty base for a file that exists, so every line
+# would read as new and the staged restore would have nothing to align to.
 bp_file_base_content() {
-  local bare="$1" base="$2" path="$3" out="$4"
-  if bp_request_hermetic git -C "$bare" cat-file -e "$base:$path" 2>/dev/null; then
-    bp_request_hermetic git -C "$bare" show "$base:$path" > "$out"
+  local bare="$1" base="$2" path="$3" out="$4" tpath
+  tpath=$(bp_base_path "$bare" "$base" "$path")
+  if bp_request_hermetic git -C "$bare" cat-file -e "$base:$tpath" 2>/dev/null; then
+    bp_request_hermetic git -C "$bare" show "$base:$tpath" > "$out"
   else
     : > "$out"
   fi

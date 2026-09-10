@@ -379,6 +379,72 @@ marker_aware_merge() {
 # guards, so bootstrap, pull, drift and a2bp cannot disagree about it (BUG-028).
 _should_substitute() { bp_should_substitute "$1"; }
 
+# --- TASK-021 Stage A′: the blueprint's shipping tree may be nested ----------
+#
+# The blueprint is being restructured so that everything a project receives
+# lives under `scaffolding/` and everything only the blueprint itself needs
+# lives under `forge/`. `scaffolding/` is shaped exactly like a project root, so
+# the mapping is one prefix on the BLUEPRINT side and nothing at all on the
+# project side.
+#
+# THIS SHIPS BEFORE THE MOVE, ON PURPOSE. A derived project runs its OWN copy of
+# this CLI, frozen at whatever commit it last pulled. On the day the blueprint
+# moves, a frozen copy that does not know about `scaffolding/` runs
+# `git archive HEAD tests` against a root that no longer has `tests`, and
+# bp_expand_managed_dirs fails closed inside read_blueprint_source — which BOTH
+# `drift` and `pull` go through. So `drift` dies at every wake AND
+# `blueprint pull scripts/blueprint`, the obvious recovery, dies before it can
+# copy anything. Three projects, three manual `cp`s, no tool saying why:
+# BUG-028's shape, self-inflicted. Reproduced against a scaffolding-shaped
+# fixture blueprint before this was written.
+#
+# (Not every subcommand: `files`, `a2bp`, `prs` and `help` do not call
+# read_blueprint_source. `a2bp` breaks after the move for a different reason —
+# it would file its request at the wrong coordinate — and is handled separately
+# in scripts/lib/request.sh.)
+#
+# RESOLUTION IS PER PATH, NOT PER TREE, and that is the whole design decision.
+# A `[ -d "$BLUEPRINT_ROOT/scaffolding" ]` probe would prefix EVERY path the
+# moment the directory appears, so any file still at the root during the move
+# would resolve to a path that does not exist. That does not make the move
+# safer; it makes the move ATOMIC — one 185-file commit that is red at every
+# intermediate point. Asking about the individual path instead lets a
+# half-migrated blueprint answer correctly for both halves, so the move can land
+# as green, pushable slices. The resolver is the thing that decides that, not
+# the restructure.
+#
+# `scaffolding/` wins when both exist. During a move that is the copy being
+# migrated to; outside a move the situation does not arise.
+#
+# THE PROJECT SIDE STAYS PROJECT-RELATIVE. bp_should_substitute has exactly one
+# leading-component rule (`tests/*`) and its header says not to add another
+# without checking every call site. Hand it `scaffolding/tests/…` and the case
+# stops matching, every suite gets {{PROJECT_NAME}} substituted, and BUG-029's
+# forever-drifted state comes back. Only the blueprint-side path gains a prefix.
+#
+# WHICH ORACLE — the filesystem or HEAD? Each consumer asks the question the way
+# it reads the answer, and the two genuinely differ:
+#
+#   bp_blueprint_path      the FILESYSTEM, because drift and pull compare and
+#                          copy WORKING-TREE bytes. `[ -e ]` on the same file
+#                          the caller is about to open cannot disagree with it.
+#   bp_expand_managed_dirs HEAD, because BUG-029 fixed the set of files a
+#                          directory expands to as "what a bootstrap would have
+#                          received" — an uncommitted suite must not sync.
+#
+# They diverge exactly while a `git mv` is staged but not committed: HEAD still
+# names the root path, the filesystem only has the scaffolding one. That
+# combination is CORRECT rather than merely tolerated — the expansion yields the
+# project-relative NAME, the resolver finds the CONTENT, and both point at the
+# one file on disk. It is the same split the file already had.
+bp_blueprint_path() {
+  if [ -e "$BLUEPRINT_ROOT/scaffolding/$1" ]; then
+    printf '%s/scaffolding/%s' "$BLUEPRINT_ROOT" "$1"
+  else
+    printf '%s/%s' "$BLUEPRINT_ROOT" "$1"
+  fi
+}
+
 # Write a placeholder-substituted COPY of the blueprint file to a
 # temp path and print the temp path. Used by drift comparison +
 # pull's "same?" check so the templated blueprint side is compared
@@ -394,7 +460,8 @@ _should_substitute() { bp_should_substitute "$1"; }
 # every managed file. The predicate is about a file's identity in the repo, so
 # it gets the repo-relative path and nothing else.
 substituted_blueprint_copy() {
-  local f="$1" bp="$BLUEPRINT_ROOT/$1"
+  local f="$1" bp
+  bp=$(bp_blueprint_path "$1")
   if ! _should_substitute "$f"; then
     echo "$bp"
     return 0
@@ -528,9 +595,24 @@ _bp_resolve_blueprint_root() {
   fi
   cli_root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P) || return 1
 
+  # TASK-021 — after the restructure this CLI lives at
+  # <root>/scaffolding/scripts/blueprint, so one `..` lands on `scaffolding/`
+  # rather than on the repo root. BLUEPRINT_ROOT must be the REPO root: every
+  # `git -C "$BLUEPRINT_ROOT" archive HEAD scaffolding/…` below depends on it,
+  # and so does `.blueprint-root`.
+  if [ "${cli_root##*/}" = "scaffolding" ]; then
+    cli_root=$(cd "$cli_root/.." 2>/dev/null && pwd -P) || return 1
+  fi
+
   # Verified, not assumed — a directory containing scripts/blueprint is not
-  # necessarily a blueprint.
-  if [ -n "$cli_root" ] && [ -f "$cli_root/CLAUDE.md" ] && [ -f "$cli_root/docs/DoD.md" ]; then
+  # necessarily a blueprint. Each anchor is accepted at either coordinate: this
+  # check is what ESTABLISHES the root, so it cannot itself depend on knowing
+  # where the tree sits. (The root `CLAUDE.md` will be a stub importing
+  # `@scaffolding/CLAUDE.md`, but requiring the stub would make this resolver
+  # fail on a tree mid-move, which is the state it most needs to survive.)
+  if [ -n "$cli_root" ] &&
+     { [ -f "$cli_root/CLAUDE.md" ] || [ -f "$cli_root/scaffolding/CLAUDE.md" ]; } &&
+     { [ -f "$cli_root/docs/DoD.md" ] || [ -f "$cli_root/scaffolding/docs/DoD.md" ]; }; then
     echo "${C_YELLOW}⚠ .blueprint-source names '${from_file:-<empty>}', which does not exist here.${C_RESET}" >&2
     echo "${C_DIM}  Falling back to the blueprint this CLI runs from: $cli_root${C_RESET}" >&2
     echo "${C_DIM}  (that field is an absolute host path, so it cannot be right on two${C_RESET}" >&2
@@ -656,30 +738,63 @@ read_blueprint_source() {
 # partial stdout was accepted because its status vanished in `$( )`. Each stage
 # runs on its own, to a file, and is checked. `grep`'s own no-match 1 is the one
 # expected non-zero, and the emptiness check below is what actually judges it.
+#
+# TASK-021 — THE DIRECTORY IS LISTED FROM BOTH HALVES AND THE RESULTS UNIONED.
+# A managed directory is the one entry that can straddle a partial move:
+# `tests/` may have half its suites under `scaffolding/tests/` and half still at
+# the root. Asking only one side would silently drop the other half from the
+# managed set — the exact class of silent under-coverage this function exists to
+# make impossible. `scaffolding/` is stripped back off, because the expansion
+# feeds drift, both pull loops and bp_should_substitute, all of which take the
+# path a file has in the PROJECT.
+#
+# ONE HALF BEING ABSENT IS NORMAL, NOT A FAILURE — before the move only the root
+# answers, after it only `scaffolding/`, during it both. So a single missing
+# candidate no longer dies; the UNION being empty does, which is the property
+# BUG-029 R2-S1 actually asserts. The residual: a checkout unreadable in one
+# half only would carry on with the other. That other half is the whole set in
+# every shape this repo can be in, and the alternative is refusing to run
+# throughout the move.
 bp_expand_managed_dirs() {
-  local expanded=() f listing line tarf listf
+  local expanded=() f listing part line tarf listf cand strip
   for f in "${MANAGED_FILES[@]}"; do
     case "$f" in
       */) ;;
       *)  expanded+=("$f"); continue ;;
     esac
 
-    tarf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
-    listf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+    listing=""
+    for cand in "scaffolding/${f%/}" "${f%/}"; do
+      # Only the scaffolding listing is rewritten. The root listing already
+      # carries project-relative paths.
+      strip=""
+      case "$cand" in scaffolding/*) strip="s#^scaffolding/##" ;; esac
 
-    if ! git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "${f%/}" >"$tarf" 2>/dev/null; then
+      tarf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+      listf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
+
+      if ! git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "$cand" >"$tarf" 2>/dev/null; then
+        # Not in HEAD under this candidate. The other one answers, or the
+        # emptiness check below fails the run.
+        rm -f "$tarf" "$listf"
+        continue
+      fi
+      if ! tar -tf "$tarf" >"$listf" 2>/dev/null; then
+        rm -f "$tarf" "$listf"
+        _bp_expand_die "$f" "the archive of '$cand' could not be listed ('tar -t' failed)"
+      fi
+      part=$(grep -v '/$' "$listf" | sed -e "$strip" || true)
       rm -f "$tarf" "$listf"
-      _bp_expand_die "$f" "'git archive HEAD ${f%/}' failed — the path is not in the blueprint's HEAD, or the checkout is unreadable"
-    fi
-    if ! tar -tf "$tarf" >"$listf" 2>/dev/null; then
-      rm -f "$tarf" "$listf"
-      _bp_expand_die "$f" "the archive could not be listed ('tar -t' failed)"
-    fi
-    listing=$(grep -v '/$' "$listf" || true)
-    rm -f "$tarf" "$listf"
+
+      [ -n "$part" ] && listing="${listing}${part}"$'\n'
+    done
+
+    # Sorted and de-duplicated: a file present in both halves mid-move is one
+    # managed file, and bp_blueprint_path decides which copy it reads.
+    listing=$(printf '%s' "$listing" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u || true)
 
     if [ -z "$listing" ]; then
-      _bp_expand_die "$f" "it contains no shipping files at HEAD — every file under it is uncommitted or export-ignore'd"
+      _bp_expand_die "$f" "it contains no shipping files at HEAD, under '${f%/}' or 'scaffolding/${f%/}' — every file under it is uncommitted or export-ignore'd"
     fi
 
     while IFS= read -r line; do
@@ -911,7 +1026,7 @@ cmd_drift() {
   MISSING_PROJECT=()
 
   for f in "${MANAGED_FILES[@]}"; do
-    bp="$BLUEPRINT_ROOT/$f"
+    bp=$(bp_blueprint_path "$f")
     if [ ! -f "$bp" ]; then
       MISSING_BLUEPRINT+=("$f")
       continue
@@ -982,7 +1097,7 @@ cmd_pull() {
   # Default: every drifted or missing file
   if [ ${#files[@]} -eq 0 ]; then
     for f in "${MANAGED_FILES[@]}"; do
-      bp="$BLUEPRINT_ROOT/$f"
+      bp=$(bp_blueprint_path "$f")
       if [ ! -f "$bp" ]; then continue; fi
       if [ ! -f "$f" ]; then
         files+=("$f")
@@ -1005,7 +1120,7 @@ cmd_pull() {
   echo "${C_BOLD}Pulling from $BLUEPRINT_ROOT${C_RESET}"
   local pulled=0
   for f in "${files[@]}"; do
-    bp="$BLUEPRINT_ROOT/$f"
+    bp=$(bp_blueprint_path "$f")
     if [ ! -f "$bp" ]; then
       echo "  ${C_RED}skip${C_RESET}  $f  (not in blueprint)"
       continue

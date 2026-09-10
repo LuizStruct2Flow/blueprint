@@ -127,13 +127,24 @@ function scenarioEnv(s: {
     //                   real feed with the pinning fully intact. It is the leak
     //                   most worth being able to see.
     //
-    // WHAT THIS STILL DOES NOT COVER, stated rather than implied: a line whose
-    // label is a literal — watch-ci.sh's "[CI]", log-activity.sh's persona from
-    // a hook payload — carries no token, and a fixture writing its own prose
-    // into the feed carries none either. Those leaks are caught only by the
-    // prefix half of the canary, which sees a rewrite and not an append. The
-    // token canary is therefore a real check over the two dominant writers, not
-    // a claim that every append is detectable.
+    // WHAT THIS DOES NOT COVER — and "does not cover" means NOT DETECTED AT
+    // ALL, not "detected by the other half". An append leaves the captured
+    // content intact as a prefix, so the canary's prefix check passes on every
+    // append by construction; with no token in the line, the token check passes
+    // too. These writers therefore reach the operator's feed unseen:
+    //
+    //   scripts/watch-ci.sh:45      labels its lines with the LITERAL "[CI]".
+    //   scripts/log-activity.sh:172 takes its persona from the hook payload.
+    //   .githooks/pre-push-project  RE-SETS AGENT_FEED_TAG itself (:838 to
+    //                               "DoD-Gate", :852 back to "GATE"), so a
+    //                               fixture that runs a whole gate — which
+    //                               tests/bootstrap-gate does — emits untagged
+    //                               lines for exactly those stages.
+    //   feed_append "<prose>"       anything calling the appender directly.
+    //
+    // So this is a real check over the two dominant writers, and it is not a
+    // claim that every append is detectable. canary.ts states the same scope
+    // where the check lives, and harness.spec.ts pins it with a case.
     AGENT_FEED_TAG: s.escapeToken,
     AGENT_PERSONA: s.escapeToken,
     // Deterministic collation and character classes. [[:space:]] is

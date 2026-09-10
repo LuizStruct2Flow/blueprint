@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFile, writeFile, stat, symlink } from 'node:fs/promises'
+import { appendFile, readFile, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
 import { RealStateCanary } from './canary.js'
@@ -266,6 +266,42 @@ describe('harness — the real-state canary (BUG-030)', () => {
       expect(r.code, r.output).toBe(0)
       expect(await s.fs.read('logs/agent-activity.log')).toContain(s.escapeToken)
     })
+  })
+
+  it('BUG-062 does NOT detect an UNTAGGED append — the limit, pinned', async () => {
+    // THIS CASE ASSERTS A HOLE, DELIBERATELY. The comments in canary.ts and
+    // index.ts previously said an untagged append was "caught only by the
+    // prefix check". It is caught by nothing: an append leaves the captured
+    // content intact as a prefix, so that check passes by construction, and a
+    // line with no token gives the token check nothing to find. watch-ci.sh's
+    // literal "[CI]", a gate stage under .githooks/pre-push-project (which
+    // re-sets AGENT_FEED_TAG itself) and any direct feed_append land here.
+    //
+    // Closing it needs ATTRIBUTION, and the feed has none to offer: a live
+    // daemon's line and a leaked fixture line are the same bytes. Rejecting new
+    // bytes outright would fail honest runs. So the scope is written down, and
+    // written down where it can be checked — if someone later makes appends
+    // detectable, this case goes red and the prose has to move with the code.
+    const ws = await createWorkspace('canary-feed-untagged')
+    try {
+      const victim = join(ws.root, 'agent-activity.log')
+      await writeFile(victim, 'existing operator activity\n', 'utf8')
+      const token = RealStateCanary.escapeToken('harness-feed-untagged')
+      const canary = await RealStateCanary.capture([
+        { label: 'activity feed', path: victim },
+      ])
+
+      await appendFile(victim, '12:00:00 [CI] a line carrying no token\n', 'utf8')
+      await expect(canary.assertUnchanged(token)).resolves.toBeUndefined()
+
+      // The half that IS real, on the same target: rewriting history is caught.
+      await writeFile(victim, 'history replaced\n', 'utf8')
+      await expect(canary.assertUnchanged(token)).rejects.toThrow(
+        /was rewritten or truncated/,
+      )
+    } finally {
+      await ws.dispose()
+    }
   })
 
   it('DETECTS a mutation of a watched file', async () => {

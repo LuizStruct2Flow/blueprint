@@ -150,19 +150,32 @@ fi
 if [ ! -f "$ROOT/.blueprint-root" ]; then
   pass "#1c not applicable outside a blueprint — tests/harness/ is blueprint-tier and does not ship, so there is no FORBIDDEN_ENV here to cross-check"
 else
+# READ FROM THE ENV_KIND TABLE, WHICH IS WHERE THE NAMES LIVE (BUG-063).
+# This used to parse a literal `FORBIDDEN_ENV = [ … ]` array. BUG-060 turned
+# that array into a DERIVATION over the ENV_KIND table — every GIT_*/AGENT_*
+# name whose kind is not 'inert' — and the pattern then matched nothing, so
+# this case failed as "could not read", which took the whole suite and the
+# push gate with it. The refusal was right: a cross-check that cannot see its
+# subject must not report success. The parse is what was stale.
+#
+# One mirrored rule (skip 'inert') is the price of reading a TypeScript
+# declaration from shell. The NAMES still come from the file, which is what
+# stops this becoming the second copy BUG-051/053/061 each were.
+forbidden="$(sed -n "/^const ENV_KIND = {/,/^} as const/p" "$ROOT/tests/harness/env.ts" \
+             | sed -nE "s/^[[:space:]]*((GIT|AGENT)_[A-Z0-9_]*): '([a-z-]+)'.*/\3 \1/p" \
+             | grep -v '^inert ' | awk '{print $2}')"
 missed=""
-for v in $(sed -n "/FORBIDDEN_ENV = \[/,/^]/p" "$ROOT/tests/harness/env.ts" \
-           | sed -nE "s/^[[:space:]]*'([A-Z0-9_]+)',.*/\1/p"); do
+for v in $forbidden; do
   grep -qx "$v" "$TMP/seen-env" && missed="$missed $v"
 done
-if [ -n "$(sed -n "/FORBIDDEN_ENV = \[/,/^]/p" "$ROOT/tests/harness/env.ts" | sed -nE "s/^[[:space:]]*'([A-Z0-9_]+)',.*/\1/p")" ]; then
+if [ -n "$forbidden" ]; then
   if [ -z "$missed" ]; then
     pass "#1c BUG-055: every name in the harness's own FORBIDDEN_ENV is scrubbed before the runner starts"
   else
     fail "#1c BUG-055: these forbidden names reached the runner:$missed"
   fi
 else
-  fail "#1c BUG-055: could not read FORBIDDEN_ENV from tests/harness/env.ts — this check would pass over nothing"
+  fail "#1c BUG-055/BUG-063: could not read the forbidden set from tests/harness/env.ts — this check would pass over nothing"
 fi
 fi
 

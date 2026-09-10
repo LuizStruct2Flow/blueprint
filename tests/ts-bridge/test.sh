@@ -49,8 +49,16 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # the declaration: creating tests/demo/demo.spec.ts is what makes `demo` a
 # declared suite. The config sits under tests/ because that is where the harness
 # manifest lives, which is what `ts_suites_present` looks for.
+# `tests/node_modules` STANDS IN FOR AN INSTALLED PROJECT (TASK-018 phase 2).
+# The bridge now refuses to run when it is absent, because `npx` answers a
+# missing local vitest by FETCHING one from the registry — an unpinned package
+# installed mid-push, past the lockfile that exists to pin it. Every case below
+# is about what the bridge REPORTS once it runs, and npx is stubbed here anyway,
+# so without this directory they would all short-circuit on the new guard and
+# assert nothing. An empty directory is exactly the right fidelity: it is the
+# condition the guard tests, and this fixture never resolves a real binary.
 W="$TMP/proj"
-mkdir -p "$W/tests/demo" "$W/scripts/lib" "$W/bin"
+mkdir -p "$W/tests/demo" "$W/tests/node_modules" "$W/scripts/lib" "$W/bin"
 cp "$ROOT/scripts/lib/pipeline.sh" "$ROOT/scripts/lib/suites.sh" "$W/scripts/lib/"
 cp "$ROOT/scripts/run-ts-suites.sh" "$W/scripts/"
 : > "$W/tests/vitest.config.ts"

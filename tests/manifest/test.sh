@@ -481,6 +481,18 @@ if [ "$IN_BLUEPRINT" -eq 1 ]; then
     SPECS_SHIP=0
     grep -q '^tests/.*\.spec\.ts$' "$_listing" && SPECS_SHIP=1
 
+    # Which harness files exist but do NOT arrive. Both sides are read off the
+    # filesystem — `find` on disk, `git archive` for the boundary — so a file
+    # added to tests/harness/ tomorrow is covered without anyone remembering to
+    # add it anywhere. TS_SHIPS above is satisfied by ONE harness file; this is
+    # what makes "the harness ships" mean the harness rather than a fragment.
+    harness_partial=""
+    for _h in "$ROOT"/tests/harness/*.ts; do
+      [ -e "$_h" ] || continue
+      _hrel="tests/harness/$(basename "$_h")"
+      _ships "$_hrel" || harness_partial="$harness_partial $_hrel"
+    done
+
     shipped_bp=""
     withheld=""
     hollow=""
@@ -692,6 +704,51 @@ EOF
       fail "#2c *.spec.ts files ship to derived projects while the TS toolchain does not — every recipient gets specs with no runner"
       echo "        Ship tests/package.json, tests/tsconfig.json, tests/vitest.config.ts and"
       echo "        tests/harness/, or export-ignore the specs. Half of the move is worse than none."
+    elif [ "$TS_SHIPS" -eq 1 ] && [ "$SPECS_SHIP" -eq 0 ]; then
+      # THE PHASE-2 HALF OF THE SAME CLAIM, and it did not exist until phase 2
+      # was reached. Every branch above tests the invariant from the phase-1
+      # side: machinery withheld, or machinery arriving that the recipient
+      # cannot use. The mirror image is machinery arriving that the recipient
+      # has NOTHING TO USE ON — vitest, a package.json, an `npm ci` in a
+      # MANAGED CI job, and not one spec to run.
+      #
+      # It is reachable by an ordinary edit: re-add `tests/**/*.spec.ts` here,
+      # or export-ignore the directory of the last shipping TypeScript suite,
+      # and without this branch #2c prints "phase 2 is whole" over a toolchain
+      # that ships for nothing. That is a check going green for the wrong
+      # reason, which is BUG-066's shape and the thing this whole file exists
+      # to refuse.
+      #
+      # It is deliberately NOT symmetric with the phase-1 pass below. Phase 1
+      # legitimately has a toolchain that does not ship AND no specs; phase 2
+      # has no legitimate state in which the toolchain ships alone, because the
+      # invariant is an IFF — the toolchain ships BECAUSE a shipping suite is
+      # TypeScript. The one ordering this would wrongly forbid, landing the
+      # runner before migrating a suite onto it, is the ordering the comment at
+      # the head of #2c already declines to require, and it stopped being
+      # available the moment `tests/bug-numbers` shipped.
+      fail "#2c the TS toolchain ships but NO *.spec.ts does — every derived project installs a runner with nothing to run"
+      echo "        The invariant is an IFF: the toolchain ships BECAUSE a shipping suite is"
+      echo "        TypeScript. A toolchain alone means every project pays 'npm ci' in the"
+      echo "        MANAGED ts-tests job, on a green job that executed no test — this repo's"
+      echo "        signature defect. Either ship a TypeScript suite, or export-ignore the"
+      echo "        toolchain again and go back to phase 1 deliberately."
+    elif [ "$TS_SHIPS" -eq 1 ] && [ -n "$harness_partial" ]; then
+      # AND THE HARNESS HAS TO ARRIVE WHOLE. TS_SHIPS asks `grep -q
+      # '^tests/harness/'`, which one file satisfies — a one-file proxy for a
+      # whole directory, which is exactly the shape BUG-061 walked through and
+      # the shape F-002 counted six times today. `tests/harness/index.ts` is
+      # the ONLY way a spec obtains a fixture, so a single `tests/harness/
+      # index.ts export-ignore` would leave every shipped spec importing a
+      # module that is not there, with TS_SHIPS still 1 and #2c still green.
+      #
+      # Derived from the filesystem on both sides rather than from a list, for
+      # the reason BUG-061 states in its own row: an AND over a remembered
+      # subset cannot see a file it does not know about.
+      fail "#2c the harness ships in PART — every shipped spec imports it, and these files do not arrive:$harness_partial"
+      echo "        tests/harness/index.ts is the only way a spec obtains a fixture. A partial"
+      echo "        harness is a project whose every TypeScript suite dies on an unresolved"
+      echo "        import, while TS_SHIPS still reads 1 because one harness file arrived."
     elif [ "$TS_SHIPS" -eq 1 ]; then
       pass "#2c phase 2 is whole — the TS toolchain ships from under the managed 'tests/' directory, so bootstrap and pull deliver the same thing (checked $_mf_n MANAGED_FILES entries)"
     else

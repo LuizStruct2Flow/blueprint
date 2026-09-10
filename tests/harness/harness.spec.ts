@@ -722,9 +722,40 @@ describe('harness — the real-state canary (BUG-030)', () => {
       }
       if (exists) {
         const content = await readFile(realBaton, 'utf8')
-        // The bootstrap default is what BUG-030 saw written over a live baton.
-        // Its presence here would mean a suite had just reset the real one.
-        expect(content).not.toContain('Bootstrapped from the blueprint')
+        // The bootstrap default is what BUG-030 saw written over a LIVE baton,
+        // so its presence USED to be treated as proof a suite had reset the
+        // real one. That inference holds in the blueprint and is FALSE in a
+        // freshly bootstrapped project, whose baton legitimately holds exactly
+        // this text — `scripts/new-project.sh` seeds it, and nothing has
+        // claimed the mic yet.
+        //
+        // TASK-018 phase 2 is what made that matter: this spec ships now, so
+        // the old assertion failed in every derived project on day one, on a
+        // test it never wrote. tests/bootstrap-gate #2 caught it, which is the
+        // one suite that speaks for downstream doing exactly its job.
+        //
+        // THE DISCRIMINATOR IS BUG-068's, REUSED RATHER THAN INVENTED: a legit
+        // write goes through signal-set.sh, which ALWAYS appends to the
+        // journal; BUG-030's clobber writes signal.md directly and appends
+        // nothing. So a baton at the bootstrap default with a journal holding
+        // only its own seed line is a project that has not started yet, while
+        // the same baton under a journal full of real flips is a live baton
+        // that something reset. The check keeps its teeth downstream instead
+        // of being switched off there.
+        const journal = join(REPO_ROOT, 'logs/state/signal-history.log')
+        let flips = 0
+        try {
+          flips = (await readFile(journal, 'utf8')).split('\n').filter((l) => l.trim()).length
+        } catch {
+          flips = 0
+        }
+        if (flips > 1) {
+          expect(
+            content,
+            `the live baton holds the bootstrap default while the journal records ${flips} ` +
+              `flips — something reset a baton that was in use (BUG-030)`,
+          ).not.toContain('Bootstrapped from the blueprint')
+        }
       }
     })
   })

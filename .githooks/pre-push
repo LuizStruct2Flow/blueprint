@@ -379,23 +379,77 @@ else
 fi
 
 _st_osv_scanner(){
-  # Scan every lockfile in the repo. osv-scanner v2 exits non-zero BOTH on a real
-  # finding AND when there are no lockfiles at all ("No package sources found",
-  # exit 128) — so a repo without lockfiles (this template before bootstrap, or a
-  # workspace not yet `npm install`ed) must be a clean no-op, not a CVE. Only a
-  # non-zero exit WITH actual scan output is a failure.
-  # `if assign=$(cmd); then` keeps the failing exit OUT of `set -e`'s reach (a bare
-  # `osv_out=$(failing)` aborts the hook under /bin/sh before we can inspect it).
-  if osv_out=$(osv-scanner scan --recursive . 2>&1); then
-    :  # clean — no vulnerabilities
-  elif printf '%s' "$osv_out" | grep -q "No package sources found"; then
-    :  # no lockfiles in this repo (template / pre-bootstrap) — nothing to scan
-  else
-    printf '%s\n' "$osv_out" | tail -20
-    echo "❌ osv-scanner found a CVE in a dependency."
-    echo "   Upgrade or pin to a known-good version. Track lower-severity CVEs"
-    echo "   in docs/config/findings.md with a planned upgrade date."
+  # POLICY: MEDIUM+ (CVSS >= 4.0) blocks. Lower-severity advisories are printed
+  # and tracked in docs/config/findings.md; they do not block the push. This is
+  # the SAME policy .github/workflows/security.yml's `sca` job applies, with the
+  # same jq classification over the same --format=json output.
+  #
+  # BUG-045: the two used to disagree. This hook failed on ANY non-zero exit that
+  # was not the literal "No package sources found" — no severity filter at all —
+  # while CI blocked MEDIUM+ only. A LOW advisory with no upgrade available
+  # therefore blocked every local push with no in-gate escape, and the only exit
+  # was --no-verify. A gate people route around protects nothing (BUG-031).
+  # Only the blueprint felt no pain, because it had no lockfile and took the
+  # no-op branch; TASK-018 phase 2 removes that exemption everywhere.
+  #
+  # --allow-no-lockfiles turns "No package sources found" into a clean exit, so a
+  # repo with no lockfile (a template before bootstrap, a workspace not yet
+  # installed) is a PASS by the tool's own contract rather than a string parsed
+  # out of stderr. NOTE: in that case osv-scanner emits `"results": null`, not
+  # `[]` — verified on 2.4.0 — so the completeness check below accepts both.
+  #
+  # jq is required: without a reliable parser the severity policy cannot be
+  # applied at all, and guessing from the exit code is the exact defect being
+  # fixed. So a missing jq fails CLOSED, matching _st_semgrep above.
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required to apply the MEDIUM+ severity policy, but is not installed."
+    echo "   Install it: bash scripts/install-toolchain.sh (or apt/dnf install jq)."
     return 1
+  fi
+
+  _osv_json="$(mktemp)"
+  _osv_rc=0
+  osv-scanner scan source \
+    --recursive \
+    --allow-no-lockfiles \
+    --licenses=false \
+    --format=json \
+    . >"$_osv_json" 2>/dev/null || _osv_rc=$?
+
+  # A scan that did not run is NOT a clean scan. osv-scanner exits 0 with no
+  # vulnerabilities and 1 with them; anything else is a tool failure. Require
+  # BOTH a sane exit AND a well-formed `results` key (array, or null when there
+  # were no package sources) before trusting a verdict — never coerce a missing
+  # key to zero findings, which would fail open.
+  if [ "$_osv_rc" -gt 1 ] || \
+     ! jq -e 'has("results") and ((.results | type) as $t | $t == "array" or $t == "null")' \
+          "$_osv_json" >/dev/null 2>&1; then
+    rm -f "$_osv_json"
+    echo "❌ osv-scanner could not complete (exit $_osv_rc) — the SCA gate did NOT run."
+    echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
+    return 1
+  fi
+
+  _osv_all="$(jq '[.results[]?.packages[]?.groups[]?] | length' "$_osv_json")"
+  _osv_blocking="$(jq '[.results[]?.packages[]?.groups[]? | select((.max_severity | tonumber? // 0) >= 4.0)] | length' "$_osv_json")"
+
+  if [ "${_osv_all:-0}" -gt 0 ]; then
+    jq -r '.results[]?.packages[]? as $p | $p.groups[]? | "  - \(.ids | join(", ")) (CVSS \(.max_severity // "unknown")) in \($p.package.name)@\($p.package.version)"' \
+       "$_osv_json" | head -40
+  fi
+
+  if [ "${_osv_blocking:-0}" -gt 0 ]; then
+    rm -f "$_osv_json"
+    echo "❌ osv-scanner found ${_osv_blocking} dependency vulnerabilit(ies) at MEDIUM+ (CVSS >= 4.0)."
+    echo "   Upgrade or pin to a known-good version. MEDIUM+ blocks here AND in CI,"
+    echo "   so there is nothing to be gained by pushing past it."
+    return 1
+  fi
+
+  rm -f "$_osv_json"
+  if [ "${_osv_all:-0}" -gt 0 ]; then
+    echo "⚠  osv-scanner: $((_osv_all - _osv_blocking)) advisor(ies) below MEDIUM — reported, not blocking."
+    echo "   Track them in docs/config/findings.md with a planned upgrade date."
   fi
   return 0
 }

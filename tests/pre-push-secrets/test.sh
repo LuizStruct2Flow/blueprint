@@ -118,10 +118,26 @@ printf '{"version":"1","results":[],"errors":[]}\n'
 exit 0
 EOF
 chmod +x "$FIX/bin/semgrep"
-for t in osv-scanner trivy; do
-  printf '#!/bin/sh\nexit 0\n' >"$FIX/bin/$t"
-  chmod +x "$FIX/bin/$t"
-done
+# osv-scanner's stage READS ITS JSON now (BUG-045), exactly as semgrep's above
+# always has, so a clean scan has to look like one: a bare `exit 0` with no
+# output is — correctly — a TOOL FAILURE to the new stage, because trusting an
+# empty document is the fail-open it refuses. This shim is catching up with the
+# contract; every case below still asks what it always asked.
+#
+# It was a bare `exit 0` for both tools, and that hid here rather than failing
+# loudly: this suite's #4 is the only case asserting the gate exits ZERO, so it
+# was the only one a broken SCA stage could break — and BUG-057 (a failing stage
+# aborts the rest) meant the derived gate inside tests/bootstrap-gate died at
+# tests/pre-push-scanners first and never reached this suite at all. Two stale
+# shims, one visible at a time.
+cat >"$FIX/bin/osv-scanner" <<'OSVSHIM'
+#!/bin/sh
+echo '{"results":[]}'
+exit 0
+OSVSHIM
+chmod +x "$FIX/bin/osv-scanner"
+printf '#!/bin/sh\nexit 0\n' >"$FIX/bin/trivy"
+chmod +x "$FIX/bin/trivy"
 
 # run_hook <stdin-lines>  → prints exit code
 run_hook(){
@@ -389,7 +405,11 @@ chmod +x "$FIX/bin/gitleaks"
 : > "$ARGV"
 # A PATH with the fixture's shims but no timeout/gtimeout anywhere.
 mkdir -p "$WORK/notimeout"
-for t in gitleaks semgrep osv-scanner trivy git sh sed grep cat mktemp tail rm date printf; do
+# `jq` is in this list because the SCA stage needs it (BUG-045) and fails CLOSED
+# without it. Omitting it would leave this case passing for the wrong reason:
+# it asserts the gate fails closed on a missing TIMEOUT provider, and a gate
+# failing closed on a missing jq instead looks identical from the exit code.
+for t in gitleaks semgrep osv-scanner trivy jq git sh sed grep cat mktemp tail rm date printf; do
   _src="$(command -v "$t" 2>/dev/null || true)"
   [ -n "$_src" ] && ln -sf "$_src" "$WORK/notimeout/$t" 2>/dev/null
 done

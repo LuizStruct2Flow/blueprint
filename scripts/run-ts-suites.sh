@@ -186,6 +186,18 @@ ts_suites_stage(){
     tail -15 "$_ts_out"
     echo "  ── end vitest output ──"
   fi
+
+  # BUG-068 — SURFACE THE CANARY'S NOTES EVEN WHEN THE RUN PASSED.
+  #
+  # The real-state canary reports a baton change it judged legitimate (a
+  # concurrent agent flipping the mic through signal-set.sh) rather than failing
+  # on it. That verdict is a PASS, and on a passing run everything vitest
+  # printed goes into $_ts_out and is deleted two lines down — so without this
+  # the report would exist only inside the test, which is precisely the silent
+  # pass the canary was changed to avoid. `CANARY-NOTE:` is the marker
+  # tests/harness/canary.ts emits; the two must move together.
+  grep -F 'CANARY-NOTE:' "$_ts_out" | sed 's/^/  ⚠ /' | head -20 || true
+
   rm -f "$_ts_out"
 
   # shellcheck disable=SC2086

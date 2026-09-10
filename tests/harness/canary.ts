@@ -69,6 +69,11 @@ async function snapshotOne(target: CanaryTarget): Promise<Snapshot> {
   }
 }
 
+/** Lines in a file's content. Newline count, so an appended line reads as +1. */
+function countLines(content: string): number {
+  return (content.match(/\n/g) ?? []).length
+}
+
 export class RealStateCanary {
   private constructor(private readonly before: Snapshot[]) {}
 
@@ -108,9 +113,51 @@ export class RealStateCanary {
    * leaves less coverage than admitting the gap. harness.spec.ts pins this
    * behaviour with a case, so the limit cannot quietly drift away from the
    * prose again in either direction.
+   *
+   * THE LIVE BATON IS WITNESSED RATHER THAN FROZEN (BUG-068), and the
+   * discriminator is exact rather than a heuristic:
+   *
+   *   BUG-030's clobber writes signal.md DIRECTLY and appends NOTHING to
+   *   logs/state/signal-history.log. A real agent's flip goes through
+   *   scripts/signal-set.sh, which ALWAYS appends one line to that journal.
+   *
+   * So: baton unchanged → pass; baton changed AND the journal grew → REPORT,
+   * do not fail; baton changed and the journal did not → fail, because that is
+   * the defect this canary exists for. This makes the guard SHARPER, not
+   * weaker — before it, the two were indistinguishable and the test was blamed
+   * for both. No lock, no snapshot-and-restore, no loss of scope.
+   *
+   * RESIDUAL, stated because it is real and not zero: a test that itself called
+   * signal-set.sh against the REAL baton would append to the real journal and
+   * be waved through. Two things keep it small — AGENT_SIGNAL_FILE is on the
+   * harness's forbidden list (env.ts, R3), so a scenario child cannot reach the
+   * real baton by inheriting a variable; and a fixture would have to name the
+   * real path explicitly, which is not something one does by accident. It is
+   * NOT closed, because closing it means attributing an append, and the journal
+   * carries nothing to attribute by — the same wall the feed hits three
+   * paragraphs up. If someone later makes appends attributable, close it here.
    */
   async assertUnchanged(escapeToken?: string): Promise<void> {
     const problems: string[] = []
+    const notes: string[] = []
+
+    // BUG-068 — THE JOURNAL IS THE WITNESS.
+    //
+    // Read once, before the loop, because the baton's verdict depends on it and
+    // the two are separate targets. `null` means there is no journal target, or
+    // it could not be read: the baton then has no witness and any change to it
+    // fails, which is the fail-closed direction. Omitting the journal must not
+    // be a way to switch the guard off.
+    const journalBefore = this.before.find(
+      (s) => s.target.label === 'baton journal',
+    )
+    let journalGrew = false
+    if (journalBefore?.content != null) {
+      const now = await snapshotOne(journalBefore.target)
+      journalGrew =
+        now.content != null &&
+        countLines(now.content) > countLines(journalBefore.content)
+    }
 
     for (const before of this.before) {
       const after = await snapshotOne(before.target)
@@ -131,7 +178,12 @@ export class RealStateCanary {
         continue
       }
 
-      const isAppendOnly = before.target.label === 'activity feed'
+      // The journal joins the feed as append-only (BUG-068). signal-set.sh only
+      // ever appends to it, so growth is normal and a rewrite or truncation is
+      // damage — the same two-way test the feed already gets.
+      const isAppendOnly =
+        before.target.label === 'activity feed' ||
+        before.target.label === 'baton journal'
       if (isAppendOnly) {
         if (!after.content!.startsWith(before.content!)) {
           problems.push(
@@ -149,10 +201,32 @@ export class RealStateCanary {
       }
 
       if (after.content !== before.content) {
+        if (before.target.label === 'live baton' && journalGrew) {
+          notes.push(
+            `live baton changed during the run AND ${journalBefore!.target.path} ` +
+              `grew — a concurrent agent flipped the mic through signal-set.sh. ` +
+              `Not a fixture escape (${before.target.path})`,
+          )
+          continue
+        }
         problems.push(
           `${before.target.label} CHANGED (${before.target.path})`,
         )
       }
+    }
+
+    // REPORTED, NEVER SILENT. A canary that quietly waves something through is
+    // indistinguishable from one that was switched off, which is this repo's
+    // signature failure (BUG-004, A-22, BUG-066). The operator has to be able to
+    // see that the canary looked, saw a change, and judged it legitimate.
+    //
+    // `CANARY-NOTE:` is a contract with scripts/run-ts-suites.sh, which greps
+    // for it and surfaces these lines even on a PASSING gate run — where vitest
+    // output is otherwise captured and discarded. Changing the marker in one
+    // place makes the report invisible in the gate while every test here still
+    // passes, so the two must move together.
+    for (const note of notes) {
+      console.warn(`CANARY-NOTE: ${note}`)
     }
 
     if (problems.length > 0) {

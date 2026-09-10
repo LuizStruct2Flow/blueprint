@@ -694,18 +694,18 @@ EOF
       echo "        reason that reads as deliberate. Add the file to MANAGED_FILES, or"
       echo "        export-ignore it so no project is told it should have been there."
     elif [ "$TS_SHIPS" -eq 0 ] && [ -n "$ts_shipping" ]; then
-      fail "#2c the TS toolchain ships in PART —$ts_shipping reach every derived project while$ts_absent do not"
+      fail "#2c BUG-073: the TS toolchain ships in PART —$ts_shipping reach every derived project while$ts_absent do not"
       echo "        A partial toolchain is worse than none: the recipient gets machinery it"
       echo "        cannot use, and .github/workflows/security.yml is MANAGED, so its ts-tests"
       echo "        job runs 'npm ci' in a project holding half a toolchain and goes red on the"
       echo "        first push, on a job that project never wrote (BUG-061). Either export-ignore"
       echo "        the shipping half in .gitattributes, or make the phase-2 move whole."
     elif [ "$SPECS_SHIP" -eq 1 ] && [ "$TS_SHIPS" -eq 0 ]; then
-      fail "#2c *.spec.ts files ship to derived projects while the TS toolchain does not — every recipient gets specs with no runner"
+      fail "#2c BUG-073: *.spec.ts files ship to derived projects while the TS toolchain does not — every recipient gets specs with no runner"
       echo "        Ship tests/package.json, tests/tsconfig.json, tests/vitest.config.ts and"
       echo "        tests/harness/, or export-ignore the specs. Half of the move is worse than none."
     elif [ "$TS_SHIPS" -eq 1 ] && [ "$SPECS_SHIP" -eq 0 ]; then
-      # THE PHASE-2 HALF OF THE SAME CLAIM, and it did not exist until phase 2
+      # THE PHASE-2 HALF OF THE SAME CLAIM (BUG-073), and it did not exist until phase 2
       # was reached. Every branch above tests the invariant from the phase-1
       # side: machinery withheld, or machinery arriving that the recipient
       # cannot use. The mirror image is machinery arriving that the recipient
@@ -750,7 +750,7 @@ EOF
       echo "        harness is a project whose every TypeScript suite dies on an unresolved"
       echo "        import, while TS_SHIPS still reads 1 because one harness file arrived."
     elif [ "$TS_SHIPS" -eq 1 ]; then
-      pass "#2c phase 2 is whole — the TS toolchain ships from under the managed 'tests/' directory, so bootstrap and pull deliver the same thing (checked $_mf_n MANAGED_FILES entries)"
+      pass "#2c BUG-073: phase 2 is whole — the TS toolchain ships from under the managed 'tests/' directory, so bootstrap and pull deliver the same thing (checked $_mf_n MANAGED_FILES entries)"
     else
       pass "#2c phase 1 is whole — no spec ships, and the TS toolchain is export-ignore'd from under the managed 'tests/' directory, so neither path delivers it (checked $_mf_n MANAGED_FILES entries)"
     fi

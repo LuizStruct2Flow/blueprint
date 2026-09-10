@@ -206,7 +206,6 @@ jobs:
           bash tests/manifest/test.sh
           bash tests/ts-bridge/test.sh
           bash tests/env-namespace/test.sh
-          bash tests/template-source/test.sh
           bash tests/no-chain-guard/test.sh
           bash tests/pull-behaviour/test.sh
           bash tests/git-isolation/test.sh

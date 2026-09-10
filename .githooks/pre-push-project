@@ -610,19 +610,13 @@ fi
 # seeded verbatim into linkedin-watcher-agent. Asserts against `git archive`
 # (what bootstrap actually ships) rather than against .gitattributes, and runs a
 # real bootstrap to prove the split did not drop the configs. ~2s.
-if [ -f tests/template-source/test.sh ]; then
-  _st_template_source(){
-    bash tests/template-source/test.sh || {
-      echo "❌ tests/template-source/test.sh failed (BUG-009)."
-      echo "   The blueprint's own project_config_*.md must not ship, templates/"
-      echo "   must carry no host paths, and bootstrap must still seed all five."
-      return 1
-    }
-  }
-  pipe_stage "template-source · BUG-009" _st_template_source
-else
-  pipe_skip "template-source · BUG-009" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
+# Equivalence proven by mutation first, and the recipe has a wrinkle worth
+# knowing: `git archive` reads .gitattributes from the COMMIT, not the working
+# tree, so deleting the `project_config_overview.md export-ignore` line only
+# reintroduces BUG-009 once that deletion is committed. Uncommitted, both
+# runners stay green, which would read as a spec that cannot fail. Committed,
+# both go red at #2 naming the leaked file.
 
 # HISTORICAL NOTE — tests/signal-set/ and tests/a2bp-contamination/ were both
 # CI-only under the 30 s ceiling. Both are back in this file as of 2026-08-02

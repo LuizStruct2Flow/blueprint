@@ -29,8 +29,10 @@
 # publishes by atomic rename, so a watch on the inode goes deaf after one publish.
 # The founder then required the system be OS-agnostic or Linux-based, which made
 # it indefensible: inotify is Linux-only, `inotifywait` is not installed, and the
-# Brewfile is macOS-only — a Linux-only dependency shipped through a macOS-only
-# package manager. The property that mattered was never "do not poll", it was
+# only install path the blueprint then documented was a macOS-only Brewfile — a
+# Linux-only dependency shipped through a macOS-only package manager. (That
+# Brewfile is gone as of TASK-017, for the same reason this watcher is.)
+# The property that mattered was never "do not poll", it was
 # "exit is an event". A 1s sleep buys that on any POSIX box, and the rename
 # subtlety disappears because content is compared rather than inodes watched.
 #

@@ -61,8 +61,18 @@ fi
 # in STACK_DEFAULTS.md §"Git author identity". Probed in a scratch dir outside
 # any repo so the blueprint's own local config can't mask a missing global one —
 # the new project will see global/env only.
+#
+# `user.useConfigOnly=true` is REQUIRED, not belt-and-braces (BUG-044). Without
+# it `git var GIT_AUTHOR_IDENT` does not fail when identity is absent — it
+# GUESSES one, from the passwd gecos name and the hostname. On macOS that
+# always succeeds, so this probe passed on a Mac with no identity configured at
+# all and bootstrap went on to commit as `Someone <someone@MacBook-Pro.local>`.
+# A guard against assuming an identity was itself assuming one. Verified: with
+# global+system config hidden it returned exactly that, and with useConfigOnly
+# it refuses ("auto-detection is disabled"). The documented one-shot
+# GIT_AUTHOR_* override still works, because env vars outrank config-only mode.
 _ident_probe="$(mktemp -d)"
-if ! git -C "$_ident_probe" var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+if ! git -C "$_ident_probe" -c user.useConfigOnly=true var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
   rmdir "$_ident_probe" 2>/dev/null || true
   echo "❌ No git author identity configured — nothing has been created." >&2
   echo "   Bootstrap inherits your identity rather than assuming one. Set it:" >&2
@@ -241,10 +251,34 @@ echo "🔤 Substituted placeholders in $_subst_count file(s)."
 # state under logs/state/, so a freshly bootstrapped project has none. Seed it
 # here for the same reason the roster is copied from its .example: a new project
 # should be able to run the ceremony without a manual first step.
+#
+# BUG-046 — the seed is scrubbed of the CALLER's baton pointers, because the
+# only baton this line may ever write is the NEW PROJECT'S.
+#
+# `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.sh:87) and
+# $AGENT_STATE_HOME (:56), and `codex-signal-watch.sh` EXPORTS
+# AGENT_SIGNAL_FILE into every dispatched wake command. So bootstrapping from a
+# dispatched agent — or from any suite that drives this script without scrubbing
+# its own environment — resolved the seed to the CALLER's live mic and published
+# `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a
+# real hand-off, silently, while everything reported success. That is BUG-030,
+# reproduced here from four different suites.
+#
+# Fixed at the source rather than in the callers: an override that means "this
+# session's baton" cannot also mean "the baton of a project that does not exist
+# yet", so it is not an override this call may honour AT ALL. Unsetting inside
+# the subshell — rather than computing a path and passing `--file` — keeps the
+# target's own scripts/lib/state-dir.sh as the SINGLE derivation of where its
+# baton lives (A-09; tests/state-dir #7), instead of adding a second copy of
+# that rule here that could drift from it.
 if [[ -f "$TARGET_DIR/scripts/signal-set.sh" ]]; then
-  ( cd "$TARGET_DIR" && bash scripts/signal-set.sh \
+  (
+    cd "$TARGET_DIR" || exit 0
+    unset AGENT_SIGNAL_FILE AGENT_STATE_HOME
+    bash scripts/signal-set.sh \
       --holder Nobody --state IDLE \
-      --task "Bootstrapped from the blueprint. Claim the mic to begin." ) >/dev/null 2>&1 || true
+      --task "Bootstrapped from the blueprint. Claim the mic to begin."
+  ) >/dev/null 2>&1 || true
 fi
 
 # --- Today's date in HANDOVER + AGENT_SIGNAL stamps ---
@@ -368,7 +402,12 @@ cat <<EOF
 Next steps:
   1. cd $TARGET_DIR
   2. Open in VS Code: code .
-  3. brew bundle    (installs gitleaks + semgrep + osv-scanner for the pre-push gate)
+  3. bash scripts/install-toolchain.sh
+     (installs gitleaks + semgrep + osv-scanner for the pre-push gate: Homebrew on
+     macOS, pinned release binaries into ~/.local/bin on Linux. Add --infra for the
+     IaC set; 'check' reports what is missing without installing. The gate SKIPS a
+     scanner it cannot find, so an unprepared machine gets a green gate that
+     checked less.)
   4. Fill out project_config_overview.md, project_config_paths.md, project_config_dod.md, project_config_security.md, project_config_infra.md
   5. Create your backend/frontend src tree as needed
   6. Optional: APPEND your project guards to .githooks/pre-push-project,

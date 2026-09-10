@@ -34,6 +34,26 @@ FAILED=0
 fail(){ echo "FAIL: $*"; FAILED=1; }
 pass(){ echo "  ok — $*"; }
 
+# BUG-049 — ONE owned temp root, removed on EVERY exit path.
+#
+# This suite had no `trap` at all and allocated six independent `mktemp -d`
+# roots. `hostile2` (#6b) was removed by nothing on any path, so it leaked on
+# every single run; the other five were removed by an `rm -rf` on the SUCCESS
+# path only, so a failure, an early exit or a Ctrl-C left all of them behind.
+#
+# Fixed by ownership rather than by five more `rm -rf` lines: everything is
+# allocated under one root that the trap owns, so a case cannot forget to clean
+# up after itself — the same conclusion CLAUDE.md reaches about no-chain-guard
+# and BUG-004, and the shape TASK-018's fixture handles make structural.
+#
+# The per-case `rm -rf` lines below are kept: they free the space mid-run and
+# state each case's own boundary. They are no longer the ONLY cleanup path.
+SD_TMP="$(mktemp -d)"
+trap 'rm -rf "$SD_TMP"' EXIT INT TERM
+# A named subdirectory of the owned root, keeping mktemp's uniqueness so a
+# suite run twice concurrently still gets two distinct fixtures.
+sd_tmpdir(){ mktemp -d "$SD_TMP/$1.XXXXXX"; }
+
 DISPATCHERS="scripts/start-codex-signal-watch.sh scripts/codex-signal-watch.sh scripts/start-gemini-signal-watch.sh"
 
 # ===========================================================================
@@ -278,7 +298,7 @@ check_ok "a correct derived assignment" \
 # GIT_DIR pointed at a decoy — an end-to-end assertion rather than a re-implemented
 # formula. #6b is kept: it proves the decoy environment is genuinely hostile, so
 # a green #8 cannot be green by accident.
-hostile2="$(mktemp -d)"
+hostile2="$(sd_tmpdir hostile2)"
 mkdir -p "$hostile2/decoy"
 GIT_DIR="$hostile2/decoy/.git" git init -q "$hostile2/decoy" 2>/dev/null || git init -q "$hostile2/decoy" 2>/dev/null
 old_got="$(
@@ -353,8 +373,8 @@ done
 #        * dispatch-time derivation (state must land under the FIXTURE repo,
 #          which did not exist when this suite started)
 # ===========================================================================
-WORK="$(mktemp -d)"
-LINKS="$(mktemp -d)"
+WORK="$(sd_tmpdir work)"
+LINKS="$(sd_tmpdir links)"
 mkdir -p "$WORK/scripts/lib"
 cp "$ROOT/scripts/start-codex-signal-watch.sh" \
    "$ROOT/scripts/codex-signal-watch.sh" \
@@ -466,7 +486,13 @@ fi
 # BSD/older macOS, where `-f` is rejected. So #10b would not have caught it, and
 # only #10's grep for the flag would. Together: #10 forbids the dependency, #10b
 # proves the portable walk that replaced it actually follows a chain.
-probe="$(mktemp -d)"
+# BUG-036 — physical path. The resolver under test correctly returns a
+# fully-resolved path, and on macOS `mktemp -d` hands back /var/folders/...
+# while /var is a symlink to /private/var. Comparing the resolver's correct
+# answer against the unresolved literal failed #10b with "chain not followed"
+# — an accusation against the resolver for doing exactly its job. Same
+# mechanism as the WORK normalisation in tests/agent-activity-bound.
+probe="$(cd "$(sd_tmpdir probe)" && pwd -P)"
 mkdir -p "$probe/real/scripts" "$probe/links/nested"
 blk="$(sed -n '/^_bp_self=/,/^_bp_root=/p' "$ROOT/scripts/codex-signal-watch.sh")"
 printf '%s\nprintf "%%s\\n" "$_bp_root"\n' "$blk" > "$probe/real/scripts/probe.sh"
@@ -487,7 +513,7 @@ rm -rf "$probe"
 # failure mode Codex flagged in round 3, where `readlink -f` degrading quietly
 # was worse than the missing-file error it replaced. Trading a hang for a lie is
 # not a fix, so the exhausted case exits non-zero.
-cyc="$(mktemp -d)"
+cyc="$(sd_tmpdir cyc)"
 ln -s "$cyc/b.sh" "$cyc/a.sh"
 ln -s "$cyc/a.sh" "$cyc/b.sh"
 cyc_out="$(bash "$cyc/a.sh" 2>&1)"
@@ -512,7 +538,7 @@ rm -rf "$cyc"
 # runs on this kernel like any other line. The lesson is that "the OS gets there
 # first" was a fact about the DEFAULT environment, not about the code — and a
 # test controls its environment.
-hop="$(mktemp -d)"
+hop="$(sd_tmpdir hop)"
 mkdir -p "$hop/real/scripts" "$hop/bin"
 blk="$(sed -n '/^_bp_self=/,/^_bp_root=/p' "$ROOT/scripts/codex-signal-watch.sh")"
 printf '%s\nprintf "%%s\\n" "$_bp_root"\n' "$blk" > "$hop/real/scripts/probe.sh"

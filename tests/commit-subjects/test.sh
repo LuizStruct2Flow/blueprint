@@ -21,6 +21,19 @@
 
 set -u
 
+# BUG-047 — never inherit git's repo pointers. Case #6 builds a throwaway repo
+# with `git -C "$T6" init -q` and then writes `core.hooksPath`, `user.email` and
+# `user.name` into it. With GIT_DIR set — which is exactly what git hands every
+# hook, and the pre-push gate runs this suite — `git -C` protects nothing: `init`
+# returns 0 while creating no .git in $T6, and the three `git config` writes land
+# in the repository GIT_DIR names. Reproduced against a victim repo: it gained
+# `core.hooksPath=.githooks` and had its identity overwritten, while this suite
+# printed PASS and exited 0. Setting core.hooksPath on a real repo is the A-22 /
+# BUG-004 failure, produced BY A TEST. It was covered only by .githooks/pre-push,
+# so a direct run hit the real repository. tests/git-isolation #1 now proves this
+# line by execution rather than by grepping for it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 FAILED=0
 pass() { echo "  ok — $1"; }

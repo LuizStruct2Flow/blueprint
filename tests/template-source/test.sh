@@ -25,6 +25,16 @@
 set -u
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
+# BUG-046 — never inherit the caller's baton pointers either. Case #4 drives
+# scripts/new-project.sh, which seeds the new project's live mic;
+# `signal-set.sh` honours $AGENT_SIGNAL_FILE / $AGENT_STATE_HOME, and
+# scripts/codex-signal-watch.sh EXPORTS AGENT_SIGNAL_FILE into every dispatched
+# wake. Running this suite from inside one therefore published
+# `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a
+# real hand-off and reported PASS. new-project.sh now scrubs them at the source;
+# this line makes a DIRECT run safe too.
+unset AGENT_SIGNAL_FILE AGENT_STATE_HOME AGENT_FEED_LOG
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FAILED=0
 fail(){ echo "FAIL: $*"; FAILED=1; }

@@ -68,3 +68,48 @@ arm_gate() {
   fi
   return 0
 }
+
+# arm_push_keepalive ROOT — keep the push connection alive across a long gate.
+#
+# BUG-032. git opens the SSH connection, THEN runs pre-push, THEN transfers on
+# that same connection. This gate takes ~380 s, comfortably past the remote's
+# idle timeout, so the connection is dead before the transfer starts: the gate
+# prints PASSED and the push fails with "Connection to github.com closed by
+# remote host" — or, worse, with nothing at all. Measured on 2026-09-09: the
+# message appeared mid-gate on consecutive pushes and vanished the moment a
+# keepalive was passed by hand.
+#
+# It is armed here rather than documented because it is repo-LOCAL config and a
+# clone therefore starts without it — the identical trap as core.hooksPath
+# above, whose lesson (BUG-004, A-22) is that a setting the operator must
+# remember is a setting that is absent when it matters. Every push in this
+# session needed GIT_SSH_COMMAND passed explicitly, which is exactly the
+# "remembered at the moment the author is busy" shape CLAUDE.md rejects.
+#
+# Same non-clobber rule as the gate: a deliberate core.sshCommand belongs to
+# whoever set it. We warn and leave it, because silently rewriting another
+# tool's transport is worse than a slow push.
+arm_push_keepalive() {
+  _ak_root="${1:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  git -C "$_ak_root" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+  _ak_cur="$(git -C "$_ak_root" config --get core.sshCommand 2>/dev/null || true)"
+  case "$_ak_cur" in
+    *ServerAliveInterval*) return 0 ;;
+    "") ;;
+    *)
+      echo "  ⚠ push: core.sshCommand is set and carries no ServerAliveInterval —"
+      echo "     leaving it alone. A gate longer than the remote's idle timeout can"
+      echo "     kill the push after a green run (BUG-032)."
+      return 0
+      ;;
+  esac
+
+  # 20 s is well inside every common idle timeout, and 30 missed probes before
+  # giving up means a genuinely dead link still fails rather than hanging.
+  if git -C "$_ak_root" config --local core.sshCommand \
+       'ssh -o ServerAliveInterval=20 -o ServerAliveCountMax=30' 2>/dev/null; then
+    echo "  ✓ push: keepalive armed (core.sshCommand, BUG-032)"
+  fi
+  return 0
+}

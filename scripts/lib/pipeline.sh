@@ -37,6 +37,14 @@
 #   pipe_stage "secret scan · gitleaks" run_gitleaks
 #   pipe_skip  "IaC synth" "no infrastructure/ directory"
 #   pipe_finish            # prints the summary; returns 0 pass / 1 fail
+#
+# For a batch runner that executes many suites in ONE process, results are
+# injected instead of run — see §"injected results" for the API and, more
+# importantly, for what it does and does not guarantee:
+#
+#   pipe_batch_begin "vitest" alpha beta      # declare, BEFORE running
+#   pipe_stage_report "alpha" 1240 0          # ...per already-executed suite
+#   pipe_batch_end "$runner_rc"               # reconcile; fails closed
 
 # The shared feed appender, so gate results land in logs/agent-activity.log
 # alongside every other agent's work rather than only in the terminal that
@@ -51,6 +59,13 @@ _PIPE_DIR=""
 _PIPE_TITLE=""
 _PIPE_T0=""
 _PIPE_N=0
+
+# A literal newline, as a variable. POSIX sh has no arrays, so the injected-
+# result API keeps its label sets as newline-delimited strings and matches them
+# with `case` — `*"$_PIPE_NL$label$_PIPE_NL"*`. Writing the newline inline in
+# every pattern works but is unreadable and easy to mangle in a later edit.
+_PIPE_NL='
+'
 
 # `date +%s%N` is GNU; macOS/BSD date has no %N and prints a literal "N".
 # Probe once, then commit to the form that works — the same discipline the feed
@@ -88,6 +103,10 @@ pipe_init(){
   _PIPE_T0="$(_pipe_now)"
   _PIPE_N=0; _PIPE_OK=0; _PIPE_BAD=0; _PIPE_SKIP=0
   _PIPE_SLOW_MS=0; _PIPE_SLOW_LABEL=""
+  # Injected-result state (see §"injected results" below). Reset per run so a
+  # second pipe_init in one process cannot inherit a half-open batch.
+  _PIPE_BATCH=""; _PIPE_BATCH_T0=0; _PIPE_BATCH_N=0; _PIPE_BATCH_BAD=0
+  _PIPE_BATCH_EXPECT="$_PIPE_NL"; _PIPE_BATCH_SEEN="$_PIPE_NL"
 
   # Buffering needs a scratch dir. If we cannot get one — /tmp full, mounted
   # noexec, coreutils not on PATH — the gate must still RUN and still fail
@@ -240,6 +259,225 @@ pipe_stage_soft(){ _pipe_run "$@"; }
 pipe_skip(){
   _pipe_line skip "$1" "skipped · $2"
   _pipe_record skip
+}
+
+# --- injected results: one runner process, many stages -----------------------
+#
+# WHY THIS EXISTS. Every function above measures a stage by running it. A batch
+# runner — one `vitest run` covering dozens of suites, one `pytest`, one gradle
+# invocation — cannot be expressed that way without giving up the thing that
+# makes it worth using. The two honest-reporting properties this gate depends on
+# both collapse into a single line:
+#
+#   * the render stops naming the suites, so "37 suites ran" and "1 suite ran"
+#     look identical — the BUG-005 shape, where absence is invisible; and
+#   * slowest-stage tracking degrades to `slowest: vitest 200s`, which names
+#     nothing anyone can optimise.
+#
+# So the runner reports each already-executed result back, and it renders,
+# tallies, tracks and warns exactly like a stage this file ran itself.
+#
+# ---------------------------------------------------------------------------
+# WHAT STOPS THIS BEING A WAY TO FAKE A GREEN STAGE.
+#
+# Be exact about the boundary: **this file does not execute a reported stage, so
+# it cannot verify that one ran.** Anything claiming otherwise would be a
+# guarantee we do not provide. What the API does instead is make *accidental*
+# silent loss — a suite dropped from a config, a runner that died early, a
+# reporter that emitted nothing — impossible to render as green:
+#
+#   1. A report is only accepted inside an open batch. `pipe_stage_report` on
+#      its own, anywhere in a gate, is a hard failure — it cannot be sprinkled
+#      next to real stages to conjure a passing line.
+#   2. The batch DECLARES its expected labels up front, before the runner runs.
+#      A label that was not declared is refused; a declared label that never
+#      reported fails the batch by name. This is the control that catches "the
+#      suite quietly stopped being collected".
+#   3. A label reported twice is refused — the count cannot be padded to satisfy
+#      a non-vacuity guard (`bootstrap-gate` #3 requires ≥25 stages).
+#   4. The runner's OWN exit status must agree with what it reported. Non-zero
+#      with every stage green means it died outside a suite; zero while a stage
+#      failed means it is lying about itself. Both fail.
+#   5. A malformed report — empty label, non-numeric duration or rc — is
+#      recorded as a FAILED stage, never skipped and never passed. A broken
+#      reporter blocks the push instead of quietly emitting fewer lines.
+#   6. `pipe_stage_report` always returns 0 and the failure lives in the
+#      pipeline's own tally, which no caller can un-record. There is deliberately
+#      no status for a caller to drop — the inverse of `pipe_stage`, which exits
+#      *because* a dropped `||` would fail open.
+#
+# RESIDUAL RISK, stated plainly rather than papered over:
+#
+#   * **If the declared set is derived from the runner's own output, every check
+#     above reduces to trusting the runner.** The declaration has to come from a
+#     source the runner cannot edit at run time — in this repo that is
+#     `tests/SUITES.md`, the same source the manifest suite reconciles against.
+#     Declaring nothing (`pipe_batch_begin LABEL` with no labels) leaves only
+#     checks 1, 3, 4, 5, 6: enough to catch a crashed or self-contradicting
+#     runner, NOT enough to catch a suite silently dropped from its config.
+#     That hole is the caller's to close, and it is why the expected set is a
+#     parameter rather than an option.
+#   * Nothing here defends against deliberate fabrication. A caller that wants a
+#     green line can print one. The threat model is a gate that stops covering
+#     something without anyone noticing, not an author lying on purpose.
+# ---------------------------------------------------------------------------
+#
+# Usage:
+#   pipe_batch_begin "vitest" $(suite_labels_from_SUITES_md)
+#   # ...run the batch, parse its machine-readable report, then per suite:
+#   pipe_stage_report "signal-dispatch" 37500 0
+#   pipe_batch_end "$runner_rc"      # fails closed; does not return on failure
+
+# _pipe_fatal LABEL DETAIL — a misuse of the injection API is itself a failed
+# stage. It renders, it tallies, it prints the summary and it exits 1, because a
+# gate whose reporting contract was violated has not proved anything.
+_pipe_fatal(){
+  _pipe_line bad "$1" "injection guard · $2"
+  _pipe_record bad
+  printf '\n%s─── injection guard · %s ───%s\n' "$_C_BAD" "$1" "$_C_OFF"
+  printf '%s\n' "$2"
+  printf '%sSee scripts/lib/pipeline.sh §"injected results".%s\n' "$_C_BAD" "$_C_OFF"
+  pipe_finish
+  exit 1
+}
+
+# _pipe_declared LIST LABEL — is LABEL in the newline-delimited LIST?
+_pipe_declared(){
+  case "$1" in
+    *"$_PIPE_NL$2$_PIPE_NL"*) return 0 ;;
+  esac
+  return 1
+}
+
+# pipe_batch_begin LABEL [EXPECTED_LABEL...]
+pipe_batch_begin(){
+  [ -n "${_PIPE_BATCH:-}" ] && \
+    _pipe_fatal "${1:-batch}" "batch '$_PIPE_BATCH' is still open — batches do not nest"
+  _PIPE_BATCH="${1:-batch}"
+  [ "$#" -gt 0 ] && shift
+  _PIPE_BATCH_T0="$(_pipe_now)"
+  _PIPE_BATCH_N=0
+  _PIPE_BATCH_BAD=0
+  _PIPE_BATCH_SEEN="$_PIPE_NL"
+  _PIPE_BATCH_EXPECT="$_PIPE_NL"
+  for _e in "$@"; do
+    [ -n "$_e" ] || continue
+    _PIPE_BATCH_EXPECT="$_PIPE_BATCH_EXPECT$_e$_PIPE_NL"
+  done
+  return 0
+}
+
+# pipe_stage_report LABEL DURATION_MS RC [NOTE] — inject one already-executed
+# result. Renders identically to a stage this file ran, feeds the same tally,
+# the same slowest-stage tracking and the same SLO. ALWAYS RETURNS 0; see
+# control 6 above.
+pipe_stage_report(){
+  _rlbl="${1:-}"; _rms="${2:-}"; _rrc="${3:-}"; _rnote="${4:-}"
+
+  [ -n "${_PIPE_BATCH:-}" ] || \
+    _pipe_fatal "${_rlbl:-pipe_stage_report}" \
+      "reported outside a batch — call pipe_batch_begin first"
+
+  [ -n "$_rlbl" ] || _pipe_fatal "pipe_stage_report" "empty LABEL"
+  case "$_rms" in
+    ''|*[!0-9]*) _pipe_fatal "$_rlbl" "DURATION_MS '$_rms' is not a non-negative integer" ;;
+  esac
+  case "$_rrc" in
+    ''|*[!0-9]*) _pipe_fatal "$_rlbl" "RC '$_rrc' is not a non-negative integer" ;;
+  esac
+  # Bounded so the value stays a meaningful exit status rather than wrapping.
+  [ "$_rrc" -gt 255 ] && _pipe_fatal "$_rlbl" "RC $_rrc is out of range (0-255)"
+
+  _pipe_declared "$_PIPE_BATCH_SEEN" "$_rlbl" && \
+    _pipe_fatal "$_rlbl" "reported twice in batch '$_PIPE_BATCH' — the stage count cannot be padded"
+
+  if [ "$_PIPE_BATCH_EXPECT" != "$_PIPE_NL" ]; then
+    _pipe_declared "$_PIPE_BATCH_EXPECT" "$_rlbl" || \
+      _pipe_fatal "$_rlbl" "not in the declared set for batch '$_PIPE_BATCH' — declaration and runner disagree"
+  fi
+
+  _PIPE_BATCH_SEEN="$_PIPE_BATCH_SEEN$_rlbl$_PIPE_NL"
+  _PIPE_BATCH_N=$(( _PIPE_BATCH_N + 1 ))
+
+  # Same slowest-stage tracking as _pipe_run. This is the point of injecting per
+  # suite at all: `slowest: signal-dispatch 37.5s` is optimisable, `slowest:
+  # vitest 200s` is not.
+  if [ "$_rms" -gt "${_PIPE_SLOW_MS:-0}" ]; then
+    _PIPE_SLOW_MS="$_rms"; _PIPE_SLOW_LABEL="$_rlbl"
+  fi
+
+  if [ "$_rrc" -eq 0 ]; then
+    _pipe_line ok "$_rlbl" "$(_pipe_dur "$_rms")${_rnote:+ · $_rnote}"
+    _pipe_record ok
+  else
+    _pipe_line bad "$_rlbl" "$(_pipe_dur "$_rms") · exit $_rrc${_rnote:+ · $_rnote}"
+    _pipe_record bad
+    _PIPE_BATCH_BAD=$(( _PIPE_BATCH_BAD + 1 ))
+  fi
+  return 0
+}
+
+# pipe_batch_end RUNNER_RC — reconcile the batch. FAILS CLOSED: on any
+# discrepancy it prints the summary and exits 1, exactly like pipe_stage.
+pipe_batch_end(){
+  _brc="${1:-}"
+  [ -n "${_PIPE_BATCH:-}" ] || _pipe_fatal "pipe_batch_end" "no batch is open"
+
+  _blbl="$_PIPE_BATCH"
+  _bn="$_PIPE_BATCH_N"
+  _bbad="$_PIPE_BATCH_BAD"
+  _bms=$(( $(_pipe_now) - _PIPE_BATCH_T0 ))
+  # Close the batch BEFORE any exit path, so a guard failure cannot leave the
+  # API accepting reports while the summary is being printed.
+  _PIPE_BATCH=""
+
+  case "$_brc" in
+    ''|*[!0-9]*) _pipe_fatal "$_blbl · runner" "RUNNER_RC '$_brc' is not a non-negative integer" ;;
+  esac
+
+  # Declared but never reported — the suite that quietly stopped running.
+  # `set -f` because field-splitting an unquoted expansion also globs, and a
+  # label containing `*` would otherwise be silently rewritten by the filesystem.
+  _missing=""
+  _oldifs="$IFS"
+  set -f
+  IFS="$_PIPE_NL"
+  set -- $_PIPE_BATCH_EXPECT
+  IFS="$_oldifs"
+  set +f
+  _bexp="$#"
+  for _e in "$@"; do
+    _pipe_declared "$_PIPE_BATCH_SEEN" "$_e" || _missing="$_missing $_e"
+  done
+  [ -n "$_missing" ] && \
+    _pipe_fatal "$_blbl · unreported" "declared but never reported:$_missing ($_bn reported in $(_pipe_dur "$_bms"))"
+
+  [ "$_bn" -eq 0 ] && \
+    _pipe_fatal "$_blbl · runner" "reported no stages at all in $(_pipe_dur "$_bms") — a runner that covered nothing must not read as a pass"
+
+  # The runner's own verdict must agree with what it reported. Either direction
+  # of disagreement is a real failure, and neither is visible in the stage lines.
+  [ "$_brc" -ne 0 ] && [ "$_bbad" -eq 0 ] && \
+    _pipe_fatal "$_blbl · runner" "exited $_brc while every reported stage passed — it failed outside any suite"
+  [ "$_brc" -eq 0 ] && [ "$_bbad" -gt 0 ] && \
+    _pipe_fatal "$_blbl · runner" "exited 0 while $_bbad reported stage(s) failed — the runner contradicts its own report"
+
+  if [ "$_bbad" -gt 0 ]; then
+    printf '\n%s─── %s · %s of %s reported stage(s) failed ───%s\n' \
+      "$_C_BAD" "$_blbl" "$_bbad" "$_bn" "$_C_OFF"
+    pipe_finish
+    exit 1
+  fi
+
+  # Feed-only, deliberately: the terminal already shows one line per suite, but
+  # "37 of 37 declared suites reported" is the durable evidence someone greps
+  # for when asking whether the gate actually covered what it claims.
+  if [ "$_bexp" -gt 0 ]; then
+    _pipe_feed "batch $_blbl: $_bn reported, $_bexp/$_bexp declared · runner exit 0 · $(_pipe_dur "$_bms") wall"
+  else
+    _pipe_feed "batch $_blbl: $_bn reported, NO declared set (undetectable drop — see pipeline.sh) · runner exit 0 · $(_pipe_dur "$_bms") wall"
+  fi
+  return 0
 }
 
 # --- summary ----------------------------------------------------------------

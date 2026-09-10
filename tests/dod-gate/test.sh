@@ -221,6 +221,37 @@ else
   fail "#7 the feed tag is never restored — every stage after the DoD block would read [DoD-Gate]"
 fi
 
+# ===========================================================================
+# 8. BUG-040 — dod_items_in_push must actually EXTRACT items.
+#
+#    Every rule in this file is built on that one function. When it returns an
+#    empty list, nothing downstream has anything to check, so every stage
+#    passes over nothing and the gate prints PASSED. That is what happened on
+#    macOS: the extraction used `sed -n 's/^\(BUG\|FEATURE\|TASK\)#...'`, and
+#    alternation inside `\(...\)` is a GNU extension BSD sed does not
+#    implement, so it matched nothing and the DoD enforced nothing.
+#
+#    The existing cases DID catch it — they reported "the rule is unenforced" —
+#    but only as a consequence, three steps downstream. This asserts the
+#    premise directly, because "the parse came back empty" is the failure that
+#    makes every other assertion here vacuous, and a vacuous suite is BUG-005.
+#    Same shape as tests/manifest asserting its own MANAGED_FILES parse is
+#    non-vacuous before trusting it.
+# ===========================================================================
+build 8
+echo x > "$W/x.txt"; git -C "$W" add -A
+git -C "$W" commit -q -m 'BUG#40: a commit whose subject the extraction must see'
+echo y > "$W/y.txt"; git -C "$W" add -A
+git -C "$W" commit -q -m 'TASK#7: and a second item of a different kind'
+items="$( cd "$W" && . ./scripts/lib/dod-gate.sh && dod_items_in_push "$BASE..HEAD" )"
+if [ -z "$items" ]; then
+  fail "#8 BUG-040: dod_items_in_push returned NOTHING for two commits that plainly name items — every DoD rule downstream is now passing over an empty list while the gate prints PASSED"
+elif printf '%s\n' "$items" | grep -q '^BUG-40$' && printf '%s\n' "$items" | grep -q '^TASK-7$'; then
+  pass "#8 BUG-040: dod_items_in_push extracts every item kind (got: $(printf '%s' "$items" | tr '\n' ' '))"
+else
+  fail "#8 BUG-040: dod_items_in_push parsed, but not what it was given — expected BUG-40 and TASK-7, got: $(printf '%s' "$items" | tr '\n' ' ')"
+fi
+
 if [ "$FAILED" -eq 0 ]; then
   echo "PASS: TASK-007 — the DoD prints as stages, and each one fails when it should."
   exit 0

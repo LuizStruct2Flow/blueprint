@@ -106,6 +106,49 @@ tests/drift-in-blueprint/          export-ignore
 tests/pull-exec-bit/               export-ignore
 tests/bootstrap-gate/              export-ignore
 
+# --- TASK-018 PHASE 1: the TypeScript harness does not ship YET --------------
+#
+# THE INVARIANT, and it is asserted rather than remembered:
+#
+#     the TS toolchain ships  IF AND ONLY IF  a SHIPPING suite is TypeScript.
+#
+# Phase 1 migrates only the six `blueprint`-tier suites above, which never leave
+# this repo. So no shipping suite is TypeScript, and the toolchain must not
+# ship either — a derived project would otherwise inherit a Node devDependency
+# and a vitest config it has no use for yet.
+#
+# WHY THIS BLOCK EXISTS AT ALL, rather than "we'll add it when we get there".
+# The two propagation paths disagree by construction, and the disagreement is
+# silent:
+#
+#   bootstrap  ships the WHOLE archive (new-project.sh: git archive HEAD),
+#              so package.json and vitest.config.ts reach a NEW project.
+#   pull       ships MANAGED_FILES only, and `tests/` IS managed while the root
+#              files are NOT — so an EXISTING project pulling would receive
+#              *.spec.ts and tests/harness/ with no runner, no config and no
+#              package.json to install one.
+#
+# That project's gate would then carry specs nothing can execute, and nothing
+# would tell it. Same shape as BUG-028: machinery shipped downstream that the
+# recipient cannot run, discovered on someone else's machine.
+#
+# THE PHASE-2 TRANSITION IS THEREFORE ALL-OR-NOTHING, and deliberately awkward
+# to half-do. Migrating the first `both`-tier suite means, in ONE change:
+#   1. delete the four export-ignore lines below,
+#   2. add package.json, tsconfig.json and vitest.config.ts to MANAGED_FILES,
+#      or a pulling project gets specs it cannot run,
+#   3. teach tests/bootstrap-gate to `npm ci` before the nested gate, or a
+#      freshly bootstrapped project fails its own first push,
+#   4. land BUG-045 — the lockfile removes osv-scanner's "No package sources
+#      found" no-op, and the local gate blocks on ANY finding while CI blocks
+#      MEDIUM+ only.
+# tests/manifest enforces (1) and (2) against each other. (3) and (4) are rowed.
+package.json                       export-ignore
+tsconfig.json                      export-ignore
+vitest.config.ts                   export-ignore
+tests/harness/                     export-ignore
+tests/**/*.spec.ts                 export-ignore
+
 # This repo's own audit register. Same class as docs/doing/** above: it is a
 # real work item of THIS repo, not template material, and its ten relative links
 # point into docs/done/, which does not ship. A derived project inherited it and

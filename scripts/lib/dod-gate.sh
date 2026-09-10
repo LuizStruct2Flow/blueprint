@@ -40,11 +40,26 @@
 #   Prints one normalised item id per line (BUG-19, TASK-1) for every commit in
 #   the outgoing range whose subject starts with <TYPE>#<n>:. Merge, revert and
 #   root commits carry no item by design and are simply absent.
+# BUG-040 — the extraction below MUST be an ERE (`sed -nE`). It used a BRE with
+# `\(BUG\|FEATURE\|TASK\)`, and alternation inside `\(...\)` is a GNU sed
+# EXTENSION that BSD sed does not implement. On macOS the expression matched
+# nothing, so this function returned an empty list — and an empty list means
+# every stage built on it passes VACUOUSLY.
+#
+# That is not a cosmetic portability nit. It silently disabled three DoD rules
+# on every macOS developer's machine: "every item in this push has a backlog
+# row" (§1b rule 1 / §7C) and both regression-test requirements. The gate went
+# on printing PASSED over work it had stopped examining, which is this repo's
+# signature failure sitting inside the guard that enforces the Definition of
+# Done. `tests/dod-gate` caught it exactly as designed — three cases reporting
+# "PASSED — the rule is unenforced".
+#
+# ERE alternation is POSIX and works on both seds. Do not "simplify" it back.
 dod_items_in_push() {
   for _dg_range in $1; do
     git log --format='%s' "$_dg_range" 2>/dev/null
   done \
-    | sed -n 's/^\(BUG\|FEATURE\|TASK\)#\([0-9][0-9]*\):.*/\1-\2/p' \
+    | sed -nE 's/^(BUG|FEATURE|TASK)#([0-9]+):.*/\1-\2/p' \
     | sort -u
 }
 

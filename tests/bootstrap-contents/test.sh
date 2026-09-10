@@ -37,6 +37,17 @@ set -u
 # run from anywhere, so it strips them itself rather than trusting its caller.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
+# BUG-046 — and never inherit the caller's BATON pointers, for the same reason.
+# This suite drives scripts/new-project.sh, which seeds the new project's live
+# mic. `signal-set.sh` honours $AGENT_SIGNAL_FILE / $AGENT_STATE_HOME, and
+# scripts/codex-signal-watch.sh EXPORTS AGENT_SIGNAL_FILE into every dispatched
+# wake — so running this suite from inside one published
+# `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a
+# real hand-off, appended a journal row, and exited 0. new-project.sh now scrubs
+# them at the source; this line is what makes a DIRECT run safe as well, which is
+# how an agent debugging a suite actually runs it.
+unset AGENT_SIGNAL_FILE AGENT_STATE_HOME AGENT_FEED_LOG
+
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"

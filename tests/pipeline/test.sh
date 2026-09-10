@@ -280,15 +280,36 @@ fi
 #     AGENT_FEED_LOG, every case here starts appending fake stages to the live
 #     logs/agent-activity.log, and nothing else would notice.
 # ===========================================================================
+# BUG-050 — THE TOKEN MUST BE UNIQUE PER RUN, and the reason is worth the
+# paragraph because the failure was so well disguised.
+#
+# This canary used to search for the FIXED literal `canary-must-not-escape`.
+# But logs/agent-activity.log is the feed EVERY agent's prose lands in, so the
+# moment an agent merely WROTE ABOUT this case, the literal appeared in the real
+# feed and the check went permanently red. That is not hypothetical: it happened
+# on 2026-09-09 at 17:38:34, and the sentence that did it was an audit claiming
+# this very token "is unique per run and survives anything". It was not unique,
+# and it did not survive being discussed.
+#
+# The failure message made it worse by accusing the suite of polluting the
+# production log — precisely backwards, and the same misdirection class as
+# BUG-041 and BUG-042, where a broken fixture indicted the thing it was pointed
+# at. It also blocked every push from this checkout while logs/ is gitignored,
+# so a fresh clone read clean and the defect looked like a local mystery.
+#
+# Two changes: the token is unique per run, and the search is scoped to lines
+# this run could have produced. A search for a literal that appears in the
+# repo's own prose is a canary that anyone can trip by documenting it.
 if [ -f "$ROOT/logs/agent-activity.log" ]; then
+  _canary_token="canary-must-not-escape-$$-$(date +%s)"
   real_before=$(grep -c '\[GATE\]' "$ROOT/logs/agent-activity.log" 2>/dev/null || echo 0)
-  run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage 'canary-must-not-escape' true; pipe_finish" >/dev/null
+  run_sh ". '$LIB'; pipe_init 'gate'; pipe_stage '$_canary_token' true; pipe_finish" >/dev/null
   real_after=$(grep -c '\[GATE\]' "$ROOT/logs/agent-activity.log" 2>/dev/null || echo 0)
   if [ "$real_before" = "$real_after" ] \
-     && ! grep -q 'canary-must-not-escape' "$ROOT/logs/agent-activity.log" 2>/dev/null; then
+     && ! grep -qF "$_canary_token" "$ROOT/logs/agent-activity.log" 2>/dev/null; then
     pass "#19 the suite writes no [GATE] lines into the real activity feed"
   else
-    fail "#19 this suite is polluting logs/agent-activity.log ($real_before -> $real_after)"
+    fail "#19 this suite is polluting logs/agent-activity.log ($real_before -> $real_after, token $_canary_token)"
   fi
 else
   pass "#19 no real feed present to pollute"

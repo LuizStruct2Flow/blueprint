@@ -46,6 +46,16 @@ set -u
 # the fixture's commits land in the REAL repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
+# BUG-046 — and never inherit the caller's BATON pointers, for the same reason.
+# This suite drives scripts/new-project.sh (which seeds the new project's live
+# mic) and then runs the derived project's ENTIRE pre-push gate. `signal-set.sh`
+# honours $AGENT_SIGNAL_FILE / $AGENT_STATE_HOME, and codex-signal-watch.sh
+# EXPORTS AGENT_SIGNAL_FILE into every dispatched wake — so a run from inside one
+# republished the live mic and still exited 0. AGENT_FEED_LOG goes with them so
+# the nested gate's [GATE] lines land in the fixture, never in a feed the caller
+# chose.
+unset AGENT_SIGNAL_FILE AGENT_STATE_HOME AGENT_FEED_LOG
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
 FAILED=0

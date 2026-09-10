@@ -324,7 +324,8 @@ blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement ups
 blueprint files            # list the blueprint-managed files (single source of truth)
 ```
 
-**What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`, `Brewfile`, every
+**What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`,
+`scripts/install-toolchain.sh`, every
 recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),
 `DoD.md`, the agent scripts, the pre-push hook, this deck itself — **and the
 whole `tests/` tree**, because a suite that guards managed machinery has to

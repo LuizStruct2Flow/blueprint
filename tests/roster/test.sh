@@ -33,6 +33,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# BUG-041 — portable in-place sed (bare `sed -i` is GNU-only).
+. "$ROOT/tests/helpers/sed-inplace.sh"
 LIB="$ROOT/scripts/lib/roster.sh"
 FEED="$ROOT/scripts/agent-activity.sh"
 KICKOFF="$ROOT/scripts/team-kickoff.sh"
@@ -264,7 +266,7 @@ elif [ -f "$FEED" ]; then
   )
   sleep 1
   # The rename, exactly as a founder would make it: one cell in the roster.
-  sed -i 's/| Orchestrator     | Alisa     |/| Orchestrator     | Dara      |/' \
+  bp_sed_i 's/| Orchestrator     | Alisa     |/| Orchestrator     | Dara      |/' \
       "$TMP/p4/AGENT_ROSTER.md" 2>/dev/null
   sleep 2
   kill "$(cat "$TMP/p4/feed.pid" 2>/dev/null)" 2>/dev/null

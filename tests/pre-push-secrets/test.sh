@@ -377,8 +377,8 @@ fi
 # ===========================================================================
 # 11. R4-F2 — with no timeout provider the cap does not exist, so the hook must
 #     REFUSE rather than run an unbounded scan. The old fallback ran gitleaks
-#     unbounded, which is precisely the documented macOS `brew bundle` path:
-#     "the scan is capped" was true of Linux boxes and nowhere else.
+#     unbounded, which is precisely what the then-documented macOS install path
+#     produced: "the scan is capped" was true of Linux boxes and nowhere else.
 # ===========================================================================
 cat >"$FIX/bin/gitleaks" <<EOF
 #!/bin/sh

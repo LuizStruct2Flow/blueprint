@@ -60,7 +60,7 @@ stage boundary (fixes the read, which `dod-gate.sh:164` also gets wrong).
 
 `git ls-files`: **99 `.md`, 79 `.sh`, zero JS/TS.** The semgrep stage runs
 `p/owasp-top-ten`, and CI adds `p/javascript` and `p/typescript`. **`shellcheck`
-is never invoked** — not in the hook, not in CI, not in the `Brewfile`. It
+is never invoked** — not in the hook, not in CI, not in the toolchain installer. It
 appears only as `# shellcheck disable=` / `source=` directives across 10+ files:
 *the codebase is annotated for a linter that has never run.*
 
@@ -74,7 +74,7 @@ that passed* — **occurring inside the security gate**, and it is the most
 expensive instance yet because that green check reads as "OWASP top-10 covered"
 with maximum credibility.
 
-**Fix:** `shellcheck` in the `Brewfile`, one `pipe_stage` over `scripts/`,
+**Fix:** `shellcheck` in `scripts/install-toolchain.sh` (which replaced the `Brewfile` in TASK-017), one `pipe_stage` over `scripts/`,
 `.githooks/`, `tests/**/*.sh`, using the missing-tool → `pipe_skip` + CI-backstop
 idiom every other scanner stage already has, with a ratcheted baseline. ~10
 lines. Converts A-16 and A-17 from audit findings into gate findings.

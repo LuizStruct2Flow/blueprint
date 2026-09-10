@@ -21,6 +21,25 @@
 
 set -u
 
+# BUG-047 — never inherit git's repo pointers. Git exports GIT_DIR to every hook
+# and the pre-push gate runs this suite, so with GIT_DIR set the bootstrap below
+# does not build a repo in its fixture at all: `git init` returns 0, creates no
+# .git there, and the initial commit lands in whatever GIT_DIR names. Reproduced
+# against a victim repo — this suite left `chore(bootstrap): initialize
+# test-ident …` in it and added `core.hooksPath=.githooks`, which is the A-22 /
+# BUG-004 failure produced BY A TEST. It was covered only by .githooks/pre-push,
+# so a direct run — how an agent debugging this suite actually runs it — hit the
+# real repository. tests/git-isolation #1 now proves this line by execution.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
+# BUG-046 — and never inherit the caller's baton pointers. This suite drives
+# scripts/new-project.sh, which seeds the new project's live mic;
+# `signal-set.sh` honours $AGENT_SIGNAL_FILE / $AGENT_STATE_HOME, and
+# scripts/codex-signal-watch.sh EXPORTS AGENT_SIGNAL_FILE into every dispatched
+# wake. Running this suite from inside one republished `Holder=Nobody /
+# State=IDLE / Task="Bootstrapped from the blueprint…"` over a real hand-off.
+unset AGENT_SIGNAL_FILE AGENT_STATE_HOME AGENT_FEED_LOG
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/new-project.sh"
 WORK="$(mktemp -d)"
@@ -51,7 +70,27 @@ case "$out_a" in
   *) fail "expected a missing-identity error, got:
 $out_a" ;;
 esac
-pass "missing identity fails before any filesystem change"
+pass "#2 BUG-044: missing identity fails before any filesystem change"
+
+# --- 2b. BUG-044 — the probe must REFUSE to auto-detect, not merely ask -------
+#
+# Case 2 asserts the consequence and is the right shape, but it can pass
+# VACUOUSLY on a host where git happens to fail on its own. That is exactly
+# what hid BUG-044: `git var GIT_AUTHOR_IDENT` does not fail when identity is
+# absent, it GUESSES, from the passwd gecos name and the hostname. On macOS
+# that always succeeds, so the guard passed, bootstrap proceeded, and the
+# initial commit carried a machine-invented author — the A-14 outcome reached
+# THROUGH the guard meant to prevent it.
+#
+# Whether the guess succeeds is a property of the HOST, so no consequence test
+# can pin this on every platform. The thing that holds everywhere is that the
+# probe disables auto-detection, and that is asserted at the source — the same
+# licence case 1 already takes when it greps for a hardcoded identity.
+if grep -q 'user\.useConfigOnly=true' "$SCRIPT"; then
+  pass "#2b BUG-044: the identity probe disables git's auto-detection"
+else
+  fail "#2b BUG-044: the identity probe does not set user.useConfigOnly=true, so 'git var' will GUESS an identity from gecos + hostname instead of failing — on any host where that guess succeeds, bootstrap commits as a machine-invented author and case 2 above passes vacuously"
+fi
 
 # --- 3. Inherited identity is used verbatim as the initial commit author -------
 TARGET_B="$WORK/with-identity"
@@ -82,6 +121,74 @@ case "$out_b" in
   *) fail "bootstrap did not echo the identity it committed as" ;;
 esac
 pass "bootstrap echoes the identity it commits as"
+
+# --- 6. BUG-046 — bootstrap seeds the NEW project's baton, never the caller's --
+#
+# The same shape as everything above: this suite exists because bootstrap must
+# not write things that belong to the operator. A-14 was a git identity; this is
+# the operator's LIVE MIC.
+#
+# THE MECHANISM. `new-project.sh` seeds a baton so a fresh project can run the
+# ceremony without a manual first step (BUG-019). It called `signal-set.sh`
+# without naming a file, and `signal-set.sh` honours $AGENT_SIGNAL_FILE
+# (scripts/lib/state-dir.sh:87) and $AGENT_STATE_HOME (:56). Those are not exotic
+# variables — scripts/codex-signal-watch.sh EXPORTS AGENT_SIGNAL_FILE into every
+# dispatched wake command — so bootstrapping from a dispatched agent published
+#
+#     Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"
+#
+# over a live hand-off, appended a row to that project's journal, and reported
+# success. That is BUG-030, mis-attributed for weeks to path derivation inside
+# one suite; all four suites that drive this script reproduced it.
+#
+# Both halves are asserted, and each is vacuous without the other: "the decoy
+# survived" would also pass if the seed were simply deleted, and "the project got
+# a baton" was already true while the real mic was being trampled.
+#
+# The decoy must be a WELL-FORMED baton. signal-set.sh refuses to publish over a
+# file whose table rows it cannot find, so a decoy of arbitrary text survives for
+# a reason that has nothing to do with the fix — a vacuous pass, and one this
+# case hit while it was being written.
+DECOY_DIR="$WORK/decoy-state"
+mkdir -p "$DECOY_DIR"
+cat >"$DECOY_DIR/signal.md" <<'DECOY'
+<!-- A DECOY live baton, standing in for the caller's real mic. -->
+
+| Field | Value |
+|---|---|
+| Holder | DecoyHolder |
+| State | OVER_TO_CODEX |
+| Task | a real hand-off that bootstrap must not overwrite |
+| Last update | 2026-01-01 |
+DECOY
+decoy_before="$(cat "$DECOY_DIR/signal.md")"
+
+TARGET_C="$WORK/with-baton-env"
+out_c="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+         GIT_AUTHOR_NAME="$NAME"    GIT_AUTHOR_EMAIL="$EMAIL" \
+         GIT_COMMITTER_NAME="$NAME" GIT_COMMITTER_EMAIL="$EMAIL" \
+         AGENT_SIGNAL_FILE="$DECOY_DIR/signal.md" \
+         AGENT_STATE_HOME="$DECOY_DIR" \
+         bash "$SCRIPT" test-baton "$TARGET_C" 2>&1)" || fail "BUG-046: bootstrap failed with the baton env set:
+$out_c"
+
+[ "$(cat "$DECOY_DIR/signal.md")" = "$decoy_before" ] || fail "BUG-046: bootstrap REPUBLISHED the caller's live baton.
+      A dispatched agent exports AGENT_SIGNAL_FILE, so this resets a real
+      hand-off to IDLE while reporting success. The decoy now reads:
+$(sed 's/^/        /' "$DECOY_DIR/signal.md")"
+
+[ ! -e "$DECOY_DIR/signal-history.log" ] || fail "BUG-046: bootstrap appended to the caller's baton JOURNAL:
+$(sed 's/^/        /' "$DECOY_DIR/signal-history.log")"
+
+[ -f "$TARGET_C/logs/state/signal.md" ] || fail "BUG-046: the new project got NO baton.
+      The seed was scrubbed away rather than redirected, so a fresh project
+      cannot run the ceremony (BUG-019) — half a fix is not a fix."
+
+grep -q '^| Holder | Nobody |' "$TARGET_C/logs/state/signal.md" \
+  || fail "BUG-046: the new project's baton is not the seeded IDLE one:
+$(sed 's/^/        /' "$TARGET_C/logs/state/signal.md")"
+
+pass "BUG-046: the baton is seeded into the NEW project, and the caller's is untouched"
 
 echo "PASS: bootstrap inherits git identity and fails safely without one."
 exit 0

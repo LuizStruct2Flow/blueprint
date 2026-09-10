@@ -38,26 +38,30 @@
 #
 # THE CONTRACT — stated narrowly, because the first version of this comment
 # claimed "a2bp never introduces project-specific bytes" and that is simply
-# false (Codex R5-F2). `--force` copies every BLOCK finding by design, a
-# justified `a2bp-allow` suppresses every check on its line, emails are
-# NOTICE-only, and the scanner knows a handful of heuristic classes rather
-# than all contamination. Test #5 itself demonstrates a host path landing
-# under `--force`. An absolute claim contradicted by intentional product
-# behaviour is worse than a narrow one, because it stops people looking.
+# false (Codex R5-F2). A justified `a2bp-allow` suppresses every check on its
+# line, emails are NOTICE-only, and the scanner knows a handful of heuristic
+# classes rather than all contamination. An absolute claim contradicted by
+# intentional product behaviour is worse than a narrow one, because it stops
+# people looking.
+#
+# (This paragraph used to say `--force` copies every BLOCK finding by design,
+# and that "test #5 itself demonstrates a host path landing under --force".
+# `--force` was removed when a2bp stopped landing bytes; it is now refused, and
+# test #5 asserts the refusal. A header describing a removed feature is the same
+# defect class as an assertion that cannot fail — both are read as current.)
 #
 # What is actually enforced:
 #
 #   1. ON THE DEFAULT PATH, a recognized BLOCK class cannot land. Every staged
 #      line is scanned — no alignment-derived exemption exists, which is what
 #      closed the R4-F2 relocation leak.
-#   2. EVERY OVERRIDE IS LOUD AND AUDITABLE. `--force` names each finding it
-#      waives; `a2bp-allow` requires a written justification on the line and a
-#      bare marker does not suppress.
+#   2. THE ONE OVERRIDE IS LOUD AND AUDITABLE. `a2bp-allow` requires a written
+#      justification on the line and a bare marker does not suppress; it stays
+#      in the file, so a reviewer sees it in the diff.
 #   3. STAGING NEVER CHANGES MEANING UNDER SUBSTITUTION. Forward-substituting
 #      the staged result reproduces the project's file byte-for-byte, asserted
 #      via the one shared primitive that production substitution also uses
-#      (R5-F1). This one holds unconditionally — `--force` waives scan
-#      findings, not this check.
+#      (R5-F1). This one holds unconditionally, and nothing waives it.
 #
 # (3) is what makes a misattributed alignment harmless: the worst it can do is
 # write {{PROJECT_NAME}} where a literal project name stood, which is the
@@ -70,10 +74,14 @@
 # closed for the classes it recognizes, and that stepping outside it leaves a
 # trail.
 #
-# Sourced by scripts/blueprint. Kept as a shared lib rather than inlined so
-# the gate and new-project.sh can reuse the same patterns — the same reason
-# scripts/lib/state-dir.sh exists (A-09): one mechanism, never two that agree
-# only by coincidence.
+# Sourced by scripts/blueprint, which is the only caller: contamination_scan is
+# invoked once, from cmd_a2bp's staging loop. This header used to say the lib
+# was kept separate "so the gate and new-project.sh can reuse the same
+# patterns"; neither ever did. It stays a file rather than inline code because
+# scripts/blueprint is already ~1500 lines and this is a self-contained,
+# separately testable unit — not because a second consumer exists. Claiming a
+# reuse that is not there invites the next author to add a THIRD copy of these
+# patterns believing they are joining a shared mechanism.
 #
 # shellcheck shell=bash
 
@@ -81,18 +89,22 @@
 # A line carrying `a2bp-allow: <justification>` is skipped by every check.
 # This is the precise tool for a known-benign hit — notably a comment that
 # quotes a historical contamination on purpose (scripts/agent-activity.sh
-# documents BUG-002's old path by name). `--force` is the blunt instrument:
-# it waives the whole file, including findings you never looked at.
+# documents BUG-002's old path by name). It is now the ONLY way through a
+# finding: `--force` is gone, and the PR reviewer is the override.
 #
 # CLAUDE.md §Security already sets the standard for suppressions: they carry
 # a justification naming why they are safe. Same rule here, enforced — a bare
 # marker with no text after it does NOT suppress.
-_contamination_suppressed() {
-  case "$1" in
-    *a2bp-allow:*[!\ ]*) return 0 ;;
-  esac
-  return 1
-}
+#
+# ENFORCED IN contamination_scan, by the `grep -nE 'a2bp-allow:[[:space:]]*
+# [^[:space:]]'` that builds its `$suppressed` line-number set. There used to be
+# a `_contamination_suppressed()` helper here that ran the same rule as a case
+# pattern, with ZERO callers — it had been superseded and never deleted. It was
+# not merely dead, it was actively misleading: an auditor checking whether test
+# #14 could fail mutated THIS helper first, saw the suite stay green, and
+# concluded the assertion was dead. The assertion is fine; the mechanism it
+# guards was 300 lines further down. Two implementations of one rule, one of
+# them unreachable, is worse than either alone.
 
 # --- Well-known dot-directories -------------------------------------------
 # Tool and shell dirs that are generic to every machine. Anything ELSE under

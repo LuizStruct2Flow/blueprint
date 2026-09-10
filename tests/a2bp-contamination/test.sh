@@ -429,6 +429,15 @@ run_a2bp --force "$CARRIER"
 rc=$?
 if [ "$rc" -eq 0 ]; then
   fail "#5 --force still waived the guard and filed the request"
+elif ! grep -qF -- '--force is gone' "$WORK/out"; then
+  # THE assertion. Every branch below is satisfied by a plain contamination
+  # block, which this fixture also triggers — so without this line, deleting
+  # the `--force)` arm entirely and letting the flag fall through as a silent
+  # no-op still printed `ok — #5`. That is the exact outcome the case header
+  # calls "the worst outcome": the operator believes the guard was waived and
+  # reads the block as a tool malfunction. Verified by mutation (`--force) : ;;`
+  # in place of the die): green before this line, red after.
+  fail "#5 --force was SILENTLY IGNORED — the run was refused for the contamination in the fixture, not for the flag; nothing told the operator the flag is gone: $(head -3 "$WORK/out")"
 elif grep -q 'reject.*--force' "$WORK/out"; then
   fail "#5 --force was parsed as a FILENAME rather than refused as a flag"
 elif ! grep -q 'a2bp-allow' "$WORK/out"; then
@@ -454,10 +463,26 @@ fi
 #    so exercising it here proves the mechanism as well as the exemption.
 #    Compare with #1, where the same input on a NON-exempt file comes out as
 #    {{PROJECT_NAME}}: that differential is the whole assertion.
+#
+#    THE BLUEPRINT-SIDE COPY IS PART OF THE ASSERTION, and it used to be a bare
+#    `SENTINEL\n`. Reverse-substitution is alignment-based: a project line is
+#    restored only when it matches the forward-substituted blueprint line it
+#    aligns to. A one-line SENTINEL shares no line with the project's file, so
+#    diff aligned NOTHING and no line was ever restored — with or without the
+#    exemption. Removing the exemption outright (`if true` in place of
+#    `_should_substitute "$path"` at scripts/blueprint) left this case printing
+#    ok. The blueprint copy below therefore carries the GENERIC form of the
+#    project's line 2, so there is something to align against; its extra final
+#    line is what "was this filed at all?" now reads.
 # ===========================================================================
 setup
 mkdir -p "$PROJ/scripts" "$FAKE_BP/scripts"
-printf 'SENTINEL\n' > "$FAKE_BP/scripts/new-project.sh"
+cat >"$FAKE_BP/scripts/new-project.sh" <<'EOF'
+#!/bin/bash
+# Bootstrap. Mentions {{PROJECT_NAME}} only as example text.  a2bp-allow: example text in a comment, not a path
+sed -e "s/{{PROJECT_NAME}}/${proj}/g" "$f"
+SENTINEL — blueprint copy untouched
+EOF
 cat >"$PROJ/scripts/new-project.sh" <<'EOF'
 #!/bin/bash
 # Bootstrap. Mentions acme-flow only as example text.  a2bp-allow: example text in a comment, not a path
@@ -687,23 +712,34 @@ fi
 
 # ===========================================================================
 # 13. F3 — suppression must be per-line for multi-digit line numbers. A naive
-#     substring test would let line 1's marker suppress line 11.
+#     substring test would let line 11's marker suppress line 1.
+#
+#     THE ORDER OF THE TWO LINES IS THE WHOLE CASE, and it used to be backwards.
+#     The suppression set is built as "|11|" and tested with `case $set in
+#     *"|$ln|"*`. Drop the delimiters — `*"$ln"*` — and "1" matches inside
+#     "|11|", so the MARKER ON THE HIGHER LINE swallows the finding on the
+#     lower one. The reverse never happens: "11" is not a substring of "|2|".
+#
+#     This fixture previously put the marker on line 2 and the finding on line
+#     11, i.e. the direction the delimiters do not protect. Both the correct and
+#     the delimiter-less forms behaved identically on it, so it re-tested only
+#     what #2 and #14 already cover. Verified by mutation: with the layout below,
+#     `*"$ln"*` suppresses BOTH lines and this case goes red.
 # ===========================================================================
 setup
 {
-  echo "# Mocks"
-  echo "Line 2 mentions /home/someuser/one — a2bp-allow: deliberate fixture line"
-  for i in 3 4 5 6 7 8 9 10; do echo "filler line $i"; done
-  echo "Line 11 mentions /home/someuser/two with no marker at all"
+  echo "Line 1 mentions /home/someuser/one with no marker at all"
+  for i in 2 3 4 5 6 7 8 9 10; do echo "filler line $i"; done
+  echo "Line 11 mentions /home/someuser/two — a2bp-allow: deliberate fixture line"
 } > "$PROJ/$CARRIER"
 run_a2bp "$CARRIER"
 rc=$?
 if [ "$rc" -eq 0 ]; then
-  fail "#13 line 11 was suppressed by line 2's marker — the suppression set is matching substrings, not whole line numbers"
-elif ! grep -q 'someuser/two' "$WORK/out"; then
-  fail "#13 the unsuppressed line 11 finding was not reported"
-elif grep -q 'someuser/one' "$WORK/out"; then
-  fail "#13 the a2bp-allow marker on line 2 did not suppress its finding"
+  fail "#13 line 1 was suppressed by line 11's marker — the suppression set is matching substrings, not whole line numbers"
+elif ! grep -q 'someuser/one' "$WORK/out"; then
+  fail "#13 the unsuppressed line 1 finding was not reported"
+elif grep -q 'someuser/two' "$WORK/out"; then
+  fail "#13 the a2bp-allow marker on line 11 did not suppress its finding"
 else
   pass "#13 suppression is exact per line number, including multi-digit (F3)"
 fi

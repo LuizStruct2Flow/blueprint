@@ -66,7 +66,9 @@ import { dirname, resolve, sep } from 'node:path'
  *               the scenario owns it AND its value is load-bearing: it carries
  *               the escape token that makes a leak into the operator's real
  *               feed visible (BUG-062). An override must still contain the
- *               token; unsetting it is refused.
+ *               token. Dropping it is permitted ONLY when the child has been
+ *               handed its own feed AND that feed is provably inside the
+ *               workspace — see assertTokenMayBeDropped.
  *
  * AND AN UNDECLARED GIT_* / AGENT_* OVERRIDE IS REFUSED TOO. That is the half
  * this table was missing: it said what happens to the names in it and nothing
@@ -136,6 +138,9 @@ const ENV_KIND = {
   // replaced it would turn a detectable leak into the untagged append that
   // BUG-062's row documents as the known, undetected hole — i.e. the fix would
   // have shipped with a one-line route to defeat itself.
+  //
+  // Dropping it is conditional rather than forbidden — see
+  // assertTokenMayBeDropped for the two clauses and why both are needed.
   AGENT_FEED_TAG: 'scenario-token',
   // The two the scenario owns from OUTSIDE both namespaces. R3 requires every
   // scenario to own its HOME and its TMPDIR, and until these were declared here
@@ -229,24 +234,74 @@ function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean 
 }
 
 /**
- * Build the environment for a fixture child process.
+ * May this call DROP the escape token — i.e. unset AGENT_FEED_TAG?
  *
- * Starts from the real environment (PATH, LANG, SHELL and the rest are needed —
- * these suites run real tools), then removes every forbidden variable and
- * applies the caller's per-scenario overrides.
+ * THE RULE. A scenario may drop the token only when it has handed the child its
+ * own feed (`AGENT_FEED_LOG` unset in the same call) AND the feed the child
+ * will then derive is provably inside the workspace (its cwd is). Both clauses,
+ * or the token stays.
  *
- * `overrides` is applied AFTER the scrub deliberately: a scenario that must
- * exercise a forbidden variable — `git-isolation` exists precisely to prove
- * that a hostile GIT_DIR cannot reach the real repo — sets it explicitly and
- * visibly, rather than inheriting it by accident. Deliberate is fine; ambient
- * is the defect.
+ * WHY THE FIRST CLAUSE. The token is not decoration on a contained run — it is
+ * what makes a leak VISIBLE when containment fails inside the child, which the
+ * harness cannot police. While `AGENT_FEED_LOG` still points at the scenario's
+ * feed, a child that resets or ignores that pointer (scripts/lib/feed.sh:35 is
+ * the only honest reader; agent-activity.sh:78 ignores it outright) reaches the
+ * operator's feed, and the token on the line is the whole detection. So a call
+ * that keeps the pointer and drops the token has removed the backstop while
+ * claiming the belt still holds.
  *
- * Deliberate is not unconditional, though: an override is checked against the
- * KIND declared for it, and a GIT_* / AGENT_* name with no declaration — or one
- * declared 'denied' — is refused rather than passed on. "The spec author meant
- * it" is not a containment argument; it is how GIT_CONFIG_COUNT would have
- * carried `core.hooksPath` into a fixture with every check reporting green.
+ * WHY THE SECOND CLAUSE, WHICH THE OBVIOUS RULE MISSES. "Unset the tag whenever
+ * the feed pointer is unset too" reads safe and is exactly inverted: unsetting
+ * `AGENT_FEED_LOG` is what makes the destination AMBIENT — feed.sh:37 derives it
+ * from `git rev-parse --show-toplevel`, falling back to `pwd`. Point the child
+ * at the real repository and that resolves to the OPERATOR'S REAL FEED, which is
+ * the one place the token exists to be seen. The pair alone would therefore
+ * license the single most dangerous combination this file can express. Requiring
+ * the cwd to be contained is what turns "derives its own feed" into "derives a
+ * feed inside this workspace": the workspace root is an mkdtemp under the system
+ * temp dir and so is inside no git tree, so from a contained cwd git either
+ * finds a repository inside the workspace or finds none and pwd answers.
+ *
+ * This is a rule and not an exemption (TASK-018 R5): any scenario that hands a
+ * child its own contained feed qualifies, and the one that does today —
+ * tests/bootstrap-gate, which runs a derived project's entire gate and whose
+ * tests/pipeline #16 greps for the literal `[GATE] PASSED` — qualifies by
+ * meeting it, not by being named.
  */
+function assertTokenMayBeDropped(
+  key: string,
+  overrides: Record<string, string | undefined>,
+  workspaceRoot: string | undefined,
+  cwd: string | undefined,
+): void {
+  const ownFeed =
+    'AGENT_FEED_LOG' in overrides && overrides.AGENT_FEED_LOG === undefined
+  const contained =
+    cwd !== undefined &&
+    workspaceRoot !== undefined &&
+    resolvesInsideWorkspace(cwd, workspaceRoot)
+
+  if (ownFeed && contained) return
+
+  throw new Error(
+    `Refusing to UNSET ${key}: it carries this scenario's escape token, and ` +
+      `without it every gate line a leaking fixture emits becomes the ` +
+      `untagged, UNDETECTED append BUG-062's row documents. Dropping it needs ` +
+      `BOTH: unset AGENT_FEED_LOG in the same call, so the child derives its ` +
+      `own feed rather than writing to one the token is the only guard on; ` +
+      `and give it a cwd inside the workspace, so what it derives lands there ` +
+      `— an unset AGENT_FEED_LOG makes the destination ambient (feed.sh falls ` +
+      `back to \`git rev-parse --show-toplevel\`, then \`pwd\`), and from the ` +
+      `real repository that IS the operator's feed. ` +
+      (ownFeed
+        ? `AGENT_FEED_LOG is unset here, but cwd ${cwd ?? '(missing)'} is not ` +
+          `inside ${workspaceRoot ?? '(missing)'}.`
+        : `AGENT_FEED_LOG is not being unset here.`) +
+      ` If the fixture just needs its own label, COMPOSE it with the token ` +
+      `instead — \`\${s.escapeToken}-my-tag\`.`,
+  )
+}
+
 /**
  * Refuse an override the declared kind does not permit. Silent when it does.
  *
@@ -256,8 +311,10 @@ function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean 
 function assertOverrideAllowed(
   key: string,
   value: string | undefined,
+  overrides: Record<string, string | undefined>,
   workspaceRoot?: string,
   escapeToken?: string,
+  cwd?: string,
 ): void {
   const kind = overrideKind(key)
 
@@ -273,14 +330,16 @@ function assertOverrideAllowed(
   // tests/bootstrap-gate stops a derived gate inheriting this scenario's baton,
   // journal and feed pointers.
   if (value === undefined) {
-    if (kind === 'scenario-path' || kind === 'scenario-token') {
+    if (kind === 'scenario-path') {
       throw new Error(
         `Refusing to UNSET ${key}: the scenario owns it, and its absence is ` +
           `not neutral — an unset HOME resolves to the operator's real home ` +
-          `via getpwuid, an unset TMPDIR to /tmp, and an unset AGENT_FEED_TAG ` +
-          `strips the escape token from every gate line a fixture emits ` +
-          `(BUG-062). Set it to a value inside this scenario instead.`,
+          `via getpwuid, and an unset TMPDIR sends mktemp to /tmp. Set it to a ` +
+          `value inside this scenario instead.`,
       )
+    }
+    if (kind === 'scenario-token') {
+      assertTokenMayBeDropped(key, overrides, workspaceRoot, cwd)
     }
     return
   }
@@ -357,10 +416,34 @@ function assertOverrideAllowed(
   }
 }
 
+/**
+ * Build the environment for a fixture child process.
+ *
+ * Starts from the real environment (PATH, LANG, SHELL and the rest are needed —
+ * these suites run real tools), then removes every forbidden variable and
+ * applies the caller's per-scenario overrides.
+ *
+ * `overrides` is applied AFTER the scrub deliberately: a scenario that must
+ * exercise a forbidden variable — `git-isolation` exists precisely to prove
+ * that a hostile GIT_DIR cannot reach the real repo — sets it explicitly and
+ * visibly, rather than inheriting it by accident. Deliberate is fine; ambient
+ * is the defect.
+ *
+ * Deliberate is not unconditional, though: an override is checked against the
+ * KIND declared for it, and a GIT_* / AGENT_* name with no declaration — or one
+ * declared 'denied' — is refused rather than passed on. "The spec author meant
+ * it" is not a containment argument; it is how GIT_CONFIG_COUNT would have
+ * carried `core.hooksPath` into a fixture with every check reporting green.
+ *
+ * `cwd` is where the child will RUN, and it is here because one rule cannot be
+ * decided without it: with AGENT_FEED_LOG unset the feed a child writes to is
+ * derived from its working directory (assertTokenMayBeDropped).
+ */
 export function fixtureEnv(
   overrides: Record<string, string | undefined> = {},
   workspaceRoot?: string,
   escapeToken?: string,
+  cwd?: string,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
 
@@ -384,7 +467,14 @@ export function fixtureEnv(
   // which a name list cannot.
 
   for (const [key, value] of Object.entries(overrides)) {
-    assertOverrideAllowed(key, value, workspaceRoot, escapeToken)
+    assertOverrideAllowed(
+      key,
+      value,
+      overrides,
+      workspaceRoot,
+      escapeToken,
+      cwd,
+    )
     if (value === undefined) delete env[key]
     else env[key] = value
   }

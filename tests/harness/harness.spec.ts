@@ -418,6 +418,59 @@ describe('harness — the real-state canary (BUG-030)', () => {
     })
   })
 
+  it('BUG-062 PERMITS dropping the token when the child is handed its own contained feed', async () => {
+    // THE ONE LEGITIMATE DROP, and the case the rule above was too strict for.
+    // tests/bootstrap-gate runs a derived project's ENTIRE pre-push gate, and
+    // AGENT_FEED_TAG is exported into it — so every line that gate renders is
+    // tagged with the token, and the derived project's own tests/pipeline #16
+    // greps for the literal `[GATE] PASSED`. It failed with "stage results
+    // missing from the feed": true, and naming the wrong cause. Composition
+    // does not solve it either — `[GATE-<token>]` fails that grep too.
+    //
+    // Permitted here because BOTH clauses hold, which is what makes this a rule
+    // rather than an exemption for one suite: AGENT_FEED_LOG is unset in the
+    // same call, and cwd is inside the workspace.
+    await scenario('feed-tag-own-feed', async (s) => {
+      const r = await s.run('sh', ['-c', 'echo "[${AGENT_FEED_TAG:-GATE}]"'], {
+        cwd: s.workspace.root,
+        env: { AGENT_FEED_LOG: undefined, AGENT_FEED_TAG: undefined },
+      })
+      expect(r.stdout.trim(), r.output).toBe('[GATE]')
+    })
+  })
+
+  it('BUG-062 REFUSES dropping the token on either half of that condition', async () => {
+    // Without both halves pinned, a conditional rule is just no rule.
+    //
+    // The second half is the one worth stating, because the obvious version of
+    // this rule — "unsetting the tag is fine whenever AGENT_FEED_LOG is unset
+    // too" — reads safe and is inverted. Unsetting AGENT_FEED_LOG is what makes
+    // the destination AMBIENT: feed.sh derives it from `git rev-parse
+    // --show-toplevel`, falling back to `pwd`. From the real repository that
+    // resolves to the OPERATOR'S OWN FEED — the one place the token exists to be
+    // seen — so the pair alone would license precisely the combination this
+    // whole mechanism is for.
+    await scenario('feed-tag-conditional', async (s) => {
+      // (a) the feed pointer stays, so the token is still the only backstop
+      // against a child that resets or ignores it.
+      await expect(
+        s.run('sh', ['-c', 'true'], {
+          cwd: s.workspace.root,
+          env: { AGENT_FEED_TAG: undefined },
+        }),
+      ).rejects.toThrow(/AGENT_FEED_LOG is not being unset here/)
+
+      // (b) the feed pointer is gone AND the child would derive its feed from
+      // the operator's real repository.
+      await expect(
+        s.run('sh', ['-c', 'true'], {
+          cwd: REPO_ROOT,
+          env: { AGENT_FEED_LOG: undefined, AGENT_FEED_TAG: undefined },
+        }),
+      ).rejects.toThrow(/is not inside/)
+    })
+  })
+
   it('BUG-062 does NOT detect an UNTAGGED append — the limit, pinned', async () => {
     // THIS CASE ASSERTS A HOLE, DELIBERATELY. The comments in canary.ts and
     // index.ts previously said an untagged append was "caught only by the

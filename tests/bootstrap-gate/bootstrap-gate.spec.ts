@@ -163,6 +163,26 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
             AGENT_SIGNAL_FILE: undefined,
             AGENT_STATE_HOME: undefined,
             AGENT_FEED_LOG: undefined,
+            // AND THE TAG, for the same reason as the three above — added
+            // after the gate caught it, not before.
+            //
+            // BUG-062's fix sets AGENT_FEED_TAG to this scenario's escape token
+            // so a leak into the operator's feed carries it. It is EXPORTED, so
+            // the NESTED gate and everything under it inherits it: every line
+            // the derived project's own gate renders is tagged with the token
+            // instead of `[GATE]`, and the derived project runs tests/pipeline,
+            // whose #16 greps for the literal `[GATE] PASSED`. It failed with
+            // "stage results missing from the feed" — true, and naming the
+            // wrong cause, which is the BUG-041/042 misdirection class.
+            // Composition does not help: `[GATE-<token>]` fails that grep too.
+            //
+            // The harness permits the unset here because BOTH clauses of its
+            // rule hold, not because this suite is named in it: AGENT_FEED_LOG
+            // is unset in the same call (the derived gate gets its OWN feed
+            // rather than one the token would be the only guard on), and cwd is
+            // inside the workspace, so the feed it derives lands there too. Drop
+            // either clause and tests/harness refuses this call.
+            AGENT_FEED_TAG: undefined,
           },
           timeoutMs: 600_000,
         },

@@ -67,6 +67,58 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
     }
   })
 
+  it('ACCEPTS a forbidden variable that is a name, a label or a count', async () => {
+    // The containment rule is only meaningful for values that are paths.
+    // AGENT_PERSONA is a persona name, AGENT_BACKING a backing-agent label,
+    // AGENT_GATE_PROFILE a profile name and GIT_CONFIG_COUNT a number — none of
+    // them names anything on disk, and refusing them "because the path must be
+    // inside the workspace" is a guard blaming a value for a property it never
+    // had. tests/codex-persona-label and tests/roster deal in exactly these.
+    const ws = await createWorkspace('forbidden-env-opaque')
+    try {
+      const env = fixtureEnv(
+        {
+          AGENT_PERSONA: 'Vitali',
+          AGENT_BACKING: 'Codex',
+          AGENT_GATE_PROFILE: 'bootstrap',
+          GIT_CONFIG_COUNT: '2',
+        },
+        ws.root,
+      )
+      expect(env.AGENT_PERSONA).toBe('Vitali')
+      expect(env.AGENT_BACKING).toBe('Codex')
+      expect(env.AGENT_GATE_PROFILE).toBe('bootstrap')
+      expect(env.GIT_CONFIG_COUNT).toBe('2')
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('validates a colon-separated path LIST element by element', async () => {
+    // GIT_ALTERNATE_OBJECT_DIRECTORIES and GIT_CEILING_DIRECTORIES are lists.
+    // Judged as one string a two-element value is not a path at all, so a
+    // fixture with two contained alternates would be refused; judged element by
+    // element, one escaping entry is still enough to refuse the whole value.
+    const ws = await createWorkspace('forbidden-env-list')
+    try {
+      const both = `${join(ws.root, 'objects-a')}:${join(ws.root, 'objects-b')}`
+      expect(
+        fixtureEnv({ GIT_ALTERNATE_OBJECT_DIRECTORIES: both }, ws.root)
+          .GIT_ALTERNATE_OBJECT_DIRECTORIES,
+      ).toBe(both)
+      expect(() =>
+        fixtureEnv(
+          {
+            GIT_ALTERNATE_OBJECT_DIRECTORIES: `${join(ws.root, 'objects-a')}:/tmp/not-mine`,
+          },
+          ws.root,
+        ),
+      ).toThrow(/the path \/tmp\/not-mine must be inside/)
+    } finally {
+      await ws.dispose()
+    }
+  })
+
   it('a real child process sees none of the forbidden variables', async () => {
     await scenario('harness-env', async (s) => {
       const r = await s.run(

@@ -47,7 +47,17 @@ export class ProcessRegistry {
   private readonly live = new Set<ChildProcess>()
   private readonly groups = new Set<number>()
 
-  constructor(private readonly workspaceRoot: string) {}
+  /**
+   * `escapeToken` is the scenario's own token. The registry does not use it
+   * itself — it hands it to fixtureEnv, which is where "an override of
+   * AGENT_FEED_TAG must still carry the token" is enforced (BUG-062). It is
+   * threaded rather than looked up because there is exactly one token per
+   * scenario and the environment builder cannot invent it.
+   */
+  constructor(
+    private readonly workspaceRoot: string,
+    private readonly escapeToken?: string,
+  ) {}
 
   /**
    * Spawn a process and wait for it to exit.
@@ -64,7 +74,7 @@ export class ProcessRegistry {
   ): Promise<RunResult> {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: fixtureEnv(options.env, this.workspaceRoot),
+      env: fixtureEnv(options.env, this.workspaceRoot, this.escapeToken),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -129,7 +139,7 @@ export class ProcessRegistry {
   ): ChildProcess {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: fixtureEnv(options.env, this.workspaceRoot),
+      env: fixtureEnv(options.env, this.workspaceRoot, this.escapeToken),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })

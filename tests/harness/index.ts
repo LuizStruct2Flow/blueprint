@@ -145,6 +145,22 @@ function scenarioEnv(s: {
     // So this is a real check over the two dominant writers, and it is not a
     // claim that every append is detectable. canary.ts states the same scope
     // where the check lives, and harness.spec.ts pins it with a case.
+    //
+    // AND THE TOKEN CANNOT BE OVERRIDDEN AWAY. A per-call `env` merges OVER
+    // this object, so `{ env: { AGENT_FEED_TAG: 'DoD-Gate' } }` used to replace
+    // the token and silently convert a detectable leak into the undetectable
+    // untagged one above — the fix for BUG-062 with a one-line route to defeat
+    // itself. env.ts declares AGENT_FEED_TAG 'scenario-token': an override must
+    // still CONTAIN the token (`${s.escapeToken}-my-tag`), and unsetting it is
+    // refused.
+    //
+    // AGENT_PERSONA IS DELIBERATELY NOT PROTECTED THAT WAY, and that is a real
+    // residual limit rather than an oversight. It is a persona NAME, and
+    // tests/roster and tests/codex-persona-label exist to assert what a named
+    // persona renders as, so composing a token into it would break the thing
+    // under test. A scenario that overrides AGENT_PERSONA therefore gives up
+    // the agent-activity.sh half of the detection for that scenario; the
+    // AGENT_FEED_TAG half still holds.
     AGENT_FEED_TAG: s.escapeToken,
     AGENT_PERSONA: s.escapeToken,
     // Deterministic collation and character classes. [[:space:]] is
@@ -172,9 +188,9 @@ export async function scenario(
   assertProcessEnvClean()
 
   const workspace = await createWorkspace(label)
-  const registry = new ProcessRegistry(workspace.root)
   const canary = await RealStateCanary.capture(realStateTargets(REPO_ROOT))
   const escapeToken = RealStateCanary.escapeToken(label)
+  const registry = new ProcessRegistry(workspace.root, escapeToken)
 
   const home = await workspace.dir('home')
   const stateHome = await workspace.dir('state')

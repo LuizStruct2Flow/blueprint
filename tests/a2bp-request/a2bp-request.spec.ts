@@ -18,10 +18,19 @@
  * implementations can be pointed at the SAME perturbed copy of the blueprint.
  * The equivalence run mutates `scripts/lib/request.sh` in a scratch copy, runs
  * `tests/a2bp-request/test.sh` from that copy and this spec with
- * `BP_SUBJECT_ROOT` set to it, and compares which case ids go red. The verdicts
- * agreed on every mutant; the per-suite table is in the migration report. It is
- * NOT a serial or skip hatch — it changes which tree is under test, never
- * whether a case runs.
+ * `BP_SUBJECT_ROOT` set to it, and compares which case ids go red. It is NOT a
+ * serial or skip hatch — it changes which tree is under test, never whether a
+ * case runs. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 15 of 15 assertions
+ * here have a mutant that was RUN and OBSERVED to turn them red.
+ *
+ * #3 AND #3b CANNOT SEE THE FRAMING LEAVE, which is the same measurement #3c's
+ * own comment reports from the other side. Removing the byte count from the
+ * content primitive (#3's subject) leaves #3 green, and making the headers
+ * newline-delimited (#3b's subject) leaves #3b green: in both fixtures the
+ * shifted byte's next neighbour is constant, so the concatenations still differ.
+ * #3 is red only when content leaves the key entirely, #3b only when the project
+ * component does, and #3c — which exists for this — is the one witness that goes
+ * red on plain concatenation.
  */
 
 import { describe, it, expect } from 'vitest'

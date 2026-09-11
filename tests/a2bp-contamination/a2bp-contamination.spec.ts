@@ -41,6 +41,20 @@
  *     equivalent property is DRIVEN: #0 hands the helper a stand-in CLI that
  *     really does move main, and requires the helper to fail. A guard that runs
  *     beats a guard that reads source.
+ *
+ * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
+ * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 36 of
+ * 36 assertions here have a mutant that was RUN and OBSERVED to turn them red,
+ * #0 included: the only thing that can falsify #0 is removing the helper's
+ * main-moved assertion, so that is the mutant, and it is injected into this
+ * file.
+ *
+ * #21 IS SATISFIED BY THE WRONG GUARD. It names the R3-F3 fail-closed check on
+ * `diff`'s exit status, and removing that check leaves it GREEN — with the
+ * alignment empty, staging passes the unrestored bytes through and the
+ * RESIDUAL-PROJECT-NAME scan blocks them instead. Both have to go before #21
+ * reds. Worth knowing before anyone reads #21 as proof that the diff guard
+ * works.
  */
 
 import { describe, it, expect } from 'vitest'

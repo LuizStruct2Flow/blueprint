@@ -31,7 +31,16 @@
  *      scenario, so the same question is asked of a directory this case owns.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. See the migration report for the table.
+ * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 13 of 13
+ * assertions here have a mutant that was RUN and OBSERVED to turn them red,
+ * including #2: `E8` makes `bp_file_push` push the request to `main` as well,
+ * and that is the only kind of defect the headline invariant can see.
+ *
+ * STRENGTHENING #2, MEASURED. The shell suite's #10 scans the SHARED $TMPDIR,
+ * so running two mutant trees at once turned it red for eleven mutants that
+ * touch no scratch code at all. This spec scans the scenario's own pinned
+ * TMPDIR and did not move. That is BUG-049's cross-suite hazard observed rather
+ * than argued.
  */
 
 import { describe, it, expect } from 'vitest'

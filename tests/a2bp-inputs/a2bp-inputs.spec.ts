@@ -13,7 +13,14 @@
  * a remote.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. See the migration report for the table.
+ * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 21 of 21
+ * assertions here have a mutant that was RUN and OBSERVED to turn them red.
+ *
+ * #1b NEEDED A MUTANT OF ITS OWN, and the reason is worth keeping: making a v1
+ * config parse as v2 does NOT red it, because the empty-remote check then
+ * refuses and still emits nothing. What #1b actually forbids is an emission a
+ * caller could eval, so `I19` injects the inference this module exists to
+ * refuse — the v1 path printing BP_CFG_REMOTE from `blueprint_source`.
  */
 
 import { describe, it, expect } from 'vitest'

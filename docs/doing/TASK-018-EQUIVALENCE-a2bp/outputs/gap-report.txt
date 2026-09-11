@@ -1,0 +1,138 @@
+mutants with a verdict: 98
+
+=== a2bp-build: 17 assertions, 17 with negative proof, 0 in the GAP
+=== a2bp-contamination: 36 assertions, 36 with negative proof, 0 in the GAP
+=== a2bp-e2e: 13 assertions, 13 with negative proof, 0 in the GAP
+=== a2bp-inputs: 21 assertions, 21 with negative proof, 0 in the GAP
+=== a2bp-pr-filing: 7 assertions, 7 with negative proof, 0 in the GAP
+=== a2bp-request: 15 assertions, 15 with negative proof, 0 in the GAP
+
+TOTAL 109/109 assertions have an observed red mutant
+
+--- shell/ts disagreements (port-stricter or port-weaker) ---
+  B1: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  B13: shell-only=['a2bp-e2e:#10'] ts-only=['a2bp-build:#2', 'a2bp-contamination:#1b']
+  B2: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  B3: shell-only=['a2bp-build:#4'] ts-only=[]
+  B7: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  B8: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  C0: shell-only=[] ts-only=['a2bp-contamination:#0']
+  C1: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  C15: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  C16: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  C17: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  C26: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  C28: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  C5: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  C8: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  C9: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  E8: shell-only=['a2bp-contamination:a2bp'] ts-only=['a2bp-contamination:#1', 'a2bp-contamination:#1b', 'a2bp-contamination:#20', 'a2bp-contamination:#22[]']
+  F4: shell-only=['a2bp-e2e:#3'] ts-only=[]
+  F5: shell-only=[] ts-only=['a2bp-e2e:#3']
+  I1: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  I16: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  I17: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  I2: shell-only=[] ts-only=['a2bp-e2e:#3']
+  K14: shell-only=[] ts-only=['a2bp-request:#3c']
+  K15: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  K9: shell-only=[] ts-only=['a2bp-contamination:#1b']
+
+--- per-mutant observed TS red sets ---
+  B1: a2bp-build:#1 a2bp-build:#2 a2bp-build:#3 a2bp-build:#3b a2bp-build:#4 a2bp-build:#5 a2bp-build:#6 a2bp-build:#9d a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1 a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4 a2bp-e2e:#6
+  B2: a2bp-build:#1 a2bp-build:#2 a2bp-build:#3 a2bp-build:#3b a2bp-build:#4 a2bp-build:#5 a2bp-build:#6 a2bp-build:#9d a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1 a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4 a2bp-e2e:#6
+  B3: a2bp-build:#3b
+  B4: (none)
+  B5: a2bp-build:#5
+  B6: a2bp-build:#7
+  B7: a2bp-build:#7b a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#12 a2bp-contamination:#13 a2bp-contamination:#15 a2bp-contamination:#18 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#2 a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7 a2bp-contamination:#7b a2bp-e2e:#1 a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4 a2bp-e2e:#5 a2bp-e2e:#6 a2bp-e2e:#8
+  B8: a2bp-build:#7c
+  B9: a2bp-build:#8
+  B10: a2bp-build:#9b
+  B11: (none)
+  B12: a2bp-build:#9c
+  B13: a2bp-build:#2 a2bp-build:#5 a2bp-build:#6 a2bp-build:#7 a2bp-build:#7c a2bp-build:#9c a2bp-build:#9f a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#5 a2bp-inputs:#11 a2bp-inputs:#12
+  B14: a2bp-build:#9d
+  B15: (none)
+  B17: a2bp-build:#9a a2bp-build:#9b a2bp-build:#9d a2bp-build:#9e
+  C0: a2bp-contamination:#0
+  C1: a2bp-contamination:#1 a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[]
+  C2: a2bp-contamination:#12 a2bp-contamination:#13 a2bp-contamination:#14 a2bp-contamination:#17 a2bp-contamination:#18 a2bp-contamination:#2
+  C3: a2bp-contamination:#11 a2bp-contamination:#3
+  C4: (none)
+  C5: a2bp-contamination:#5
+  C6: (none)
+  C7: a2bp-contamination:#7 a2bp-contamination:#8
+  C8: a2bp-contamination:#9
+  C9: (none)
+  C10: a2bp-contamination:#11
+  C11: a2bp-contamination:#12 a2bp-e2e:#8
+  C12: a2bp-contamination:#13
+  C13: a2bp-contamination:#14
+  C14: a2bp-contamination:#15 a2bp-contamination:#20
+  C15: (none)
+  C16: (none)
+  C17: a2bp-contamination:#1 a2bp-contamination:#16 a2bp-contamination:#1b a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#7 a2bp-contamination:#7b a2bp-contamination:#8 a2bp-contamination:#9
+  C18: a2bp-contamination:#25b
+  C19: a2bp-contamination:#26
+  C20: a2bp-contamination:#27 a2bp-contamination:#27b
+  C21: a2bp-contamination:#27b
+  C22: a2bp-contamination:#28
+  C23: (none)
+  C24: a2bp-contamination:#21 a2bp-contamination:#7 a2bp-contamination:#8
+  C25: a2bp-contamination:#25
+  C26: a2bp-contamination:#1 a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#26b a2bp-contamination:#28
+  C27: a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#23[] a2bp-contamination:#24[] a2bp-contamination:#25
+  C28: a2bp-contamination:#1 a2bp-contamination:#1b a2bp-contamination:#25 a2bp-contamination:#25b
+  E1: a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#19 a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4
+  E2: a2bp-e2e:#3
+  E3: a2bp-e2e:#4
+  E4: a2bp-e2e:#6
+  E5: a2bp-e2e:#10
+  E6: a2bp-e2e:#9
+  E7: (none)
+  E8: a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#19 a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#2 a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4
+  F1: a2bp-pr-filing:#1
+  F2: (none)
+  F3: (none)
+  F4: a2bp-pr-filing:#4
+  F5: a2bp-e2e:#1 a2bp-e2e:#3 a2bp-pr-filing:#4b
+  F6: a2bp-pr-filing:#4c
+  F7: a2bp-pr-filing:#5
+  F8: a2bp-pr-filing:#3
+  F9: a2bp-pr-filing:#2
+  I1: a2bp-e2e:#11 a2bp-inputs:#1
+  I2: a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#19 a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4 a2bp-inputs:#2 a2bp-inputs:#2b a2bp-inputs:#4b
+  I3: a2bp-inputs:#2b
+  I4: a2bp-inputs:#3
+  I5: a2bp-inputs:#4
+  I6: a2bp-inputs:#4b a2bp-inputs:#4c
+  I7: a2bp-inputs:#5 a2bp-inputs:#6 a2bp-inputs:#6b
+  I8: a2bp-inputs:#5b
+  I9: a2bp-inputs:#7
+  I10: a2bp-inputs:#8
+  I11: a2bp-e2e:#7 a2bp-inputs:#10 a2bp-inputs:#9
+  I12: (none)
+  I13: (none)
+  I14: a2bp-e2e:#7 a2bp-inputs:#10 a2bp-inputs:#7 a2bp-inputs:#8 a2bp-inputs:#9 a2bp-inputs:#9b a2bp-inputs:#9c
+  I15: a2bp-contamination:#24[] a2bp-e2e:#5 a2bp-inputs:#11
+  I16: a2bp-build:#9e a2bp-contamination:#24[] a2bp-e2e:#5 a2bp-inputs:#11 a2bp-inputs:#12
+  I17: a2bp-inputs:#13
+  I18: a2bp-build:#9e
+  I19: a2bp-inputs:#1b
+  K1: a2bp-e2e:#3 a2bp-e2e:#4 a2bp-request:#1
+  K2: a2bp-request:#2 a2bp-request:#4
+  K3: (none)
+  K4: (none)
+  K5: a2bp-request:#5e a2bp-request:#6
+  K6: a2bp-contamination:#22b[] a2bp-request:#5b a2bp-request:#5c
+  K7: a2bp-request:#5d
+  K8: a2bp-request:#5e
+  K9: a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#12 a2bp-contamination:#13 a2bp-contamination:#15 a2bp-contamination:#18 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#2 a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7 a2bp-contamination:#7b a2bp-e2e:#1 a2bp-e2e:#11 a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4 a2bp-e2e:#5 a2bp-e2e:#6 a2bp-e2e:#7 a2bp-e2e:#8 a2bp-request:#7
+  K10: a2bp-request:#8
+  K11: a2bp-request:#8b
+  K12: a2bp-request:#2 a2bp-request:#3
+  K13: a2bp-request:#2 a2bp-request:#3b
+  K14: a2bp-request:#3c
+  K15: a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1 a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4 a2bp-e2e:#6 a2bp-request:#5 a2bp-request:#5e a2bp-request:#6
+  N1: (none)
+  N2: (none)

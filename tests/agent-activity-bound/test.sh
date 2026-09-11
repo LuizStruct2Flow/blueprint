@@ -168,13 +168,22 @@ start_feed(){ feed --daemon; }
 stop_feed(){ feed --stop; }
 status_feed(){ feed --status; }
 
-# Resident supervisors belonging to THIS fixture only.
+# Processes matching an argv pattern AND rooted at THIS fixture.
+#
 # The daemon re-execs as `bash scripts/agent-activity.sh --supervise` with a
 # RELATIVE path, so its argv does not contain the fixture path — match on the
 # internal mode and confirm ownership via the process cwd instead.
-supervisors(){
+#
+# BUG-095: the `tail -n0 -F` half of #15 and #2 counted MACHINE-WIDE while this
+# half was already scoped, so those two cases were unsatisfiable on any host
+# where some OTHER process argv merely CONTAINED the string — an agent shell
+# wrapper, or the `pgrep -fa 'tail -F'` you run to diagnose it. Nothing was
+# wrong and the gate could not pass. Scoping by cwd does not weaken the
+# assertion: a follower our supervisor forks inherits the fixture cwd, so
+# "zero followers rooted at OUR tree" still reds the RC-2 leak.
+owned(){
   local n=0 p cwd
-  for p in $(ps -eo pid,args 2>/dev/null | grep '[a]gent-activity.sh --supervise' | awk '{print $1}'); do
+  for p in $(ps -eo pid,args 2>/dev/null | grep -- "$1" | awk '{print $1}'); do
     # BUG-036: this read /proc/<pid>/cwd directly, which macOS does not have,
     # so the count was 0 on a Mac no matter what was running and six cases
     # below failed closed. bp_proc_cwd falls back to lsof.
@@ -183,6 +192,8 @@ supervisors(){
   done
   echo "$n"
 }
+supervisors(){ owned '[a]gent-activity.sh --supervise'; }
+tails(){ owned '[t]ail -n0 -F'; }
 sup_pid(){ sed -n 's/^pid=//p' "$REPO/logs/.agent-activity.state" 2>/dev/null | head -1; }
 
 # Wait until $1 appears in the log, up to $2 seconds. Returns 1 on timeout.
@@ -262,7 +273,7 @@ else fail "#1 50 concurrent starts produced $n supervisors, expected exactly 1 (
 # ===========================================================================
 # #15 Resident bound is ONE — no `tee`, no per-file followers.
 # ===========================================================================
-if [ "$(supervisors)" -eq 1 ] && [ "$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")" -eq 0 ]; then
+if [ "$(supervisors)" -eq 1 ] && [ "$(tails)" -eq 0 ]; then
   pass "#15 one resident process; no follow-by-name tails"
 else fail "#15 resident set is not exactly one supervisor with zero tail -F"; fi
 
@@ -526,10 +537,10 @@ start_feed >/dev/null 2>&1
 # adjacent numbers and only one of them is named.
 wait_sup 1 || fail "#2 the feed never started - the counts below cannot tell an RC-2 leak from a supervisor that never existed"
 sleep 1
-n1="$(supervisors)"; t1="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
+n1="$(supervisors)"; t1="$(tails)"
 i=40; while [ $i -lt 80 ]; do printf '{"type":"assistant","message":{"content":[{"type":"text","text":"b%s"}]}}\n' "$i" >"$PROJ/agent-$i.jsonl"; i=$((i+1)); done
 sleep 1
-n2="$(supervisors)"; t2="$(ps -eo args 2>/dev/null | grep -c "[t]ail -n0 -F")"
+n2="$(supervisors)"; t2="$(tails)"
 if [ "$n1" -eq 1 ] && [ "$n2" -eq 1 ] && [ "$t1" -eq 0 ] && [ "$t2" -eq 0 ]; then
   pass "#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)"
 else fail "#2 process count grew with transcripts (sup ${n1}→${n2}, tails ${t1}→${t2}) — the RC-2 leak"; fi

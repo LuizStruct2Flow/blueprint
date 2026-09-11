@@ -41,8 +41,39 @@
  *      → #C1 goes red: a stale call site resolves instead of failing.
  *   4. Drop `|| exit 9` from any consumer's init line.
  *      → #E goes red: that consumer derives an artefact path at `/`.
- *   5. Remove one fixture's `.blueprint-source` marker line.
- *      → #F goes red naming that constructor.
+ *
+ * DISSOLVED CASE — `#F no fixture constructor builds a project-shaped tree
+ * without one` (removed 2026-09-11, TASK-018). Its mutation recipe was "remove
+ * one fixture's `.blueprint-source` marker line → #F goes red naming that
+ * constructor".
+ *
+ * #F scanned every `tests/<suite>/test.sh` for a project-shaped fixture
+ * constructor (`mkdir -p "$X/scripts…"` with state-resolving code copied in)
+ * and required each to write a root terminator. Its SUBJECT was shell fixtures
+ * building their own project-shaped trees by hand. The shell-runner retirement
+ * deletes every one of them, and the case's own code already named that end
+ * condition, in the `catch` around its `readFile`: *"TypeScript suites use the
+ * harness, which owns isolation."* With no `.sh` left, every suite takes that
+ * branch and the scan has nothing to scan.
+ *
+ * WHY IT WAS DELETED RATHER THAN LEFT TO PASS VACUOUSLY — and this is the part
+ * a reader should not have to rediscover. #F's non-vacuity guard named four
+ * anchors (`state-dir`, `watcher-liveness`, `agent-activity-bound`,
+ * `subagent-feed`), ALL FOUR of which are shell runners the wave deletes. So at
+ * the end state `inScope` is empty and the guard fires — which is the guard
+ * working: it was written precisely to refuse a scan that had stopped reaching
+ * anything. MEASURED in a scratchpad copy of the finished tree: `#F no longer
+ * scans state-dir, whose fixture needs a terminator: expected [] to include
+ * 'state-dir'`. Weakening the anchor list to keep the case green would have
+ * converted a real non-vacuity guard into a vacuous pass, which is the exact
+ * trade CLAUDE.md §"Pre-push tolerance" exists to refuse.
+ *
+ * WHAT CARRIES THE PROPERTY NOW: `tests/harness/` constructs every fixture
+ * tree, so a terminator is written by the harness rather than remembered by
+ * each fixture author — structurally present instead of checked for
+ * (TASK-018-RULES R3). #A above is what tests that `bp_state_root` terminates
+ * where it should, and #A6 that a markerless tree fails loudly rather than
+ * climbing into the operator's real checkout.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -253,96 +284,6 @@ async function consumersWithInitGuard(): Promise<{ missing: string[]; checked: s
   }
   return { missing, checked }
 }
-
-describe('TASK-021 #F — every project-shaped fixture carries a root terminator', () => {
-  it('#F no fixture constructor builds a project-shaped tree without one', async () => {
-    /**
-     * BELT AND BRACES, and the braces are here because the belt was measured
-     * and found short.
-     *
-     * `.git` covers the fixtures that run `git init` — most of them — with
-     * nobody having to think about it. It does NOT cover the ones that do not,
-     * and a census selecting constructors BY the presence of `git init` cannot
-     * bound the cases lacking it. Three suites were in exactly that state and
-     * failed: state-dir's `sd_tmpdir work`, watcher-liveness's `e2e_repo`,
-     * agent-activity-bound's temp repo.
-     *
-     * SELECTION CRITERION, stated because getting it wrong is what produced the
-     * short census: a fixture is in scope when it creates a `scripts/`
-     * directory under a temp root AND copies code that RESOLVES A STATE ROOT
-     * into it — `state-dir.sh` itself, or one of its consumers. Structural, and
-     * independent of git.
-     *
-     * The first version selected on "copies any production code", which flagged
-     * `ts-bridge` (pipeline.sh + suites.sh) and `a2bp-contamination` ($PROJ):
-     * project-shaped trees that never resolve a state root and need no marker.
-     * A guard that fires on the benign case teaches people to ignore it — the
-     * rule tests/state-dir #5b already states about its own artefact matching.
-     */
-    // A `cp` of REAL production code, not a mention of the filename.
-    // `a2bp-inputs` writes its own `scripts/lib/state-dir.sh` containing the
-    // literal word "helper" and never executes it — a path-validation fixture.
-    // Matching the name alone flagged it; matching the copy does not.
-    const STATE_CONSUMERS =
-      /\bcp\b[^\n]*(state-dir\.sh|agent-activity\.sh|signal-set\.sh|session-resume\.sh|team-kickoff\.sh|codex-signal-watch\.sh|start-[\w-]+-signal-watch\.sh|scripts\/lib\/\.)/
-    const testsDir = join(REPO_ROOT, 'tests')
-    const suites = (await readdir(testsDir, { withFileTypes: true }))
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-
-    const offenders: string[] = []
-    const inScope = new Set<string>()
-
-    for (const suite of suites) {
-      const runner = join(testsDir, suite, 'test.sh')
-      let body: string
-      try {
-        body = await readFile(runner, 'utf8')
-      } catch {
-        continue // TypeScript suites use the harness, which owns isolation
-      }
-      const lines = body.split('\n')
-      lines.forEach((line, i) => {
-        // a project-shaped root: `mkdir -p "$X/scripts…"`
-        const m = /mkdir -p .*?"\$\{?(\w+)\}?\/scripts/.exec(line)
-        if (!m) return
-        if (/^\s*#/.test(line)) return
-        const v = m[1]
-        const near = lines.slice(Math.max(0, i - 12), i + 25).join('\n')
-        // in scope only if state-resolving code is copied into this tree
-        if (!STATE_CONSUMERS.test(near)) return
-        inScope.add(suite)
-        // …and then it must gain a terminator: a marker written, or a git init
-        const marks = new RegExp(
-          `(\\.blueprint-source|\\.blueprint-root)"?\\s*$|\\$\\{?${v}\\}?/\\.blueprint-(source|root)|git (-C )?["']?\\$\\{?${v}\\}?["']?[^\\n]*init|git init[^\\n]*\\$\\{?${v}\\}?`,
-          'm',
-        )
-        const cdInit = new RegExp(`cd "\\$\\{?${v}\\}?"[\\s\\S]{0,200}?git init`, 'm')
-        if (!marks.test(near) && !cdInit.test(near)) {
-          offenders.push(`tests/${suite}/test.sh:${i + 1} ($${v})`)
-        }
-      })
-    }
-
-    expect(offenders).toEqual([])
-
-    // NON-VACUITY BY KNOWN ANCHORS, not by a count. A bare floor is satisfied
-    // by any seven constructors, so a regex that silently stopped matching the
-    // interesting ones could still pass it. These four are the suites whose
-    // fixtures actually failed when the terminator was markers-only, so a scan
-    // that no longer reaches them has stopped testing the thing it exists for.
-    for (const anchor of [
-      'state-dir',
-      'watcher-liveness',
-      'agent-activity-bound',
-      'subagent-feed',
-    ]) {
-      expect(inScope, `#F no longer scans ${anchor}, whose fixture needs a terminator`).toContain(
-        anchor,
-      )
-    }
-  })
-})
 
 describe('TASK-021 #G — production code never passes a root to the state API', () => {
   it('#G no production call site supplies a root, INCLUDING via the named seam', async () => {

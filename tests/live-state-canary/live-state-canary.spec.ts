@@ -32,6 +32,29 @@
  * MUTATION RECIPE (R6) — observed red, not predicted:
  *   Restore the `[ -n "$before" ] &&` conjunct in the comparison under test.
  *   → #3 goes red: the induced leak is no longer detected.
+ *
+ * DISSOLVED CASE — `#4 the three disarm conjuncts are gone from the suites that
+ * carried them` (removed 2026-09-11, TASK-018).
+ *
+ * It `readFile`d `tests/baton-durability/test.sh`, `tests/pipeline/test.sh` and
+ * `tests/watcher-liveness/test.sh` and asserted, structurally, that none had its
+ * disarm conjunct back. Its SUBJECT was those three files. The shell-runner
+ * retirement deletes all three, so the case does not become weaker — it becomes
+ * about nothing, and `readFile` turns ENOENT into a red for the opposite of a
+ * defect. Same disposition as `tests/manifest` #4/#5 in TASK-018-TARGET §4: not
+ * satisfied by the migration, DISSOLVED by it. Recorded rather than silently
+ * dropped, following the `drift-in-blueprint` precedent.
+ *
+ * WHAT IS NOT LOST WITH IT, and the reason this is a dissolution rather than a
+ * coverage cut: the case guarded against the SHAPE returning in a fourth shell
+ * suite copying one of the three. With no shell suite left to copy it into,
+ * there is no fourth. The property itself — a live-state guard that disarms when
+ * the watched file is absent — is what #3 above proves is CAUGHT, by inducing
+ * the leak rather than by grepping for the anti-pattern, and #3 stands.
+ *
+ * WHAT THE REPLACEMENT MUST NOT BE: an iteration over "whatever `*.sh` still
+ * exist". That is a vacuous pass wearing the old name — green over an empty
+ * list, and BUG-066's shape exactly.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -153,21 +176,4 @@ describe('TASK-021 §5.5 — the live-state canaries cannot pass vacuously', () 
     })
   })
 
-  it('#4 the three disarm conjuncts are gone from the suites that carried them', async () => {
-    // Removal asserted structurally, so the shape cannot come back through a
-    // fourth suite copying one of these three.
-    const cases: Array<[string, RegExp]> = [
-      ['tests/baton-durability/test.sh', /\[ -n "\$_real_before" \]\s*&&/],
-      ['tests/pipeline/test.sh', /no real feed present to pollute/],
-      ['tests/watcher-liveness/test.sh', /had_live_lock" -eq 0 \] && \[ -e/],
-    ]
-    for (const [rel, forbidden] of cases) {
-      // Comments stripped first: each of these files now EXPLAINS the disarm it
-      // used to carry, and a guard that fires on its own post-mortem is the
-      // false-positive class this repo keeps warning about (CLAUDE.md notes
-      // `Bash(* --no-verify*)` blocking a task string that merely discusses it).
-      const code = (await readFile(join(REPO_ROOT, rel), 'utf8')).replace(/^\s*#.*$/gm, '')
-      expect(forbidden.test(code), `${rel} still carries its disarm conjunct`).toBe(false)
-    }
-  })
 })

@@ -229,7 +229,14 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
         'AGENTS.md',
         'scripts/agent-activity.sh',
         '.githooks/pre-push',
-        'tests/marker-merge/test.sh',
+        // A "did tests/ arrive downstream" probe, so any SHIPPING runner in
+        // that suite serves. It named `tests/marker-merge/test.sh` until
+        // TASK-018 retired the shell runners; pinning the probe to a file
+        // scheduled for deletion is how a case about one thing goes red for
+        // another. The spec ships by the same `.gitattributes` rule the runner
+        // did — `tests/` is a managed directory with no `export-ignore` line
+        // for `marker-merge` — which is what `tests/manifest` #2b asserts.
+        'tests/marker-merge/marker-merge.spec.ts',
       ]) {
         if (!(await s.fs.exists(join(derived, f)))) missing.push(f)
       }

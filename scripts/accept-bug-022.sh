@@ -15,8 +15,8 @@
 # looked in the right file. The three checks below make the absence and its
 # repair both visible in one run.
 #
-# tests/watcher-liveness/test.sh is the real regression test and runs in the
-# gate. This is the human-facing view of the same behaviour.
+# tests/watcher-liveness/watcher-liveness.spec.ts is the real regression test and
+# runs in the gate. This is the human-facing view of the same behaviour.
 #
 # ── TO SEE IT ON THE REAL REPO INSTEAD ───────────────────────────────────────
 # Only do this when the mic is NOT handed to an agent, or you will dispatch one.

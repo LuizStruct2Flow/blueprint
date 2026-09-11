@@ -542,7 +542,7 @@ supervise(){
   # inherit it just the same, and the tick sleep is a child on every iteration.
   # Wrapping the whole body in `{ ... } 9>&-` closes FD 9 for everything spawned
   # inside while this shell keeps the lock, so no per-command `9>&-` can be
-  # forgotten. Regression: tests/agent-activity-bound/test.sh #4.
+  # forgotten. Regression: tests/agent-activity-bound/agent-activity-bound.spec.ts #4.
   supervise_body 9>&-
 }
 

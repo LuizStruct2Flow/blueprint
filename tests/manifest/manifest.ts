@@ -226,7 +226,16 @@ export async function liveBridges(root: string, text: string): Promise<string[]>
   // this repo's hooks happens to be indented, which is the only reason it
   // stayed latent. Anchoring on the match itself removes the class.
   const found = new Set<string>()
-  const src = /(^|[ \t])(\.|source)[ \t]+"?(\$ROOT\/)?\.?\/?([A-Za-z0-9_][A-Za-z0-9_./-]*)/gm
+  //
+  // BUG-066 — THE ROOT PREFIX IS A VARIABLE, AND IT IS NOT ALWAYS `$ROOT`.
+  // This accepted exactly one spelling, `$ROOT/`, so when the gate started
+  // resolving its code root and sourcing `. "$BP_CODE_ROOT/scripts/..."`, no
+  // candidate matched, no bridge was discovered, and #4 reported EVERY
+  // TypeScript suite as never invoked — a fail-closed red for a tree that was
+  // in fact running all of them. A hardcoded variable name is the same kind of
+  // second description this whole control exists to avoid.
+  const src =
+    /(^|[ \t])(\.|source)[ \t]+"?(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/)?\.?\/?([A-Za-z0-9_][A-Za-z0-9_./-]*)/gm
   const candidates = new Set<string>()
   for (const m of text.matchAll(src)) if (m[4]) candidates.add(m[4])
 
@@ -603,13 +612,18 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   const ciBlanket = tsPresent && hasCi && blanketOf(ciCmds, pkgText)
   const includeCovers = includeOk(cfgText)
 
+  // BUG-066: `bash "$BP_CODE_ROOT/tests/<suite>/test.sh"` is the same
+  // invocation as `bash tests/<suite>/test.sh` — the gate now resolves its code
+  // root instead of trusting cwd. The optional variable prefix is what keeps
+  // this an assertion about INVOCATION rather than about spelling.
+  const rootVar = '"?(\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?/)?'
   const shInvoked = (cmds: string, s: string, anchored: boolean) =>
     new RegExp(
-      `${anchored ? '(^|[^#A-Za-z0-9_/])' : ''}bash +tests/${rx(s)}/[a-z0-9._-]+\\.sh`,
+      `${anchored ? '(^|[^#A-Za-z0-9_/])' : ''}bash +${rootVar}tests/${rx(s)}/[a-z0-9._-]+\\.sh`,
       'm',
     ).test(cmds)
   const tsNamed = (cmds: string, s: string) =>
-    new RegExp(`vitest[^|]*tests/${rx(s)}/[a-zA-Z0-9._-]+\\.spec\\.ts`).test(cmds)
+    new RegExp(`vitest[^|]*${rootVar}tests/${rx(s)}/[a-zA-Z0-9._-]+\\.spec\\.ts`).test(cmds)
   /** A spec is covered when it is named outright, or reached by the chain. */
   const tsCovered = (cmds: string, s: string, blanket: boolean, noRunner: string) => {
     if (tsNamed(cmds, s)) return ''

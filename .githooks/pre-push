@@ -45,6 +45,65 @@ set -e
 # other hook context and must not depend on its caller.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
+# --- BUG-066: the CODE root ---------------------------------------------------
+#
+# Every path below used to be written cwd-relative — `scripts/lib/pipeline.sh`,
+# `tests/<suite>/test.sh`, `scripts/run-ts-suites.sh`. That is correct exactly
+# while the code tree sits at the repository root, and TASK-021 moves it to
+# `scaffolding/`. Measured in a post-move tree: the gate returned rc=0 printing
+# `PASSED · 0 stages · 39 skipped`, and a real `git push` was accepted.
+#
+# So the hook needs to resolve WHERE ITS CODE IS. Three constraints shaped this:
+#
+#   * NOT from $0. `core.hooksPath` and a symlinked .git/hooks both give the
+#     right answer, but a COPIED .git/hooks/pre-push gives `<repo>/.git` — a
+#     plausible directory with no tests/ — and git supports that install. And
+#     $BASH_SOURCE is a bashism; this file is #!/bin/sh.
+#   * FROM CWD, which git guarantees: hooks run at the work-tree root. `pwd` is
+#     a syscall, so unlike `git rev-parse --show-toplevel` no exported GIT_DIR
+#     can move it (BUG-077).
+#   * NOT "the file I source exists here". That is a proxy — it is evidence
+#     about the renderer and gets USED as a claim about the suites, which is
+#     FEATURE-002's mistake one level up. A code root is ranked on BOTH things
+#     the gate actually consumes: the renderer it sources AND the suite tree it
+#     runs. Nothing is inferred from anything else.
+#
+# RANKING, and it is what answers "mid-move, when both trees exist, which wins":
+#   rank 1  renderer AND tests/   — a directory that can actually run this gate
+#   rank 2  renderer only         — it can render; the suite stages will fail by
+#                                   their own guards, naming the path
+#   none    no renderer           — refuse the push
+# Candidates are tried scaffolding-first, so a COMPLETE root always beats a
+# half-built one and, between two complete ones, the destination wins. A
+# derived project has no scaffolding/ (bootstrap strips it), so downstream this
+# resolves to `.` exactly as before.
+#
+# A no-match REFUSES. It does not fall through to a skip: this whole block
+# exists because a gate reported PASSED having run nothing.
+BP_CODE_ROOT=''
+_pp_cr_partial=''
+_pp_cr_tried=''
+for _pp_cr in scaffolding .; do
+  [ -d "$_pp_cr" ] || continue
+  _pp_cr_tried="$_pp_cr_tried $_pp_cr"
+  [ -r "$_pp_cr/scripts/lib/pipeline.sh" ] || continue
+  if [ -d "$_pp_cr/tests" ]; then BP_CODE_ROOT="$_pp_cr"; break; fi
+  [ -n "$_pp_cr_partial" ] || _pp_cr_partial="$_pp_cr"
+done
+[ -n "$BP_CODE_ROOT" ] || BP_CODE_ROOT="$_pp_cr_partial"
+if [ -z "$BP_CODE_ROOT" ]; then
+  echo "❌ no code root: scripts/lib/pipeline.sh is not readable under any of:$_pp_cr_tried"
+  echo "   (probed from $(pwd), which git guarantees is the work-tree root)"
+  echo "   Run: blueprint pull scripts/lib/pipeline.sh"
+  echo "   Blocking the push: a gate that cannot find its own code has not run"
+  echo "   its stages, and a gate that skips them all still reports green."
+  exit 1
+fi
+BP_CODE_ROOT="$(cd -P "$BP_CODE_ROOT" && pwd)"
+export BP_CODE_ROOT
+[ -d "$BP_CODE_ROOT/tests" ] || \
+  echo "⚠ code root $BP_CODE_ROOT has no tests/ — the suite stages will say so."
+
 # FEATURE-002 — render the gate as a pipeline. The banner is not decoration: a
 # gate that does not run prints NOTHING, which looks exactly like a gate that
 # passed. On 2026-08-02 something wiped core.hooksPath and a push went out
@@ -57,11 +116,14 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 # derived project that pulled this hook before scripts/lib/pipeline.sh lands
 # here, and a confusing block is far better than a gate whose stages quietly
 # do not run.
+#
+# The readable-check above already decided this path, so the `else` here is
+# unreachable in practice and kept as the fail-closed floor.
 # shellcheck source=scripts/lib/pipeline.sh
-if [ -r scripts/lib/pipeline.sh ]; then
-  . scripts/lib/pipeline.sh
+if [ -r "$BP_CODE_ROOT/scripts/lib/pipeline.sh" ]; then
+  . "$BP_CODE_ROOT/scripts/lib/pipeline.sh"
 else
-  echo "❌ scripts/lib/pipeline.sh is missing — the gate renderer is absent."
+  echo "❌ $BP_CODE_ROOT/scripts/lib/pipeline.sh is missing — the gate renderer is absent."
   echo "   Run: blueprint pull scripts/lib/pipeline.sh"
   echo "   Blocking the push: a gate that cannot render its stages cannot"
   echo "   demonstrate that it ran them."
@@ -140,7 +202,11 @@ push_log_opts() {
 # POSIX and needs nothing installed.
 _pp_head="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 _pp_n="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo '?')"
-_pp_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# BUG-077: `pwd`, not `git rev-parse --show-toplevel`. git runs hooks from the
+# work-tree root, so this is the same answer from a syscall no exported GIT_DIR
+# can redirect — and it is the PROJECT root, which is what the banner names,
+# rather than the code root resolved above.
+_pp_top="$(pwd)"
 
 # TASK-019 — the blueprint is trunk-based, like every project derived from it.
 #
@@ -606,8 +672,19 @@ fi
 #   - localization parity checks
 # This keeps .githooks/pre-push pristine (blueprint-managed) and lets the
 # blueprint sync forward without trampling your project guards.
-if [ -f .githooks/pre-push-project ]; then
-  . .githooks/pre-push-project
+#
+# BUG-066: resolved against the code root first, because pre-push-project is
+# this file's sibling and travels with it. The cwd-relative form is kept as the
+# second candidate so a tree that moves the code but leaves .githooks at the
+# repository root still finds it.
+_pp_proj=''
+for _pp_c in "$BP_CODE_ROOT/.githooks/pre-push-project" ".githooks/pre-push-project"; do
+  [ -f "$_pp_c" ] || continue
+  _pp_proj="$_pp_c"
+  break
+done
+if [ -n "$_pp_proj" ]; then
+  . "$_pp_proj"
 else
   pipe_skip "project guards" "no .githooks/pre-push-project"
 fi
@@ -620,9 +697,9 @@ if pipe_finish; then
   # FEATURE-002 — the server side of the pipeline. Detached and fire-and-forget:
   # it cannot block the push, cannot change its exit status, and exits on a hard
   # deadline even if no run ever appears. Opt out with AGENT_CI_WATCH=0.
-  if [ "${AGENT_CI_WATCH:-1}" = "1" ] && [ -x scripts/watch-ci.sh ] \
+  if [ "${AGENT_CI_WATCH:-1}" = "1" ] && [ -x "$BP_CODE_ROOT/scripts/watch-ci.sh" ] \
      && command -v gh >/dev/null 2>&1; then
-    ( setsid sh scripts/watch-ci.sh "$(git rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1 & ) 2>/dev/null || true
+    ( setsid sh "$BP_CODE_ROOT/scripts/watch-ci.sh" "$(git rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1 & ) 2>/dev/null || true
     echo "  watching CI for $(git rev-parse --short HEAD 2>/dev/null) — results here and in logs/agent-activity.log"
   fi
   exit 0

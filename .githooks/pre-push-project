@@ -41,7 +41,12 @@
 # (and keeps the "every gate file wires to the one renderer" assertion honest)
 # without starting a second pipeline inside the parent's.
 # shellcheck source=scripts/lib/pipeline.sh
-command -v pipe_stage >/dev/null 2>&1 || . scripts/lib/pipeline.sh
+#
+# BUG-066: every path in this file hangs off $BP_CODE_ROOT, which the parent
+# hook resolves from git-guaranteed cwd. The `.` default keeps this file
+# runnable on its own and is what the cwd-relative form used to mean.
+: "${BP_CODE_ROOT:=.}"
+command -v pipe_stage >/dev/null 2>&1 || . "$BP_CODE_ROOT/scripts/lib/pipeline.sh"
 
 # BP-7 — `blueprint pull` must do a marker-aware merge, preserving the
 # project's outside-marker content byte-for-byte.
@@ -238,9 +243,9 @@ command -v pipe_stage >/dev/null 2>&1 || . scripts/lib/pipeline.sh
 # and `set -e` killed the hook before one stage printed — a refused push with
 # the stage list truncated and no error anywhere. Runs before the stage it
 # guards, and hermetic (~0.1 s, stubbed npx).
-if [ -f tests/ts-bridge/test.sh ]; then
+if [ -f "$BP_CODE_ROOT/tests/ts-bridge/test.sh" ]; then
   _st_tsbridge(){
-    bash tests/ts-bridge/test.sh || {
+    bash "$BP_CODE_ROOT/tests/ts-bridge/test.sh" || {
       echo "❌ tests/ts-bridge/test.sh failed (BUG-055)."
       echo "   The vitest bridge must scrub git's environment before invoking the"
       echo "   runner, and must report its own failure instead of aborting the gate."
@@ -448,9 +453,9 @@ fi
 # so the gate can derive which items this push serves. `push_log_opts` (defined
 # in .githooks/pre-push for the secret scan) gives the outgoing range.
 # ============================================================================
-if [ -f scripts/lib/dod-gate.sh ]; then
+if [ -f "$BP_CODE_ROOT/scripts/lib/dod-gate.sh" ]; then
   # shellcheck source=scripts/lib/dod-gate.sh
-  . ./scripts/lib/dod-gate.sh
+  . "$BP_CODE_ROOT/scripts/lib/dod-gate.sh"
   _dod_ranges="$(push_log_opts)"
 
   AGENT_FEED_TAG="DoD-Gate"
@@ -497,10 +502,12 @@ fi
 # Placed here, at the END of the managed region, deliberately. It is the only
 # stage that needs a toolchain the rest of the gate does not, so a machine
 # missing it fails one clearly-named stage rather than poisoning earlier ones.
-if [ -f scripts/run-ts-suites.sh ]; then
+if [ -f "$BP_CODE_ROOT/scripts/run-ts-suites.sh" ]; then
   # shellcheck source=scripts/run-ts-suites.sh
-  . ./scripts/run-ts-suites.sh
-  ts_suites_stage "$(pwd)"
+  . "$BP_CODE_ROOT/scripts/run-ts-suites.sh"
+  # BUG-066: the CODE root, not `pwd`. This argument is what the bridge uses to
+  # find tests/vitest.config.ts and the *.spec.ts population.
+  ts_suites_stage "$BP_CODE_ROOT"
 else
   pipe_skip "vitest · TASK-018" "scripts/run-ts-suites.sh absent — run: blueprint pull scripts/run-ts-suites.sh"
 fi

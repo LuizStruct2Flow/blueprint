@@ -147,7 +147,11 @@ dod_stage_bugtests() {
     # check would have reported the bug UNTESTED with its test sitting in the
     # file -- a specific, plausible, wrong answer that reads as the gate
     # working. docs/config/findings.md F-002, instance 8.
-    if grep -raqE "BUG-0*${_dg_n}\b" tests/ 2>/dev/null; then
+    # BUG-066: the suite tree lives under the CODE root, which is not the
+    # project root once TASK-021 moves the code under scaffolding/. The `docs/`
+    # paths above stay cwd-relative on purpose — those are the PROJECT's own
+    # lifecycle files and do not move.
+    if grep -raqE "BUG-0*${_dg_n}\b" "${BP_CODE_ROOT:-.}/tests/" 2>/dev/null; then
       _dg_tested="$_dg_tested BUG-$_dg_n"
     else
       _dg_untested="$_dg_untested BUG-$_dg_n"
@@ -180,10 +184,13 @@ dod_stage_bugtests() {
 # both came out of.
 dod_stage_signal() {
   _dg_sig=""
-  if [ -f scripts/lib/state-dir.sh ]; then
+  if [ -f "${BP_CODE_ROOT:-.}/scripts/lib/state-dir.sh" ]; then
     # shellcheck source=scripts/lib/state-dir.sh
-    . ./scripts/lib/state-dir.sh
-    BP_CODE_ROOT="$(pwd)"   # git runs hooks from the work-tree root
+    . "${BP_CODE_ROOT:-.}/scripts/lib/state-dir.sh"
+    # BUG-066: the parent hook resolved this already. `pwd` is the fallback for
+    # a standalone source, and it is the same claim it always was — git runs
+    # hooks from the work-tree root.
+    : "${BP_CODE_ROOT:=$(pwd)}"
     BP_STATE_ROOT="$(bp_state_root)" || return 1
     _dg_sig="$(agent_signal_file 2>/dev/null)"
   fi

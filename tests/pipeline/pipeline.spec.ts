@@ -109,8 +109,29 @@ import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/i
 const LIB = join(REPO_ROOT, 'scripts/lib/pipeline.sh')
 const FEED_LIB = join(REPO_ROOT, 'scripts/lib/feed.sh')
 
+const STATE_LIB = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
+
 /** The suffix `scripts/lib/feed.sh` appends to the project root it derives. */
 const FEED_SUFFIX = 'logs/agent-activity.log'
+
+/**
+ * What a production caller does before it asks feed.sh anything (BUG-077).
+ *
+ * feed.sh used to answer with `git rev-parse --show-toplevel`, which reports
+ * whatever repository the CALLER's git environment points at — and git exports
+ * GIT_DIR into every hook, while this gate runs its suites from one. It now
+ * reads `$BP_STATE_ROOT`, resolved once through the same upward filesystem walk
+ * every other consumer uses.
+ *
+ * So the drivers below resolve it the way `scripts/agent-activity.sh` and
+ * `scripts/log-activity.sh` do. The case's claim is unchanged — the enclosing
+ * project root plus FEED_SUFFIX — but it is now asked of the shared derivation
+ * rather than of git.
+ */
+const RESOLVE_STATE_ROOT =
+  `. ${JSON.stringify(STATE_LIB)}\n` +
+  `BP_CODE_ROOT="$(pwd)"\n` +
+  `BP_STATE_ROOT="$(bp_state_root)" || exit 9\n`
 
 /**
  * ESC, as the thing to search for. A CI log full of these is soup.
@@ -694,7 +715,7 @@ pipe_finish`),
       const r = await runPipe(
         s,
         'p19a',
-        `. ${JSON.stringify(FEED_LIB)}\nfeed_log_path\necho\n`,
+        `${RESOLVE_STATE_ROOT}. ${JSON.stringify(FEED_LIB)}\nfeed_log_path\necho\n`,
         { env: { AGENT_FEED_LOG: undefined }, cwd: repo.dir },
       )
 
@@ -759,7 +780,7 @@ pipe_finish`),
       const resolved = await runPipe(
         s,
         'p19c-resolve',
-        `. ${JSON.stringify(FEED_LIB)}\nfeed_log_path\necho\n`,
+        `${RESOLVE_STATE_ROOT}. ${JSON.stringify(FEED_LIB)}\nfeed_log_path\necho\n`,
         { env: { AGENT_FEED_LOG: undefined }, cwd: REPO_ROOT },
       )
       expect(resolved.code, resolved.output).toBe(0)
@@ -777,10 +798,21 @@ pipe_finish`),
       const existedBefore = await readIfPresent(realFeed) !== '' || (await fileExists(realFeed))
       const before = detect(await readIfPresent(realFeed), s.escapeToken)
 
+      // MAKE THE FIXTURE PROJECT-SHAPED (BUG-077). feed.sh no longer falls back
+      // to `pwd` when it cannot identify a project — it drops the line rather
+      // than guessing one — so a bare temp directory now resolves to nothing and
+      // this case would pass vacuously for a NEW reason. `.blueprint-source` is
+      // one of the three terminators `bp_state_root` walks for, and planting it
+      // is what scripts/lib/state-dir.sh says a fixture that never `git init`s
+      // owes: "the two markers are complete for real CHECKOUTS and NOT for
+      // FIXTURES".
+      await s.fs.write('.blueprint-source', 'config_version = 2\n')
+
       const r = await runPipe(
         s,
         'p19c',
-        withFeed(`pipe_init 'gate'
+        RESOLVE_STATE_ROOT +
+          withFeed(`pipe_init 'gate'
 pipe_stage '${s.escapeToken}' true
 pipe_finish`),
         { env: { AGENT_FEED_LOG: undefined }, cwd: s.workspace.root },

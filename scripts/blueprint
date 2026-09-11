@@ -957,10 +957,42 @@ report_staleness() {
 # It deliberately does NOT also require the CLI-belongs-here test: that would
 # reintroduce a false NEGATIVE for the legitimate `blueprint drift` form run via
 # a PATH symlink from inside the blueprint.
+# _bp_project_root — the enclosing project root, resolved WITHOUT asking git.
+#
+# BUG-077. Four sites here used `git rev-parse --show-toplevel`, which answers
+# about the CALLER's exported git environment rather than about the tree the
+# operator is standing in. git exports GIT_DIR into every hook and the gate runs
+# the suites from one, so a fixture's environment silently redirects the answer
+# — and three of the four sites feed it to arm_gate / arm_push_keepalive /
+# report_staleness, two of which WRITE repo-local git config. That is BUG-014's
+# mechanism pointed at A-22's injury.
+#
+# The walk is `bp_state_root`, reused rather than reimplemented: a second
+# derivation of one location is the A-09 defect, and this file already carries
+# the physical-location idiom for `lib/gate.sh` two functions down. It consults
+# no command and no environment variable, so nothing can redirect it.
+_bp_project_root() {
+  local _lib _root
+  _lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/state-dir.sh"
+  if [ -r "$_lib" ]; then
+    # Sourced and called inside the command substitution's subshell, so
+    # BP_CODE_ROOT never leaks into the CLI's own environment.
+    _root="$(
+      . "$_lib"
+      BP_CODE_ROOT="$PWD"
+      bp_state_root 2>/dev/null
+    )"
+    if [ -n "$_root" ]; then
+      (cd "$_root" 2>/dev/null && pwd -P) && return 0
+    fi
+  fi
+  pwd -P
+}
+
 _bp_is_blueprint_itself() {
   local here
-  here=$(git rev-parse --show-toplevel 2>/dev/null) || here="$PWD"
-  here=$(cd "$here" 2>/dev/null && pwd -P) || return 1
+  here="$(_bp_project_root)" || return 1
+  [ -n "$here" ] || return 1
   [ -f "$here/.blueprint-root" ]
 }
 
@@ -973,11 +1005,14 @@ cmd_drift() {
   # covers them. Same arm_gate as the feed: one mechanism, two callers.
   _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
   # shellcheck source=scripts/lib/gate.sh
-  [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  # BUG-077: _bp_project_root, never `git rev-parse` — arm_gate writes
+  # repo-local config, so an environment-redirectable root arms the wrong repo.
+  _bp_proj="$(_bp_project_root)"
+  [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$_bp_proj"
   # BUG-032 — the push keepalive rides the same two wake paths, for the same
   # reason: it is repo-local config, so a clone starts without it.
   command -v arm_push_keepalive >/dev/null 2>&1 \
-    && arm_push_keepalive "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    && arm_push_keepalive "$_bp_proj"
 
   # BUG-007: the wake ritual runs `blueprint drift` in EVERY struct2flow repo,
   # and this one has no `.blueprint-source` because it is the source. It used to
@@ -994,7 +1029,7 @@ cmd_drift() {
     echo "  ${C_GREEN}✓ This IS the blueprint — it is the source of truth, so there is${C_RESET}"
     echo "  ${C_GREEN}  nothing to sync against and no drift to report.${C_RESET}"
     BLUEPRINT_BRANCH=""
-    report_staleness "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    report_staleness "$_bp_proj"
     echo
     echo "${C_DIM}Derived projects run this to compare themselves against here.${C_RESET}"
     echo "${C_DIM}To see what they would sync: blueprint files${C_RESET}"

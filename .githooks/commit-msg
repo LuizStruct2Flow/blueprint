@@ -60,7 +60,19 @@ fi
 #
 # FAILS CLOSED if the library is missing: a hook that cannot load its rule has
 # checked nothing, and must not report a pass.
-_cs_lib="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/lib/commit-subject.sh"
+#
+# BUG-077: `pwd`, not `git rev-parse --show-toplevel`. git runs hooks from the
+# work-tree root, so this is the same answer from a syscall that no exported
+# GIT_DIR can redirect — and unlike the rev-parse form it cannot silently
+# resolve to another repository's tree when a fixture invokes this hook.
+# `scaffolding` first, for the same reason .githooks/pre-push probes it
+# (BUG-066): after TASK-021 the code tree is not the project root.
+_cs_lib=''
+for _cs_c in "$(pwd)/scaffolding" "$(pwd)"; do
+  [ -r "$_cs_c/scripts/lib/commit-subject.sh" ] || continue
+  _cs_lib="$_cs_c/scripts/lib/commit-subject.sh"
+  break
+done
 if [ ! -r "$_cs_lib" ]; then
   echo "commit-msg: cannot read scripts/lib/commit-subject.sh — refusing." >&2
   echo "  Restore it with: blueprint pull scripts/lib/commit-subject.sh" >&2

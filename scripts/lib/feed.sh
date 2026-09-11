@@ -28,14 +28,44 @@
 #   AGENT_FEED_MAX_LINES  rotate above this many lines (default 4000)
 #   AGENT_FEED_KEEP_LINES keep this many on rotate      (default 2000)
 
-# Resolve the feed path once per process. Callers run from the repo root (git
-# runs hooks there), but fall back to locating it from this file so a caller in
-# a subdirectory still writes to the right feed.
+# Resolve the feed path once per process, from $BP_STATE_ROOT — the ONE
+# derivation every consumer of per-project state already shares.
+#
+# BUG-077. This used to be `git rev-parse --show-toplevel`, which answers a
+# question nothing here is asking: "what repository does my caller's git
+# environment point at". Two separate ways that is the wrong answer:
+#
+#   * git exports GIT_DIR into every hook, and the gate runs the suites from a
+#     pre-push hook — so a fixture's git environment silently redirects the
+#     feed. That is BUG-014's mechanism and A-09's consequence, and the ban on
+#     the idiom predates this file. Its scope was *state-dir consumers*, which
+#     this file is not; the scope was never wrong, only narrower than the
+#     hazard. tests/forbidden-idiom now scopes it to the hazard instead.
+#   * After TASK-021 splits code from state, the repository root and the code
+#     root are different directories. scripts/agent-activity.sh — the supervisor
+#     that holds this file open and appends by offset — resolves its path from
+#     its own physical location. Two derivations, one rendezvous: the supervisor
+#     would write scaffolding/logs/agent-activity.log while the gate and the
+#     subagent hooks wrote <repo>/logs/agent-activity.log. Two feeds, both
+#     written, neither empty, nothing looking wrong.
+#
+# A caller that has not resolved BP_STATE_ROOT gets NO feed line and one
+# complaint on stderr. That is deliberate: a missing line is recoverable, and a
+# line written into the wrong project's feed is the defect A-09 exists to
+# prevent. Resolve it the way every other consumer does, at initialisation:
+#
+#   BP_CODE_ROOT="$_bp_root"            # this script's own physical location
+#   . "$_bp_root/scripts/lib/state-dir.sh"
+#   BP_STATE_ROOT="$(bp_state_root)" || exit 9
 feed_log_path(){
   if [ -n "${AGENT_FEED_LOG:-}" ]; then printf '%s' "$AGENT_FEED_LOG"; return 0; fi
   if [ -n "${_FEED_LOG:-}" ]; then printf '%s' "$_FEED_LOG"; return 0; fi
-  _fl_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-  _FEED_LOG="$_fl_root/logs/agent-activity.log"
+  if [ -z "${BP_STATE_ROOT:-}" ]; then
+    echo "feed.sh: BP_STATE_ROOT is unset — dropping the feed line rather than" >&2
+    echo "  guessing a project. Resolve it with bp_state_root at init." >&2
+    return 9
+  fi
+  _FEED_LOG="$BP_STATE_ROOT/logs/agent-activity.log"
   printf '%s' "$_FEED_LOG"
 }
 
@@ -46,7 +76,8 @@ feed_log_path(){
 # error and returns 0. A feed line is worth having; it is never worth failing a
 # push over.
 feed_append(){
-  _fa_log="$(feed_log_path)"
+  _fa_log="$(feed_log_path)" || return 0
+  [ -n "$_fa_log" ] || return 0
   _fa_dir="${_fa_log%/*}"
   [ -d "$_fa_dir" ] || mkdir -p "$_fa_dir" 2>/dev/null || return 0
 

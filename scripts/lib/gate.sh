@@ -21,20 +21,37 @@
 #                                  only covering path for them)
 # One mechanism, two callers — never two implementations.
 
-# arm_gate [repo_root]
+# arm_gate PROJECT_ROOT
 # Reports the gate state ALWAYS (founder's call: explicit, not silent — a whole
 # session was spent believing the gate was armed when it was not). Arms only
 # when core.hooksPath is UNSET. Never fails the caller.
+#
+# THE ROOT IS REQUIRED (BUG-077). It used to default to `git rev-parse
+# --show-toplevel`, which answers about the CALLER's exported git environment —
+# and git exports GIT_DIR into every hook, while the gate runs the suites from
+# one. This function WRITES git config at the root it resolves, so a redirected
+# answer arms (or fails to arm) somebody else's repository: BUG-014's mechanism
+# with A-22's consequence, which is the pair this helper exists to prevent.
+#
+# Both callers already pass an explicit root, so the default was dead code that
+# existed only to be wrong. Removed rather than repaired, for the reason
+# state-dir.sh gives about its own positional root: a tolerant signature lets a
+# stale call site keep resolving somewhere plausible.
 arm_gate() {
   _ag_root="${1:-}"
-  [ -n "$_ag_root" ] || _ag_root="$(git rev-parse --show-toplevel 2>/dev/null)" || _ag_root=""
   # One guard, and it SPEAKS. "Reports the gate state ALWAYS" (above) has to hold
   # on the failure paths too, or a call that could not arm is indistinguishable
   # from a call that never happened — which is the BUG-004 injury itself. This also
   # covers rev-parse exiting 0 with empty output: unlikely, but it must not reach
   # the path concatenation below.
   if [ -z "$_ag_root" ]; then
-    echo "  ⚠ gate: not a git work tree — nothing to arm"
+    echo "  ⚠ gate: arm_gate needs an explicit project root — nothing to arm."
+    echo "     Pass the root you already resolved; it is never inferred from the"
+    echo "     git environment, which a hook can redirect (BUG-077)."
+    return 0
+  fi
+  if [ ! -d "$_ag_root" ]; then
+    echo "  ⚠ gate: '$_ag_root' is not a directory — nothing to arm"
     return 0
   fi
 
@@ -89,8 +106,13 @@ arm_gate() {
 # Same non-clobber rule as the gate: a deliberate core.sshCommand belongs to
 # whoever set it. We warn and leave it, because silently rewriting another
 # tool's transport is worse than a slow push.
+#
+# The root is REQUIRED, for the same reason arm_gate's is (BUG-077): this
+# function writes repo-local git config, and a root inferred from the caller's
+# git environment is a root a hook can redirect.
 arm_push_keepalive() {
-  _ak_root="${1:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  _ak_root="${1:-}"
+  [ -n "$_ak_root" ] || return 0
   git -C "$_ak_root" rev-parse --git-dir >/dev/null 2>&1 || return 0
 
   _ak_cur="$(git -C "$_ak_root" config --get core.sshCommand 2>/dev/null || true)"

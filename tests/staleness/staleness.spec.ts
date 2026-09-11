@@ -62,8 +62,9 @@
  *
  * EQUIVALENCE RECORD (R6, and the migration's own evidence).
  *
- * "Ported" is a claim, so it was measured rather than reviewed. Ten perturbed
- * trees were built and BOTH implementations run over each — the two retiring
+ * "Ported" is a claim, so it was measured rather than reviewed. Seventeen
+ * perturbed trees were built (ten in round 1, seven in round 2 below) and BOTH
+ * implementations run over each — the two retiring
  * shell runners and this spec — with the per-case verdict sets compared
  * mechanically. The sets below are OBSERVED, not predicted. The shell runners
  * number BOTH files from 1, so a shell `#3` is ambiguous between the probe's and

@@ -63,7 +63,7 @@
  * changed, and the harness's CHANGED-NOTHING guard — asked of the mutant tree's
  * own git, which is the correct thing to ask — answered "changed nothing" and
  * refused the verdict. `scripts/start-codex-signal-watch.sh`, this suite's entire
- * subject, is one of fifteen files the real repo TRACKS while `.gitignore` also
+ * subject, is one of sixteen files the real repo TRACKS while `.gitignore` also
  * names them: tracked beats ignored in the real repo and NOT in the fresh `git
  * init` every harness builds its tree with. `git add -A -f` is the fix, and the
  * guard failing LOUDLY rather than reporting a fabricated finding is the only

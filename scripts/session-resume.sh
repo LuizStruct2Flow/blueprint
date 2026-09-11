@@ -189,8 +189,31 @@ if [ "$MODE" = "mark" ]; then
   # preserve. Found by Codex R8; it is A-09's "two writers to one file" one level
   # up, and this script became the second writer.
   #
-  # A lock would work and is not needed: a single small `printf` to a file opened
-  # O_APPEND is one write(), and no other appender can interleave inside it.
+  # A lock would work and is not needed: ONE write() to a file opened O_APPEND is
+  # indivisible, so no other appender can land inside it.
+  #
+  # BUG-079 — AND `printf '%s\n' "$roll"` IS NOT ONE WRITE. This line used to be
+  # exactly that, with the comment above claiming the property it did not have.
+  # `bash`'s printf builtin flushes at every newline, so a two-line roll is TWO
+  # write() calls and the gap Codex R8 identified was still open — narrower, but
+  # open, and still silent. Measured rather than reasoned about, both ways:
+  #
+  #   strace: printf '%s\n' "$roll"  →  write(1, "[ts] </aaa>\n", 12)
+  #                                     write(1, "[ts] <bbb> head=x\n", 18)
+  #   a competing appender at ~170 kHz over 60 marks: 36 events landed between a
+  #   close and the next open, in the UNMODIFIED script (.scratch/probe-r8.sh).
+  #
+  # `echo`, `printf '%s\n%s\n'` and even coreutils `/usr/bin/printf` all split the
+  # same way. A heredoc does not: bash writes the body to a temp file before `cat`
+  # runs, so `cat` reads all of it in one `read()` and emits ONE `write()`.
+  # `printf … | cat` gets this right only by luck — `cat` may read the first line
+  # before the second arrives, and then it is two writes again.
+  #
+  # Found by TASK-018's equivalence run: the mutant that reverts this fix left
+  # BOTH the shell suite and its TypeScript port green, because the shell suite
+  # drove the race with a full `bash signal-set.sh` per flip — ~33 Hz against a
+  # gap of microseconds. A case that cannot provoke the race it asserts is a green
+  # that proves nothing, which is BUG-005's shape.
   prev="$(open_marker_line)"
   if [ -n "$prev" ]; then
     roll="$(printf '[%s] </%s>\n[%s] <%s> head=%s' \
@@ -198,7 +221,9 @@ if [ "$MODE" = "mark" ]; then
   else
     roll="$(printf '[%s] <%s> head=%s' "$(now_utc)" "$new_id" "$head_sha")"
   fi
-  printf '%s\n' "$roll" >>"$JOURNAL"
+  cat >>"$JOURNAL" <<EOF
+$roll
+EOF
 
   # READ THE MARKER BACK BEFORE TOUCHING HANDOVER (Codex R6-1).
   #

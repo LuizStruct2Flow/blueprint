@@ -37,6 +37,13 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # the inode-preserving rotation. This file used to inline its own append, which
 # is how two writers to the same log drift apart on rotation and one of them
 # orphans the supervisor's open handle.
+#
+# BUG-077: feed.sh no longer asks git where it is. The state root is resolved
+# here, once, the way every other consumer resolves it — $repo_root is this
+# script's CODE root, and bp_state_root walks up from it to the project.
+BP_CODE_ROOT="$repo_root"
+. "$repo_root/scripts/lib/state-dir.sh"
+BP_STATE_ROOT="$(bp_state_root)" || exit 0
 # shellcheck source=scripts/lib/feed.sh
 . "$repo_root/scripts/lib/feed.sh"
 

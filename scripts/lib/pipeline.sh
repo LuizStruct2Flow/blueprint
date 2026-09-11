@@ -50,8 +50,23 @@
 # alongside every other agent's work rather than only in the terminal that
 # happened to run the push. Optional by design — see _pipe_feed.
 # shellcheck source=scripts/lib/feed.sh
-if [ -r "${_PIPE_LIBDIR:-scripts/lib}/feed.sh" ]; then
-  . "${_PIPE_LIBDIR:-scripts/lib}/feed.sh"
+#
+# BUG-066: the default hangs off $BP_CODE_ROOT, which .githooks/pre-push
+# resolves before sourcing this file. A bare `scripts/lib` is cwd-relative and
+# stops resolving the moment the code tree moves under scaffolding/.
+_PIPE_LIB="${_PIPE_LIBDIR:-${BP_CODE_ROOT:-.}/scripts/lib}"
+if [ -r "$_PIPE_LIB/feed.sh" ]; then
+  # BUG-077: feed.sh resolves the feed from $BP_STATE_ROOT rather than asking
+  # git — git exports GIT_DIR into every hook and the gate runs suites from one.
+  # Resolved here because the gate is the one feed producer that is not a
+  # top-level script with its own physical-location block: `pwd` is git's hook
+  # contract, which is the same claim scripts/lib/dod-gate.sh makes.
+  if [ -z "${BP_STATE_ROOT:-}" ] && [ -r "$_PIPE_LIB/state-dir.sh" ]; then
+    . "$_PIPE_LIB/state-dir.sh"
+    : "${BP_CODE_ROOT:=$(pwd)}"
+    BP_STATE_ROOT="$(bp_state_root)" || BP_STATE_ROOT=""
+  fi
+  . "$_PIPE_LIB/feed.sh"
 fi
 
 # --- state ------------------------------------------------------------------

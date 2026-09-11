@@ -76,7 +76,13 @@ BP_STATE_ROOT="$(bp_state_root)" || exit 9
 # helper. Reading the tracked AGENT_SIGNAL.md here would read protocol prose,
 # and — worse, before the split — a file git rewrites under a live dispatch.
 signal_file="$(agent_signal_file)"
-log_dir="$repo_root/logs"; mkdir -p "$log_dir"
+# BUG-077: the STATE root, not this script's CODE root. The supervisor holds
+# the feed open and appends by offset while scripts/lib/feed.sh appends by path,
+# so the two must derive the same file from the same rule — that is A-09's whole
+# argument, and `$repo_root/logs` here versus a state-root path there is exactly
+# the split it forbids. Identical today (the roots coincide in a flat tree);
+# after the scaffolding/ move it is the difference between one feed and two.
+log_dir="$BP_STATE_ROOT/logs"; mkdir -p "$log_dir"
 out="$log_dir/agent-activity.log"
 lock_file="$log_dir/.agent-activity.lock"
 state_file="$log_dir/.agent-activity.state"
@@ -660,11 +666,11 @@ case "${1:-}" in
   --stop)      cmd_stop ;;
   --status)    cmd_status ;;
   --whoami)    cmd_whoami ;;
-  --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
-               command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$repo_root"
+  --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$BP_STATE_ROOT"
+               command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$BP_STATE_ROOT"
                cmd_daemon ;;
   --supervise) AGENT_FEED_FOREGROUND=0 supervise ;;          # internal: daemon child
-  "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$repo_root"
+  "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$BP_STATE_ROOT"
                AGENT_FEED_FOREGROUND=1 supervise ;;          # foreground
   *)           echo "usage: $0 [--daemon|--stop|--status|--whoami]" >&2; exit 2 ;;
 esac

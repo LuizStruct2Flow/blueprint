@@ -43,8 +43,8 @@
  *     beats a guard that reads source.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 36 of
- * 36 assertions here have a mutant that was RUN and OBSERVED to turn them red,
+ * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 38 of
+ * 38 assertions here have a mutant that was RUN and OBSERVED to turn them red,
  * #0 included: the only thing that can falsify #0 is removing the helper's
  * main-moved assertion, so that is the mutant, and it is injected into this
  * file.
@@ -57,6 +57,13 @@
  * `a2bp-allow` marker — the product's own sanctioned override, which suppresses
  * the scan on that line — so the fail-closed check is the only thing left
  * standing. Observed: `C15` alone reds it.
+ *
+ * #29 AND #30 ARE NEW (BUG-105). Both close product behaviour that NOTHING
+ * watched in either implementation: `bp_file_base_content` aligning at the root
+ * coordinate instead of `bp_base_path`'s (`B15`), and `cmd_a2bp`'s required-libs
+ * refusal degrading to a `continue` (`E7`). Neither is a port regression — the
+ * shell runner was equally blind — so each needed a NEW case rather than a
+ * stricter one.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -1306,6 +1313,124 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       expect(produced, 'large-file substitution left unresolved tokens').not.toContain(
         '{{PROJECT_NAME}}',
       )
+    })
+  })
+
+  it('#29 BUG-105: the guard aligns against the base COORDINATE, so a scaffolded base still restores', async () => {
+    await scenario('a2bp-contam-29', async (s) => {
+      // THE HOLE BUG-105 RECORDS, NOW WATCHED. `bp_file_base_content` could be
+      // changed to align at the ROOT path instead of `bp_base_path`'s answer and
+      // NOTHING in either implementation went red: no case drove a2bp end to end
+      // against a base whose copy of the file lives under `scaffolding/`, which
+      // is precisely the layout TASK-021 is moving the blueprint into. The
+      // function's own header states the consequence — an EMPTY base for a file
+      // that exists, so every line reads as new and A-07's placeholder restore
+      // degrades to nothing on exactly the lines it exists for.
+      //
+      // The fixture is the move itself: the base carries the carrier under
+      // `scaffolding/`, and a root file of the same name is left in place as
+      // well, because that is the state during the move and it is the wrong
+      // answer a root-coordinate alignment would pick up. Under the root
+      // coordinate the restore has nothing to align to, the literal project name
+      // survives into the staged bytes, and the residual-name scan blocks the
+      // request — so this case sees the defect as a REFUSAL of a request that
+      // must be filed. Observed: B15 reds it.
+      const f = await fixture(s)
+      const scaffolded = `scaffolding/${CARRIER}`
+      await f.writeBp(
+        scaffolded,
+        '# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project.\none more line\n',
+      )
+      await f.writeIn(
+        f.proj,
+        CARRIER,
+        '# Mocks\nGeneric guidance for the acme-flow project.\none more line, edited\n',
+      )
+
+      const r = await f.a2bp(f.proj, [CARRIER])
+      expect(
+        r.rc,
+        `a request against a scaffolded base was refused — the guard aligned at the wrong coordinate\n${r.out}`,
+      ).toBe(0)
+
+      const filed = await f.readBp(scaffolded)
+      expect(
+        filed,
+        'the placeholder was not restored against the scaffolded base',
+      ).toContain('{{PROJECT_NAME}}')
+      expect(
+        filed,
+        'the literal project name reached the blueprint through a mis-resolved base',
+      ).not.toContain('acme-flow')
+      expect(filed, 'the request does not carry the edit it was filed for').toContain(
+        'one more line, edited',
+      )
+    })
+  })
+
+  it('#30 BUG-105: a missing request library REFUSES the run, it does not file an unscanned request', async () => {
+    await scenario('a2bp-contam-30', async (s) => {
+      // THE SECOND HOLE BUG-105 RECORDS. `cmd_a2bp`'s required-libs loop could be
+      // changed from `die` to `continue` and NOTHING went red in either
+      // implementation, while the guard's own comment cites BUG-003 — "a guard
+      // that cannot run is not a guard that passed". The `FAIL: scripts/lib/… is
+      // missing` line the shell runners print is the SUITE checking its own
+      // preconditions, not the CLI's behaviour.
+      //
+      // THE PATH MATTERS: `tests/*` is managed and NOT substituted, so with
+      // contamination.sh absent and the refusal downgraded, staging is a plain
+      // `cp`, `contamination_scan` is simply not a command, `findings` comes back
+      // empty — and the request is filed with the scan having never run. That is
+      // the door BUG-002 and A-09 came through, standing open. Any substitutable
+      // path would instead fail in `contamination_stage` and be rejected for a
+      // different reason, which is why this case does not use the carrier.
+      const f = await fixture(s)
+      const contaminated = 'tests/fixture/test.sh'
+      const hostPath = '/home/someone/dev/acme-flow/secret'
+      await f.writeIn(f.proj, contaminated, `echo fixture\n# see ${hostPath}\n`)
+
+      const copyCli = async (rel: string, drop?: string): Promise<string> => {
+        const dir = await s.fs.mkdirp(rel)
+        for (const part of ['blueprint', 'lib']) {
+          const cp = await s.run('cp', ['-a', join(SUBJECT_ROOT, 'scripts', part), dir], {
+            cwd: s.workspace.root,
+          })
+          expect(cp.code, `the fixture could not copy scripts/${part}\n${cp.output}`).toBe(0)
+        }
+        if (drop !== undefined) {
+          const rm = await s.run('rm', ['-f', join(dir, 'lib', drop)], { cwd: s.workspace.root })
+          expect(rm.code, rm.output).toBe(0)
+          const gone = await s.run('test', ['-e', join(dir, 'lib', drop)], {
+            cwd: s.workspace.root,
+          })
+          expect(gone.code, `${drop} is still present — this case would be vacuous`).not.toBe(0)
+        }
+        return join(dir, 'blueprint')
+      }
+
+      // NON-VACUITY: the same copied CLI, complete, must reach the scan and
+      // block. Without this, "nothing was filed" is satisfied by a CLI copy that
+      // is broken for any reason at all.
+      const control = await f.a2bp(f.proj, [contaminated], { cli: await copyCli('cli-whole') })
+      expect(
+        control.raw,
+        `the copied CLI did not reach the contamination scan — the case below would be vacuous\n${control.out}`,
+      ).toBe(RC.BLOCKED)
+      expect(control.out.toUpperCase(), 'the control run reported no finding').toContain('BLOCK')
+
+      const r = await f.a2bp(f.proj, [contaminated], {
+        cli: await copyCli('cli-no-guard', 'contamination.sh'),
+      })
+
+      expect(
+        await f.readBp(contaminated),
+        'A REQUEST WAS FILED WITH THE CONTAMINATION GUARD ABSENT — the scan never ran',
+      ).not.toContain(hostPath)
+      expect(r.rc, `a2bp ran with its guard missing\n${r.out}`).not.toBe(0)
+      expect(
+        r.out,
+        'refused, but not by the required-libs guard — a downstream failure is not the same as a refusal (BUG-003)',
+      ).toContain('scripts/lib/contamination.sh is missing')
     })
   })
 })

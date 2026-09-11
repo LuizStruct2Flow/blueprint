@@ -11,8 +11,8 @@ things should be documented in the tasks/bugs || commits || md files."*
 | what is open, and what to test | the four `docs/<state>/` folders |
 | what changed and why | `git log` — commit bodies carry the reasoning |
 | what a fix taught | the item's own row in `BUGS.md` |
-| the rules | `CLAUDE.md`, `docs/DoD.md`, and **`docs/doing/TASK-018-RULES.md`** |
-| **the TARGET this is all aimed at** | **`docs/doing/TASK-018-TARGET.md`** — read it BEFORE writing any test |
+| the rules | `CLAUDE.md`, `docs/DoD.md`, and **`docs/waiting-acceptance/TASK-018-RULES.md`** |
+| **the TARGET this is all aimed at** | **`docs/waiting-acceptance/TASK-018-TARGET.md`** — read it BEFORE writing any test |
 | host quirks, standing founder decisions | `project_config_overview.md` |
 
 **Anything derivable from a command does not belong here.** The previous version
@@ -86,7 +86,7 @@ only real contention. 4–6 agents on disjoint sets is the practical ceiling.
 
 ## 3. WHAT TO DO NEXT — the restructure, decided 2026-09-10
 
-**Read `docs/doing/TASK-018-TARGET.md` first. It is the agreed target and this
+**Read `docs/waiting-acceptance/TASK-018-TARGET.md` first. It is the agreed target and this
 session implemented against it without having been told it.** Four of the seven
 rules are not yet true; that is by design, not defect.
 

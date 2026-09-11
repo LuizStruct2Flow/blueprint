@@ -14,7 +14,7 @@
  * guard: it reports success.
  *
  * PORTED FROM tests/signal-set/test.sh (TASK-018). Equivalence was measured,
- * not reviewed — see docs/doing/TASK-018-EQUIVALENCE-mic/ for the mutant
+ * not reviewed — see docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/ for the mutant
  * population, the per-case agreement table and the two divergences, both of
  * which are recorded below at the case they affect.
  */

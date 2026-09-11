@@ -20,7 +20,7 @@
  * `tests/a2bp-request/test.sh` from that copy and this spec with
  * `BP_SUBJECT_ROOT` set to it, and compares which case ids go red. It is NOT a
  * serial or skip hatch — it changes which tree is under test, never whether a
- * case runs. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 15 of 15 assertions
+ * case runs. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 15 of 15 assertions
  * here have a mutant that was RUN and OBSERVED to turn them red.
  *
  * #3 AND #3b COULD NOT SEE THE FRAMING LEAVE, and now can (BUG-104, closed).

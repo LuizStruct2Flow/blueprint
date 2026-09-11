@@ -32,7 +32,7 @@
  * sed runs inside the sandbox and the verdicts cannot diverge.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 7 of 7
+ * perturbed copy of the blueprint. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 7 of 7
  * assertions here have a mutant that was RUN and OBSERVED to turn them red.
  *
  * #2 AND #3 NOW WITNESS THE DEFECT THEY NAME (BUG-104, closed). They did not.

@@ -204,8 +204,30 @@ if [ "$MODE" = "mark" ]; then
   #   close and the next open, in the UNMODIFIED script (.scratch/probe-r8.sh).
   #
   # `echo`, `printf '%s\n%s\n'` and even coreutils `/usr/bin/printf` all split the
-  # same way. A heredoc does not: bash writes the body to a temp file before `cat`
-  # runs, so `cat` reads all of it in one `read()` and emits ONE `write()`.
+  # same way. A heredoc does not — and the SCOPE of that claim matters, because
+  # the next person reasons from this comment:
+  #
+  #   NOT a POSIX guarantee. Nothing requires `cat` to use exactly one `write(2)`,
+  #   and `/bin/sh` being dash is beside the point — the write is done by an
+  #   EXTERNAL `cat`, not by the shell.
+  #
+  #   MEASURED HERE, on this platform, at this payload size. `bash` writes the
+  #   heredoc body to a temp file before `cat` runs, so `cat` reads the whole body
+  #   in one `read()` and emits one `write()`:
+  #
+  #     strace, cat (uutils coreutils) 0.8.0, 163-byte body:
+  #       (bash)  write(4, "<body>", 163)          ← heredoc temp file
+  #       (cat)   splice(0,…,1,…) = EINVAL          ← zero-copy attempt, refused
+  #               read(3, …, 16384) = 163
+  #               write(1, "<body>", 163)          ← ONE write
+  #
+  #   WHAT WOULD FALSIFY IT, and one of them is already measured: a body larger
+  #   than `cat`'s read buffer splits. The same binary, same heredoc, with a 1 MiB
+  #   body: 64 x write(1, …, 16384) + 1 x 13798. So the property holds because the
+  #   roll is two short lines, and it stops holding the moment this payload grows
+  #   past ~16 KiB. A different `cat` (GNU, busybox, toybox, macOS) has its own
+  #   buffer and its own splice path, so re-measure rather than assume.
+  #
   # `printf … | cat` gets this right only by luck — `cat` may read the first line
   # before the second arrives, and then it is two writes again.
   #

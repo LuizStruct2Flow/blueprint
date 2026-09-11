@@ -140,7 +140,14 @@ dod_stage_bugtests() {
       _dg_parked="$_dg_parked BUG-$_dg_n"
       continue
     fi
-    if grep -rqE "BUG-0*${_dg_n}\b" tests/ 2>/dev/null; then
+    # -a is load-bearing, not tidiness. A file containing a NUL byte is
+    # classified BINARY by grep, which then prints NOTHING for it: no match,
+    # no error, and an exit status identical to "the pattern is absent". One
+    # got into tests/a2bp-request/a2bp-request.spec.ts on 2026-09-11, and this
+    # check would have reported the bug UNTESTED with its test sitting in the
+    # file -- a specific, plausible, wrong answer that reads as the gate
+    # working. docs/config/findings.md F-002, instance 8.
+    if grep -raqE "BUG-0*${_dg_n}\b" tests/ 2>/dev/null; then
       _dg_tested="$_dg_tested BUG-$_dg_n"
     else
       _dg_untested="$_dg_untested BUG-$_dg_n"

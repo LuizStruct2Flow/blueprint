@@ -68,7 +68,7 @@ of `.githooks/pre-push-project`, or if any gate file on that chain adopts
 
 ## F-002 — the recurring shape: a check that infers a property from a proxy that is satisfiable without it
 
-**Raised by** Eto (Orchestrator), 2026-09-10, from six instances found within one
+**Raised by** Eto (Orchestrator), 2026-09-10, from eight instances found within one
 week. Not a bug row: there is no single site to fix. It is a claim about how
 checks in this repo get written, recorded so the sixth instance is recognised as
 the sixth rather than investigated as a novelty.
@@ -83,6 +83,7 @@ the sixth rather than investigated as a novelty.
 | BUG-066 | `grep` the hook's text for `bash tests/<suite>/…` | the text mentions the suite | the suite is invoked |
 | BUG-067 | `feed_is_running` after `setsid` | the lock is held **by anyone** | my child started |
 | BUG-068 | `console.warn` emitted the note | a string was written to a buffer | the operator sees it |
+| — (found 2026-09-11) | `grep -rqE 'BUG-0*NN\b' tests/` | the pattern is absent **or the file looks binary** | no test names this bug |
 
 **The shape.** Each check tests a **proxy** for the property it is trusted to
 establish, and in each case the proxy is satisfiable **without** the property. The
@@ -95,7 +96,7 @@ the failure is not merely undetected — it is actively vouched for, with the fu
 credibility of a green gate. `BUG-066` is the extreme: a push landed with 47 of 51
 stages skipped and the gate printed `PASSED`.
 
-**Two questions that would have caught all six**, and they are cheap enough to
+**Two questions that would have caught all eight**, and they are cheap enough to
 ask every time a check is written:
 
 1. **What else satisfies this predicate?** If anything other than the property
@@ -122,6 +123,25 @@ output to a temp file it deletes unless `rc != 0`. The witnessed verdict is a
 reported it*. Caught before landing, by asking question 1 of a report path rather
 than of a guard — which is the wider reading: **this applies to anything that
 vouches, not only to things that block.**
+
+**Instance eight inverts the direction, and that is why it belongs here.** A
+literal NUL byte got into `tests/a2bp-request/a2bp-request.spec.ts` (found by
+Andreas, Back-End-2, during the a2bp port). `grep` classifies a file containing NUL
+as binary and prints **nothing at all** — no match, no error, and an exit status
+indistinguishable from "the pattern is not there". DoD §2's check is
+`grep -rqE "BUG-0*NN\b" tests/`, so it would have reported the bug **untested with
+its test sitting in the file**.
+
+Every earlier instance fails toward *pass*. This one fails toward a confident false
+**negative** — the gate does not crash, it produces a specific, plausible,
+actionable, wrong answer. That reads as the gate working, which makes it harder to
+catch than a silent pass, not easier. So the shape is not "guards are too
+permissive"; it is **a check whose failure mode is indistinguishable from its
+working mode**, and permissiveness was only ever the most common way that happens.
+
+Cheap to close where it matters: `grep -a` treats binary as text. Worth doing in
+the DoD gate regardless of whether a NUL ever recurs, because the cost is one flag
+and the failure is unfalsifiable from the output.
 
 **Re-open / promote when** the BUG-066 and BUG-067 fixes are both in and someone
 can say whether the two questions would have been enough. At that point it belongs

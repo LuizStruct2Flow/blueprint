@@ -43,8 +43,14 @@ implementations of one suite, [`code/mut.sh`](code/mut.sh) injects one defect, a
 [`code/run.py`](code/run.py) runs both and compares. Run it as:
 
 ```bash
-python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/run.py [suite ...]
+python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/run.py                    # all five suites
+python3 .../code/run.py --out results-r6 wait-mic:w9-key-on-the-directory  # one tree
+python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/gap.py                    # any assertion with no mutant?
 ```
+
+`run.py` proves the two implementations AGREE on a defect.
+[`code/gap.py`](code/gap.py) asks the other question — whether every assertion has
+a defect at all — and §9 is the pass that closed it.
 
 **A mutant root points both implementations at ITSELF, with nothing to configure.**
 `tests/<suite>/test.sh` resolves `ROOT` from `dirname $0/../..`, and a spec
@@ -79,7 +85,12 @@ and `signal-set.sh` all pointed there. Mutating the DERIVATION reddens `#1` and
 ## 2. The population
 
 Per suite: three negative controls plus one mutant per distinct defect class
-named by an assertion.
+named by an assertion — **and then, in the R6 negative-proof pass (§9), one more
+per assertion that no mutant in that population ever turned red.** "One per defect
+class" is assertion-GROUP coverage, and three independent Codex reviews of the
+other TASK-018 groups refused certification for exactly that gap. Six assertions
+here had no mutant at all; [`code/gap.py`](code/gap.py) is now the check that
+says so, and it reports **0**.
 
 The controls are not ceremony. `c0-healthy` proves the comparison is not red for
 an unrelated reason. `c1-defect-in-a-comment` appends the BUG-023 defect as PROSE
@@ -92,10 +103,12 @@ population by grepping COMMENTS, which is how BUG-047 survived.
 | suite | trees | mutants |
 |---|---|---|
 | `signal-set` | 13 | refuse pipes · escape processing over the value · normalise only one input path · collapse repeated spaces · no boundary trim · mangle tabs · exceed the documented Unicode contract · rewrite the whole file · publish without a Task · swallow the failed journal append |
-| `wait-mic` | 10 | compare rendered rows · an empty reading is a handoff · wake on the Task too · accept a partial reading · reject a rejoinable pipe · whitelist the State · never exit |
-| `session-resume` | 13 | cry wolf on a healthy resume · warn and exit zero · take the first marker · order by timestamp · a missing marker is silent · rollback discards · report nothing · `--mark` does not stamp HANDOVER · stamp before the read-back · roll the window in two appends |
+| `wait-mic` | 13 | compare rendered rows · an empty reading is a handoff · wake on the Task too · accept a partial reading · reject a rejoinable pipe · whitelist the State · never exit · **fire without a change** · **key on the directory** · **Task is part of the mic** |
+| `session-resume` | 15 | cry wolf on a healthy resume · warn and exit zero · take the first marker · order by timestamp · a missing marker is silent · rollback discards · report nothing · `--mark` does not stamp HANDOVER · stamp before the read-back · roll the window in two appends · **snapshot the lifecycle at mark** · **leave a breadcrumb** |
 | `signal-dispatch` | 6 | no settle window · Task text is a round identity · the settle window never expires |
-| `baton-durability` | 10 | watch the tracked file · journal derived from the root · seed written to the canonical path · resolve the baton once at startup · re-resolve past an explicit pin · clear the trigger key on a move · live rows in the tracked file |
+| `baton-durability` | 11 | watch the tracked file · journal derived from the root · seed written to the canonical path · resolve the baton once at startup · re-resolve past an explicit pin · clear the trigger key on a move · live rows in the tracked file · **match the rendered field name** |
+
+**Bold** is the R6 pass (§9).
 
 ---
 
@@ -106,11 +119,11 @@ Raw per-tree records in [`outputs/`](outputs/).
 | suite | trees | agree | to explain |
 |---|---|---|---|
 | `signal-set` | 13 | 13 | — |
-| `wait-mic` | 10 | 10 | — |
-| `session-resume` | 13 | 12 | 1 · `s13`, PORT-ONLY-RED (BUG-079) |
+| `wait-mic` | 13 | 12 | 1 · `w9`, PORT-ONLY-RED (§9.1) |
+| `session-resume` | 15 | 14 | 1 · `s13`, PORT-ONLY-RED (BUG-079) |
 | `signal-dispatch` | 6 | 6 | — |
-| `baton-durability` | 10 | 9 | 1 · `b3`, PORT-ONLY-RED (BUG-084) |
-| **total** | **52** | **50** | **2, both the port being stronger** |
+| `baton-durability` | 11 | 10 | 1 · `b3`, PORT-ONLY-RED (BUG-084) |
+| **total** | **58** | **55** | **3, all three the port being stronger** |
 
 **No SHELL-ONLY-RED anywhere.** There is no mutant in the population that the
 shell suite catches and the port does not, which is the direction that would mean
@@ -200,13 +213,18 @@ SUBJECT — which is why `b3` is PORT-ONLY-RED.
 
 Recorded rather than quietly left out. None of these is closed by this port.
 
-1. **`wait-mic` #3 — "a neighbouring file changing is not a handoff" — has no
-   mutant.** The defect it guards is a waiter keyed on the DIRECTORY rather than
-   on the baton's content, and `wait-mic.sh` has no directory watch to break:
-   injecting one means writing a different script, not perturbing this one. So #3
-   is a case whose ability to fail is asserted by construction and not by
-   execution, in both implementations. Cheap to close if the waiter ever regains
-   an inotify path — which is how it started, and why the case exists.
+1. ~~**`wait-mic` #3 — "a neighbouring file changing is not a handoff" — has no
+   mutant.**~~ **WRONG, and §9.1 is the correction.** The claim was that
+   "injecting a directory watch means writing a different script": it does not.
+   The waiter compares a READING, so folding the directory listing into the
+   reading keys it on the directory with everything else left intact — one
+   substitution, `w9-key-on-the-directory`. The port's #3 goes red on it.
+
+   The shell suite's #3 stays GREEN, which is the finding this paragraph was
+   hiding: it appends to a `signal-history.log` that case 1 already created in
+   the `$WORK` directory all thirteen cases share, so the listing does not change
+   and a listing-keyed waiter is invisible to it. The case is not unfalsifiable —
+   its FIXTURE was.
 
 2. **No mutant reaches `signal-set` #1's "not truncated at the pipe" clause
    separately from its "escaped" clause.** `m1` and `m2` between them redden #1
@@ -331,6 +349,8 @@ environment that carries them.
 
 ---
 
+---
+
 ## 8. Retirement
 
 **Not done here, deliberately.** All five shell runners stay on disk and stay
@@ -341,4 +361,107 @@ happened on 2026-09-11 from agents writing shared files off stale reads.
 
 Running both briefly is also how BUG-079 and BUG-084 were found.
 
-Ready to retire, on this evidence: **all five.**
+Ready to retire, on this evidence: **all five** — and §9.1 adds a third reason
+for one of them: `tests/wait-mic/test.sh` #3 is green over the defect it exists
+to catch, because thirteen cases share one fixture directory. The port's `#3` is
+not.
+
+---
+
+## 9. The R6 negative-proof pass
+
+§2's population was built "one mutant per distinct defect class named by an
+assertion". Three independent Codex reviews of the OTHER TASK-018 groups refused
+certification for what that leaves out, and Alex put it exactly: *the recorded
+mutant set is assertion-GROUP coverage, not assertion coverage.* A defect class
+can be covered while a particular assertion in it has nothing that turns it red —
+and an assertion nothing turns red is `tests/a2bp-contamination` again, whose
+headline check was dead for months while every review passed.
+
+So the question was asked mechanically instead: **every `it()` id in the five
+specs, minus every id ever OBSERVED red in a recorded run.**
+[`code/gap.py`](code/gap.py) is that subtraction, exit 1 if anything is left. It
+found **six** assertions with no mutant at all:
+
+| suite | gap | why nothing reached them |
+|---|---|---|
+| `wait-mic` | `#2`, `#3`, `#4` | `w1`–`w7` all break the READING, and a broken reading makes the waiter WAIT — which is what these three assert |
+| `session-resume` | `#8`, `#10` | `s1`–`s13` perturb warnings and the replay window; none touches where the report's facts come from, or makes the tool write |
+| `baton-durability` | `#1b` | nothing in the population ever broke the fixture, which is the only thing a control can detect |
+
+Six mutants close it. Every red set below is OBSERVED, from
+[`outputs/results-r6-negative-proof.json`](outputs/results-r6-negative-proof.json):
+
+| mutant | defect | injected in | shell | port |
+|---|---|---|---|---|
+| `w8-fire-without-a-change` | exit as soon as the baton is READABLE | `wait-mic.sh` loop guard | `#1 #2 #3 #4 #5 #6 #8 #9 #10 #11 #12 #13` | same |
+| `w9-key-on-the-directory` | the directory listing folded into the reading | `mic()` END guard | `#4` | `#3 #4` |
+| `w10-task-is-part-of-the-mic` | Task compared along with Holder/State | `mic()` | `#4` | `#4` |
+| `s14-snapshot-the-lifecycle-at-mark` | `--mark` caches the lifecycle; the report serves the cache | `session-resume.sh` | `#8` | `#8` |
+| `s15-leave-a-breadcrumb` | the report appends a run log beside the journal | `session-resume.sh` | `#10` | `#10` |
+| `b8-match-the-rendered-field-name` | `$2 == field` instead of `trim($2) == field` | `codex-signal-watch.sh` `read_field` | `#1 #1b #6 #6c` | same |
+
+`gap.py` now reports **53/53** — `signal-set` 13, `wait-mic` 13,
+`session-resume` 13, `signal-dispatch` 6, `baton-durability` 8.
+
+### 9.1 `w9` is PORT-ONLY-RED, and the shell suite is why
+
+`w9` reddens `#3` and `#4` in the port and only `#4` in the shell suite. Both
+halves are measured, not inferred — the shell run under the mutant prints:
+
+```
+  ok — #3 a neighbouring file changing is not a handoff
+FAIL: #4 the waiter EXITED — phantom handoff:
+      [MIC: Holder=OLD State=IDLE Dir=out1/out2/out3/out4/signal-history.log/signal.md/signal.md.kwmd2W/]
+```
+
+- **`#3` green in the shell is a fixture defect, not a subject difference.** All
+  thirteen shell cases share one `$WORK` directory, and case 1 publishes through
+  `signal-set.sh`, which creates `signal-history.log` there. Case 3's
+  `printf >>` therefore appends to a file that already exists: no directory entry
+  changes, and the defect is invisible. The port gives every scenario its own
+  directory, so its `#3` CREATES the neighbour and the listing moves.
+- **`#4` red in the shell is a RACE it won.** The `Dir=` value it caught ends in
+  `signal.md.kwmd2W` — `signal-set.sh`'s mktemp file, sampled inside a ~30 ms
+  publish window at a 0.2 s poll. The port's `#4` reddens for a reason that
+  cannot lose the race: its state directory has no journal until that publish
+  creates one.
+
+So the port is stronger on the same defect, for the same reason twice: **fixture
+isolation is what makes "an unrelated file appeared beside the baton" an event at
+all.** Recorded here rather than as a bug row, because the weakness is in a shell
+runner already queued for retirement (§8) — and because it is the second time in
+this catalogue that a shared fixture, not a subject, decided a verdict.
+
+### 9.2 Two assertions are falsifiable but NOT independently
+
+Stated rather than smoothed over, because "it has a mutant" is a weaker claim
+than it looks for these two.
+
+- **`wait-mic` #2 cannot have a mutant that reddens it alone.** The waiter takes
+  its baseline, then compares BEFORE its first `sleep`, and every fixture arms
+  itself by waiting for one completed iteration. So any defect that makes the
+  waiter fire spuriously fires before the fixture can arm — which reddens all
+  twelve seeded cases at once, exactly as `w8` does. #2's red is genuine (the
+  waiter did exit having seen no change) but it arrives through the precondition
+  rather than through #2's own assertion, and no perturbation of this script can
+  change that.
+- **`baton-durability` #1b cannot have one either, by construction.** #1b IS #1
+  minus the checkout, so any defect that stops the dispatch reddens both. That is
+  what a control is: it has no failure mode of its own, it exists so that #1's
+  red can be attributed. `b8` is the first mutant to exercise it.
+
+### 9.3 Two apparatus fixes the pass needed
+
+- **`run.py` invoked `npx vitest`.** It resolved the pinned binary only because
+  cwd happened to be the mutant's `tests/`; when that resolution misses, `npx`
+  fetches an unpinned vitest that runs no files and exits 0. A silent no-op reads
+  as a green port, which is the one failure this exercise cannot survive. It now
+  calls `tests/node_modules/.bin/vitest` with an explicit `--root`, and treats a
+  report with no `testResults` as `#no-tests-ran` rather than as agreement.
+- **`outputs/results-last-run.json` is what its name says.** run.py overwrote it
+  on every invocation, so the tracked JSON held only `signal-set` and the other
+  four suites' records survived only as the `outputs/*.log` stdout captures. A
+  `--out NAME` argument and `suite:mutant` targets fix both — a later pass can add
+  mutants without re-running an hour of trees or clobbering the record. `gap.py`
+  reads both shapes.

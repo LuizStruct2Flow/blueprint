@@ -263,6 +263,70 @@ EOF
 EOF
   sub "$WM" ;;
 
+# ─── R6 negative-proof pass: the three wait-mic cases no mutant ever reddened ──
+wait-mic/w8-fire-without-a-change)
+  # THE PHANTOM HANDOFF in its most direct form: exit as soon as the baton is
+  # READABLE, rather than when it has changed. #2 is the load-bearing case and had
+  # no mutant — w1..w7 all break the READING, and a broken reading makes the
+  # waiter wait, which is what #2 asserts. Nothing in the population made it fire.
+  frm <<'EOF'
+  if [ -n "$cur" ] && [ "$cur" != "$prev" ]; then
+EOF
+  to <<'EOF'
+  if [ -n "$cur" ]; then
+EOF
+  sub "$WM" ;;
+
+wait-mic/w9-key-on-the-directory)
+  # #3's defect class, which the README recorded as unreachable: "injecting a
+  # directory watch means writing a different script". It does not — the reading
+  # is what the waiter compares, so folding the DIRECTORY LISTING into the reading
+  # keys the waiter on the directory with the file watch left intact. The journal
+  # sits beside the baton and is appended on every flip, so this fires on the
+  # waiter's own neighbour's bookkeeping.
+  #
+  # Deliberately inside the all-or-nothing guard rather than ahead of the awk: a
+  # listing prepended unconditionally would ALSO make an unreadable baton a
+  # handoff, which is w2's defect, and the mutant would redden #5/#8/#9/#10 for a
+  # reason that has nothing to do with #3.
+  frm <<'EOF'
+      if (!bad && nh == 1 && ns == 1 && h != "" && s != "") printf "Holder=%s State=%s", h, s
+EOF
+  to <<'EOF'
+      if (!bad && nh == 1 && ns == 1 && h != "" && s != "") { while (("ls -A \"$(dirname \"" FILENAME "\")\"" | getline l) > 0) d = d l "/"; printf "Holder=%s State=%s Dir=%s", h, s, d }
+EOF
+  sub "$WM" ;;
+
+wait-mic/w10-task-is-part-of-the-mic)
+  # #4's defect — waking on PAYLOAD — and w3 was supposed to be it. w3 reddened
+  # #1, #7 and #13 and left #4 GREEN, because adding `Task` to the State pattern
+  # increments `ns` twice, `ns == 1` then fails, and the waiter stops reading at
+  # all: TRAP 2, a mutant repaired into a different defect by the code it is
+  # injected into. Here Task is folded into the compared value WITHOUT touching
+  # the row counts, so the reading stays well-formed and the waiter genuinely
+  # wakes on payload.
+  # Task is captured into its OWN variable and trimmed in END like the other two,
+  # rather than concatenated onto `s`. The concatenating form also reddened #6,
+  # because `| State | IDLE |`'s padding stops being boundary whitespace once
+  # something follows it — so the mutant quietly became "compare rendered rows"
+  # as well, which is w1's defect and not this one.
+  frm <<'EOF'
+    /^\| *State *\|/  { if (NF < 4) bad = 1; s = $3; for (i = 4; i < NF; i++) s = s "|" $i; ns++ }
+EOF
+  to <<'EOF'
+    /^\| *State *\|/  { if (NF < 4) bad = 1; s = $3; for (i = 4; i < NF; i++) s = s "|" $i; ns++ }
+    /^\| *Task *\|/   { t = $3; for (i = 4; i < NF; i++) t = t "|" $i }
+EOF
+  sub "$WM"
+  frm <<'EOF'
+      if (!bad && nh == 1 && ns == 1 && h != "" && s != "") printf "Holder=%s State=%s", h, s
+EOF
+  to <<'EOF'
+      gsub(/^[ \t\r]+|[ \t\r]+$/, "", t)
+      if (!bad && nh == 1 && ns == 1 && h != "" && s != "") printf "Holder=%s State=%s Task=%s", h, s, t
+EOF
+  sub "$WM" ;;
+
 # ═══ session-resume ══════════════════════════════════════════════════════════
 session-resume/s1-cry-wolf-on-a-healthy-resume)
   # A warning that fires on the ORDINARY path is noise, noise gets muted, and a
@@ -387,6 +451,55 @@ XEOF
   to <<'XEOF'
   printf '%s\n' "$roll" >>"$JOURNAL"
 XEOF
+  sub "$SR" ;;
+
+# ─── R6 negative-proof pass: the two session-resume cases no mutant reddened ───
+session-resume/s14-snapshot-the-lifecycle-at-mark)
+  # THE PARKED DESIGN, REINSTATED. The header of session-resume.sh records that an
+  # authored HANDOVER snapshot was refused because "a second bookkeeping surface
+  # goes stale by construction" — #8 is the case that asserts it, and no mutant
+  # in the population reddened it, because s1..s13 all perturb WARNINGS and the
+  # REPLAY WINDOW and none of them touches where the report's facts come from.
+  #
+  # Two substitutions, because a cache is a writer and a reader: `--mark` records
+  # the lifecycle it saw, and the report serves that instead of deriving. It is
+  # written at MARK rather than at report time deliberately — a cache written by
+  # the report would also redden #10, and #10 is a different defect with its own
+  # mutant below.
+  frm <<'EOF'
+    mv "$tmp" "$HANDOVER"
+EOF
+  to <<'EOF'
+    mv "$tmp" "$HANDOVER"
+    for _st in backlog doing waiting-acceptance done; do
+      grep -hoE '^\|[[:space:]]*\*\*[A-Z]+-[0-9]+\*\*' "$DATA_ROOT/docs/$_st"/*.md 2>/dev/null | grep -oE '[A-Z]+-[0-9]+' | sort -u > "$DATA_ROOT/logs/state/.lifecycle-$_st"
+    done
+EOF
+  sub "$SR"
+  frm <<'EOF'
+lifecycle_ids(){
+  grep -hoE
+EOF
+  to <<'EOF'
+lifecycle_ids(){
+  if [ -f "$DATA_ROOT/logs/state/.lifecycle-$1" ]; then cat "$DATA_ROOT/logs/state/.lifecycle-$1"; return 0; fi
+  grep -hoE
+EOF
+  sub "$SR" ;;
+
+session-resume/s15-leave-a-breadcrumb)
+  # #10 — "reporting is READ-ONLY" — had no mutant either, for the same reason:
+  # every recorded mutant changes what the tool SAYS, and none makes it write. A
+  # run log beside the journal is the most plausible form of the defect and the
+  # one BUG-014 is the precedent for: the thing that observes becomes the thing
+  # that changes what it observed, and this one runs on every wake.
+  frm <<'EOF'
+echo "LIFECYCLE"
+EOF
+  to <<'EOF'
+printf 'resume\n' >> "$DATA_ROOT/logs/state/resume-runs.log"
+echo "LIFECYCLE"
+EOF
   sub "$SR" ;;
 
 # ═══ signal-dispatch ═════════════════════════════════════════════════════════
@@ -531,6 +644,25 @@ EOF
 | State | OVER_TO_CODEX |
 EOF
   sub "$M/AGENT_SIGNAL.md" ;;
+
+# ─── R6 negative-proof pass: the control case no mutant reddened ──────────────
+baton-durability/b8-match-the-rendered-field-name)
+  # BUG-010 IN THE DISPATCHER: compare the field NAME as rendered instead of as a
+  # value, and a padded table stops parsing. `signal-set.sh` publishes `| State |`
+  # with padding, so `$2` is " State " and the watcher reads an empty State,
+  # matches no target, and never dispatches at all.
+  #
+  # #1b is the CONTROL that exists to tell "the bug" from "a broken fixture", and
+  # nothing in the population ever broke the fixture. It cannot have a mutant of
+  # its own: #1b is #1 minus the checkout, so any defect that stops the dispatch
+  # reddens both — which is precisely what a control is for.
+  frm <<'EOF'
+    trim($2) == field { print trim($3); exit }
+EOF
+  to <<'EOF'
+    $2 == field { print trim($3); exit }
+EOF
+  sub "$CW" ;;
 
 *) echo "UNKNOWN-MUTANT: $SUITE/$ID" >&2; exit 4 ;;
 esac

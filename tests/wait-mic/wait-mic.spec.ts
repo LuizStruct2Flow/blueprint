@@ -37,7 +37,7 @@
  * PATH: `wait-mic.sh` calls `sleep` exactly once per loop iteration and nothing
  * else in these fixtures calls it at all, so the shim's log is a faithful
  * ITERATION COUNTER. Every wait below is then expressed in the subject's own
- * iterations — "it has taken a baseline reading", "it has compared six times
+ * iterations — "it has taken a baseline reading", "it has compared seven times
  * since the perturbation" — which no machine load can shorten. A stalled host
  * makes the waiter do FEWER iterations, and the only way to reach a failing
  * verdict is the waiter exiting, which is the defect itself rather than a timing
@@ -66,19 +66,33 @@ const SEED =
 /**
  * ITERATIONS, NOT SECONDS, is the unit every wait below is expressed in.
  *
- * Six is the bound for "and it did not fire": one more than the five poll
- * intervals the shell suite's `timeout 1` bought at its 0.2 s clock, so nothing
- * was traded away for the speed. The poll interval is latency and not
- * correctness — `wait-mic.sh` says so, and nothing asserted here depends on it —
- * so it runs fast.
+ * THE ARITHMETIC, STATED EXACTLY. The shim records its marker BEFORE it execs the
+ * real `sleep`, so N markers prove N COMPARISONS reached the sleep call and only
+ * N−1 sleeps RETURNED — the elapsed time N markers guarantee is (N−1)·poll. The
+ * first version of this constant read "six is one more than the five poll
+ * intervals the shell's `timeout 1` bought", which was off by exactly that one:
+ * six markers are five completed intervals, i.e. equal to the shell rather than
+ * one better.
+ *
+ * SEVEN restores the claim instead of retreating from it: six completed
+ * intervals, one more than the shell's five, AND seven comparisons of the
+ * perturbed baton — which `timeout 1` could not promise at all, since a stalled
+ * host can burn a whole second with the waiter having looked zero times.
+ *
+ * The marker stays before the sleep: it is what makes `arm()`'s "the waiter has
+ * taken its baseline reading" observable at the instant it happens rather than
+ * one poll later.
+ *
+ * The poll interval is latency and not correctness — `wait-mic.sh` says so, and
+ * nothing asserted here depends on it — so it runs fast.
  */
-const QUIET_ITERATIONS = 6
+const QUIET_ITERATIONS = 7
 const POLL = '0.05'
 
 interface Mic {
   /** The baton the waiter is watching. */
   readonly signal: string
-  /** Iterations the waiter has provably completed. */
+  /** Markers: comparisons the waiter has provably MADE (and N−1 sleeps returned). */
   iterations(): Promise<number>
   /** Arm the waiter and wait until it has taken its BASELINE reading. */
   arm(): Promise<Watcher>
@@ -135,8 +149,9 @@ async function mic(s: Scenario, name: string, seeded = true): Promise<Mic> {
       // slept: `prev="$(mic)"` runs once at startup. A perturbation that lands
       // before it makes the NEW value the baseline, so the waiter correctly
       // never fires and the case fails while proving nothing about the subject.
-      // One completed iteration is that precondition, stated as a fact rather
-      // than bought with a guess.
+      // One marker is that precondition exactly — it is written on the way into
+      // the first sleep, which the loop reaches only after `prev` was captured —
+      // stated as a fact rather than bought with a guess.
       await until('the waiter has taken its baseline reading', async () => (await iterations()) >= 1)
       return w
     },
@@ -165,7 +180,7 @@ async function mic(s: Scenario, name: string, seeded = true): Promise<Mic> {
 }
 
 /**
- * Run a NEGATIVE case: perturb, let the waiter compare six more times, and
+ * Run a NEGATIVE case: perturb, let the waiter compare QUIET_ITERATIONS more times, and
  * require it to still be waiting.
  *
  * `perturb` runs only after the baseline is captured, so a failure here is the

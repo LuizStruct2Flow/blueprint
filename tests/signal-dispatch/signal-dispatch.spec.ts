@@ -66,9 +66,16 @@
  * that the watcher looked at anything during it. On a stalled host the shell's
  * `quiet()` could elapse with the watcher having polled zero times, making the
  * negative assertion vacuous — green, while the case checked nothing. An
- * iteration count cannot be vacuous, and it cannot be shortened by load either:
- * N iterations take at least N·poll seconds by construction, so every bound here
- * is at least the wall-clock bound it replaces.
+ * iteration count cannot be vacuous, and it cannot be shortened by load either.
+ *
+ * THE ARITHMETIC, STATED EXACTLY, because the first version of this note was off
+ * by one poll and overstated the bound. The shim records its marker BEFORE it
+ * execs the real `sleep`, so N markers prove N COMPARISONS reached the sleep
+ * call — and therefore only N−1 sleeps have RETURNED. The elapsed time N markers
+ * guarantee is (N−1)·poll, not N·poll. The marker stays where it is: it is what
+ * makes "the watcher has taken its first reading" observable at the instant it
+ * happens rather than one poll later, and every wait here is written in
+ * comparisons. The constants below carry the −1 instead.
  *
  * PORTED FROM tests/signal-dispatch/test.sh (TASK-018). Equivalence measured
  * over a mutant population — see docs/doing/TASK-018-EQUIVALENCE-mic/.
@@ -88,9 +95,23 @@ const SETTLE = 2
 /** The poll interval has no integral-clock constraint and goes sub-second freely. */
 const POLL = 0.2
 
-/** Poll iterations that together span one settle window, plus two to observe both ends. */
-const QUIET_ITERATIONS = Math.ceil(SETTLE / POLL) + 2
-/** Enough iterations for the watcher to have taken one full reading after an edit. */
+/**
+ * Markers that together span one settle window, plus two to observe both ends.
+ *
+ * The `+ 1` is the shim's off-by-one (see the header): N markers buy (N−1)·poll
+ * of elapsed time, so spanning the settle window needs ceil(SETTLE/POLL) + 1
+ * markers before the two observation polls are added. At 13 that is 12·0.2 =
+ * 2.4 s — exactly the `settle + 2·poll` the shell's `quiet()` slept, and now
+ * ALSO 13 comparisons, which the sleep could not promise at all.
+ */
+const QUIET_ITERATIONS = Math.ceil(SETTLE / POLL) + 3
+/**
+ * Enough markers for the watcher to have taken one full reading after an edit.
+ *
+ * One would do — a marker recorded after the edit was preceded by a comparison
+ * made after the edit — and two is deliberate margin, matching the shell's
+ * `observe_tick()` sleep of 2·poll.
+ */
 const OBSERVE_ITERATIONS = 2
 
 interface Dispatcher {
@@ -119,8 +140,10 @@ async function dispatcher(s: Scenario, name: string): Promise<Dispatcher> {
   await s.fs.write(`${name}/hits`, '')
 
   const shims = await s.shimDir(`${name}/shims`)
-  // One line per watcher loop iteration, then the real sleep. Absolute paths for
-  // the real binary, because resolving `sleep` through PATH would find this shim.
+  // One line per watcher loop iteration, written BEFORE the real sleep, then the
+  // real sleep is exec'd. Absolute paths for the real binary, because resolving
+  // `sleep` through PATH would find this shim. N lines therefore mean N
+  // comparisons reached the sleep call and N−1 sleeps returned — see the header.
   await shims.add(
     'sleep',
     `printf 'i\\n' >> "${pollsPath}"\n` +

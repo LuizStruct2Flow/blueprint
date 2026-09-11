@@ -585,12 +585,41 @@ apply_E8() { # the request branch is pushed to MAIN as well (e2e #2).
 
 ROUND2="K12 K13 K14 K15 B17 I19 F8 F9 C24 C25 C26 C27 E8 C28"
 
+# ===========================================================================
+# ROUND 3 — the cross-provider review (Andreas, 2026-09-11) refused
+# certification over five assertions whose red mutant was not the defect in
+# their own title, and over product behaviour nothing watched at all. Nothing
+# new is INJECTED here except E9: the other nine mutants below already existed
+# and were both-green, and what changed is the fixtures they are now able to
+# falsify. They are listed so a reader can replay the closure directly:
+#
+#   K3  → request:#3     F2 → pr-filing:#2    C15 → contamination:#21
+#   K4  → request:#3b    F3 → pr-filing:#3
+#   B15 → contamination:#29   E7 → contamination:#30   E9 → e2e:#12
+# ===========================================================================
+
+apply_E9() { # the immediate pre-push base re-check never happens (e2e #12).
+  # `bp_file_remote_tip` loses `git ls-remote`'s status through its pipeline and
+  # can print nothing; cmd_a2bp reads empty as "the blueprint did not move" and
+  # pushes. This is that outcome in its strongest form.
+  sub "$1/$FIL" "bp_file_remote_tip() {$NL" "bp_file_remote_tip() {${NL}  return 0$NL"
+}
+
+ROUND3="E9"
+
 ALL_MUTANTS="K1 K2 K3 K4 K5 K6 K7 K8 K9 K10 K11 \
 I1 I2 I3 I4 I5 I6 I7 I8 I9 I10 I11 I12 I13 I14 I15 I16 I17 I18 \
 F1 F2 F3 F4 F5 F6 F7 \
 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 B13 B14 B15 \
 C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 C11 C12 C13 C14 C15 C16 C17 C18 C19 C20 C21 C22 \
-E1 E2 E3 E4 E5 E6 E7 N1 N2 $ROUND2"
+E1 E2 E3 E4 E5 E6 E7 N1 N2 $ROUND2 $ROUND3"
+
+# The population, counted by the script that defines it. A tree count in prose
+# is a transcription, and this migration has already shipped two of those that
+# nothing could reproduce (`.scratch/equiv-matrix.txt`'s 41/45, and a 120 that
+# no stored output supports). Printed on every run below, next to the number of
+# trees the run actually built.
+ALL_N=$(printf '%s\n' $ALL_MUTANTS | wc -l | tr -d ' ')
 
 # --out FILE — publish the matrix ONLY if the run produced a verdict for every
 # mutant.
@@ -736,12 +765,18 @@ run_one() { # $1 = mutant
   rm -rf "$tree"
 }
 
+REQUESTED=$#
 for m in "$@"; do
   run_one "$m"
 done
 
 printf -- '--- totals (computed by this run) ---\n'
-printf 'trees=%d\n' "$TREES"
+# THREE numbers, because two of them have been confused for each other. The
+# catalogue is how many labels exist; requested is how many this invocation
+# asked for; trees is how many perturbed copies were actually built and given a
+# verdict. A partial run says so in its own output instead of being read as a
+# full one.
+printf 'catalogue=%s requested=%d trees=%d\n' "$ALL_N" "$REQUESTED" "$TREES"
 if [ -n "$INVALID" ]; then
   printf '*** INVALID MATRIX — no verdict from:%s\n' "$INVALID"
   exit 1

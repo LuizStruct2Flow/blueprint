@@ -1,0 +1,204 @@
+[
+  {
+    "suite": "signal-set",
+    "mutant": "c0-healthy",
+    "verdict": "agree",
+    "shell": [],
+    "port": [],
+    "shell_rc": 0,
+    "port_rc": 0,
+    "t_shell": 0.3,
+    "t_port": 1.2,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "c1-defect-in-a-comment",
+    "verdict": "agree",
+    "shell": [],
+    "port": [],
+    "shell_rc": 0,
+    "port_rc": 0,
+    "t_shell": 0.3,
+    "t_port": 0.9,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "c2-benign-lookalike",
+    "verdict": "agree",
+    "shell": [],
+    "port": [],
+    "shell_rc": 0,
+    "port_rc": 0,
+    "t_shell": 0.3,
+    "t_port": 0.9,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m1-refuse-pipes",
+    "verdict": "agree",
+    "shell": [
+      "#1"
+    ],
+    "port": [
+      "#1"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 0.9,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m2-escape-processing-over-the-value",
+    "verdict": "agree",
+    "shell": [
+      "#2"
+    ],
+    "port": [
+      "#2"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 0.9,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m3-normalise-only-one-input-path",
+    "verdict": "agree",
+    "shell": [
+      "#3",
+      "#3b"
+    ],
+    "port": [
+      "#3",
+      "#3b"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 1.0,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m3c-collapse-repeated-spaces",
+    "verdict": "agree",
+    "shell": [
+      "#3c"
+    ],
+    "port": [
+      "#3c"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 0.9,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m3e-no-boundary-trim",
+    "verdict": "agree",
+    "shell": [
+      "#3e",
+      "#3f",
+      "#3g"
+    ],
+    "port": [
+      "#3e",
+      "#3f",
+      "#3g"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 1.0,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m3d-mangle-tabs",
+    "verdict": "agree",
+    "shell": [
+      "#3d"
+    ],
+    "port": [
+      "#3d"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 1.0,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m3h-exceed-the-documented-contract",
+    "verdict": "agree",
+    "shell": [
+      "#3h"
+    ],
+    "port": [
+      "#3h"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 1.0,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m4-rewrite-the-whole-file",
+    "verdict": "agree",
+    "shell": [
+      "#4"
+    ],
+    "port": [
+      "#4"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 1.0,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m5-publish-without-a-task",
+    "verdict": "agree",
+    "shell": [
+      "#5"
+    ],
+    "port": [
+      "#5"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 1.0,
+    "port_out": ""
+  },
+  {
+    "suite": "signal-set",
+    "mutant": "m6-swallow-the-failed-journal-append",
+    "verdict": "agree",
+    "shell": [
+      "#6"
+    ],
+    "port": [
+      "#6"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 0.3,
+    "t_port": 0.9,
+    "port_out": ""
+  }
+]

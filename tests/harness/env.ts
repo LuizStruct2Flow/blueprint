@@ -119,6 +119,69 @@ const ENV_KIND = {
   AGENT_SIGNAL_FILE: 'path',
   AGENT_STATE_HOME: 'path',
   AGENT_FEED_LOG: 'path',
+  // THE TWO TIMING KNOBS THE MIC SUITES SET, and 'opaque' is right for a
+  // narrow reason worth stating: each is a DURATION IN SECONDS handed to
+  // `sleep` or compared against `date +%s`, so it names nothing on disk,
+  // activates no second variable, and redirects no write — which is the test
+  // the GIT_CONFIG_COUNT paragraph above says 'opaque' must actually pass, not
+  // merely "it looks like a number".
+  //
+  //   AGENT_SIGNAL_SETTLE   scripts/codex-signal-watch.sh's settle window.
+  //                         Whole seconds only, because the watcher compares
+  //                         `date +%s`; tests/signal-dispatch's header records
+  //                         that a sub-second value straddles a second boundary
+  //                         and dispatches a stale Task on ~40% of runs. The
+  //                         suites pick a value, they do not get to pick a
+  //                         fractional one.
+  //   AGENT_WAIT_MIC_POLL   scripts/wait-mic.sh's poll interval. Latency, not
+  //                         correctness — nothing in that script's behaviour
+  //                         depends on it, only on comparing two readings — so
+  //                         a suite may run it fast.
+  //
+  // SCRUBBED rather than 'inert', which is the half that matters. An operator
+  // with either set in their shell would otherwise silently change the timing
+  // of every fixture watcher, and tests/signal-dispatch is the suite whose
+  // whole subject is timing. An ambient value that alters what a timing test
+  // measures is the BUG-046 shape with a number instead of a path.
+  AGENT_SIGNAL_SETTLE: 'opaque',
+  AGENT_WAIT_MIC_POLL: 'opaque',
+  // THE TWO FEED KNOBS, declared for the same reason and by the same test as the
+  // two above: each is a NUMBER handed to `sleep` or compared against a byte
+  // count, so it names nothing on disk, activates no second variable, and
+  // redirects no write.
+  //
+  //   AGENT_FEED_TICK          scripts/agent-activity.sh:135 poll interval,
+  //                            seconds, default 2. The feed suites turn it down
+  //                            so a condition-based wait resolves in one tick
+  //                            instead of eight; nothing about the feed's
+  //                            correctness depends on the value.
+  //   AGENT_FEED_MAX_FRAGMENT  :136 force-flush bound, bytes, default 1 MiB. It
+  //                            is the SUBJECT of tests/agent-activity-bound #12
+  //                            — a newline-less writer must not re-read forever
+  //                            — and proving that at the default would mean
+  //                            writing a megabyte without a newline to assert a
+  //                            branch that a hundred bytes reaches.
+  //
+  // SCRUBBED rather than 'inert', which is again the half that matters: an
+  // operator with AGENT_FEED_TICK set in their shell would silently change the
+  // timing of every fixture feed, and the feed suites are the ones whose subject
+  // IS timing.
+  AGENT_FEED_TICK: 'opaque',
+  AGENT_FEED_MAX_FRAGMENT: 'opaque',
+  // THE TWO FAULT-INJECTION SEAMS agent-activity.sh carries for its own suite.
+  // Declared because a seam nothing can reach is a seam nothing tests: #10's
+  // append-during-read race and #18's short-sink recovery are deterministic only
+  // because the reader can be slowed and its capture made to come up short on
+  // demand. Guessing at the race instead is the timing-luck R4 forbids.
+  //
+  //   AGENT_FEED_TEST_SLOW_READ   a flag; widens the bounded read window.
+  //   AGENT_FEED_TEST_SHORT_SINK  a SENTINEL PATH; while that file exists the
+  //                               capture returns short. 'path', not 'opaque',
+  //                               because it names a file — so the containment
+  //                               check applies and a scenario cannot arm the seam
+  //                               with a path outside its own workspace.
+  AGENT_FEED_TEST_SLOW_READ: 'opaque',
+  AGENT_FEED_TEST_SHORT_SINK: 'path',
   // A persona NAME, a backing-agent LABEL, and a gate-profile NAME.
   AGENT_PERSONA: 'opaque',
   AGENT_BACKING: 'opaque',

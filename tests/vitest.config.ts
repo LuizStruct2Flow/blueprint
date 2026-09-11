@@ -40,19 +40,24 @@ export default defineConfig({
     // be running an emulated toolchain, so the default 5s would fail honest
     // tests. Individual scenarios tighten this where they can.
     //
-    // 300s -> 600s on 2026-09-11, and the reason is temporary BY DESIGN.
-    // `bootstrap-gate` #2/#3 bootstraps a project and runs that project's ENTIRE
-    // pre-push gate. Until phase 2 that nested gate ran 35 shell suites; it now
-    // runs those AND 35 TypeScript specs, because the migration keeps both
-    // implementations until each port is independently certified. The nested run
-    // therefore roughly doubled and hit the old ceiling at 300005ms -- a timeout,
-    // not a failure: 707 of 708 tests passed and the casualty was the case that
-    // is slowest by construction.
+    // 600s -> 320s on 2026-09-11, on a MEASUREMENT rather than on the plan's
+    // prediction, because the paragraph this replaces told the next reader not
+    // to carry a number forward.
     //
-    // This number comes back DOWN when the shell runners retire. If you are
-    // reading it long after that has happened, the double-run is over and the
-    // ceiling is now hiding something else -- measure before raising it again.
-    testTimeout: 600_000,
+    // The 600 was temporary by design: `bootstrap-gate` #2/#3 bootstraps a
+    // project and runs that project's ENTIRE pre-push gate, and while the
+    // migration kept both implementations that nested gate ran 35 shell suites
+    // AND every TypeScript spec. It roughly doubled and hit the old 300s
+    // ceiling at 300005ms. The shell runners are now retired, so that half is
+    // gone: the case was re-run on this tree and reported 206716ms, against
+    // 374491ms before. 320s is 1.5x that, rounded up.
+    //
+    // WHAT THE CEILING NOW COVERS is one nested gate of ~207s whose cost is
+    // almost entirely the nested vitest run -- there is no shell half left to
+    // remove. So the next lever on this number is TASK-013, the declared
+    // bootstrap profile, and it stopped being one optimisation among many.
+    // If this is ever hit again, measure #2/#3 before raising it.
+    testTimeout: 320_000,
     hookTimeout: 120_000,
 
     // A scenario that leaves a stray handle is a scenario that leaked a process

@@ -19,22 +19,49 @@
  * twenty shell fixtures and the operator's real `.git`.
  *
  * WHICH IS WHY THE MAGIC NUMBERS ARE GONE, and this is the one behavioural change
- * in the port. The shell version hardcoded two floors:
+ * in the port. The shell version hardcoded two floors, and the PROSE HERE WAS
+ * WRONG ABOUT BOTH until 2026-09-11 — corrected below, with what was measured:
  *
- *   `[ "$found" -lt 15 ]`      → 20 members today. My group retires four of
- *                                them, leaving 16. ONE more retirement from any
- *                                other group and the gate goes red — on a
- *                                healthy tree, for the opposite of a defect.
- *   `[ "$_gi_n" -ge 3 ]`       → the anchor set. `commit-subjects` is one of the
- *                                three and retires in this same wave, so this
- *                                floor breaks FIRST.
+ *   `[ "$found" -lt 15 ]`      → 20 git-driving members today, `git-isolation`'s
+ *                                own runner among them. Retiring `state-dir`,
+ *                                `commit-msg-gate` and `commit-subjects` leaves
+ *                                17, so the floor needs three FURTHER removals
+ *                                to bite. MEASURED: six non-anchor removals
+ *                                (a2bp-build, a2bp-contamination, a2bp-e2e,
+ *                                a2bp-inputs, baton-durability, dod-gate) →
+ *                                "#3 only 14 git-driving suites found". The
+ *                                earlier "retires four of them, leaving 16, ONE
+ *                                retirement from red" arithmetic was wrong; the
+ *                                conclusion it supported — that a count floor
+ *                                goes red on a healthy tree under this migration
+ *                                — is not.
+ *   `[ "$_gi_n" -ge 3 ]`       → NOT the floor that breaks first. It CANNOT
+ *                                break at all: it word-counts the hardcoded
+ *                                literal `GI_ANCHORS="marker-merge gate-arming
+ *                                commit-subjects"`, which is never derived from
+ *                                disk, so `_gi_n` is 3 over every possible tree
+ *                                including an empty one. MEASURED, by deleting
+ *                                `tests/commit-subjects/test.sh` and running the
+ *                                real runner: what goes red is `#1`'s
+ *                                `[ ! -f "$s" ]` ("#1 tests/commit-subjects/
+ *                                test.sh not found") and `#3`'s `missing_anchor`
+ *                                branch ("#3 discovery MISSED suites #1 proves
+ *                                drive git: commit-subjects"). The ordering
+ *                                constraint the old text drew from this floor
+ *                                stands unchanged — an anchor retirement IS
+ *                                immediately red — but it is enforced two lines
+ *                                elsewhere, and a reader sent to line 109 finds
+ *                                a line that cannot fail.
  *
  * Both were correct when written and both are now booby traps under the very
  * migration they sit inside. They are replaced by the half that would actually
  * have caught BUG-047 — every anchor still ON DISK must be found by the
- * predicate — plus an explicit, visible report when the population empties. A
- * vacuous pass is acceptable here ONLY because it is the intended end state, and
- * it is asserted as such rather than arrived at silently.
+ * predicate — plus, when the population empties, an explicit assertion that
+ * every anchor became a SPEC. That end-state branch used to assert the `.sh`
+ * population was empty and was itself red at the end state, on
+ * `tests/helpers/proc-cwd.sh`, which is alive; see #3's own comment. A vacuous
+ * pass is acceptable here ONLY because it is the intended end state, and it is
+ * asserted as such rather than arrived at silently.
  *
  * EQUIVALENCE RECORD (TASK-018-RULES R6).
  *
@@ -82,6 +109,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import {
@@ -224,11 +252,32 @@ describe('BUG-014 — a test fixture cannot write into the repository under test
     // suite has dissolved and should be deleted along with its shell twin; until
     // then the number is the honest measure of what is still at risk.
     if (scan.members.length === 0) {
-      expect(
-        scan.considered,
-        'no shell suites remain under tests/, so this control has nothing left to ' +
-          'check and should be deleted (TASK-018-TARGET §4)',
-      ).toEqual([])
+      // THE END STATE, STATED POSITIVELY — as "the migration COMPLETED", not as
+      // "the directory is empty".
+      //
+      // This branch used to assert `scan.considered` was empty, and MEASURED,
+      // that is red at the end state for a file that is alive and correct:
+      // `scanGitIsolation` walks `tests/<dir>/*.sh` and `tests/helpers/` is a
+      // directory under `tests/`, so `helpers/proc-cwd.sh` is CONSIDERED. It
+      // drives no git, so it is not a member — population zero, terminal branch
+      // taken, and the assertion fires on a live shell helper. It would also
+      // have fired on any runner deliberately RETAINED, which is a decision the
+      // founder gets to make without this control calling it a defect.
+      //
+      // What the dissolution actually claims is that every anchor's hazard moved
+      // into the type system rather than being dropped, so that is what is
+      // asserted: each declared anchor now owns a spec. Non-vacuous — emptying
+      // DECLARED_ANCHORS is not survivable here either way — and it survives both
+      // a live shell helper and a retained runner.
+      for (const anchor of DECLARED_ANCHORS) {
+        expect(
+          existsSync(join(TESTS_DIR, anchor, `${anchor}.spec.ts`)),
+          `no git-driving shell suite remains, but tests/${anchor}/${anchor}.spec.ts ` +
+            `does not exist — ${anchor} was DELETED rather than ported, so the hazard ` +
+            `this control existed for left with no successor. This suite dissolves ` +
+            `once every anchor is a spec (TASK-018-TARGET §4), not before.`,
+        ).toBe(true)
+      }
     } else {
       expect(
         anchorsOnDisk.length,

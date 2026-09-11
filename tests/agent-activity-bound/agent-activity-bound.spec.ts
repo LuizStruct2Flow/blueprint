@@ -792,7 +792,12 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
           await intoSeam(1 / 3)
           await b.append('RACE-C\n')
 
-          await b.f.expectLine('RACE-C')
+          // The shell gave this one call 30 s against its own default of 8
+          // (`wait_for RACE-C 30`, test.sh:578), because the case DELIBERATELY
+          // slows the read by `seamSeconds`: measured here at 4.60/4.61/4.62 s
+          // over three runs — deterministic, and the only caller in these suites
+          // that does not fit the 8 s default. Same number, same reason.
+          await b.f.expectLine('RACE-C', 30_000)
           await b.proveTicks(1)
           // Advancing the offset short DUPLICATES, advancing it long SKIPS. Only
           // exactly-once is correct, which is why all three counts are asserted.

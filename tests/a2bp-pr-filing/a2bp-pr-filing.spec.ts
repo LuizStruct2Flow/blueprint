@@ -1,0 +1,231 @@
+/**
+ * tests/a2bp-pr-filing/a2bp-pr-filing.spec.ts — BUG-011, in TypeScript
+ * (TASK-018).
+ *
+ * `a2bp` reported a request as FILED when no PR was ever opened.
+ *
+ * `bp_file_existing_pr` asks gh for a PR on the request branch:
+ *
+ *   gh pr list … --json state,url --jq '.[0] | "\(.state)\t\(.url)"'
+ *
+ * On an EMPTY list `.[0]` is null, and jq interpolates null as the literal
+ * string "null" — so the function printed `null<TAB>null` instead of nothing.
+ * The caller guarded with `[ -n "$existing" ] && [ "$existing" != "<TAB>" ]`: it
+ * anticipated empty fields but not the literal. A non-existent PR therefore
+ * passed as an existing one, fell to the `*)` branch, printed
+ * `✓ request already open: null`, and returned BP_RC_PENDING (3).
+ *
+ * That exit code is the severe part. 3 means "filed, awaiting a decision", and
+ * CLAUDE.md is explicit that no script may read "PR opened" as "the blueprint
+ * has this". Here the code ASSERTED filed while nothing was filed — worse than a
+ * silent failure, because a caller cannot detect it.
+ *
+ * NOTHING HERE REACHES GITHUB. `gh` is a shim inside the scenario workspace,
+ * found first on PATH; `jq` must be REAL, because the defect IS jq's rendering
+ * of null and shimming it would test nothing.
+ *
+ * THE SOURCE-INSPECTION CASES CALL `sed`, they do not reimplement it. #4, #4b,
+ * #4c and #5 assert on a RANGE of `scripts/blueprint`, and the shell suite
+ * selected those ranges with `sed -n '/a/,/b/p'`. A TypeScript reimplementation
+ * of sed's range semantics — including that a range re-triggers after it closes
+ * — would be a second implementation to keep faithful for no gain, so the same
+ * sed runs inside the sandbox and the verdicts cannot diverge.
+ *
+ * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
+ * perturbed copy of the blueprint. See the migration report for the table.
+ */
+
+import { describe, it, expect } from 'vitest'
+import { join } from 'node:path'
+import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
+
+const SUBJECT_ROOT = process.env.BP_SUBJECT_ROOT ?? REPO_ROOT
+const LIB = join(SUBJECT_ROOT, 'scripts/lib/request-file.sh')
+const CLI = join(SUBJECT_ROOT, 'scripts/blueprint')
+
+/**
+ * A `gh` whose `pr list` returns `json`.
+ *
+ * It reproduces gh's own `--jq` handling — pipe the JSON through jq with the
+ * given filter — because that is exactly where the null literal is produced.
+ */
+async function ghShim(s: Scenario, json: string): Promise<string> {
+  const shims = await s.shimDir('bin')
+  await shims.add(
+    'gh',
+    [
+      `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then`,
+      `  json='${json}'`,
+      `  filter=""`,
+      `  while [ $# -gt 0 ]; do`,
+      `    [ "$1" = "--jq" ] && { shift; filter="$1"; }`,
+      `    shift`,
+      `  done`,
+      `  printf '%s' "$json" | jq -r "$filter"`,
+      `  exit 0`,
+      `fi`,
+      `exit 1`,
+    ].join('\n'),
+  )
+  return shims.path()
+}
+
+/** Probe for an existing PR through the shimmed gh. */
+function existingPr(s: Scenario, path: string): Promise<RunResult> {
+  return s.run('bash', ['-c', `. "${LIB}"; bp_file_existing_pr owner/repo some-ref`, '_'], {
+    cwd: s.workspace.root,
+    env: { PATH: path },
+  })
+}
+
+/** `sed -n '/start/,/end/p'` over the CLI — the shell suite's own selector. */
+async function block(s: Scenario, range: string): Promise<string> {
+  const r = await s.run('sed', ['-n', range, CLI], { cwd: s.workspace.root })
+  expect(r.code, r.output).toBe(0)
+  return r.stdout
+}
+
+/**
+ * ONE multi-line shell condition, bounded by the continuation backslashes that
+ * actually define it.
+ *
+ * WHY THIS IS NOT A `sed` RANGE. `sed -n '/if \[ -n "$existing" \]/,/; then/p'`
+ * is what the shell suite uses, and it is FAIL-OPEN: the end pattern is a line
+ * the condition itself carries, so deleting the clause under test also deletes
+ * the range's terminator, and the range runs on until the next unrelated
+ * `; then` — 90 lines later, through comment prose that contains the word
+ * `null`. Verified by mutation: with the whole null-rejecting continuation
+ * deleted, the shell suite's #5 stays GREEN.
+ *
+ * A condition ends where its line stops ending in a backslash. That boundary is
+ * the syntax rather than a guess about neighbouring text, so deleting the clause
+ * shrinks the selection instead of exploding it.
+ */
+async function condition(s: Scenario, startPattern: RegExp): Promise<string> {
+  const source = await s.run('cat', [CLI], { cwd: s.workspace.root })
+  expect(source.code, source.output).toBe(0)
+  const lines = source.stdout.split('\n')
+  const start = lines.findIndex((l) => startPattern.test(l))
+  if (start < 0) return ''
+  const picked: string[] = []
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i] ?? ''
+    picked.push(line)
+    if (!line.endsWith('\\')) break
+  }
+  return picked.join('\n')
+}
+
+describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => {
+  it("#1 no PR on the branch produces empty output, not 'null'", async () => {
+    await scenario('a2bp-pr-filing-1', async (s) => {
+      // THE REPRODUCER. An empty list must report NOTHING — not the string
+      // "null", which the caller cannot distinguish from a URL.
+      const r = await existingPr(s, await ghShim(s, '[]'))
+
+      expect(r.stdout, 'a non-existent PR reads as an existing one').not.toContain('null')
+      expect(r.stdout.replace(/\s/g, ''), 'an empty PR list produced output at all').toBe('')
+    })
+  })
+
+  it('#2 an existing PR is still reported with its state and url', async () => {
+    await scenario('a2bp-pr-filing-2', async (s) => {
+      // The fix must not blind the probe, which would re-file a request the
+      // owner already closed.
+      const path = await ghShim(s, '[{"state":"OPEN","url":"https://example.com/pr/7"}]')
+      const r = await existingPr(s, path)
+      expect(r.stdout).toContain('https://example.com/pr/7')
+    })
+  })
+
+  it('#3 a closed PR is still reported, so it is not silently re-filed', async () => {
+    await scenario('a2bp-pr-filing-3', async (s) => {
+      // Re-filing a request the owner declined re-spends the reviewer attention
+      // this whole design exists to protect.
+      const path = await ghShim(s, '[{"state":"CLOSED","url":"https://example.com/pr/8"}]')
+      const r = await existingPr(s, path)
+      expect(r.stdout).toContain('CLOSED')
+    })
+  })
+
+  it('#4 branch-pushed-but-no-PR returns BP_RC_FAILED (5), not "filed"', async () => {
+    await scenario('a2bp-pr-filing-4', async (s) => {
+      // 3 is a PROMISE that a reviewer now has something to look at. Returning
+      // it when nothing was filed is the defect that makes this bug worse than a
+      // crash: the caller has no way to tell the difference.
+      const lib = await s.run('grep', ['-q', 'BP_RC_FAILED=5', LIB], { cwd: s.workspace.root })
+      expect(lib.code, 'BP_RC_FAILED is not 5 — the contract this asserts has moved').toBe(0)
+
+      const failBranch = await block(s, '/opening the PR failed/,/^  }/p')
+      expect(
+        failBranch,
+        'could not locate the pr-create failure branch — the assertion would be vacuous',
+      ).not.toBe('')
+      expect(
+        failBranch,
+        "the branch is pushed and the PR failed, yet it returns BP_RC_PENDING (3) — 'filed' asserted while nothing was filed",
+      ).not.toContain('BP_RC_PENDING')
+      expect(
+        failBranch,
+        'the pr-create failure branch returns neither FAILED nor PENDING — unclear contract',
+      ).toContain('BP_RC_FAILED')
+    })
+  })
+
+  it('#4b the missing-gh path returns BP_RC_FAILED (5), like the pr-create failure', async () => {
+    await scenario('a2bp-pr-filing-4b', async (s) => {
+      // THE OTHER no-PR PATH (Codex F1). Case #4 only inspects the block after
+      // "opening the PR failed", so it was blind to the EARLIER `command -v gh`
+      // branch, which still returned BP_RC_PENDING (3). That is the COMMON path:
+      // most environments without gh never reach the pr-create call. The first
+      // fix corrected the rarer branch and left the bug where it bites most.
+      const noGh = await block(s, '/if ! command -v gh/,/^  fi/p')
+      expect(noGh, 'could not locate the missing-gh branch').not.toBe('')
+      expect(
+        noGh,
+        "gh is not installed, no PR can exist, yet it returns BP_RC_PENDING (3) — 'filed' asserted with no PR",
+      ).not.toContain('BP_RC_PENDING')
+      expect(noGh, 'the missing-gh branch returns neither FAILED nor PENDING').toContain(
+        'BP_RC_FAILED',
+      )
+    })
+  })
+
+  it('#4c a zero-exit gh pr create with no usable URL returns FAILED, not "filed"', async () => {
+    await scenario('a2bp-pr-filing-4c', async (s) => {
+      // THE THIRD no-PR PATH (Codex R2-F1). `gh pr create` can exit ZERO and
+      // print nothing, `null`, or a warning; the code then announced "request
+      // filed" and returned 3 on the strength of an exit status alone. Same
+      // boundary already defended for bp_file_existing_pr: when the OUTPUT is
+      // the evidence, a success status is not a substitute for it.
+      const blk = await block(s, '/gh reported success but returned no usable PR URL/,/esac/p')
+      expect(
+        blk,
+        "no guard on gh pr create's output — a zero exit with an empty or 'null' URL still reports filed",
+      ).not.toBe('')
+      expect(blk, 'the no-usable-URL path does not return BP_RC_FAILED').toContain('BP_RC_FAILED')
+    })
+  })
+
+  it("#5 BUG-082: the caller explicitly rejects a literal 'null' as an existing PR, read from a BOUNDED condition", async () => {
+    await scenario('a2bp-pr-filing-5', async (s) => {
+      // Defence in depth: #1 fixes the source, this fixes the consumer, and the
+      // bug needed BOTH to be wrong to reach the user.
+      //
+      // Read the WHOLE condition, not its first line: it is a multi-line `if`
+      // with a trailing backslash, and grepping one line found the part without
+      // the check and reported a fixed guard as broken.
+      //
+      // BOUNDED BY THE CONTINUATION, NOT BY A `; then` PATTERN — see
+      // `condition()`. This is the one place this port is deliberately STRICTER
+      // than the suite it replaces, and the defect it catches is concrete:
+      // deleting the entire null-rejecting continuation leaves the shell suite's
+      // #5 green, because it also deletes the terminator of that suite's own sed
+      // range. Same shape as BUG-074 — a range that fails OPEN when the thing it
+      // measures goes missing.
+      const guard = await condition(s, /if \[ -n "\$existing" \]/)
+      expect(guard, "could not find the caller's guard on $existing").not.toBe('')
+      expect(guard, "the caller's guard does not reject a literal 'null'").toContain('null')
+    })
+  })
+})

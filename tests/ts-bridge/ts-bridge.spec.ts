@@ -153,8 +153,15 @@ const STAGE_LINE = /[✓✗]\s+demo\s/
 describe('BUG-055 — the vitest bridge scrubs git’s environment and reports its own failures', () => {
   it('#0 the fixture declares a suite that owns a spec', async () => {
     await scenario('tsbridge-0', async (s) => {
-      // Without this the cases below pass vacuously: `ts_suites_stage` skips
-      // outright when no suite owns a spec, and a skip is green.
+      // Without this the cases below assert nothing about a real declared
+      // suite.
+      //
+      // CORRECTED BY MEASUREMENT (R6 second pass). This comment used to say they
+      // would "pass vacuously — `ts_suites_stage` skips outright when no suite
+      // owns a spec, and a skip is green". They do not: a mutant blinding the
+      // spec discovery turns #1, #1b, #1c, #1e, #2, #2b and #2c RED. The fixture
+      // claim this case makes is true and the case is non-vacuous; the stated
+      // consequence of its absence was not.
       const f = await fixture(s)
 
       const r = await s.run(

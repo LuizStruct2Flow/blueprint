@@ -464,6 +464,15 @@ pipe_finish`),
   it('#13 the gate hooks source the pipeline renderer', async () => {
     // Assertions #1–#12 could all pass while `.githooks/` ignored the library
     // entirely.
+    //
+    // KNOWN HOLE, measured rather than suspected (R6 second pass, recorded in
+    // the migration report as FINDING 1). This cannot tell SOURCING the renderer
+    // from MENTIONING it: deleting the `. scripts/lib/pipeline.sh` line while
+    // leaving the five comments in `.githooks/pre-push` that name the same path
+    // keeps this green. BUG-080's exact shape. The retiring shell #13 is a
+    // `grep -q 'lib/pipeline.sh'` over the same file and has the identical hole,
+    // so this is a faithful port and NOT the place to fix it — narrowing it here
+    // would make the port unprovable against the runner it replaces.
     for (const rel of ['.githooks/pre-push', '.githooks/pre-push-project']) {
       const text = await readFile(join(REPO_ROOT, rel), 'utf8')
       expect(text, `${rel} does not source scripts/lib/pipeline.sh`).toContain('lib/pipeline.sh')
@@ -561,6 +570,13 @@ pipe_finish`),
       expect(pass.code, pass.output).toBe(0)
 
       const feed = await readFile(s.feedLog, 'utf8')
+      // KNOWN HOLE in THIS claim only, measured (R6 second pass, FINDING 2 in
+      // the migration report). `pipe_finish` writes `slowest: alpha 0.0s` into
+      // the VERDICT line, so the stage name reaches the feed even with the
+      // per-stage `_pipe_feed` deleted — this pattern matches, both
+      // implementations stay green, and the defect it names goes unnoticed. The
+      // shell #16 has the identical hole; claims 2–4 below are each falsifiable.
+      // Left as-is deliberately: see #13.
       expect(feed, `stage results missing from the feed:\n${feed}`).toMatch(/\[.*\].*alpha/)
       expect(feed, `skipped stage missing from the feed:\n${feed}`).toMatch(/\[.*\].*beta/)
       expect(feed, `no verdict line in the feed:\n${feed}`).toContain('PASSED')

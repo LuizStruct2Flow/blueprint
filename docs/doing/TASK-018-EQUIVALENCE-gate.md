@@ -160,6 +160,118 @@ process); each must turn the NAMED case red, and each does:
 
 ---
 
+## 2b. R6 second pass — per-ASSERTION negative proof
+
+**The population in §2 is one mutant per assertion GROUP.** That proves a CASE
+can fail; it does not prove that each named assertion INSIDE a case can. Alex
+(Codex, cross-provider review, 2026-09-11) refused to certify the six ports for
+retirement on exactly that reading of R6 — a case carrying four claims has a
+recorded red proof for the case and none for the individual claims — and listed
+fourteen assertions with no targeted proof.
+
+19 further perturbed trees, one defect per named assertion, same driver
+(`.scratch/vitali-equiv.py --r6`), raw log `.scratch/markus-r6-final.out`.
+**24 trees, 3 disagreements, 2 mutants with an EMPTY port red set** — computed
+by the run, not transcribed.
+
+Three controls, each present because its absence has already produced a
+fabricated finding in this migration:
+
+- **A missing anchor is fatal.** A substitution matching nothing yields "both
+  green", which reads identically to "neither implementation covers this".
+  `.scratch/markus-r6-anchors.py` resolves every literal before the sweep runs.
+- **"This mutant changed nothing" is asked of the TREE'S OWN GIT**, never of a
+  list of files a mutant is allowed to touch — such a list encodes its own
+  answer. Plus a byte comparison against what `apply_edits` saved, because the
+  tree's git is *blind* to the sixteen files this repo tracks and its
+  `.gitignore` also names (`git ls-files -i -c --exclude-standard`): a fresh `git init`
+  honours the ignore file, so `.claude/settings.json` mutated invisibly.
+  `build_tree` now stages with `add -A -f` for the same reason. **No verdict
+  below changed when `-f` was added**; the defect was in what the CONTROL could
+  see, not in what the trees did.
+- **The port's failure MESSAGE is recorded, not just the case id.** `#16`
+  carries four claims and `#14` five, so "`#16` went red" cannot say which. Each
+  row below names the assertion the port itself printed.
+
+| named assertion | mutant — the defect injected | shell red | port red | the assertion the port named |
+|---|---|---|---|---|
+| `pipeline` #0 | **delete** `scripts/lib/pipeline.sh` | #0 | #0,#1,#7,#9b,#10,#11,#12,#14,#15,#16,#17,#19c,#20 | `promise rejected ENOENT` — the `stat(LIB)` claim |
+| `pipeline` #1 PASSED text<br>(and #14's PASSED limb) | rename the TERMINAL verdict `PASSED`→`DONE`. Deliberately NOT the feed's own `PASSED · …` line, which is a separate string and is what #16 claim 3 reads | #1,#14 | #1,#14 | `expected … to contain 'PASSED'`, printed once for each |
+| `pipeline` #10 | move the banner out of `pipe_init` into `pipe_finish`'s PASSING branch | #10 | #10 | `no banner on the failing path` |
+| `pipeline` #13 | rewrite **every** `lib/pipeline.sh` mention in `.githooks/pre-push` | #13 | #13 | `.githooks/pre-push does not source scripts/lib/pipeline.sh` |
+| **`pipeline` #13** | delete only the `. scripts/lib/pipeline.sh` LINE, keep the comments | – | – | **both-green — FINDING 1** |
+| `pipeline` #14 passing limb | refuse to start when `mktemp` fails instead of degrading | #14,#15 | #14,#15 | `no-scratch-dir pass path broke` |
+| `pipeline` #14 non-vacuity limb | drop the `no scratch dir` banner text | – | #14 | `mktemp did not fail — the unbuffered path was never exercised` (**port-only-red**) |
+| `pipeline` #14 rendering limb | discard unbuffered stage output | #14 | #14 | `unbuffered failure output was lost entirely` |
+| **`pipeline` #16 claim 1** | stop feeding a stage RESULT (`_pipe_line ok`) | – | – | **both-green — FINDING 2** |
+| `pipeline` #16 claim 2 | stop feeding a SKIP | #16 | #16 | `skipped stage missing from the feed` |
+| `pipeline` #16 claim 3 | stop feeding the VERDICT | #16 | #16 | `no verdict line in the feed` |
+| `pipeline` #16 claim 4 | drop `— PUSH BLOCKED` from the failed-verdict feed line | #16 | #16 | `a blocked push is not identifiable in the feed` |
+| `no-chain-guard` #5 | inspect EVERY tool, not only Bash | #5 | #5 | `a Read call was blocked — the guard is out of its scope` |
+| `no-chain-guard` #7 | point the PreToolUse hook at a different script | #7 | #7 | `the guard is referenced by no PreToolUse hook — it runs nowhere` |
+| `gate-arming` #1b | make `--stop` arm as a side effect | #1b | #1b | `--stop armed the gate` |
+| `gate-arming` #10 installation | announce the keepalive, write no config | #10,#10b | #10,#10b | `core.sshCommand was left without a keepalive` |
+| `gate-arming` #10d | return 1 outside a repo | #10d | #10d | `returned 1 outside a repo` |
+| `pre-push-scanners` #1 | make the `clean` class unreachable | #0,#1,#4,#4b | #0,#1,#4,#4b | `clean scanners should pass` |
+| `ts-bridge` #0 | blind the spec discovery (`*.spec.ts` → `*.spec.tsx`) | #0 | #0,#1,#1b,#1c,#1e,#2,#2b,#2c | `expected [] to deeply equal [ 'demo' ]` |
+
+**Seventeen of the nineteen named assertions now have a recorded defect that
+turns them red.** Two do not, and both are recorded as findings rather than
+engineered around — neither assertion was weakened, and neither is fixed here,
+because changing an assertion while proving the port against its predecessor
+makes the port unprovable against it.
+
+### The two assertions no mutant could turn red
+
+**FINDING 1 — `pipeline` #13 cannot tell sourcing from mentioning.** It asserts
+`readFile('.githooks/pre-push').toContain('lib/pipeline.sh')`. Deleting the
+actual `. scripts/lib/pipeline.sh` invocation leaves five comment mentions in
+that file, and the case stays green in BOTH implementations. The shell's #13 is
+a `grep -q 'lib/pipeline.sh'` over the same file, so this is a **faithful port
+of a hole, not a port regression** — BUG-080's exact shape (`grep demo` satisfied
+by "declared but never reported: demo"), in a file the §2 population never
+mutated.
+
+**FINDING 2 — `pipeline` #16's first feed claim is satisfied by the verdict
+line.** It asserts `/\[.*\].*alpha/` against the feed. Deleting the per-stage
+`_pipe_feed "✓ $2  $3"` leaves the feed as, verbatim
+(`.scratch/markus-r6-why16.sh` reproduces it):
+
+```
+[GATE] ── pre-push gate · x ──
+[GATE] – beta  skipped · not here
+[GATE] PASSED · 1 stages · 1 skipped · 0.0s · slowest: alpha 0.0s
+```
+
+`pipe_finish`'s slowest-stage annotation carries the stage NAME into the verdict
+line, so a pattern looking for the name in any `[TAG]` line matches even with
+per-stage feeding entirely removed. Both implementations stay green. Claims 2, 3
+and 4 of the same case are each falsifiable; only claim 1 is not. The shell
+suite's `#16 each stage result is appended to the activity feed` has the
+identical hole — again a faithful port.
+
+### The three disagreements, all abort-vs-continue or port-stricter
+
+- **`r6-renderer-absent`** and **`r6-spec-discovery-blind`**: the shell runner
+  `exit 1`s immediately after its own #0, so it reports one red id where the
+  port reports every case it went on to run. Not narrower coverage — a different
+  failure policy, and the port's is the informative one.
+- **`r6-unbuffered-mode-unannounced`**: port-only-red. The port's #14 carries an
+  explicit non-vacuity control (`toContain('no scratch dir')`) that proves
+  `mktemp` really failed; the shell's #14 has none, so a fixture that silently
+  stopped removing `mktemp` would leave it asserting #1 again under a longer
+  PATH. New coverage, same class as `ts-bridge` #1e.
+
+### One doc correction, measured
+
+`ts-bridge.spec.ts` #0's comment says that without it "the cases below pass
+vacuously: `ts_suites_stage` skips outright when no suite owns a spec, and a skip
+is green." Measured under `r6-spec-discovery-blind`, they do not: #1, #1b, #1c,
+#1e, #2, #2b and #2c all go RED. #0 is non-vacuous and the fixture claim it makes
+is true; the stated CONSEQUENCE of its absence is not.
+
+---
+
 ## 3. Every divergence, and why each is the port being right
 
 **No shell-only-red anywhere.** The port is nowhere looser. Six substantive

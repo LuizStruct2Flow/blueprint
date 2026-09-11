@@ -298,9 +298,13 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     const docs = join(REPO_ROOT, 'docs')
     const scan = await scanLifecycleDocs(docs)
 
+    // Non-vacuity is about the SCAN'S REACH, not this repository's content. A
+    // freshly bootstrapped project has zero per-item artefacts and that is
+    // correct — asserting `checked > 0` failed a derived project's own gate,
+    // because it is a claim about the blueprint in a suite that ships.
     expect(
-      scan.checked,
-      'no per-item artefacts examined — the discovery is broken, so #3 proved nothing',
+      scan.statesScanned,
+      'no lifecycle state was walked — the discovery is broken, so #3 proved nothing',
     ).toBeGreaterThan(0)
     expect(scan.orphans, scan.orphans.join(' ')).toEqual([])
     expect(scan.phantomRows, scan.phantomRows.join(' ')).toEqual([])
@@ -315,8 +319,14 @@ describe('lifecycle-docs — a record that states something untrue costs more th
 
       const subjects = log.stdout.split('\n').filter(Boolean)
       // Non-vacuity: a `git log` that returned nothing would make #6 pass over
-      // an empty population, which is precisely BUG-005.
-      expect(subjects.length).toBeGreaterThan(50)
+      // an empty population, which is precisely BUG-005. The floor used to be a
+      // constant 50, which is this repository's history — a fresh project has
+      // one commit. Compare against the same fact from an independent command
+      // instead, so the check is non-vacuous in ANY tree.
+      const count = await s.run('git', ['rev-list', '--count', 'HEAD'], { cwd: REPO_ROOT })
+      expect(count.code).toBe(0)
+      expect(subjects.length).toBe(Number(count.stdout.trim()))
+      expect(subjects.length).toBeGreaterThan(0)
 
       const rowless = bugsWithoutRows(subjects, await rowedBugIds(docs))
       expect(

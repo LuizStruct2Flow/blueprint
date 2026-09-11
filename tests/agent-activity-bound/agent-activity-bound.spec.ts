@@ -58,12 +58,54 @@
  * 2m41s to the run. Only re-writing the sentinel until one lands after the seed
  * closes it, which is what `readerReady` does.
  *
- * EQUIVALENCE RECORD (R6, and this migration's own evidence). Trees carrying one
- * injected defect each, plus the healthy control and negative controls, were built
- * once and BOTH implementations run over each: the retiring
+ * EQUIVALENCE RECORD (R6, and this migration's own evidence).
+ *
+ * Nineteen perturbed trees plus the healthy control and two negative controls were
+ * built and BOTH implementations run over each: the retiring
  * `tests/agent-activity-bound/test.sh`, copied into the tree, and this spec with
- * `BP_SPEC_ROOT` pointed at it. The per-id verdict sets were compared mechanically;
- * the TASK-018 report lists every divergence.
+ * `BP_SPEC_ROOT` pointed at it. Per-id verdict sets compared mechanically. Every
+ * shipped mechanism and every review-found regression the old suite names has a
+ * mutant: RC-1, RC-2, RC-6, R3, R4, I-2, I-3, #7, #8, #8b, #10, #12, #13, #14, #15f,
+ * #16, #18.
+ *
+ * WHERE THEY AGREE: RC-6, I-3, R3, R4, I-2, #7, #8, #12, #14 and both negative
+ * controls — identical red sets, to the id.
+ *
+ * WHERE THEY DIFFER, all five in the port's favour and none a regression:
+ *
+ *   - RC-1, RC-2, #16, #10, #13: the port reds a superset, because a leaked
+ *     supervisor breaks every ownership assertion it owns, and because #11/#19 and
+ *     #9 independently witness a mis-advanced offset.
+ *   - THE SHELL SUITE RED `#15` AND `#2` ON SIX MUTANTS THAT TOUCH NO PROCESS CODE
+ *     AT ALL — RC-6, I-3, R3, R4, #16, #12 — and those reds vanished on a clean
+ *     re-run. Cause: both count `tail -n0 -F` MACHINE-WIDE, and the RC-2 tree had
+ *     left 89 orphaned followers behind (a follower outlives the supervisor that
+ *     forked it), so one tree's debris decided six later trees' verdicts. That is
+ *     the reading-what-you-do-not-own defect R5 names, measured rather than
+ *     supposed, and it is why `ownedProcesses()` scopes every count to the
+ *     scenario's own workspace.
+ *
+ * FOUR ASSERTIONS NEITHER IMPLEMENTATION CAN FAIL, recorded because mutation cannot
+ * close them — each needs a new assertion rather than a stricter one (BUG-094):
+ *
+ *   - `#8b` cannot witness the loss of the inode-reset branch. Its rotated-in file
+ *     is SMALLER than the old offset, so the truncation branch (`size < off → 0`)
+ *     resets it anyway and the case passes with the rotation branch deleted.
+ *   - `#18` cannot witness the loss of the short-capture guard. Dropping one byte
+ *     from a newline-terminated payload leaves a capture with no trailing newline,
+ *     which the fragment path already withholds — so nothing is emitted either way.
+ *     A witness needs a multi-record payload where the short capture still ends in a
+ *     newline.
+ *   - `#15f` cannot witness a `tee`. The mutant pipes each emit through one, so the
+ *     child is transient and a `ps` snapshot almost never catches it.
+ *   - `#13` passes when `--status` is made to trust the state file, because
+ *     `resolve_supervisor` then rejects the dead pid and `--status` still exits
+ *     non-zero — one fail-closed branch impersonating another (cf. BUG-081). The
+ *     defect IS caught, by `#13b` and `#4`.
+ *
+ * One mutant is weaker than its name: `R3` perturbs only the FRAGMENT length path,
+ * so `#17` correctly stays green and the static backstop is what fires. A faithful
+ * R3 mutant would route the payload itself through `$()`.
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -723,23 +765,44 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       // R-1. The read window is widened by a TEST SEAM so the race is deterministic
       // rather than timing-luck: advancing the offset short duplicates records,
       // advancing it long skips them, and only exactly-once is correct.
+      // THE SEAM IS A CLOCK THIS TEST SETS, and the appends are placed as fractions
+      // OF IT. R4 permits controlling the clock and forbids guessing at one, and
+      // that distinction is the whole of this case: `AGENT_FEED_TEST_SLOW_READ`
+      // makes `pump` sleep a KNOWN number of seconds between stat'ing the file and
+      // reading it, so a write landing a third of the way into that window is inside
+      // the read by construction — it is not a bet on how fast the machine is.
+      //
+      // The first version of this port removed the shell's delays as R4 violations
+      // and thereby removed the RACE: all three records landed before any read
+      // window opened, and the case then passed against a mutant that advances the
+      // offset to a RE-STAT — which silently drops anything appended during a read,
+      // the exact defect #10 exists to catch. Measured, not assumed: that mutant is
+      // caught by #9 and #11/#19 and was NOT caught here.
+      const seamSeconds = 3
+      const intoSeam = (fraction: number): Promise<void> =>
+        new Promise((r) => setTimeout(r, seamSeconds * 1000 * fraction))
+
       const b = await bound(s)
       await b.f.withDaemon(
         async () => {
           await b.f.readerReady(b.runLogRel)
-          await b.append('RACE-A\n') // in the snapshot
+          await b.append('RACE-A\n') // present when the snapshot is taken
+          await intoSeam(1 / 3)
           await b.append('RACE-B\n') // lands DURING the slowed read
+          await intoSeam(1 / 3)
           await b.append('RACE-C\n')
 
           await b.f.expectLine('RACE-C')
           await b.proveTicks(1)
+          // Advancing the offset short DUPLICATES, advancing it long SKIPS. Only
+          // exactly-once is correct, which is why all three counts are asserted.
           expect({
             a: await b.f.count('RACE-A'),
             b: await b.f.count('RACE-B'),
             c: await b.f.count('RACE-C'),
           }).toEqual({ a: 1, b: 1, c: 1 })
         },
-        { AGENT_FEED_TEST_SLOW_READ: '1' },
+        { AGENT_FEED_TEST_SLOW_READ: String(seamSeconds) },
       )
     })
   })

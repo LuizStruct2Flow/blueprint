@@ -345,7 +345,7 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         // the run log, and a single append is then lost permanently — which is
         // how this case failed on its first run, reading exactly like the feed
         // having gone silent.
-        await f.readerReady('once/state/gemini-runs.log')
+        await f.readerReady('alive/state/gemini-runs.log')
         await s.fs.write('alive/state/gemini-runs.log', 'AWAKE\n', { append: true })
         await f.expectLine('AWAKE')
 

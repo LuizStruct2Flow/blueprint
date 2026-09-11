@@ -316,7 +316,7 @@ describe('BUG-010 — the roster is the single source of persona identity', () =
       await f.withFeed(async () => {
         // The supervisor must be READING before the rename, or the evidence that it
         // followed the change cannot be told from it never having looked (BUG-038).
-        await f.readerReady('state/gemini-runs.log')
+        await f.readerReady('p4/state/gemini-runs.log')
 
         // The rename, exactly as a founder would make it: one cell in the roster.
         //

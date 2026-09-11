@@ -80,6 +80,15 @@ True and useful, and not the historical state: before the split
 and `signal-set.sh` all pointed there. Mutating the DERIVATION reddens `#1` and
 `#2` in both.
 
+**Both traps are one shape, and the a2bp group hit the third instance of it
+independently.** Their tree builder does a fresh `git init` + `git add -A`, which
+applies `.gitignore` in full — and this repo TRACKS fifteen files `.gitignore`
+also names. So `git status --porcelain` reported MUTANT CHANGED NOTHING while the
+mutant had rewritten a whole file. Here the applied-check asked a double-escaped
+REGEX; there it asked GIT about a baseline git was never given. In every case the
+check consulted something that encodes its own answer instead of the thing
+itself, which is why `sub()` compares the BYTES and nothing else.
+
 ---
 
 ## 2. The population
@@ -429,9 +438,13 @@ FAIL: #4 the waiter EXITED — phantom handoff:
 
 So the port is stronger on the same defect, for the same reason twice: **fixture
 isolation is what makes "an unrelated file appeared beside the baton" an event at
-all.** Recorded here rather than as a bug row, because the weakness is in a shell
-runner already queued for retirement (§8) — and because it is the second time in
-this catalogue that a shared fixture, not a subject, decided a verdict.
+all.** It is the second time in this catalogue that a shared fixture, not a
+subject, decided a verdict.
+
+**Rowed as BUG-098** together with `w3` (§9, testing something other than what it
+was written for, unnoticed because nobody had asked the per-assertion question)
+and the two structurally non-independent assertions below. The mechanism detail
+stays here rather than in the row, because it is about this apparatus.
 
 ### 9.2 Two assertions are falsifiable but NOT independently
 
@@ -451,7 +464,7 @@ than it looks for these two.
   what a control is: it has no failure mode of its own, it exists so that #1's
   red can be attributed. `b8` is the first mutant to exercise it.
 
-### 9.3 Two apparatus fixes the pass needed
+### 9.3 Two apparatus fixes the pass needed — BUG-100
 
 - **`run.py` invoked `npx vitest`.** It resolved the pinned binary only because
   cwd happened to be the mutant's `tests/`; when that resolution misses, `npx`

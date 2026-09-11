@@ -1,0 +1,8 @@
+C28  shell=FAIL [a2bp-contamination:#1 a2bp-contamination:#25 a2bp-contamination:#25b]
+     ts=FAIL [a2bp-contamination:#1 a2bp-contamination:#1b a2bp-contamination:#25 a2bp-contamination:#25b]
+B15  shell=PASS []
+     ts=PASS []
+E7   shell=PASS []
+     ts=PASS []
+--- totals (computed by this run) ---
+trees=3

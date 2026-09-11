@@ -32,7 +32,16 @@
  * sed runs inside the sandbox and the verdicts cannot diverge.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. See the migration report for the table.
+ * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 7 of 7
+ * assertions here have a mutant that was RUN and OBSERVED to turn them red.
+ *
+ * #2 AND #3 CANNOT BE FALSIFIED BY THE DEFECT THEY NAME, and that is a property
+ * of the shim above rather than of the port. It reproduces gh's `--jq` handling
+ * and ignores every other flag, so deleting `--json state,url` (#2's subject) or
+ * narrowing `--state all` to `--state open` (#3's subject) reaches nothing: both
+ * stay green. What reds them is a mutation of the jq FILTER — drop `\(.url)` and
+ * #2 goes red, drop `\(.state)` and #3 does. Recorded, not engineered around:
+ * the query flags are unwitnessed by both implementations.
  */
 
 import { describe, it, expect } from 'vitest'

@@ -39,7 +39,20 @@ export default defineConfig({
     // suites they replace take up to ~180s (bootstrap-gate), and the host may
     // be running an emulated toolchain, so the default 5s would fail honest
     // tests. Individual scenarios tighten this where they can.
-    testTimeout: 300_000,
+    //
+    // 300s -> 600s on 2026-09-11, and the reason is temporary BY DESIGN.
+    // `bootstrap-gate` #2/#3 bootstraps a project and runs that project's ENTIRE
+    // pre-push gate. Until phase 2 that nested gate ran 35 shell suites; it now
+    // runs those AND 35 TypeScript specs, because the migration keeps both
+    // implementations until each port is independently certified. The nested run
+    // therefore roughly doubled and hit the old ceiling at 300005ms -- a timeout,
+    // not a failure: 707 of 708 tests passed and the casualty was the case that
+    // is slowest by construction.
+    //
+    // This number comes back DOWN when the shell runners retire. If you are
+    // reading it long after that has happened, the double-run is over and the
+    // ceiling is now hiding something else -- measure before raising it again.
+    testTimeout: 600_000,
     hookTimeout: 120_000,
 
     // A scenario that leaves a stray handle is a scenario that leaked a process

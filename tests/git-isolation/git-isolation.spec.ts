@@ -223,7 +223,7 @@ describe('BUG-014 — a test fixture cannot write into the repository under test
     ).toBe(true)
   })
 
-  it('#3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself', async () => {
+  it('#3 BUG-088: THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself, and once that population empties every declared anchor owns a spec', async () => {
     const scan = await scanGitIsolation(TESTS_DIR)
 
     expect(

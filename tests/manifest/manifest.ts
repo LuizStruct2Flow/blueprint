@@ -169,6 +169,17 @@ export function liveCmds(text: string): string {
     .join('\n')
 }
 
+/**
+ * The same, for TypeScript — block comments then line comments.
+ *
+ * `//` also truncates a URL, which is harmless here: the only consumer is #1b,
+ * where the effect is to IGNORE a reference rather than to invent one, and
+ * nothing writes a helper path after a URL on one line.
+ */
+function stripTsComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')
+}
+
 /** Shell function definitions in one file's live text. */
 function definedFuncs(text: string): string[] {
   const out: string[] = []
@@ -495,8 +506,38 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
     }
     for (const e of entries.sort()) if (e.endsWith('.sh')) helperNames.push(e)
   }
-  const shellSources: string[] = []
-  const walk = async (dir: string): Promise<void> => {
+  // A CONSUMER MAY BE TYPESCRIPT, and after TASK-018 it usually is. This walk
+  // read only `*.sh`, so `tests/helpers/proc-cwd.sh` — sourced by
+  // `tests/helpers/feed-fixture.ts` for BUG-089's fail-open guard, and driven
+  // by `tests/proc-cwd/proc-cwd.spec.ts` — would be reported as dead the moment
+  // its last shell consumer retired. A helper killed for being unreferenced by
+  // a scan that cannot see its references is the worst shape this check has.
+  //
+  // THE HELPERS DIRECTORY STAYS EXCLUDED FOR `.sh` AND ONLY FOR `.sh`. That
+  // exclusion exists so a helper's own header, which names itself, cannot
+  // satisfy the check on its own behalf — and that argument is about the file
+  // being judged, not about its neighbours. A `.ts` fixture in the same
+  // directory is a consumer like any other.
+  // COMMENTS ARE STRIPPED, and that is not a refinement — without it this check
+  // vouches for its OWN subject. The paragraph above names `proc-cwd.sh`, and
+  // `manifest.ts` is a `.ts` file under `tests/`, so widening the walk made the
+  // check's own prose the thing keeping the helper alive. MEASURED: with both
+  // real consumers mutated away, #1b stayed green. That is precisely the
+  // self-vouching the `helpers/*.sh` exclusion exists to prevent, reintroduced
+  // one level up — the BUG-035 shape, membership decided by what comments SAY
+  // rather than by what code DOES, which `tests/git-isolation` already learned.
+  //
+  // THE MATCH IS ON THE FILENAME, not on `helpers/<name>`. A real reference is
+  // often assembled rather than spelled: `tests/helpers/feed-fixture.ts` sources
+  // this very helper via `join(REPO_ROOT, 'tests', 'helpers', 'proc-cwd.sh')`,
+  // which contains no `helpers/proc-cwd.sh` substring at all. Under the prefix
+  // match that live consumer was invisible and only a comment made it look
+  // otherwise. A `*.sh` basename is distinctive enough that a stripped-source
+  // mention IS a reference, and over-inclusion is the safe direction here: the
+  // cost of a false green is a dead helper left on disk, the cost of a false red
+  // is a live one deleted.
+  const sources: string[] = []
+  const walk = async (dir: string, inHelpers: boolean): Promise<void> => {
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -505,16 +546,18 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
     }
     for (const e of entries) {
       if (e.isDirectory()) {
-        if (e.name === 'helpers' || e.name === '__helpers__' || e.name === 'node_modules') continue
-        await walk(join(dir, e.name))
-      } else if (e.name.endsWith('.sh')) {
-        shellSources.push(await readOr(join(dir, e.name)))
+        if (e.name === 'node_modules') continue
+        await walk(join(dir, e.name), e.name === 'helpers' || e.name === '__helpers__')
+      } else if (e.name.endsWith('.ts')) {
+        sources.push(stripTsComments(await readOr(join(dir, e.name))))
+      } else if (!inHelpers && e.name.endsWith('.sh')) {
+        sources.push(liveCmds(await readOr(join(dir, e.name))))
       }
     }
   }
-  await walk(join(root, 'tests'))
-  const allShell = shellSources.join('\n')
-  const orphans = helperNames.filter((n) => !allShell.includes(`helpers/${n}`))
+  await walk(join(root, 'tests'), false)
+  const allSources = sources.join('\n')
+  const orphans = helperNames.filter((n) => !allSources.includes(n))
   checks.push(
     orphans.length > 0
       ? bad(

@@ -63,9 +63,14 @@
  *   - #9's FIXTURE CARRIES `.blueprint-source`, and that is not cosmetic. It is a
  *     project-shaped tree that never runs `git init`, so under TASK-021's
  *     three-terminator walk it would resolve NOTHING and the dispatch would fail
- *     for a reason unrelated to A-09. `tests/state-root` #F is the spec that
- *     enumerates every such fixture constructor and fails when one produces no
- *     terminator; this is one of the three it found.
+ *     for a reason unrelated to A-09. `tests/state-root` #F was the spec that
+ *     enumerated every such fixture constructor and failed when one produced no
+ *     terminator; this is one of the three it found. #F DISSOLVED on 2026-09-11
+ *     (BUG-109) — its whole population was `tests/<suite>/test.sh` fixtures,
+ *     which the TASK-018 retirement deletes, and its own non-vacuity anchors
+ *     were four of them. The terminator on this fixture is still load-bearing
+ *     for the reason above; what is gone is the repo-wide census, because there
+ *     is nothing left to census.
  *
  * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
  *

@@ -141,7 +141,7 @@ commit as the row.
 This is the half that gets forgotten, because a row is one line and a folder is
 not: on 2026-08-03 fourteen rows were promoted to `done/` and every one of their
 folders was left behind, spotted only by a human reading a directory listing.
-[`tests/lifecycle-docs/`](../tests/lifecycle-docs/test.sh) #3 now fails the
+[`tests/lifecycle-docs/`](../tests/lifecycle-docs/) #3 now fails the
 push instead.
 
 ## §1c Lifecycle management pass (`lcm`)
@@ -179,8 +179,8 @@ implies. Walk this checklist:
    (the per-item "what to test" prose an index carries, which a bug row cannot),
    a test must hold the two together.
 
-   Enforced by [`tests/lifecycle-docs/`](../tests/lifecycle-docs/test.sh) and
-   [`tests/doc-links/`](../tests/doc-links/test.sh) rather than by remembering —
+   Enforced by [`tests/lifecycle-docs/`](../tests/lifecycle-docs/) and
+   [`tests/doc-links/`](../tests/doc-links/) rather than by remembering —
    the same conclusion this repo reached for the pre-push gate, fixture
    isolation and command chaining.
 

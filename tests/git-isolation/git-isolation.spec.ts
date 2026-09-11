@@ -56,6 +56,29 @@
  * would also reach `tests/node_modules/<pkg>/*.sh` if any dependency shipped
  * one. The port excludes `node_modules` explicitly. No such file exists today —
  * verified — so no verdict differed.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Fourteen cases, fourteen with an observed red. One is worth naming here:
+ * emptying DECLARED_ANCHORS turns `#3 THE REAL TREE` red, so the anchor half
+ * that REPLACED the two magic-number floors is proven load-bearing rather
+ * than merely argued for. `#1` is evidenced ONE ANCHOR AT A TIME — each is
+ * its own case and a red on one says nothing about the others.
+ *
+ * One mutant nothing kills, recorded because a green run cannot show it:
+ * loosening UNSETS_GIT_DIR to a bare /GIT_DIR/ turns no case red. Comments
+ * are stripped before the predicate runs, so the false positives it would
+ * admit are already gone; what is untested is a CODE line that merely
+ * mentions the variable, and the documented refusal of `unset -v GIT_DIR`.
  */
 
 import { describe, it, expect } from 'vitest'

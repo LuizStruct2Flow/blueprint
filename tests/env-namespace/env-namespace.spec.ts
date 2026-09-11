@@ -30,6 +30,22 @@
  *     path containing a space would differ — there is none, in this repo or in
  *     any fixture — and the port is the stricter of the two. Noted because a
  *     silent tightening is still a change.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Twelve cases, twelve with an observed red. `#1 the FLOOR` needed its own
+ * mutant: nothing else distinguishes it, because it is the case that draws
+ * the line between "all clean" and "discovery found nothing", and only a
+ * defect in the COUNT itself can cross it.
  */
 
 import { describe, it, expect } from 'vitest'

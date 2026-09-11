@@ -66,6 +66,26 @@
  *     for a reason unrelated to A-09. `tests/state-root` #F is the spec that
  *     enumerates every such fixture constructor and fails when one produces no
  *     terminator; this is one of the three it found.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Eighteen cases, eighteen with an observed red, each EXCLUSIVELY — this is
+ * the only suite in the group where every case has a mutant of its own.
+ * Two of them are FIXTURE perturbations rather than code defects, the shape
+ * suite-sync #1c already uses: `#10c` asserts that bash refuses a cyclic
+ * script file and `#6b` that `git rev-parse` under a foreign GIT_DIR answers
+ * about the caller — properties of the kernel and of git, which no mutation
+ * of this repository can falsify. Their fixtures are perturbed instead, and
+ * each case notices.
  */
 
 import { describe, it, expect } from 'vitest'

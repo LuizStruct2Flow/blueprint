@@ -64,6 +64,33 @@
  * config writes landed in whatever `GIT_DIR` named. Here the repository comes
  * from the harness, which scrubs the variable before any child starts, so the
  * hazard is unrepresentable rather than remembered (TASK-018-RULES R3).
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Thirty-two cases, thirty-two with an observed red — and one structural
+ * fact the measurement made visible. `#3 FAILS CLOSED on a missing
+ * argument`, `#3 FAILS CLOSED on an unreadable message file` and `#3 an
+ * empty message … is rejected` have no SINGLE-EDIT mutant: removing the
+ * readability guard, and removing the empty-subject guard, each turn only
+ * `#3 the no-argument path is defended TWICE` red, because the rule itself
+ * refusing "" is a THIRD line of defence. All three go together or not at
+ * all. Redundant defence of a fail-closed path is the correct design; the
+ * consequence for R6 is that these cases are the redundantly-guarded ones
+ * rather than the distinguishing ones, which is what suite-sync #7-bare
+ * records about itself.
+ *
+ * `#4 … a repo WITHOUT it is ungated` asserts the ABSENCE of enforcement, so
+ * no code mutant can reach it; its fixture is given the `core.hooksPath` it
+ * exists to lack, and the case notices.
  */
 
 import { describe, it, expect } from 'vitest'

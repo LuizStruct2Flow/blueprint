@@ -107,19 +107,31 @@ is precisely the error the author cannot see by definition.
 **6. Land it.** The landing step is the one thing that differs by repo type, and
 getting it wrong is a known failure mode in both directions:
 
-| Repo | How it lands |
+| Contributor | How it lands |
 |---|---|
-| **Product / derived project** | Trunk-based: push to `main`. No branches. |
-| **The blueprint itself** | Branch + pull request + merge. **Never** a direct push to `main`. |
+| **A maintainer of this repo** | Trunk-based: push to `main`. No branches. Same in a derived project and in the blueprint. |
+| **An external contribution** — a derived project asking the blueprint for a change | Pull request. `blueprint a2bp` files it, and a maintainer decides. |
 
-The asymmetry is deliberate. The blueprint's `main` is what every derived
-project pulls from, so anything landing there fans out to all of them — see
-`CLAUDE.md` §"Never push to the blueprint's `main`", which also lists the three
-arguments agents have used to talk themselves past it.
+**The axis is the contributor, not the repo.** This table used to split by repo
+and say the blueprint always needs a pull request. TASK-019 removed that, for a
+reason worth keeping: a pull request is a request made *of* someone, so a
+maintainer opening one against their own trunk is reviewing themselves — and the
+hooks enforcing it had to be disabled to do ordinary work, which is a guard that
+protects nothing (`docs/done/BUGS.md` BUG-031 makes the same argument about a red
+CI everyone merges over).
 
-**7. Landing moves it to `waiting-acceptance/`.** For a product repo that is the
-push; for the blueprint it is the **merge**, not the branch push. An item whose
-PR is still open is waiting on review, not on the founder, and stays in `doing/`.
+What a PR is actually for is unchanged, and it is why `a2bp` still opens one: the
+people who maintain a repo are not forced to accept a change from outside it. The
+reach of the blueprint's `main` is also unchanged — everything landing there fans
+out to every derived project on their next pull. What changed is only *who is
+asked for permission to use it*. See `CLAUDE.md` §"The blueprint's `main` is its
+trunk".
+
+**7. Landing moves it to `waiting-acceptance/`.** The trigger is landing on
+`main`, which for a maintainer's own work is the push itself. When a change does
+travel on a branch — an `a2bp` request, or one you chose to isolate — the trigger
+is the **merge**, not the branch push: an item whose PR is still open is waiting
+on review, not on the founder, and stays in `doing/`.
 
 **8. Artefacts always travel with their parent item.** Plans, review documents,
 mockups, spike code, outputs — the whole folder moves through

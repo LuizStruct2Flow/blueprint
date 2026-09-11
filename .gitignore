@@ -6,8 +6,17 @@ dist/
 build/
 *.js.map
 
-# Rendered presentation (regenerate with scripts/build-deck.sh)
-docs/way-of-working.pdf
+# Rendered presentations (regenerate with scripts/build-deck.sh <deck.md>)
+# NOTE: docs/way-of-working.pdf was committed BEFORE it was listed here, and
+# .gitignore does not apply to an already-tracked file — so it still shows as
+# modified on every rebuild. Untracking it is a deliberate call (it stops
+# shipping to anyone who clones), so it is left alone rather than quietly
+# removed. The glob covers every deck added since.
+docs/*.pdf
+
+# Office lock files — created while a workbook is open, never content
+~$*
+.~lock.*#
 
 # Environment files — never commit secrets
 .env

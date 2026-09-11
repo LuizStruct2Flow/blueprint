@@ -356,10 +356,21 @@ per the normal team workflow below.
 - **Commit-message convention — ENFORCED.** Every commit subject STARTS with the backlog item it serves: `BUG#20:`, `FEATURE#3:`, `TASK#1:`. `.githooks/commit-msg` rejects anything else, so this is a gate rather than a habit. **One item per commit** — a commit serving two items is two commits, which the hook cannot check and DoD §1b rule 3 states. The body explains *why*, not what: the "what" is in the diff, and the "why" is what a future reader (or `git blame`) actually needs. There is no such thing as a commit with no item — if work has no backlog row it is not ready to commit (DoD §1b rule 1). This REPLACES the Conventional Commits form (`fix(BUG-XXX):`) that this file used to prescribe; that form does not start with the item and is now refused.
 - **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `BUG#XX: minimal reproducer (failing)` → `BUG#XX: <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
 - Trunk-based development only — no branches, use feature toggles instead.
-  **This governs PRODUCT repos. It does NOT apply to the blueprint**, where
-  every contribution is a branch + pull request — see §"Never push to the
-  blueprint's `main`". Reading this line as blanket permission is exactly how
-  an agent ends up pushing to the blueprint trunk.
+  **This holds in the blueprint too** — see §"The blueprint's `main` is its
+  trunk". The axis that decides is the **contributor, not the repo**: a
+  maintainer of a repo pushes its trunk, and an **external** contribution
+  arrives as a pull request — which for the blueprint is what
+  `blueprint a2bp` files (§"Back-propagating"). A pull request exists so the
+  people who maintain a repo are not forced to accept a change from outside
+  it, not so an author can review themselves.
+
+  This bullet used to say the opposite — that the blueprint was exempt and
+  every contribution there needed a branch and a PR. TASK-019 removed that,
+  and the line survived pointing at a section that no longer exists, so this
+  file contradicted itself for a while: the rule below still said a PR was
+  never required. **When a workflow changes, every rule that referenced the
+  old one has to be re-read** — they do not fail loudly, they just quietly
+  describe something that no longer happens.
 - Run and report test coverage before every commit/push
 - **Coverage thresholds** (enforced in the pre-push gate):
   - **Measure over the WHOLE source tree, not a curated subset.** A high

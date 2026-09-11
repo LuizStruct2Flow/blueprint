@@ -1,0 +1,127 @@
+[
+  {
+    "suite": "wait-mic",
+    "mutant": "w8-fire-without-a-change",
+    "verdict": "agree",
+    "shell": [
+      "#1",
+      "#10",
+      "#11",
+      "#12",
+      "#13",
+      "#2",
+      "#3",
+      "#4",
+      "#5",
+      "#6",
+      "#8",
+      "#9"
+    ],
+    "port": [
+      "#1",
+      "#10",
+      "#11",
+      "#12",
+      "#13",
+      "#2",
+      "#3",
+      "#4",
+      "#5",
+      "#6",
+      "#8",
+      "#9"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 11.5,
+    "t_port": 360.6,
+    "port_out": ""
+  },
+  {
+    "suite": "wait-mic",
+    "mutant": "w9-key-on-the-directory",
+    "verdict": "PORT-ONLY-RED",
+    "shell": [
+      "#4"
+    ],
+    "port": [
+      "#3",
+      "#4"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 16.5,
+    "t_port": 63.0,
+    "port_out": "JSON report written to /tmp/equiv-wait-mic-mhah20s3/vitest.json\n"
+  },
+  {
+    "suite": "wait-mic",
+    "mutant": "w10-task-is-part-of-the-mic",
+    "verdict": "agree",
+    "shell": [
+      "#4"
+    ],
+    "port": [
+      "#4"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 16.7,
+    "t_port": 33.2,
+    "port_out": ""
+  },
+  {
+    "suite": "session-resume",
+    "mutant": "s14-snapshot-the-lifecycle-at-mark",
+    "verdict": "agree",
+    "shell": [
+      "#8"
+    ],
+    "port": [
+      "#8"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 2.4,
+    "t_port": 4.7,
+    "port_out": ""
+  },
+  {
+    "suite": "session-resume",
+    "mutant": "s15-leave-a-breadcrumb",
+    "verdict": "agree",
+    "shell": [
+      "#10"
+    ],
+    "port": [
+      "#10"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 2.0,
+    "t_port": 4.0,
+    "port_out": ""
+  },
+  {
+    "suite": "baton-durability",
+    "mutant": "b8-match-the-rendered-field-name",
+    "verdict": "agree",
+    "shell": [
+      "#1",
+      "#1b",
+      "#6",
+      "#6c"
+    ],
+    "port": [
+      "#1",
+      "#1b",
+      "#6",
+      "#6c"
+    ],
+    "shell_rc": 1,
+    "port_rc": 1,
+    "t_shell": 187.0,
+    "t_port": 124.2,
+    "port_out": ""
+  }
+]

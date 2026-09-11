@@ -15,7 +15,13 @@ Four verdicts per pair, and each means something different:
                    class mutation testing structurally cannot find by itself —
                    it only shows up when the defect is injected deliberately.
 
-Usage: python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/run.py [suite ...]
+Usage: python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/run.py [--out NAME] [target ...]
+
+A target is a whole suite (`wait-mic`) or one tree of it (`wait-mic:w8-…`), so a
+later pass can re-run the mutants it added without paying for the ones already
+recorded. `--out NAME` writes `outputs/NAME.json` instead of overwriting
+`results-last-run.json` — which is what that file's name says it is, and why the
+five suites' records live in the per-suite `outputs/*.log` rather than in it.
 """
 from __future__ import annotations
 
@@ -55,6 +61,9 @@ MUTANTS: dict[str, list[str]] = {
         "w5-reject-a-rejoinable-pipe",
         "w6-whitelist-the-state",
         "w7-never-exit",
+        "w8-fire-without-a-change",
+        "w9-key-on-the-directory",
+        "w10-task-is-part-of-the-mic",
     ],
     "session-resume": [
         "s1-cry-wolf-on-a-healthy-resume",
@@ -67,6 +76,8 @@ MUTANTS: dict[str, list[str]] = {
         "s9-mark-does-not-stamp-the-handover",
         "s12-stamp-before-the-read-back",
         "s13-roll-the-window-in-two-appends",
+        "s14-snapshot-the-lifecycle-at-mark",
+        "s15-leave-a-breadcrumb",
     ],
     "signal-dispatch": [
         "d1-no-settle-window",
@@ -81,6 +92,7 @@ MUTANTS: dict[str, list[str]] = {
         "b5-re-resolve-past-an-explicit-pin",
         "b6-clear-the-trigger-key-on-a-move",
         "b7-live-rows-in-the-tracked-file",
+        "b8-match-the-rendered-field-name",
     ],
 }
 
@@ -131,8 +143,14 @@ def shell_red(root: Path, suite: str) -> tuple[set[str], int]:
 def port_red(root: Path, suite: str) -> tuple[set[str], int, str]:
     """Run <suite>.spec.ts and collect the ids of the cases that failed."""
     report = root / "vitest.json"
+    # The PINNED vitest, invoked directly, with --root naming the mutant's tests/
+    # explicitly. `npx vitest` resolved the same binary here only because cwd
+    # happened to be tests/ — and when that resolution misses, npx FETCHES an
+    # unpinned vitest, which runs no files and exits 0. A silent no-op that reads
+    # as a green port is the one failure this whole exercise cannot survive.
     proc = subprocess.run(
-        ["npx", "vitest", "run", suite, "--reporter=json",
+        [str(root / "tests/node_modules/.bin/vitest"), "run", suite,
+         "--root", str(root / "tests"), "--reporter=json",
          f"--outputFile={report}"],
         cwd=root / "tests", capture_output=True, text=True,
         env=child_env(), timeout=1800,
@@ -142,6 +160,10 @@ def port_red(root: Path, suite: str) -> tuple[set[str], int, str]:
         return {"#no-report"}, proc.returncode, proc.stdout + proc.stderr
 
     data = json.loads(report.read_text())
+    # A run that executed NOTHING is green, and green is the verdict that ends
+    # this exercise. Say so instead.
+    if not data.get("testResults"):
+        return {"#no-tests-ran"}, proc.returncode, proc.stdout + proc.stderr
     for suite_result in data.get("testResults", []):
         for case in suite_result.get("assertionResults", []):
             if case.get("status") != "failed":
@@ -205,25 +227,36 @@ def run_pair(suite: str, mutant: str) -> dict:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def targets(argv: list[str]) -> tuple[str, list[tuple[str, str]]]:
+    """`--out NAME`, then `suite` or `suite:mutant` targets -> (name, pairs)."""
+    out, args = "results-last-run", list(argv)
+    if args[:1] == ["--out"]:
+        out, args = args[1], args[2:]
+    pairs = []
+    for arg in args or list(MUTANTS):
+        suite, _, one = arg.partition(":")
+        pairs += [(suite, one)] if one else [(suite, m) for m in CONTROLS + MUTANTS[suite]]
+    return out, pairs
+
+
 def main() -> int:
-    suites = sys.argv[1:] or list(MUTANTS)
+    out_name, pairs = targets(sys.argv[1:])
     rows = []
-    for suite in suites:
-        for mutant in CONTROLS + MUTANTS[suite]:
-            row = run_pair(suite, mutant)
-            rows.append(row)
-            if "error" in row:
-                print(f"  !! {suite:18} {mutant:42} MUTANT FAILED TO APPLY: {row['error']}", flush=True)
-                continue
-            print(
-                f"  {row['verdict']:15} {suite:18} {mutant:42} "
-                f"shell={','.join(row['shell']) or '-':28} port={','.join(row['port']) or '-':28} "
-                f"({row['t_shell']}s / {row['t_port']}s)",
-                flush=True,
-            )
+    for suite, mutant in pairs:
+        row = run_pair(suite, mutant)
+        rows.append(row)
+        if "error" in row:
+            print(f"  !! {suite:18} {mutant:42} MUTANT FAILED TO APPLY: {row['error']}", flush=True)
+            continue
+        print(
+            f"  {row['verdict']:15} {suite:18} {mutant:42} "
+            f"shell={','.join(row['shell']) or '-':28} port={','.join(row['port']) or '-':28} "
+            f"({row['t_shell']}s / {row['t_port']}s)",
+            flush=True,
+        )
     out = HERE.parent / "outputs"
     out.mkdir(exist_ok=True)
-    (out / "results-last-run.json").write_text(json.dumps(rows, indent=2))
+    (out / f"{out_name}.json").write_text(json.dumps(rows, indent=2))
 
     bad = [r for r in rows if r.get("verdict") not in ("agree",) or "error" in r]
     print(f"\n{len(rows)} tree(s); {len(rows) - len(bad)} agree, {len(bad)} to explain")

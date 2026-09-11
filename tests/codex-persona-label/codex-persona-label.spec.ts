@@ -41,6 +41,39 @@
  * a static label — must not trip #4, which is about `codex-runs.log` alone.
  *
  * MUTATION RECIPE (R6) — each observed red, not predicted. See
+ *
+ * `#3`'S OWN NEGATIVE PROOF, added 2026-09-11 after a cross-provider review named
+ * it as an assertion with no mutant that reds it. The recorded population was
+ * assertion-GROUP coverage; this is assertion coverage.
+ *
+ * Mutant `C1`: every occurrence of `bp_roster_label` in the launcher renamed to
+ * `bp_private_label` — the launcher rolling its own label instead of sharing the
+ * feed's, which is the defect this check exists for. OBSERVED, both
+ * implementations, and exactly one case each:
+ *
+ *     shell   FAIL: #3 the launcher does not label its output …
+ *     port    × #3 the launcher builds its label from the shared roster lookup
+ *
+ * Everything else stayed green, `#3 it labels with the holder of the mic AT
+ * DISPATCH TIME` included — so the mutant isolates the assertion rather than the
+ * group. Harness: `.scratch/markus-feed-r6.sh`.
+ *
+ * THE FIRST RUN OF IT IS THE USEFUL HALF, and it is a defect in the APPARATUS
+ * rather than in either implementation (BUG-096). The mutant landed, the file
+ * changed, and the harness's CHANGED-NOTHING guard — asked of the mutant tree's
+ * own git, which is the correct thing to ask — answered "changed nothing" and
+ * refused the verdict. `scripts/start-codex-signal-watch.sh`, this suite's entire
+ * subject, is one of fifteen files the real repo TRACKS while `.gitignore` also
+ * names them: tracked beats ignored in the real repo and NOT in the fresh `git
+ * init` every harness builds its tree with. `git add -A -f` is the fix, and the
+ * guard failing LOUDLY rather than reporting a fabricated finding is the only
+ * reason this was cheap.
+ *
+ * None of this closes BUG-092 part 1: `#3` is a source check, and a launcher
+ * that calls `bp_roster_label` with a path holding no roster still passes it.
+ * What is now proven is that the check can fail at all.
+ *
+ * See
  * `.scratch/equiv-codex-persona-label.sh` for the population as run.
  */
 

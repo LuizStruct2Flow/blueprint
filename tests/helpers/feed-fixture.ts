@@ -223,7 +223,18 @@ export async function feedFixture(
       return (await read()).split(needle).length - 1
     },
 
-    async expectLine(needle, timeoutMs = 20_000) {
+    // 8 s IS THE SHELL'S OWN DEFAULT (`wait_for`'s `lim=8`, agent-activity-bound
+    // test.sh:200), restored after the port shipped 20 s. A ceiling is what the
+    // test waits before declaring failure, and widening one is the cheapest way
+    // to make a flaky port look green — so it is measured rather than felt.
+    //
+    // MEASURED on this host (Linux, 4 full runs of the four feed suites,
+    // 129 + 43 samples): p50 0.30 s, p90 0.30 s, worst 3.31 s. The worst is
+    // `TICK-PROOF-1`, whose reader is deliberately slowed by the case itself, so
+    // it is a property of the fixture rather than of load. 8 s is 2.4x it.
+    // The one caller that genuinely needs more is #10's `RACE-C`, which passes
+    // the same explicit 30 s the shell gave it (`wait_for RACE-C 30`, :578).
+    async expectLine(needle, timeoutMs = 8_000) {
       await vi.waitFor(
         async () => {
           const body = await read()
@@ -238,7 +249,12 @@ export async function feedFixture(
     },
 
     async readerReady(workspaceRelFile, options = {}) {
-      const { timeoutMs = 30_000, wrap = (t: string) => `${t}\n` } = options
+      // 20 s IS THE SHELL'S BOUND EXACTLY — 20 outer sentinels x 4 x 0.25 s
+      // (agent-activity-bound test.sh:250, subagent-feed test.sh:158) — restored
+      // after the port shipped 30 s. MEASURED here over 4 full runs (111 + 37
+      // samples): p50 0.25 s, p90 0.50 s, worst 3.26 s at 14 re-appends, which is
+      // the `--daemon` case where registration genuinely lags. 20 s is 6x that.
+      const { timeoutMs = 20_000, wrap = (t: string) => `${t}\n` } = options
       const tag = `READY-${randomBytes(6).toString('hex')}`
       // THE FILE MUST ALREADY EXIST. `ScopedFs.write` creates parents, so a wrong
       // path silently creates a file nothing watches and the handshake then burns
@@ -333,13 +349,19 @@ export async function feedFixture(
       return { supervisors: Number(sup), tails: Number(tails) }
     },
 
-    // 10 s, not 30. A supervisor becomes resident in well under a second here and
-    // the shell suite's own `wait_sup` allowed 4 s, so 30 s bought nothing on a
-    // healthy tree and cost the full bound on every FAILING assertion — under the
-    // RC-1 mutant (instance guard deleted) that is two timeouts per case and turned
-    // a 40 s spec into a 36 minute one, which is what made the equivalence sweep
-    // impractical. R4's note applies: set the bound from a measurement.
-    async expectSupervisors(want, timeoutMs = 10_000) {
+    // 4 s IS THE SHELL'S BOUND EXACTLY — `wait_sup`'s 40 x 0.1 s
+    // (agent-activity-bound test.sh:207, subagent-feed test.sh:139). The port
+    // shipped 30 s, then 10 s on the reasoning below; neither was measured, and
+    // both were wider than the shell's.
+    //
+    // MEASURED here over 4 full runs (180 + 60 samples): p50 39 ms, p99 47 ms,
+    // worst 120 ms. 4 s is 33x the worst observation.
+    //
+    // The bound matters on the FAILING side, not the passing one: under the RC-1
+    // mutant (instance guard deleted) every case burns the whole ceiling twice,
+    // which at 30 s turned a 40 s spec into a 36 minute one and made the
+    // equivalence sweep impractical.
+    async expectSupervisors(want, timeoutMs = 4_000) {
       await vi.waitFor(
         async () => {
           const { supervisors } = await fixture.ownedProcesses()

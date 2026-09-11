@@ -56,11 +56,13 @@
 
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import {
   bugsWithoutRows,
   rowedBugIds,
   scanLifecycleDocs,
+  LIFECYCLE_STATES,
   type LifecycleScan,
 } from './lifecycle-docs.js'
 
@@ -298,14 +300,33 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     const docs = join(REPO_ROOT, 'docs')
     const scan = await scanLifecycleDocs(docs)
 
-    // Non-vacuity is about the SCAN'S REACH, not this repository's content. A
-    // freshly bootstrapped project has zero per-item artefacts and that is
-    // correct — asserting `checked > 0` failed a derived project's own gate,
-    // because it is a claim about the blueprint in a suite that ships.
+    // NON-VACUITY WITHOUT A CONTENT CLAIM, and it took two tries to get here.
+    //
+    // This asserted `checked > 0` — a floor on artefact folders — and a freshly
+    // bootstrapped project has none, so it failed a derived project's own gate.
+    // Replacing it with a floor on lifecycle TABLES was the same mistake once
+    // removed: `git archive HEAD` ships only README.md in doing/, done/ and
+    // waiting-acceptance/, so zero is correct there too.
+    //
+    // Any FLOOR here is a claim about this repository's content, in a suite that
+    // ships. The question is not "did the scan find things" but "does what it
+    // found agree with what is on disk" — two facts derived independently, which
+    // is non-vacuous in any tree and cannot be satisfied by an empty population
+    // unless the population really is empty.
+    const statesWithTables = (
+      await Promise.all(
+        LIFECYCLE_STATES.map(async (state) =>
+          (await readFile(join(docs, state, 'BUGS.md'), 'utf8').catch(() => '')).trim() !== ''
+            ? 1
+            : 0,
+        ),
+      )
+    ).reduce<number>((a, b) => a + b, 0)
+
     expect(
       scan.statesScanned,
-      'no lifecycle state was walked — the discovery is broken, so #3 proved nothing',
-    ).toBeGreaterThan(0)
+      `the scan walked ${scan.statesScanned} lifecycle tables but ${statesWithTables} exist on disk — discovery is broken, so #3 proved nothing`,
+    ).toBe(statesWithTables)
     expect(scan.orphans, scan.orphans.join(' ')).toEqual([])
     expect(scan.phantomRows, scan.phantomRows.join(' ')).toEqual([])
     expect(scan.forwardingNotes, scan.forwardingNotes.join(' ')).toEqual([])

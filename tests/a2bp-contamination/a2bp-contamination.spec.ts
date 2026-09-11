@@ -49,12 +49,14 @@
  * main-moved assertion, so that is the mutant, and it is injected into this
  * file.
  *
- * #21 IS SATISFIED BY THE WRONG GUARD. It names the R3-F3 fail-closed check on
- * `diff`'s exit status, and removing that check leaves it GREEN — with the
- * alignment empty, staging passes the unrestored bytes through and the
- * RESIDUAL-PROJECT-NAME scan blocks them instead. Both have to go before #21
- * reds. Worth knowing before anyone reads #21 as proof that the diff guard
- * works.
+ * #21 WAS SATISFIED BY THE WRONG GUARD (BUG-104, closed). It names the R3-F3
+ * fail-closed check on `diff`'s exit status, and removing that check left it
+ * GREEN: with the alignment empty, staging passes the unrestored bytes through
+ * and the RESIDUAL-PROJECT-NAME scan blocked them instead, so the case was proof
+ * about a different guard than the one in its title. Its line now carries an
+ * `a2bp-allow` marker — the product's own sanctioned override, which suppresses
+ * the scan on that line — so the fail-closed check is the only thing left
+ * standing. Observed: `C15` alone reds it.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -1037,9 +1039,21 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       // Codex R3-F3 — the GNU --*-line-format switches are extensions.
       // Swallowing an error into an empty alignment reads as "nothing is
       // attributable", and wholly unrestored project bytes then travel upstream.
+      //
+      // THE LINE CARRIES AN a2bp-allow MARKER, AND THAT IS THE POINT (BUG-104).
+      // Without it this case was satisfied by the WRONG GUARD: with the
+      // fail-closed check removed, staging passes the unrestored bytes through
+      // and the RESIDUAL-PROJECT-NAME scan blocks them, so the case stayed green
+      // over the defect in its own title and was red only under a mutant that
+      // removed both. `a2bp-allow` is the product's one sanctioned override and
+      // suppresses every check on its line — which is exactly the situation in
+      // which the diff guard is the only thing left. Observed: C15 alone now
+      // reds this (the request is FILED, carrying the literal name), and the
+      // real tree still blocks.
       const f = await fixture(s)
-      await f.writeBp(CARRIER, '# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project.\n')
-      await f.writeIn(f.proj, CARRIER, '# Mocks\nGeneric guidance for the acme-flow project.\n')
+      const allow = '<!-- a2bp-allow: the project name is this line\'s worked example -->'
+      await f.writeBp(CARRIER, `# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project. ${allow}\n`)
+      await f.writeIn(f.proj, CARRIER, `# Mocks\nGeneric guidance for the acme-flow project. ${allow}\n`)
 
       const broken = await s.shimDir('broken-diff')
       await broken.add('diff', 'exit 2')

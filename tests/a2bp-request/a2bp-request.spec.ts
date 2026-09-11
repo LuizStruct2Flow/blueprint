@@ -23,14 +23,18 @@
  * case runs. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 15 of 15 assertions
  * here have a mutant that was RUN and OBSERVED to turn them red.
  *
- * #3 AND #3b CANNOT SEE THE FRAMING LEAVE, which is the same measurement #3c's
- * own comment reports from the other side. Removing the byte count from the
- * content primitive (#3's subject) leaves #3 green, and making the headers
- * newline-delimited (#3b's subject) leaves #3b green: in both fixtures the
- * shifted byte's next neighbour is constant, so the concatenations still differ.
- * #3 is red only when content leaves the key entirely, #3b only when the project
- * component does, and #3c — which exists for this — is the one witness that goes
- * red on plain concatenation.
+ * #3 AND #3b COULD NOT SEE THE FRAMING LEAVE, and now can (BUG-104, closed).
+ * Their original fixtures shifted a byte into a field whose next neighbour is
+ * constant, so the concatenations still differed: removing the byte count from
+ * the content primitive (#3's subject) left #3 green, and making the headers
+ * newline-delimited (#3b's subject) left #3b green. Each was red only under a
+ * defect OTHER than the one in its title — content leaving the key for #3, the
+ * project component leaving it for #3b.
+ *
+ * Each case now carries a second pair chosen so the shifted bytes become the
+ * next record's header (#3) or forge a newline boundary (#3b). Observed: K3 reds
+ * #3, K4 reds #3b, and both are green on the real library. #3c stays as the
+ * witness for plain concatenation of BOTH primitives at once.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -166,6 +170,33 @@ describe('a2bp request identity — the key is framed, deterministic and ref-val
         await spec(s, 'b', '100644', 'bc'),
       )
       expect(kA).not.toBe(kB)
+
+      // THE PAIR THAT WITNESSES CONTENT FRAMING LEAVING (BUG-104). The pair
+      // above cannot: content's NEXT neighbour is the following spec's framed
+      // path, which begins with a byte count, so a byte shifted out of content
+      // lands in front of a digit and the concatenations still differ. Removing
+      // the count from the content primitive alone therefore left this case
+      // green, and its only red mutant deleted content from the key entirely —
+      // a different defect from the one in its title.
+      //
+      // A collision needs the shifted bytes to BE the next frame's header. With
+      // content unframed the tail reads `<content><len(path)> <path>`, so
+      // (content "", path "1 x") and (content "3 ", path "x") both render
+      // `3 1 x`. Framed, the content records are `0 ` and `2 3 ` and nothing
+      // collides. Observed: K3 reds this, and it is green on the real library.
+      const kA2 = await key(
+        s,
+        [R, B, S, P],
+        await spec(s, 'a', '100644', ''),
+        await spec(s, '1 x', '100644', 'z'),
+      )
+      const kB2 = await key(
+        s,
+        [R, B, S, P],
+        await spec(s, 'a', '100644', '3 '),
+        await spec(s, 'x', '100644', 'z'),
+      )
+      expect(kA2, 'content is concatenated without a byte count').not.toBe(kB2)
     })
   })
 
@@ -174,6 +205,21 @@ describe('a2bp request identity — the key is framed, deterministic and ref-val
       const kC = await key(s, [R, B, S, 'ab'], await spec(s, 'x', '100644', 'z'))
       const kD = await key(s, [R, B, S, 'a'], await spec(s, 'x', '100644', 'z'))
       expect(kC).not.toBe(kD)
+
+      // THE PAIR THAT WITNESSES NEWLINE DELIMITING (BUG-104). The pair above
+      // survives it: with `<len> <bytes>` replaced by `<bytes>\n` the project
+      // components `ab` and `a` still produce different streams, so this case
+      // stayed green under the very defect its title names and was red only when
+      // the project component left the key altogether.
+      //
+      // Newline delimiting is falsified by a component that CONTAINS a newline,
+      // because the boundary is then forgeable: project `a\nb` + path `x` and
+      // project `a` + path `b\nx` both emit `a\nb\nx\n`. Framed, the records are
+      // `3 a\nb1 x` and `1 a3 b\nx`. Observed: K4 reds this, green on the real
+      // library.
+      const kC2 = await key(s, [R, B, S, 'a\nb'], await spec(s, 'x', '100644', 'z'))
+      const kD2 = await key(s, [R, B, S, 'a'], await spec(s, 'b\nx', '100644', 'z'))
+      expect(kC2, 'header components are delimited by newlines, not framed').not.toBe(kD2)
     })
   })
 

@@ -35,13 +35,16 @@
  * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 7 of 7
  * assertions here have a mutant that was RUN and OBSERVED to turn them red.
  *
- * #2 AND #3 CANNOT BE FALSIFIED BY THE DEFECT THEY NAME, and that is a property
- * of the shim above rather than of the port. It reproduces gh's `--jq` handling
- * and ignores every other flag, so deleting `--json state,url` (#2's subject) or
- * narrowing `--state all` to `--state open` (#3's subject) reaches nothing: both
- * stay green. What reds them is a mutation of the jq FILTER — drop `\(.url)` and
- * #2 goes red, drop `\(.state)` and #3 does. Recorded, not engineered around:
- * the query flags are unwitnessed by both implementations.
+ * #2 AND #3 NOW WITNESS THE DEFECT THEY NAME (BUG-104, closed). They did not.
+ * The shim reproduced gh's `--jq` handling and ignored every other flag, so
+ * deleting `--json state,url` (#2's subject) or narrowing `--state all` to
+ * `--state open` (#3's subject) reached nothing and both stayed green — each was
+ * red only under a mutation of the jq FILTER, i.e. proven by a defect other than
+ * its own. The fix is in the FIXTURE, not in the assertions: `ghShim` now
+ * implements `--state` filtering and `--json` field selection the way gh does,
+ * so the query flags are under test instead of being ignored. Observed: `F2`
+ * (`--json state,url` → `--json url`) reds #2, `F3` (`--state all` →
+ * `--state open`) reds #3, and both stay green on the real tree.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -55,8 +58,22 @@ const CLI = join(SUBJECT_ROOT, 'scripts/blueprint')
 /**
  * A `gh` whose `pr list` returns `json`.
  *
- * It reproduces gh's own `--jq` handling — pipe the JSON through jq with the
- * given filter — because that is exactly where the null literal is produced.
+ * IT HONOURS `--state` AND `--json`, NOT ONLY `--jq` (BUG-104). The first
+ * version consumed the filter and ignored every other flag, which made #2 and #3
+ * unfalsifiable by the defect they name: deleting `--json state,url` or
+ * narrowing `--state all` to `--state open` reached nothing the shim looked at,
+ * so both stayed green whether or not a2bp asked gh for the right thing. A
+ * fixture that ignores the argument under test is asserting on its own
+ * behaviour.
+ *
+ * All three flags are reproduced the way gh implements them, so the assertions
+ * stay behavioural rather than becoming argv inspections:
+ *
+ *   --state  filters (`all` means no filter, and gh compares case-insensitively);
+ *   --json   SELECTS which fields come back — a field not asked for is absent,
+ *            and jq then renders `\(.state)` of an absent key as `null`;
+ *   --jq     pipes the result through jq, which is where BUG-011's literal
+ *            `null` is produced and is why `jq` must stay REAL here.
  */
 async function ghShim(s: Scenario, json: string): Promise<string> {
   const shims = await s.shimDir('bin')
@@ -66,11 +83,24 @@ async function ghShim(s: Scenario, json: string): Promise<string> {
       `if [ "$1" = "pr" ] && [ "$2" = "list" ]; then`,
       `  json='${json}'`,
       `  filter=""`,
+      `  fields=""`,
+      `  state="open"`,
       `  while [ $# -gt 0 ]; do`,
-      `    [ "$1" = "--jq" ] && { shift; filter="$1"; }`,
+      `    case "$1" in`,
+      `      --jq)    shift; filter="$1" ;;`,
+      `      --json)  shift; fields="$1" ;;`,
+      `      --state) shift; state="$1" ;;`,
+      `    esac`,
       `    shift`,
       `  done`,
-      `  printf '%s' "$json" | jq -r "$filter"`,
+      `  printf '%s' "$json" \\`,
+      `    | jq -c --arg s "$state" --arg f "$fields" '`,
+      `        [ .[]`,
+      `          | select($s == "all" or (.state | ascii_downcase) == ($s | ascii_downcase))`,
+      `          | if $f == "" then .`,
+      `            else with_entries(select(.key as $k | ($f | split(",")) | index($k))) end`,
+      `        ]' \\`,
+      `    | jq -r "$filter"`,
       `  exit 0`,
       `fi`,
       `exit 1`,
@@ -141,9 +171,16 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
     await scenario('a2bp-pr-filing-2', async (s) => {
       // The fix must not blind the probe, which would re-file a request the
       // owner already closed.
+      //
+      // BOTH FIELDS ARE ASSERTED, because both are what `--json state,url` asks
+      // for and the shim now honours that selection. Dropping `state` from the
+      // query leaves the key absent, jq renders it as the literal `null`, and
+      // this case sees it — which is the defect its title names.
       const path = await ghShim(s, '[{"state":"OPEN","url":"https://example.com/pr/7"}]')
       const r = await existingPr(s, path)
-      expect(r.stdout).toContain('https://example.com/pr/7')
+      expect(r.stdout.trim(), 'the probe did not report the PR with its state AND url').toBe(
+        'OPEN\thttps://example.com/pr/7',
+      )
     })
   })
 
@@ -151,9 +188,16 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
     await scenario('a2bp-pr-filing-3', async (s) => {
       // Re-filing a request the owner declined re-spends the reviewer attention
       // this whole design exists to protect.
+      //
+      // The shim filters on `--state` the way gh does, so narrowing the query to
+      // open PRs makes this list EMPTY and the probe silent — the exact
+      // behaviour a narrowed query produces in production, and the reason this
+      // case names `--state all`.
       const path = await ghShim(s, '[{"state":"CLOSED","url":"https://example.com/pr/8"}]')
       const r = await existingPr(s, path)
-      expect(r.stdout).toContain('CLOSED')
+      expect(r.stdout.trim(), 'a CLOSED PR was not reported — it would be silently re-filed').toBe(
+        'CLOSED\thttps://example.com/pr/8',
+      )
     })
   })
 

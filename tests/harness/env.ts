@@ -279,7 +279,14 @@ export const FORBIDDEN_ENV = (Object.keys(ENV_KIND) as ForbiddenVar[]).filter(
 function overrideKind(key: string): EnvKind | undefined {
   const declared = (ENV_KIND as Record<string, EnvKind>)[key]
   if (declared !== undefined) return declared
-  return /^(GIT|AGENT|BP)_/.test(key) ? 'denied' : undefined
+  // DELIBERATELY NOT BP_ (BUG-066). GIT_* and AGENT_* are closed namespaces of
+  // repo pointers and coordination state, so an undeclared member of either is
+  // a hazard nobody has classified yet. BP_* is not: it is also where this
+  // repo's ordinary tunables live — BP_NO_PROMPT, BP_STALENESS_TIMEOUT,
+  // BP_ROSTER_LOOKUP_TIMEOUT — which specs pass on purpose. Denying the prefix
+  // refused four of those cases. The two BP_ names that ARE hazards are
+  // declared above and reach FORBIDDEN_ENV by name.
+  return /^(GIT|AGENT)_/.test(key) ? 'denied' : undefined
 }
 
 /**

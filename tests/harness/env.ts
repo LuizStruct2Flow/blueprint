@@ -115,6 +115,18 @@ const ENV_KIND = {
   // git config key does with its value — buys nothing.
   GIT_CONFIG_COUNT: 'denied',
   GIT_CONFIG_PARAMETERS: 'denied',
+  // THE ROOTS (BUG-066 / BUG-077). `.githooks/pre-push` EXPORTS BP_CODE_ROOT,
+  // and the gate runs these suites — so without this line every fixture child
+  // inherits the real checkout's code root, and `${BP_CODE_ROOT:-.}/tests/`
+  // reads the real suite tree instead of the fixture's. Caught by
+  // `bootstrap-gate` #2/#3, which runs a derived project's whole gate: four
+  // `dod-gate` cases went green asserting that a BUG with NO regression test
+  // and an ABSENT baton both FAIL — they were finding the real repository's
+  // tests and the real baton. Same kind as AGENT_SIGNAL_FILE below and the same
+  // mechanism as BUG-046: a variable exported for production correctness,
+  // inherited into a fixture that was never told about it.
+  BP_CODE_ROOT: 'path',
+  BP_STATE_ROOT: 'path',
   // blueprint coordination state (BUG-046 / BUG-030)
   AGENT_SIGNAL_FILE: 'path',
   AGENT_STATE_HOME: 'path',
@@ -235,8 +247,8 @@ type EnvKind =
 export type ForbiddenVar = keyof typeof ENV_KIND
 
 /**
- * Everything the scrub removes: every declared GIT_* / AGENT_* variable that is
- * not 'inert'.
+ * Everything the scrub removes: every declared GIT_* / AGENT_* / BP_* variable
+ * that is not 'inert'.
  *
  * THE NAMESPACE FILTER IS LOAD-BEARING, not decoration. This list is also what
  * assertProcessEnvClean requires the TEST process not to be carrying, and the
@@ -246,12 +258,14 @@ export type ForbiddenVar = keyof typeof ENV_KIND
  * directory), which is a different mechanism, checked in a different place.
  *
  * It also keeps the invariant scripts/run-ts-suites.sh depends on: every name
- * here is GIT_* or AGENT_*, so its prefix-based scrub covers the whole list
- * without restating it, and tests/ts-bridge #1c can cross-check that from this
- * file rather than from a second copy.
+ * here is GIT_*, AGENT_* or BP_*, so its prefix-based scrub covers the whole
+ * list without restating it, and tests/ts-bridge #1c can cross-check that from
+ * this file rather than from a second copy. BP_ joined the two with BUG-066 —
+ * .githooks/pre-push exports BP_CODE_ROOT, and both scrubs had to learn it
+ * together or the cross-check would report them disagreeing.
  */
 export const FORBIDDEN_ENV = (Object.keys(ENV_KIND) as ForbiddenVar[]).filter(
-  (k) => ENV_KIND[k] !== 'inert' && /^(GIT|AGENT)_/.test(k),
+  (k) => ENV_KIND[k] !== 'inert' && /^(GIT|AGENT|BP)_/.test(k),
 ) as readonly ForbiddenVar[]
 
 /**
@@ -265,7 +279,7 @@ export const FORBIDDEN_ENV = (Object.keys(ENV_KIND) as ForbiddenVar[]).filter(
 function overrideKind(key: string): EnvKind | undefined {
   const declared = (ENV_KIND as Record<string, EnvKind>)[key]
   if (declared !== undefined) return declared
-  return /^(GIT|AGENT)_/.test(key) ? 'denied' : undefined
+  return /^(GIT|AGENT|BP)_/.test(key) ? 'denied' : undefined
 }
 
 /**

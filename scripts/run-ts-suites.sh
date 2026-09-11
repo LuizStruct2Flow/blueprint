@@ -170,7 +170,11 @@ ts_suites_stage(){
   # start. The include glob in tests/vitest.config.ts is root-relative to match.
   if (
     cd "$_ts_root/tests" || exit 1
-    for _v in $(env | sed -nE 's/^((GIT|AGENT)_[A-Za-z0-9_]*)=.*/\1/p'); do
+    # BP_ joined the prefix list with BUG-066: .githooks/pre-push exports
+    # BP_CODE_ROOT, so without it every spec's fixture children inherit the real
+    # checkout's roots and a `${BP_CODE_ROOT:-.}` default silently reads the
+    # real tree. Same argument the block above makes about GIT_ and AGENT_.
+    for _v in $(env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\1/p'); do
       unset "$_v"
     done
     # TWO reporters, deliberately. `json` feeds pipe_stage_report below;

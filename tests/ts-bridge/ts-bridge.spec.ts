@@ -213,8 +213,8 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
       // prefix. The bridge deliberately does not restate the list (a second copy
       // drifts); this is what makes the prefix sufficient rather than assumed.
       for (const name of FORBIDDEN_ENV) {
-        expect(name, `${name} is outside the GIT_*/AGENT_* prefixes the bridge scrubs`).toMatch(
-          /^(GIT|AGENT)_/,
+        expect(name, `${name} is outside the GIT_*/AGENT_*/BP_* prefixes the bridge scrubs`).toMatch(
+          /^(GIT|AGENT|BP)_/,
         )
       }
     })
@@ -386,7 +386,7 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
       // the wrong channel for telling the stub where to write.
       await shims.add(
         'npx',
-        `env | sed -nE 's/^((GIT|AGENT)_[A-Za-z0-9_]*)=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
+        `env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
           `printf 'ran\\n' >> ${JSON.stringify(seenPath)}\n` +
           `echo "stub npx: pretending to be vitest"\n` +
           `for a in "$@"; do\n` +

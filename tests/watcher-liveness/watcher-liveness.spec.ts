@@ -37,6 +37,32 @@
  *     files is safe and documenting `dead_last` is not, for no reason anyone
  *     chose. Every source check here strips comments.
  *
+ * `#2`'S LOCK-PATH ASSERTION NOW HAS ITS OWN NEGATIVE PROOF, added 2026-09-11
+ * after a cross-provider review observed that the recorded population proved the
+ * derivation and proved both callers mention the library, but never reddened this
+ * case specifically.
+ *
+ * Mutant `W1`: `bp_watch_lock_path`'s `_wl_dir="${1:-.}"` replaced by
+ * `_wl_dir="$(git rev-parse --show-toplevel)"` — the lock derived from a repo
+ * ROOT instead of the baton directory it was handed, which is the incident this
+ * function's docblock describes. OBSERVED, both implementations:
+ *
+ *     shell   #2 (the lock path), #6 (x2), #7
+ *     port    × #2 the lock is derived from the baton dir it was given, not from
+ *               a repo root
+ *             × #2 dead · × #2 alive · × #2 after SIGKILL
+ *             × #6 (x2) · × #7 it put the lock beside the baton it was watching
+ *
+ * The collateral is the defect being real rather than the mutant being blunt —
+ * every lock user is broken by it — and the named case is red in both. Harness:
+ * `.scratch/markus-feed-r6.sh`.
+ *
+ * This does NOT close BUG-092 part 5. A SPLIT derivation — the feed passing
+ * `$state_dir` where the watcher passes `dirname "$signal_file"` — is still
+ * invisible to both implementations, because every fixture makes those two the
+ * same directory. That needs a new case with them deliberately different, not a
+ * stricter version of this one.
+ *
  * TIMING (R4). No case waits a duration. The two that need a lock HELD by a live
  * process use a pid-file handshake: the holder writes its pid and `exec`s a long
  * sleep, so the test waits for the FILE to exist and then kills the exact process

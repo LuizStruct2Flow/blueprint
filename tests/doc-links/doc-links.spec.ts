@@ -33,6 +33,22 @@
  *   - File ORDER differs (`find | sort` vs. a sorted recursive walk), so the
  *     broken list can be permuted. The spec compares SETS, and the real tree
  *     produced identical order anyway.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Thirteen cases, thirteen with an observed red. `#1 a DIRECTORY target
+ * resolves` needed a mutant of its own — requiring a regular file is the one
+ * defect that reports a work-item FOLDER as broken, and nothing else in the
+ * population distinguishes it.
  */
 
 import { describe, it, expect } from 'vitest'

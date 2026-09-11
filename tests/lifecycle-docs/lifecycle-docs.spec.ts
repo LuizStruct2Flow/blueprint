@@ -35,6 +35,23 @@
  *     binds as expected here but is a known trap; ported as an explicit set
  *     membership test. Verified identical on a tree carrying all three record
  *     filenames plus a decoy `BUGS.md.bak`.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Fourteen cases, fourteen with an observed red, and the non-vacuity pair
+ * needs two OPPOSITE mutants: dropping the increment turns the healthy
+ * fixture red, while seeding the count non-zero turns `#3 an empty tree
+ * examines nothing` red. One mutant cannot do both, which is the point of
+ * having both cases.
  */
 
 import { describe, it, expect } from 'vitest'

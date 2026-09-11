@@ -38,6 +38,30 @@
  * RETIREMENT READINESS: with that block present, this spec is a genuine superset
  * of `tests/proc-cwd/test.sh` — #1 to #5 are carried across by driving the
  * shipped helper — and the shell runner can go.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * AND IT FOUND ONE THING THIS BLOCK CANNOT CLAIM. `#1`, `#3` and `#5` of the
+ * first describe — the three asserting that `pwd -P` equals the workspace
+ * path — have NO isolable negative proof on Linux. The mutant that removes
+ * the workspace root's realpath (with TMPDIR pointed at a symlink, which is
+ * the macOS shape reproduced here) turns all ten cases red with the SAME
+ * thrown error: assertOverrideAllowed realpaths both sides of its
+ * containment test, so a non-physical root aborts every scenario before any
+ * assertion runs. Their own `expect` was never observed failing.
+ *
+ * That is a stronger guard catching the defect first, not a weakness in the
+ * port — but it is evidence these three do not have, and it is recorded
+ * rather than engineered around. On macOS the same mutant reaches them.
  */
 
 import { describe, it, expect } from 'vitest'

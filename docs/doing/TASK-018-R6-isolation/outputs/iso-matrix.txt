@@ -1,0 +1,322 @@
+GI1    git-isolation   FAIL
+         RED: #1 marker-merge leaves the GIT_DIR repository untouched — proven by EXECUTION
+         RED: #3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself
+GI2    git-isolation   FAIL
+         RED: #2 the pre-push hook unsets GIT_DIR before running anything
+GI3    git-isolation   FAIL
+         RED: #3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself
+GI4    git-isolation   FAIL
+         RED: #3 BUG-047 half one — `git -C … init` is FOUND, though it has no "git init" substring
+         RED: #3 BUG-087 — the `new-project.sh` arm of the predicate cannot fire on a real call site
+         RED: #3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself
+GI5    git-isolation   FAIL
+         RED: #2 a pre-push hook whose unset is COMMENTED OUT does not count
+         RED: #3 BUG-047 half two — a suite whose only "git" is in a COMMENT is NOT a member
+         RED: #3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself
+         RED: #3 the unset line is read from CODE too — a commented-out unset does not count
+GI6    git-isolation   PASS
+GI7    git-isolation   FAIL
+         RED: #2 a MISSING pre-push hook is a failure, not an absence to shrug at
+GI8    git-isolation   FAIL
+         RED: #3 a NON-test.sh runner in a suite folder is covered — the glob is *.sh
+GI9    git-isolation   FAIL
+         RED: #1 gate-arming leaves the GIT_DIR repository untouched — proven by EXECUTION
+GI10   git-isolation   PASS
+GI11   git-isolation   FAIL
+         RED: #3 THE DIVERGENCE — a small, fully-guarded population passes here and FAILS in the shell twin
+         RED: #3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself
+GI12   git-isolation   FAIL
+         RED: #2 a pre-push hook whose unset is COMMENTED OUT does not count
+         RED: #3 BUG-047 half one — `git -C … init` is FOUND, though it has no "git init" substring
+         RED: #3 a NON-test.sh runner in a suite folder is covered — the glob is *.sh
+         RED: #3 a suite that drives git and forgets its unset line is named
+         RED: #3 the unset line is read from CODE too — a commented-out unset does not count
+GI13   git-isolation   FAIL
+         RED: #1 commit-subjects leaves the GIT_DIR repository untouched — proven by EXECUTION
+         RED: #3 THE REAL TREE — every git-driving shell suite unsets GIT_DIR itself
+PC1    proc-cwd        FAIL
+         RED: #2 a live process resolves to the directory it was started in
+         RED: #3 a cwd containing SPACES survives the lookup intact
+PC2    proc-cwd        FAIL
+         RED: #1 a cwd mechanism is available on this host — without which every count is 0
+PC3    proc-cwd        FAIL
+         RED: #4 a DEAD pid yields empty, not a stale or wrong path
+PC4    proc-cwd        FAIL
+         RED: #5 an EMPTY pid is a no-op, not an error under `set -u`
+PC5    proc-cwd        FAIL
+         RED: #6 the harness scrubs git repo pointers from every child (BUG-047)
+PC6    proc-cwd        FAIL
+         RED: #7 the harness gives each scenario its own baton, never the real one
+PC7    proc-cwd        FAIL
+         RED: #1 a cwd mechanism is available on this host — without which every count is 0
+         RED: #1 a scenario can spawn a process and observe its real working directory
+         RED: #2 a live process resolves to the directory it was started in
+         RED: #3 a cwd containing SPACES survives the lookup intact
+         RED: #3 a working directory containing spaces survives intact
+         RED: #4 a DEAD pid yields empty, not a stale or wrong path
+         RED: #5 an EMPTY pid is a no-op, not an error under `set -u`
+         RED: #5 the workspace root is a physical path, not a symlinked one
+         RED: #6 the harness scrubs git repo pointers from every child (BUG-047)
+         RED: #7 the harness gives each scenario its own baton, never the real one
+PC8    proc-cwd        PASS
+EN1    env-namespace   FAIL
+         RED: #1 any non-generic prefix is caught, not just the one that caused the bug
+         RED: #1 the ORIGINAL regression — an LWA_ knob in a file that travels
+         RED: #2 a BACK-COMPAT fallback is allowed — a project that set the old name keeps its config
+EN2    env-namespace   FAIL
+         RED: #1 an INTERNAL variable is not configuration and is not flagged
+         RED: THE REAL REPO — every managed script keeps to a generic namespace
+         RED: the extractors themselves — the two predicates, on the exact strings that taught them
+EN3    env-namespace   FAIL
+         RED: #1 a name inside a COMMENT is an incident record, not a namespace
+         RED: THE REAL REPO — every managed script keeps to a generic namespace
+         RED: the extractors themselves — the two predicates, on the exact strings that taught them
+EN4    env-namespace   FAIL
+         RED: #2 a BACK-COMPAT fallback is allowed — a project that set the old name keeps its config
+         RED: the extractors themselves — the two predicates, on the exact strings that taught them
+EN5    env-namespace   FAIL
+         RED: #1 the ORIGINAL regression — an LWA_ knob in a file that travels
+         RED: the extractors themselves — the two predicates, on the exact strings that taught them
+EN6    env-namespace   FAIL
+         RED: #3 a MISSING log-activity.sh refuses to judge rather than passing
+         RED: #3 a SECOND copy of the rotation is caught even when the appender is sourced
+         RED: #3 log-activity.sh that does NOT source the shared appender is caught
+EN7    env-namespace   FAIL
+         RED: #1 any non-generic prefix is caught, not just the one that caused the bug
+         RED: #1 the ORIGINAL regression — an LWA_ knob in a file that travels
+         RED: #1+#2+#3 the healthy fixture is green, and is seen scanning a real population
+         RED: #2 a BACK-COMPAT fallback is allowed — a project that set the old name keeps its config
+         RED: THE REAL REPO — every managed script keeps to a generic namespace
+EN8    env-namespace   FAIL
+         RED: THE REAL REPO — every managed script keeps to a generic namespace
+EN9    env-namespace   PASS
+EN10   env-namespace   FAIL
+         RED: #1 the FLOOR is what separates "all clean" from "discovery found nothing"
+         RED: #1+#2+#3 the healthy fixture is green, and is seen scanning a real population
+DL1    doc-links       FAIL
+         RED: #1 a link pointing at a file that MOVED is reported, naming file and target
+         RED: #1 an anchored link whose FILE is gone is still reported
+         RED: #1-paren a target containing `)` is TRUNCATED — reported, but under a name nobody can grep for
+DL2    doc-links       FAIL
+         RED: #1 a link inside a FENCED block is an example and is not examined
+         RED: #1 an UNCLOSED fence swallows the rest of the file, in both implementations
+DL3    doc-links       FAIL
+         RED: #1 a link inside BACKTICKS is prose about a link and is not examined
+         RED: THE REAL TREE — every relative link under docs/ resolves
+DL4    doc-links       FAIL
+         RED: #1 http, mailto and autolink targets are not filesystem paths
+         RED: THE REAL TREE — every relative link under docs/ resolves
+DL5    doc-links       FAIL
+         RED: #1 a pure in-page anchor names no file, and an anchor SUFFIX is dropped
+         RED: #1 an anchored link whose FILE is gone is still reported
+         RED: THE REAL TREE — every relative link under docs/ resolves
+DL6    doc-links       FAIL
+         RED: #1 a link in a NESTED folder resolves against its own directory
+         RED: THE REAL TREE — every relative link under docs/ resolves
+DL7    doc-links       FAIL
+         RED: #0 a tree with too few links is a BROKEN EXTRACTOR, not a clean bill of health
+         RED: #0+#1 the healthy fixture is green, and is seen doing work
+         RED: #1 a link in a NESTED folder resolves against its own directory
+         RED: #1 a link inside BACKTICKS is prose about a link and is not examined
+         RED: #1 a link inside a FENCED block is an example and is not examined
+         RED: #1 a pure in-page anchor names no file, and an anchor SUFFIX is dropped
+         RED: #1 http, mailto and autolink targets are not filesystem paths
+DL8    doc-links       FAIL
+         RED: THE REAL TREE — every relative link under docs/ resolves
+DL9    doc-links       PASS
+DL10   doc-links       FAIL
+         RED: #1 a DIRECTORY target resolves — a work-item folder is a legitimate link
+         RED: THE REAL TREE — every relative link under docs/ resolves
+LD1    lifecycle-docs  FAIL
+         RED: #5 an empty table that says where its items WENT is a forwarding note
+LD2    lifecycle-docs  FAIL
+         RED: THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row
+LD3    lifecycle-docs  FAIL
+         RED: #6 BUG-086 — a bug with commits and no row is caught (the gap the lcm pass found by hand)
+         RED: #6 a row is a ROW, not a mention — a bug named in prose is still rowless
+LD4    lifecycle-docs  FAIL
+         RED: THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row
+LD5    lifecycle-docs  PASS
+LD6    lifecycle-docs  FAIL
+         RED: #6 a row is a ROW, not a mention — a bug named in prose is still rowless
+LD7    lifecycle-docs  FAIL
+         RED: #3 a PLAN-BUG-0XX.md travels with its work too
+         RED: #3 a ROW ELSEWHERE is not a record HERE — the folder is what answers "where is it"
+         RED: #3 an artefact FOLDER whose row did not travel with it is named
+LD8    lifecycle-docs  FAIL
+         RED: #3 an ACCEPTANCE write-up is also a record — a historical item needs no fabricated row
+         RED: THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row
+LD9    lifecycle-docs  FAIL
+         RED: #4 an all-empty placeholder row claims an item that does not exist
+LD10   lifecycle-docs  FAIL
+         RED: #3+#4+#5 the healthy fixture is green, and #3 is seen examining a real population
+         RED: #4 an all-empty placeholder row claims an item that does not exist
+         RED: #4 the |---|---| separator is NOT a phantom row
+         RED: THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row
+LD11   lifecycle-docs  FAIL
+         RED: #5 a bare "*(Empty.)*" is the correct form and is not flagged
+         RED: THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row
+LD12   lifecycle-docs  FAIL
+         RED: #3 a state folder with NO BUGS.md is skipped, not reported as all-orphan
+LD13   lifecycle-docs  FAIL
+         RED: #3 a state folder with NO BUGS.md is skipped, not reported as all-orphan
+         RED: #3 an ACCEPTANCE write-up is also a record — a historical item needs no fabricated row
+         RED: #3 an artefact FOLDER whose row did not travel with it is named
+         RED: #3+#4+#5 the healthy fixture is green, and #3 is seen examining a real population
+         RED: THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row
+LD14   lifecycle-docs  FAIL
+         RED: #3 a state folder with NO BUGS.md is skipped, not reported as all-orphan
+         RED: #3 an ACCEPTANCE write-up is also a record — a historical item needs no fabricated row
+         RED: #3 an artefact FOLDER whose row did not travel with it is named
+         RED: #3 an empty tree examines nothing, which is the vacuous pass #3 can still give
+         RED: #3+#4+#5 the healthy fixture is green, and #3 is seen examining a real population
+CS1    commit-subjects FAIL
+         RED: #1 goes red when the shared rule is deleted
+         RED: #1 the library exposes commit_subject_ok, so the rule is reusable at all
+         RED: #1+#3+#4+#5+#6 the real repository is wired end to end
+         RED: #2 THE REPRODUCER — 5fe89e0's actual subject is rejected, and a conforming one is not
+         RED: #2 exempt: Merge branch 'x'
+         RED: #2 exempt: Revert "BUG#1: y"
+         RED: #2 exempt: fixup! BUG#1: y
+         RED: #3 goes red when the checker loses its exec bit (the BUG-008 shape)
+         RED: #3 the checker agrees with the rule, and its failure NAMES the offender
+         RED: #4 goes red when the hook carries its own copy of the pattern
+         RED: #4 the hook and the checker reach the SAME definition — no second copy anywhere
+         RED: #5 goes red when CI checks the BRANCH COMMITS but not the PR TITLE
+         RED: #5 goes red when CI never invokes the checker at all
+         RED: #5 goes red when `edited` leaves the activity types
+         RED: #6 a MENTION in the CLI is not membership — the path must be a quoted entry
+         RED: #6 goes red when either file stops travelling to derived projects
+         RED: the healthy fixture passes every wiring check — without which no case below means anything
+CS2    commit-subjects FAIL
+         RED: #2 THE REPRODUCER — 5fe89e0's actual subject is rejected, and a conforming one is not
+         RED: #2 names no item: BUG#1:
+         RED: #2 names no item: BUG#: no number
+         RED: #2 names no item: BUG: no number
+         RED: #2 names no item: TASK#1 no colon
+         RED: #3 the checker agrees with the rule, and its failure NAMES the offender
+CS3    commit-subjects PASS
+CS4    commit-subjects FAIL
+         RED: #6 the hook FAILS CLOSED when its rule library is missing
+CS5    commit-subjects FAIL
+         RED: #2 THE REPRODUCER — 5fe89e0's actual subject is rejected, and a conforming one is not
+         RED: #2 exempt: Merge branch 'x'
+         RED: #2 exempt: Revert "BUG#1: y"
+         RED: #2 exempt: fixup! BUG#1: y
+         RED: #3 the checker agrees with the rule, and its failure NAMES the offender
+CS6    commit-subjects FAIL
+         RED: #3 the checker FAILS CLOSED on no input, an empty range and an unknown mode
+         RED: #3 the checker agrees with the rule, and its failure NAMES the offender
+CS7    commit-subjects FAIL
+         RED: #1+#3+#4+#5+#6 the real repository is wired end to end
+         RED: #4 the hook and the checker reach the SAME definition — no second copy anywhere
+CM1    commit-msg-gate FAIL
+         RED: #0 the hook exists and is executable — git silently ignores one that is not
+CM2    commit-msg-gate FAIL
+         RED: #2 REJECTS a subject that does not name its item: BUG#20 no colon
+         RED: #2 REJECTS a subject that does not name its item: BUG#20:
+         RED: #2 REJECTS a subject that does not name its item: BUG#: no number
+         RED: #2 REJECTS a subject that does not name its item: BUG-20: hyphen instead of hash
+         RED: #2 REJECTS a subject that does not name its item: docs: no item at all
+         RED: #2 REJECTS a subject that does not name its item: fix(BUG-020): the old conventional-commits form
+         RED: #2 REJECTS a subject that does not name its item: wip
+         RED: #2 goes red when the rejection is turned into a pass
+         RED: #3 goes red when git's comment template is no longer skipped
+         RED: #3 goes red when the merge/revert/fixup exemption is removed
+         RED: #4 END TO END — git actually runs it, and the rejection BLOCKS rather than warns
+         RED: #4 goes red when the ROOT COMMIT exemption is removed — bootstrap breaks
+CM3    commit-msg-gate PASS
+CM4    commit-msg-gate FAIL
+         RED: #3 the no-argument path is defended TWICE, and only removing both opens it
+CM5    commit-msg-gate FAIL
+         RED: #3 the no-argument path is defended TWICE, and only removing both opens it
+CM6    commit-msg-gate FAIL
+         RED: #3 git's comment template is skipped when finding the subject
+         RED: #3 goes red when git's comment template is no longer skipped
+CM7    commit-msg-gate FAIL
+         RED: #2 REJECTS a subject that does not name its item: BUG#20 no colon
+         RED: #2 REJECTS a subject that does not name its item: BUG#20:
+         RED: #2 REJECTS a subject that does not name its item: BUG#: no number
+         RED: #2 REJECTS a subject that does not name its item: BUG-20: hyphen instead of hash
+         RED: #2 REJECTS a subject that does not name its item: docs: no item at all
+         RED: #2 REJECTS a subject that does not name its item: fix(BUG-020): the old conventional-commits form
+         RED: #2 REJECTS a subject that does not name its item: wip
+         RED: #2 goes red when the rejection is turned into a pass
+         RED: #3 goes red when git's comment template is no longer skipped
+         RED: #3 goes red when the merge/revert/fixup exemption is removed
+         RED: #4 END TO END — git actually runs it, and the rejection BLOCKS rather than warns
+         RED: #4 goes red when the ROOT COMMIT exemption is removed — bootstrap breaks
+CM8    commit-msg-gate PASS
+CM9    commit-msg-gate FAIL
+         RED: #2 REJECTS a subject that does not name its item: #20: no type
+         RED: #2 REJECTS a subject that does not name its item: BUG#20 no colon
+         RED: #2 REJECTS a subject that does not name its item: BUG#20:
+         RED: #2 REJECTS a subject that does not name its item: BUG#: no number
+         RED: #2 REJECTS a subject that does not name its item: BUG-20: hyphen instead of hash
+         RED: #2 REJECTS a subject that does not name its item: docs: no item at all
+         RED: #2 REJECTS a subject that does not name its item: fix(BUG-020): the old conventional-commits form
+         RED: #2 REJECTS a subject that does not name its item: wip
+         RED: #2 goes red when the rejection is turned into a pass
+         RED: #3 FAILS CLOSED on a missing argument
+         RED: #3 FAILS CLOSED on an unreadable message file
+         RED: #3 an empty message — nothing but blanks and comments — is rejected
+         RED: #3 goes red when git's comment template is no longer skipped
+         RED: #3 goes red when the merge/revert/fixup exemption is removed
+         RED: #3 the no-argument path is defended TWICE, and only removing both opens it
+         RED: #4 END TO END — git actually runs it, and the rejection BLOCKS rather than warns
+         RED: #4 goes red when the ROOT COMMIT exemption is removed — bootstrap breaks
+CM10   commit-msg-gate FAIL
+         RED: #4 the hook is wired by core.hooksPath, and a repo WITHOUT it is ungated
+CM11   commit-msg-gate FAIL
+         RED: #1 ACCEPTS the required format: BUG#1: single digit
+         RED: #1 ACCEPTS the required format: BUG#20: a refused pull exits non-zero
+         RED: #1 ACCEPTS the required format: FEATURE#1234: many digits
+         RED: #1 ACCEPTS the required format: FEATURE#3: the gate renders as a pipeline
+         RED: #1 ACCEPTS the required format: TASK#1: move the lcm checklist into the DoD
+         RED: #2 goes red when the conventional-commits form is admitted
+         RED: #3 EXEMPT: Merge branch 'main' into topic — git writes them; there is no single item
+         RED: #3 EXEMPT: Revert "BUG#20: a refused pull exits non-zero" — the original named its item
+         RED: #3 EXEMPT: amend! BUG#20: a refused pull — likewise
+         RED: #3 EXEMPT: fixup! BUG#20: a refused pull — a rebase instruction, not a final message
+         RED: #3 EXEMPT: squash! BUG#20: a refused pull — likewise
+         RED: #3 git's comment template is skipped when finding the subject
+         RED: #4 END TO END — git actually runs it, and the rejection BLOCKS rather than warns
+CM12   commit-msg-gate FAIL
+         RED: #3/#6 goes red when a missing rule library reports a pass
+SD1    state-dir       FAIL
+         RED: #1 THE REPRODUCER — two projects derive two DISTINCT state dirs
+         RED: #2+#5 AGENT_STATE_HOME overrides the derived dir — the deliberate shared-dir case
+         RED: #5 the state dir resolves INSIDE the project, never outside it
+SD2    state-dir       FAIL
+         RED: #2+#5 AGENT_STATE_HOME overrides the derived dir — the deliberate shared-dir case
+SD3    state-dir       FAIL
+         RED: #1 the seam REFUSES an empty or missing root rather than deriving from nothing
+SD4    state-dir       FAIL
+         RED: #3+#4+#5b+#7+#10+#10e THE REAL REPO — one mechanism, every consumer wired to it
+         RED: #5b the KNOWN LIMIT is stated as a case, not left as a surprise
+         RED: #5c the guard catches all four defect shapes, including both Codex bypasses
+SD5    state-dir       FAIL
+         RED: #10b the shipped resolver follows a two-hop RELATIVE chain to the real tree
+         RED: #10d the hop-exhaustion branch RUNS, reached by shadowing readlink on PATH
+         RED: #7 a consumer with NO physical-root block anchors some other way
+         RED: #7 a drifted physical-root block is named
+SD6    state-dir       FAIL
+         RED: #3 a dispatcher building a log path from the literal placeholder is caught
+         RED: #5c the guard catches all four defect shapes, including both Codex bypasses
+SD7    state-dir       FAIL
+         RED: #3+#4+#5b+#7+#10+#10e THE REAL REPO — one mechanism, every consumer wired to it
+SD8    state-dir       PASS
+SD9    state-dir       FAIL
+         RED: #3 the non-vacuity half — a dispatcher naming NO artefact makes the scan refuse to judge
+SD10   state-dir       FAIL
+         RED: a MISSING consumer is reported rather than silently skipped
+SD11   state-dir       FAIL
+         RED: #4+#10+#10e each go red on the defect they name
+SD12   state-dir       FAIL
+         RED: #8+#9+#9b BEHAVIOURAL — the real launcher, through an out-of-tree symlink, under a hostile GIT_DIR
+SD13   state-dir       FAIL
+         RED: #10c a symlink CYCLE fails non-zero rather than resolving to something plausible
+SD14   state-dir       FAIL
+         RED: #6b the decoy environment is genuinely hostile — so #8 cannot pass by accident
+--- totals (computed by this run, not transcribed) ---
+trees=88 runs=88

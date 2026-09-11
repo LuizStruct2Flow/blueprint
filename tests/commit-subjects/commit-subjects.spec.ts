@@ -42,6 +42,23 @@
  *     `tests/git-isolation` #1 names this suite as one of its three execution
  *     anchors for exactly that reason — see that spec for what happens to the
  *     anchor when this shell file retires.
+ *
+ * R6 NEGATIVE PROOF — per CASE, not per case GROUP.
+ *
+ * The record above compares VERDICT SETS between the shell suite and this
+ * port. Three Codex reviews of neighbouring groups refused certification on
+ * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
+ * can be made red. So every `it()` here was put to the narrower question —
+ * is there a perturbation OBSERVED to turn it red — and the answer is
+ * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * the mutant(s) per case. The denominator comes from the runner rather than
+ * from a grep, so the `it.each` tables are expanded rather than counted once.
+ *
+ * Twenty-three cases, twenty-three with an observed red. One belongs here rather
+ * than next door: turning the hook's missing-library `exit 1` into `exit 0`
+ * is invisible in tests/commit-msg-gate, whose own R6 case rewrites that
+ * same branch in its fixture — `#6 the hook FAILS CLOSED when its rule
+ * library is missing` is the only case anywhere that sees it.
  */
 
 import { describe, it, expect } from 'vitest'

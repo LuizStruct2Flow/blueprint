@@ -31,10 +31,16 @@
  *      scenario, so the same question is asked of a directory this case owns.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 13 of 13
+ * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 14 of 14
  * assertions here have a mutant that was RUN and OBSERVED to turn them red,
  * including #2: `E8` makes `bp_file_push` push the request to `main` as well,
  * and that is the only kind of defect the headline invariant can see.
+ *
+ * #12 IS NEW (BUG-108). The immediate pre-push base re-check was watched by
+ * nothing in either implementation: replacing `bp_file_remote_tip` with
+ * `return 0` left all six shell suites and every TS case green, because an
+ * empty tip reads as "the blueprint did not move". `E9` is that mutant and #12
+ * is its witness.
  *
  * STRENGTHENING #2, MEASURED. The shell suite's #10 scans the SHARED $TMPDIR,
  * so running two mutant trees at once turned it red for eleven mutants that
@@ -454,6 +460,83 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
       expect(r.output, 'refused without printing the lines to add').toContain(
         'config_version   = 2',
       )
+    })
+  })
+
+  it('#12 BUG-108: a blueprint that moves DURING the build is re-checked, and the request is rebuilt', async () => {
+    await scenario('a2bp-e2e-12', async (s) => {
+      // THE PRE-PUSH BASE RE-CHECK, WATCHED FOR THE FIRST TIME. Checking one ref
+      // and pushing another are not atomic; `cmd_a2bp` narrows that window by
+      // asking the remote for its tip again immediately before the push. Nothing
+      // asserted it: replacing `bp_file_remote_tip` with `return 0` left all 115
+      // TS cases and all six shell suites green, because an empty tip is read as
+      // "do not rebuild" and the request is then filed against a base that has
+      // already been superseded.
+      //
+      // THE WINDOW IS DRIVEN, NOT SIMULATED. A `git` wrapper in front of the
+      // gh-free PATH advances the remote's main immediately after the FIRST
+      // fetch completes — which is exactly the race: the base is fetched, the
+      // blueprint moves, the re-check must notice before the push. Hanging the
+      // move off the fetch rather than off the re-check's own `ls-remote` is
+      // what makes this a witness: a defect that never asks for the tip still
+      // faces a moved blueprint, and is caught building on the stale one.
+      //
+      // Everything stays inside the scenario: the "remote" is a bare repo in the
+      // workspace and the wrapper forwards to the real git by absolute path.
+      const e = await setup(s)
+
+      const which = await s.run('sh', ['-c', 'command -v git'], {
+        cwd: s.workspace.root,
+        env: { PATH: e.noGhPath },
+      })
+      expect(which.code, 'could not resolve git on the gh-free PATH').toBe(0)
+      const realGit = which.stdout.trim()
+
+      const stamp = s.workspace.path('blueprint-moved.stamp')
+      const shims = await s.shimDir('git-race')
+      await shims.add(
+        'git',
+        [
+          `fetching=0`,
+          `for a in "$@"; do`,
+          `  [ "$a" = fetch ] && fetching=1`,
+          `done`,
+          `"${realGit}" "$@"`,
+          `rc=$?`,
+          // Once. A second move would make the CLI report "the blueprint moved
+          // again" and refuse, which is a different case.
+          `if [ "$fetching" = 1 ] && [ ! -e "${stamp}" ]; then`,
+          `  : > "${stamp}"`,
+          `  t=$("${realGit}" -C "${e.remote}" rev-parse 'main^{tree}')`,
+          `  c=$("${realGit}" -C "${e.remote}" -c user.email=e@l -c user.name=E \\`,
+          `        -c commit.gpgsign=false commit-tree "$t" -p main -m 'the blueprint moved')`,
+          `  "${realGit}" -C "${e.remote}" update-ref refs/heads/main "$c"`,
+          `fi`,
+          `exit $rc`,
+        ].join('\n'),
+      )
+
+      const before = await e.sha('main')
+      const r = await s.run(CLI, ['a2bp', 'docs/DoD.md'], {
+        cwd: e.proj,
+        env: { PATH: `${shims.dir}:${e.noGhPath}` },
+      })
+      const after = await e.sha('main')
+
+      expect(after, 'the fixture never moved main — this case would be vacuous').not.toBe(before)
+      expect(
+        r.output,
+        'the blueprint moved during the build and the re-check did not report it',
+      ).toContain('The blueprint moved while this request was being built')
+
+      const refs = await e.requestRefs()
+      expect(refs, `no request branch was filed\n${r.output}`).not.toHaveLength(0)
+      const parent = await e.git(['rev-parse', `${refs[0] as string}^`])
+      expect(parent.code, parent.output).toBe(0)
+      expect(
+        parent.stdout.trim(),
+        'the request was filed against a SUPERSEDED base — the pre-push re-check did not rebuild it',
+      ).toBe(after)
     })
   })
 })

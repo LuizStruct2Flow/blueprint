@@ -18,7 +18,7 @@
  *
  * PORTED FROM tests/session-resume/test.sh (TASK-018). Equivalence measured over
  * a mutant population rather than reviewed — see
- * docs/doing/TASK-018-EQUIVALENCE-mic/.
+ * docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/.
  */
 
 import { describe, it, expect } from 'vitest'

@@ -5,8 +5,8 @@ repository was edited to produce it; the only thing run was one throwaway `git`
 probe in a scratch directory (result reproduced verbatim in §2.1).
 
 - **Mapped against commit `e5e3600`.**
-- **Design it implements:** [`TASK-018-TARGET.md`](TASK-018-TARGET.md) §2, and
-  [`TASK-018-RULES.md`](TASK-018-RULES.md) R2.
+- **Design it implements:** [`TASK-018-TARGET.md`](../waiting-acceptance/TASK-018-TARGET.md) §2, and
+  [`TASK-018-RULES.md`](../waiting-acceptance/TASK-018-RULES.md) R2.
 - **Design it partially CORRECTS:** §0 and §6 below contradict TARGET §2. The
   target says two buckets partition the tree and that the founder chose the
   symmetric shape "knowing the cost". Two costs it did not name are structural,
@@ -439,7 +439,7 @@ shipping.
 `.gitattributes:94,126` · `README.md:150` · `.github/workflows/security.yml:308`
 (a `::notice::` string an operator reads) · `docs/doing/BUGS.md:43` (BUG-053's
 row — historical, keep the old term with a note) ·
-`docs/doing/TASK-018-TARGET.md:8` · `docs/done/BUGS.md` ×2,
+`docs/waiting-acceptance/TASK-018-TARGET.md:8` · `docs/done/BUGS.md` ×2,
 `docs/done/TASK-012-strip-test.md`,
 `docs/done/BUG-001-fork-bomb/CODEX-REVIEW-BUG-001.md` (**do not touch** —
 `done/` is a historical record).

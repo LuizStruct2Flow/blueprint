@@ -78,7 +78,7 @@
  * comparisons. The constants below carry the −1 instead.
  *
  * PORTED FROM tests/signal-dispatch/test.sh (TASK-018). Equivalence measured
- * over a mutant population — see docs/doing/TASK-018-EQUIVALENCE-mic/.
+ * over a mutant population — see docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/.
  */
 
 import { describe, it, expect } from 'vitest'

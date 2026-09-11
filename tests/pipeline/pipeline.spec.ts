@@ -369,7 +369,7 @@ pipe_finish`),
     // assertion, at which moment #9 and #17 become live for the first time.
     //
     // `scripts/lib/pipeline.sh` is the Pipeline agent's file under
-    // docs/doing/TASK-018-CONVENTIONS.md, so this suite reports the defect and
+    // docs/waiting-acceptance/TASK-018-CONVENTIONS.md, so this suite reports the defect and
     // does not fix it.
     const lib = await readFile(LIB, 'utf8')
 

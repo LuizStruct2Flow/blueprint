@@ -38,7 +38,7 @@
  * the same point: agreeing on `#3` does not say which of the cases NAMED `#3`
  * can be made red. So every `it()` here was put to the narrower question —
  * is there a perturbation OBSERVED to turn it red — and the answer is
- * recorded in docs/doing/TASK-018-R6-isolation/outputs/gap.txt, which names
+ * recorded in docs/waiting-acceptance/TASK-018-R6-isolation/outputs/gap.txt, which names
  * the mutant(s) per case. The denominator comes from the runner rather than
  * from a grep, so the `it.each` tables are expanded rather than counted once.
  *

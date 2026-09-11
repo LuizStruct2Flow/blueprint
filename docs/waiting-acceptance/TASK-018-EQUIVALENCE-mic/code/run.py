@@ -15,7 +15,7 @@ Four verdicts per pair, and each means something different:
                    class mutation testing structurally cannot find by itself —
                    it only shows up when the defect is injected deliberately.
 
-Usage: python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/run.py [--out NAME] [target ...]
+Usage: python3 docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/code/run.py [--out NAME] [target ...]
 
 A target is a whole suite (`wait-mic`) or one tree of it (`wait-mic:w8-…`), so a
 later pass can re-run the mutants it added without paying for the ones already

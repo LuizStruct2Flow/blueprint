@@ -13,7 +13,7 @@ So: every `it()` id in the five specs, minus every id ever OBSERVED red in a
 recorded run. What is left has no negative proof, and is either a missing mutant
 or a finding about the fixture.
 
-    python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/gap.py
+    python3 docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/code/gap.py
 
 Exit 0 when the gap is empty, 1 otherwise, so it can be a gate rather than a
 report if the group ever needs one.

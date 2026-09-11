@@ -355,7 +355,7 @@ state is green, and every commit is independently revertible.**
 
 8. **Lifecycle move** — the TASK-018 rows and plan files travel to
    `waiting-acceptance/` once step 6 is on `main` (CLAUDE.md §"Documentation
-   Structure"). `docs/doing/PLAN-TASK-018-RETIREMENT.md` travels with them.
+   Structure"). `docs/waiting-acceptance/PLAN-TASK-018-RETIREMENT.md` travels with them.
 
 ---
 

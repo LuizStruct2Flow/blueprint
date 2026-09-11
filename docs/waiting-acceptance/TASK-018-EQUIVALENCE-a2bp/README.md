@@ -44,11 +44,11 @@ nothing red says no assertion anywhere watches that line.
 ## 2. How to run it
 
 ```bash
-bash docs/doing/TASK-018-EQUIVALENCE-a2bp/code/equiv.sh --check      # do the literals still match?
-bash docs/doing/TASK-018-EQUIVALENCE-a2bp/code/equiv.sh --all        # every tree (~2 h)
-bash docs/doing/TASK-018-EQUIVALENCE-a2bp/code/equiv.sh C24 K14      # two of them
-bash docs/doing/TASK-018-EQUIVALENCE-a2bp/code/diff-audit.sh C28     # what did it CHANGE?
-python3 docs/doing/TASK-018-EQUIVALENCE-a2bp/code/gap.py outputs/*.txt
+bash docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/code/equiv.sh --check      # do the literals still match?
+bash docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/code/equiv.sh --all        # every tree (~2 h)
+bash docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/code/equiv.sh C24 K14      # two of them
+bash docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/code/diff-audit.sh C28     # what did it CHANGE?
+python3 docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/code/gap.py outputs/*.txt
 ```
 
 `equiv.sh` builds one perturbed copy of the repo per mutant, runs all six

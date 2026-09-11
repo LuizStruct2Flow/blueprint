@@ -562,7 +562,7 @@ export function assertProcessEnvClean(): void {
         `${carried.join(', ')}. This is the BUG-046/BUG-047 class. The harness ` +
         `scrubs child environments, but a spec calling child_process directly ` +
         `would inherit these — which is why specs must spawn through the ` +
-        `harness (docs/doing/TASK-018-CONVENTIONS.md).`,
+        `harness (docs/waiting-acceptance/TASK-018-CONVENTIONS.md).`,
     )
   }
 }

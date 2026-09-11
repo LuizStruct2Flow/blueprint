@@ -24,7 +24,7 @@
  * also faster — half a second on average rather than 1.1 s always.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 17 of 17
+ * perturbed copy of the blueprint. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 17 of 17
  * assertions here have a mutant that was RUN and OBSERVED to turn them red.
  *
  * TWO THINGS THAT PASS AND SHOULD NOT BE READ AS COVERAGE. `B4` removes the

@@ -31,7 +31,7 @@
  *      scenario, so the same question is asked of a directory this case owns.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 14 of 14
+ * perturbed copy of the blueprint. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 14 of 14
  * assertions here have a mutant that was RUN and OBSERVED to turn them red,
  * including #2: `E8` makes `bp_file_push` push the request to `main` as well,
  * and that is the only kind of defect the headline invariant can see.

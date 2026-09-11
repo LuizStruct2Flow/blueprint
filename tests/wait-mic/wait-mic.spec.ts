@@ -47,7 +47,7 @@
  * observes, it does not substitute.
  *
  * PORTED FROM tests/wait-mic/test.sh (TASK-018). Equivalence measured over a
- * mutant population — see docs/doing/TASK-018-EQUIVALENCE-mic/.
+ * mutant population — see docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/.
  */
 
 import { describe, it, expect } from 'vitest'

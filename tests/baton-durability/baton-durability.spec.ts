@@ -51,7 +51,7 @@
  * offers no way to obtain an environment that carries them.
  *
  * PORTED FROM tests/baton-durability/test.sh (TASK-018). Equivalence measured
- * over a mutant population — see docs/doing/TASK-018-EQUIVALENCE-mic/.
+ * over a mutant population — see docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/.
  */
 
 import { describe, it, expect } from 'vitest'

@@ -43,7 +43,7 @@
  *     beats a guard that reads source.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 38 of
+ * perturbed copy of the blueprint. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 38 of
  * 38 assertions here have a mutant that was RUN and OBSERVED to turn them red,
  * #0 included: the only thing that can falsify #0 is removing the helper's
  * main-moved assertion, so that is the mutant, and it is injected into this

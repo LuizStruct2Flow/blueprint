@@ -43,9 +43,9 @@ implementations of one suite, [`code/mut.sh`](code/mut.sh) injects one defect, a
 [`code/run.py`](code/run.py) runs both and compares. Run it as:
 
 ```bash
-python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/run.py                    # all five suites
+python3 docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/code/run.py                    # all five suites
 python3 .../code/run.py --out results-r6 wait-mic:w9-key-on-the-directory  # one tree
-python3 docs/doing/TASK-018-EQUIVALENCE-mic/code/gap.py                    # any assertion with no mutant?
+python3 docs/waiting-acceptance/TASK-018-EQUIVALENCE-mic/code/gap.py                    # any assertion with no mutant?
 ```
 
 `run.py` proves the two implementations AGREE on a defect.

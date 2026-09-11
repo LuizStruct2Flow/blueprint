@@ -13,7 +13,7 @@
  * a remote.
  *
  * EQUIVALENCE RECORD (R6): `BP_SUBJECT_ROOT` points both implementations at one
- * perturbed copy of the blueprint. The catalogue is docs/doing/TASK-018-EQUIVALENCE-a2bp/ — 21 of 21
+ * perturbed copy of the blueprint. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 21 of 21
  * assertions here have a mutant that was RUN and OBSERVED to turn them red.
  *
  * #1b NEEDED A MUTANT OF ITS OWN, and the reason is worth keeping: making a v1

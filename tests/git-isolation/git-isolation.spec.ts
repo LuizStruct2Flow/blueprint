@@ -266,9 +266,18 @@ describe('BUG-014 — a test fixture cannot write into the repository under test
       //
       // What the dissolution actually claims is that every anchor's hazard moved
       // into the type system rather than being dropped, so that is what is
-      // asserted: each declared anchor now owns a spec. Non-vacuous — emptying
-      // DECLARED_ANCHORS is not survivable here either way — and it survives both
-      // a live shell helper and a retained runner.
+      // asserted: each declared anchor now owns a spec. It survives both a live
+      // shell helper and a deliberately-retained runner.
+      //
+      // THE LIST FIRST, because at the end state this branch is the only thing
+      // this suite says about the real tree, and a `for` over an empty list is a
+      // green that asserted nothing. The `else` branch is guarded by
+      // `anchorsOnDisk.length`, which an empty DECLARED_ANCHORS already fails;
+      // this branch needs its own, or the two halves are not equally honest.
+      expect(
+        DECLARED_ANCHORS.length,
+        'DECLARED_ANCHORS is empty, so this branch would pass over nothing',
+      ).toBeGreaterThan(0)
       for (const anchor of DECLARED_ANCHORS) {
         expect(
           existsSync(join(TESTS_DIR, anchor, `${anchor}.spec.ts`)),

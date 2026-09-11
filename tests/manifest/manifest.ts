@@ -518,6 +518,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   // satisfy the check on its own behalf — and that argument is about the file
   // being judged, not about its neighbours. A `.ts` fixture in the same
   // directory is a consumer like any other.
+  //
   // COMMENTS ARE STRIPPED, and that is not a refinement — without it this check
   // vouches for its OWN subject. The paragraph above names `proc-cwd.sh`, and
   // `manifest.ts` is a `.ts` file under `tests/`, so widening the walk made the

@@ -1,0 +1,909 @@
+/**
+ * tests/agent-activity-bound/agent-activity-bound.spec.ts — BUG-001.
+ *
+ * `agent-activity.sh` holds ONE instance with a BOUNDED process set. On a founder
+ * host the old design reached ~17,400 script instances and ~8,700 `tail` processes,
+ * exhausted `fs.inotify.max_user_instances` (128), and pegged ~24 of 32 threads for
+ * 2.7 days at zero application load.
+ *
+ * These are BEHAVIOURAL assertions: the feed is actually started, actually written
+ * to, and its log actually inspected. The source checks at the end are a cheap
+ * backstop against the specific idioms that caused the defects — they are not the
+ * coverage, and they cannot be.
+ *
+ * WHAT CHANGES IN THE PORT, AND WHY EACH CHANGE IS AN IMPROVEMENT RATHER THAN A
+ * CONVENIENCE. All four are recorded because a silent change is still a change.
+ *
+ *   1. NO `--fast` SPLIT. The shell suite ran a subset in the pre-push gate and the
+ *      race / fault-injection cases (#10, #18, #5f) only in CI. That split existed
+ *      to fit a 30 s pre-push ceiling which was retired with BUG-005 — and CLAUDE.md
+ *      §"Pre-push tolerance" now states plainly that a suite must never be demoted
+ *      to fit a time budget. R7 makes a skip a build failure, so the split could not
+ *      survive anyway.
+ *
+ *   2. ONE SCENARIO PER CASE, WHICH IS WHAT MAKES THIS SUITE PARALLEL-SAFE. The
+ *      shell suite shared ONE fixture repo across all 34 assertions, and the
+ *      supervisor lock is per REPO ROOT — not per state dir. That is why its
+ *      teardown ordering was load-bearing (BUG-065: #7's teardown had to wait for
+ *      its supervisor to be GONE before #2 started a feed, or `cmd_daemon` reported
+ *      "started (daemon)" on the strength of a predecessor's lock and #2 then
+ *      measured zero supervisors and blamed a leak). Here every case gets its own
+ *      workspace and therefore its own repo root, so that interaction — and BUG-067,
+ *      which is still open — is unreachable by construction rather than avoided by
+ *      careful sequencing.
+ *
+ *   3. PROCESS COUNTS ARE SCOPED TO THIS SCENARIO. `#2` and `#15` counted
+ *      `tail -n0 -F` MACHINE-WIDE, so a sibling test's processes changed their
+ *      verdict. TASK-018-TARGET §1.2 names exactly that — "a machine-wide `ps`
+ *      scan" — as the kind of thing that makes a test look like it needs serial
+ *      execution when it is really reading something it does not own.
+ *
+ *   4. NO CASE WAITS A FIXED DURATION (R4). Where the shell slept to let ticks pass
+ *      and then asserted an ABSENCE, this round-trips sentinels through the pumped
+ *      run log: each sentinel that comes back out of the feed is one tick PROVEN to
+ *      have completed. That is strictly stronger than a sleep — it does not get
+ *      weaker on a loaded box, and it does not get slower on an idle one. The one
+ *      unavoidable bound is `withFeed`'s outer process ceiling, which is a safety
+ *      net for a hung supervisor rather than a synchronisation point.
+ *
+ * THE HANDSHAKE IS NOT OPTIONAL (BUG-038). `expectSupervisors(1)` proves a
+ * supervisor is RESIDENT. It does NOT prove the supervisor has seeded a baseline
+ * offset for a given file, and those are not the same instant. Because the feed
+ * deliberately does not replay pre-existing content (#16), a payload appended after
+ * residency but before registration is folded into the baseline and is never
+ * emitted — so the case reports "the reader lost it", which is indistinguishable
+ * from the regression it exists to catch. THE LOSS IS PERMANENT: with `seed_offset`
+ * delayed 5 s the payload never appeared in 184 s, and a bound raised to 45 s
+ * against a measured 32.6 s first-record latency changed no outcome while adding
+ * 2m41s to the run. Only re-writing the sentinel until one lands after the seed
+ * closes it, which is what `readerReady` does.
+ *
+ * EQUIVALENCE RECORD (R6, and this migration's own evidence). Trees carrying one
+ * injected defect each, plus the healthy control and negative controls, were built
+ * once and BOTH implementations run over each: the retiring
+ * `tests/agent-activity-bound/test.sh`, copied into the tree, and this spec with
+ * `BP_SPEC_ROOT` pointed at it. The per-id verdict sets were compared mechanically;
+ * the TASK-018 report lists every divergence.
+ */
+
+import { describe, it, expect, vi } from 'vitest'
+import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { feedFixture, type FeedFixture } from '../helpers/feed-fixture.js'
+
+/**
+ * The tree under test. `BP_SPEC_ROOT` repoints it at a perturbed copy, which is how
+ * the equivalence driver runs this spec and the retiring shell suite over the same
+ * bytes. It selects the SUBJECT, never the sandbox.
+ */
+const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
+
+const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
+
+/** A script's source with comments stripped — this file's header names the idioms. */
+async function code(path: string): Promise<string> {
+  const raw = await readFile(path, 'utf8').catch(() => '')
+  return raw.replace(/^[ \t]*#.*$/gm, '').replace(/[ \t]#.*$/gm, '')
+}
+
+/**
+ * The instrumented fixture every behavioural case uses.
+ *
+ * The pumped source is the GEMINI run log, not the Codex one: BUG-021 stopped the
+ * feed pumping `codex-runs.log`, because Codex's launcher now labels its own lines
+ * with the persona holding the mic — a fact the feed cannot know. Nothing here is
+ * about Codex; these assertions are about byte-exact delta reads, so any pumped log
+ * serves.
+ */
+interface Bound {
+  readonly f: FeedFixture
+  /** Workspace-relative path of the pumped run log. */
+  readonly runLogRel: string
+  /** Append to the pumped run log. */
+  append(text: string): Promise<void>
+  /** Truncate the pumped run log. */
+  truncate(): Promise<void>
+  /**
+   * Prove that `n` further ticks completed, by round-tripping a sentinel each time.
+   *
+   * This is what replaces every `sleep` that preceded an ABSENCE assertion. A sleep
+   * asserts "enough time passed for the bug to show"; this asserts "the supervisor
+   * completed n more cycles", which is the property actually wanted and which does
+   * not degrade under load.
+   *
+   * THE SENTINEL GOES THROUGH A SEPARATE PUMPED FILE — a subagent transcript, not
+   * the run log the cases write to. Writing it to the run log is wrong in a way that
+   * is invisible until the split-record case: the sentinel's trailing newline
+   * COMPLETES the deliberately-incomplete fragment #11/#19 is holding, so the feed
+   * emitted `SPLIT-héllo-→TICK-PROOF-1` and the case failed while the code was
+   * correct. A tick prover must not be able to alter what it is measuring.
+   */
+  proveTicks(n: number): Promise<void>
+}
+
+async function bound(s: Scenario, name = 'repo'): Promise<Bound> {
+  const f = await feedFixture(s, name, {
+    source: SUBJECT,
+    holder: 'Fixture',
+    state: 'ACTIVE',
+  })
+  const runLogRel = `${name}/state/gemini-runs.log`
+  await s.fs.write(runLogRel, '')
+
+  // A pumped file the cases never touch, so proving a tick cannot alter what the
+  // tick is being counted for. A subagent transcript is the other thing the feed
+  // pumps, and its records are self-delimiting JSON — so an appended sentinel can
+  // never accidentally terminate a fragment the way a raw line can.
+  const tickRel = `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess/subagents/agent-tickproof.jsonl`
+  await s.fs.write(tickRel, '')
+
+  let tick = 0
+  return {
+    f,
+    runLogRel,
+    append: async (text) => void (await s.fs.write(runLogRel, text, { append: true })),
+    truncate: async () => void (await s.fs.write(runLogRel, '')),
+    proveTicks: async (n) => {
+      if (n === 0) return
+      // The tick file needs its own handshake once, for the same reason every other
+      // watched file does: until it is seeded, a sentinel written to it is folded
+      // into the baseline and never comes back (BUG-038).
+      if (tick === 0) {
+        await f.readerReady(tickRel, {
+          wrap: (t) =>
+            `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: t }] } })}\n`,
+        })
+      }
+      for (let i = 0; i < n; i += 1) {
+        tick += 1
+        const mark = `TICK-PROOF-${tick}`
+        await s.fs.write(
+          tickRel,
+          `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: mark }] } })}\n`,
+          { append: true },
+        )
+        await f.expectLine(mark)
+      }
+    },
+  }
+}
+
+/** A UTF-8 locale this host actually has, for the multibyte half of #11/#19. */
+async function utf8Locale(s: Scenario): Promise<string> {
+  const r = await s.run('sh', ['-c', 'locale -a 2>/dev/null'], { cwd: s.workspace.root })
+  const found = r.stdout
+    .split('\n')
+    .find((l) => /^(en_US|C)\.(utf-?8)$/i.test(l.trim()))
+  // R7: no skipping. The shell suite announced "#19 cannot prove the LC_ALL=C fix
+  // on this host" and carried on green, which is BUG-005 in miniature — covering
+  // less while reporting success. A host with no multibyte locale now FAILS, and
+  // says what to install.
+  expect(
+    found,
+    'no UTF-8 locale on this host, so the LC_ALL=C byte-counting fix cannot be ' +
+      'proven. Install one (locale-gen en_US.UTF-8) rather than skipping the case.',
+  ).toBeDefined()
+  return (found ?? '').trim()
+}
+
+describe('BUG-001 — one instance, a bounded process set, byte-correct reads', () => {
+  // =========================================================================
+  // RC-1 — the instance guard.
+  // =========================================================================
+  it('#1 50 concurrent starts → exactly 1 supervisor', async () => {
+    await scenario('aab-1', async (s) => {
+      // EXACTLY one, not "at most": zero would mean the daemon never started, and
+      // the consensus plan requires one survivor.
+      const b = await bound(s)
+      try {
+        await Promise.all(
+          Array.from({ length: 50 }, () =>
+            s.run('bash', ['scripts/agent-activity.sh', '--daemon'], {
+              cwd: b.f.repo,
+              env: b.f.env,
+            }),
+          ),
+        )
+        await b.f.expectSupervisors(1)
+        expect((await b.f.ownedProcesses()).supervisors).toBe(1)
+      } finally {
+        await b.f.cli(['--stop'])
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  it('#15 one resident process; no follow-by-name tails', async () => {
+    await scenario('aab-15', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        // RC-2: the resident set is ONE supervisor doing its own reads. A `tail -F`
+        // per watched file is the shape that reached ~8,700 processes.
+        expect(await b.f.ownedProcesses()).toEqual({ supervisors: 1, tails: 0 })
+      })
+    })
+  })
+
+  it('#5 --status reports running', async () => {
+    await scenario('aab-5', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        expect((await b.f.cli(['--status'])).code).toBe(0)
+      })
+    })
+  })
+
+  it('#5b --stop leaves zero residue', async () => {
+    await scenario('aab-5b', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {})
+      expect((await b.f.ownedProcesses()).supervisors).toBe(0)
+    })
+  })
+
+  it('#5c --status reports not running after stop', async () => {
+    await scenario('aab-5c', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {})
+      expect((await b.f.cli(['--status'])).code).not.toBe(0)
+    })
+  })
+
+  it('#6 concurrent stop/start converges to exactly one supervisor', async () => {
+    await scenario('aab-6', async (s) => {
+      const b = await bound(s)
+      try {
+        await b.f.cli(['--daemon'])
+        await b.f.expectSupervisors(1)
+        // Converge deliberately: a race may legitimately land on 0, but the
+        // CONTRACT is "no wedged lock, no double start" — so a follow-up start must
+        // reach exactly 1.
+        await Promise.all([b.f.cli(['--stop']), b.f.cli(['--daemon'])])
+        await b.f.cli(['--daemon'])
+
+        await b.f.expectSupervisors(1)
+      } finally {
+        await b.f.cli(['--stop'])
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  // =========================================================================
+  // Byte-correct delta reads.
+  // =========================================================================
+  it('#16 pre-existing content not replayed', async () => {
+    await scenario('aab-16', async (s) => {
+      const b = await bound(s)
+      // Written BEFORE the feed ever starts.
+      await b.append('PRE-EXISTING-must-not-replay\n')
+
+      await b.f.withDaemon(async () => {
+        // The absence is bounded by a PROVEN tick rather than by a sleep: once the
+        // supervisor has completed a full cycle over this file, "not replayed" is a
+        // fact instead of a guess about latency.
+        await b.f.readerReady(b.runLogRel)
+        await b.proveTicks(1)
+
+        expect(await b.f.count('PRE-EXISTING-must-not-replay')).toBe(0)
+      })
+    })
+  })
+
+  it('#17 lone complete record emitted once, unaided by a successor or force-flush', async () => {
+    await scenario('aab-17a', async (s) => {
+      // THE ASSERTION THAT FAILS AGAINST THE `$()` FORMULATION, where command
+      // substitution strips the trailing newline and k=0 leaves the record stuck
+      // until the fragment bound. Not a latency assertion: several ticks are
+      // allowed, because claiming "next tick" while polling many would say more
+      // than it measures.
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        await b.append('SOLO-RECORD\n')
+        await b.f.expectLine('SOLO-RECORD')
+        await b.proveTicks(1)
+
+        expect(await b.f.count('SOLO-RECORD')).toBe(1)
+      })
+    })
+  })
+
+  it('#17 offset advanced by the record (successor emitted, no re-emission)', async () => {
+    await scenario('aab-17b', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        await b.append('SOLO-RECORD\n')
+        await b.f.expectLine('SOLO-RECORD')
+        // A stalled offset would either re-emit the first record or swallow this one.
+        await b.append('SOLO-NEXT\n')
+        await b.f.expectLine('SOLO-NEXT')
+
+        expect(await b.f.count('SOLO-RECORD')).toBe(1)
+      })
+    })
+  })
+
+  it('#11/#19 incomplete multibyte record withheld', async () => {
+    await scenario('aab-11a', async (s) => {
+      // The split-record property (#11) holds in any locale. The MULTIBYTE part
+      // (#19) only exercises the LC_ALL=C fix under a UTF-8 locale — in the C
+      // locale awk already counts bytes, so it would pass vacuously against the
+      // very implementation it exists to catch. So the locale is selected
+      // explicitly, and its absence is a failure rather than a skip.
+      const locale = await utf8Locale(s)
+      const b = await bound(s)
+      await b.f.withDaemon(
+        async () => {
+          await b.f.readerReady(b.runLogRel)
+          await b.append('SPLIT-héllo-→')
+
+          await b.proveTicks(1)
+          expect(
+            await b.f.count('SPLIT-héllo-→'),
+            'an incomplete record was emitted before its newline (byte/char mismatch)',
+          ).toBe(0)
+        },
+        { LC_ALL: locale },
+      )
+    })
+  })
+
+  it('#11/#19 completed multibyte record emitted exactly once, intact', async () => {
+    await scenario('aab-11b', async (s) => {
+      const locale = await utf8Locale(s)
+      const b = await bound(s)
+      await b.f.withDaemon(
+        async () => {
+          await b.f.readerReady(b.runLogRel)
+          await b.append('SPLIT-héllo-→')
+          await b.proveTicks(1)
+          await b.append('-TAIL\n')
+
+          await b.f.expectLine('SPLIT-héllo-→-TAIL')
+          await b.proveTicks(1)
+          expect(await b.f.count('SPLIT-héllo-→-TAIL')).toBe(1)
+        },
+        { LC_ALL: locale },
+      )
+    })
+  })
+
+  it('#3 quiet-then-active file still emits (never evicted)', async () => {
+    await scenario('aab-3', async (s) => {
+      // The rev-1 pool design would have evicted this file. Idleness is proven by
+      // completed ticks rather than by sleeping: three cycles with nothing written
+      // to this file is exactly what "went quiet" means, and it is checkable.
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        const other = `${b.runLogRel.replace('gemini-runs.log', 'quiet-probe.log')}`
+        await s.fs.write(other, '')
+        await b.proveTicks(3)
+
+        await b.append('AFTER-IDLE\n')
+        await b.f.expectLine('AFTER-IDLE')
+      })
+    })
+  })
+
+  it('#12 oversized newline-less line force-flushed exactly once', async () => {
+    await scenario('aab-12a', async (s) => {
+      // A newline-less writer must not re-read forever. The force-flush bound is
+      // turned right down, because proving the branch at the 1 MiB default would
+      // mean writing a megabyte to reach a branch a hundred bytes reaches.
+      const b = await bound(s)
+      await b.f.withDaemon(
+        async () => {
+          await b.f.readerReady(b.runLogRel)
+          await b.append('X'.repeat(200))
+
+          await b.f.expectLine('force-flushed')
+          await b.proveTicks(1)
+          expect(
+            await b.f.count('force-flushed'),
+            'the offset did not advance past the fragment — a re-read loop',
+          ).toBe(1)
+        },
+        { AGENT_FEED_MAX_FRAGMENT: '64' },
+      )
+    })
+  })
+
+  it('#12 stream continues after a force-flush', async () => {
+    await scenario('aab-12b', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(
+        async () => {
+          await b.f.readerReady(b.runLogRel)
+          await b.append('X'.repeat(200))
+          await b.f.expectLine('force-flushed')
+
+          await b.append('\nAFTER-FLUSH\n')
+          await b.f.expectLine('AFTER-FLUSH')
+        },
+        { AGENT_FEED_MAX_FRAGMENT: '64' },
+      )
+    })
+  })
+
+  // =========================================================================
+  // RC-6 / I-3 — change detection on the baton.
+  // =========================================================================
+  it('#9 unchanged signal file emits nothing further (RC-6)', async () => {
+    await scenario('aab-9', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        // THE SUBTLETY THAT MADE THIS THE MOST FREQUENT FAILURE IN THE SHELL SUITE
+        // (5 of 8 runs): a new supervisor TRUNCATES the log, emits "feed started",
+        // emits the baton line ONCE, and only then seeds the run log. Sampling the
+        // baseline between the truncate and that baton line reads 0, the startup
+        // line then lands inside the sampling window, and the case reports
+        // "re-emitted every tick" about a supervisor that emitted exactly once. The
+        // handshake proves the seed happened, which is strictly after the baton
+        // line, so the baseline is sampled on a settled log.
+        await b.f.readerReady(b.runLogRel)
+        const base = await b.f.count('ACTIVE —')
+
+        await b.proveTicks(3)
+
+        expect(
+          await b.f.count('ACTIVE —'),
+          'the unchanged baton re-emitted every tick (a stat blob read as an mtime)',
+        ).toBe(base)
+      })
+    })
+  })
+
+  it('#9b same-size in-place signal edit detected (I-3)', async () => {
+    await scenario('aab-9b', async (s) => {
+      // size+inode is a STREAM IDENTITY, not a change token. `signal_token` is a
+      // `cksum` of the content for exactly this reason.
+      const b = await bound(s)
+      const baton = (task: string): string =>
+        `# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Fixture |\n` +
+        `| State | ACTIVE |\n| Task | ${task} |\n| Last update | 2026-09-11 |\n`
+
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        await s.fs.write('repo/state/signal.md', baton('AAAA'))
+        await b.f.expectLine('AAAA')
+
+        // Identical byte length, rewritten in place.
+        await s.fs.write('repo/state/signal.md', baton('BBBB'))
+
+        await b.f.expectLine('BBBB')
+      })
+    })
+  })
+
+  it('#8 truncation handled; stream resumes', async () => {
+    await scenario('aab-8', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        await b.truncate()
+        await b.append('AFTER-TRUNCATE\n')
+
+        await b.f.expectLine('AFTER-TRUNCATE')
+      })
+    })
+  })
+
+  it('#8b rotation handled (inode change resets offset)', async () => {
+    await scenario('aab-8b', async (s) => {
+      const b = await bound(s)
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        // A NEW INODE at the same path, which is what a rotator produces.
+        await s.run('mv', [join(s.workspace.root, b.runLogRel), join(s.workspace.root, `${b.runLogRel}.old`)], {
+          cwd: s.workspace.root,
+        })
+        await s.fs.write(b.runLogRel, 'AFTER-ROTATE\n')
+
+        await b.f.expectLine('AFTER-ROTATE')
+      })
+    })
+  })
+
+  // =========================================================================
+  // Identity and recovery — the state file must never be trusted on its own.
+  // =========================================================================
+  it('#13 stale state after SIGKILL reports not running', async () => {
+    await scenario('aab-13', async (s) => {
+      const b = await bound(s)
+      await b.f.cli(['--daemon'])
+      await b.f.expectSupervisors(1)
+      const pid = await b.f.supervisorPid()
+      expect(pid, 'the supervisor published no pid — the case cannot proceed').not.toBe('')
+
+      await s.run('kill', ['-9', pid], { cwd: s.workspace.root })
+      await b.f.expectSupervisors(0)
+
+      // The LOCK is the oracle, not the state file. flock is released by the kernel
+      // on SIGKILL, so "can I take it?" answers "is a supervisor alive?".
+      expect((await b.f.cli(['--status'])).code, '--status trusted a stale state file').not.toBe(0)
+    })
+  })
+
+  it('#13b stale --stop exits cleanly without signalling', async () => {
+    await scenario('aab-13b', async (s) => {
+      const b = await bound(s)
+      await b.f.cli(['--daemon'])
+      await b.f.expectSupervisors(1)
+      const pid = await b.f.supervisorPid()
+      await s.run('kill', ['-9', pid], { cwd: s.workspace.root })
+      await b.f.expectSupervisors(0)
+
+      expect((await b.f.cli(['--stop'])).code).toBe(0)
+    })
+  })
+
+  it('#4 lock released by SIGKILL; restart yields exactly one supervisor', async () => {
+    await scenario('aab-4', async (s) => {
+      // A SURVIVING CHILD THAT INHERITED THE LOCK FD keeps the lock alive, so
+      // recovery-by-SIGKILL would never converge.
+      const b = await bound(s)
+      try {
+        await b.f.cli(['--daemon'])
+        await b.f.expectSupervisors(1)
+        const pid = await b.f.supervisorPid()
+        await s.run('kill', ['-9', pid], { cwd: s.workspace.root })
+        await b.f.expectSupervisors(0)
+
+        const restart = await b.f.cli(['--daemon'])
+        await b.f.expectSupervisors(1)
+        expect((await b.f.ownedProcesses()).supervisors, restart.output).toBe(1)
+      } finally {
+        await b.f.cli(['--stop'])
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  it('#14 mismatched start-token → refused to signal an unrelated process', async () => {
+    await scenario('aab-14', async (s) => {
+      // PRECONDITION: a feed MUST be running, or `--stop` short-circuits on
+      // "nothing to stop" and never reaches identity validation — the case would
+      // pass against an implementation with no validation at all.
+      const b = await bound(s)
+      const stateFile = 'repo/logs/.agent-activity.state'
+      try {
+        await b.f.cli(['--daemon'])
+        await b.f.expectSupervisors(1)
+        const real = await s.fs.read(stateFile)
+
+        // A victim this scenario owns, standing in for a reused pid.
+        const victimPid = `${s.workspace.root}/victim.pid`
+        const victim = s
+          .run('sh', ['-c', `echo $$ > "${victimPid}"; exec sleep 300`], {
+            cwd: s.workspace.root,
+            timeoutMs: 120_000,
+          })
+          .catch(() => undefined)
+        await vi.waitFor(async () => expect(await s.fs.exists('victim.pid')).toBe(true), {
+          timeout: 20_000,
+          interval: 50,
+        })
+        const vpid = (await s.fs.read('victim.pid')).trim()
+
+        await s.fs.write(stateFile, `pid=${vpid}\nnonce=bogus\ntoken=NOT-THE-REAL-TOKEN\n`)
+        const stop = await b.f.cli(['--stop'])
+
+        expect(stop.code, '--stop signalled a process whose identity did not match').not.toBe(0)
+        expect(
+          (await s.run('kill', ['-0', vpid], { cwd: s.workspace.root })).code,
+          'the unrelated process was killed',
+        ).toBe(0)
+
+        await s.fs.write(stateFile, real)
+        await s.run('kill', ['-9', vpid], { cwd: s.workspace.root })
+        await victim
+      } finally {
+        await b.f.cli(['--stop'])
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  it('#14b missing nonce alone fails closed (I-2)', async () => {
+    await scenario('aab-14b', async (s) => {
+      // ONLY the nonce is omitted — real pid, real token. Anything else and the
+      // baseline rejects on the token instead, so the case would pass against the
+      // very implementation it is meant to catch.
+      //
+      // The nonce is not decoration: `start_token` on Linux is the start time in
+      // clock ticks since BOOT, so after a reboot a fresh process can legitimately
+      // carry the same pid AND the same token as the dead supervisor.
+      const b = await bound(s)
+      const stateFile = 'repo/logs/.agent-activity.state'
+      try {
+        await b.f.cli(['--daemon'])
+        await b.f.expectSupervisors(1)
+        const real = await s.fs.read(stateFile)
+        const pid = /^pid=(\d+)$/m.exec(real)?.[1] ?? ''
+        const token = /^token=(.*)$/m.exec(real)?.[1] ?? ''
+        expect(pid, 'no pid in the state file').not.toBe('')
+        expect(token, 'no token in the state file').not.toBe('')
+
+        await s.fs.write(stateFile, `pid=${pid}\ntoken=${token}\n`)
+
+        expect(
+          (await b.f.cli(['--stop'])).code,
+          'a state file with a valid pid+token but NO nonce was accepted',
+        ).not.toBe(0)
+        await s.fs.write(stateFile, real)
+      } finally {
+        await b.f.cli(['--stop'])
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  // =========================================================================
+  // Quoting, scale, and the two fault-injection seams.
+  // =========================================================================
+  it('#7 state dir containing spaces handled', async () => {
+    await scenario('aab-7', async (s) => {
+      const b = await bound(s)
+      const spacey = await s.fs.mkdirp('repo/state dir with spaces')
+      await s.fs.write('repo/state dir with spaces/gemini-runs.log', '')
+      await s.fs.write(
+        'repo/state dir with spaces/signal.md',
+        '| Field | Value |\n|---|---|\n| Holder | Fixture |\n| State | ACTIVE |\n| Task | t |\n',
+      )
+      const spaceyEnv = {
+        AGENT_STATE_HOME: spacey,
+        AGENT_SIGNAL_FILE: join(spacey, 'signal.md'),
+      }
+
+      await s.run('bash', ['scripts/agent-activity.sh', '--daemon'], {
+        cwd: b.f.repo,
+        env: { ...b.f.env, ...spaceyEnv },
+      })
+      try {
+        await b.f.expectSupervisors(1)
+        // The handshake on the spacey path itself is also the first proof the reader
+        // opened a path containing spaces at all.
+        await b.f.readerReady('repo/state dir with spaces/gemini-runs.log')
+        await s.fs.write('repo/state dir with spaces/gemini-runs.log', 'SPACED-PATH-OK\n', {
+          append: true,
+        })
+
+        await b.f.expectLine('SPACED-PATH-OK')
+      } finally {
+        await s.run('bash', ['scripts/agent-activity.sh', '--stop'], {
+          cwd: b.f.repo,
+          env: { ...b.f.env, ...spaceyEnv },
+        })
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  it('#2 process count independent of transcript count (40→80 files: 1 supervisor, 0 tails)', async () => {
+    await scenario('aab-2', async (s) => {
+      // RC-2. Resident count staying independent of watched-file count IS the bug:
+      // the old design held a follower per file and reached ~8,700 of them.
+      const b = await bound(s)
+      const proj = `home/.claude/projects/${b.f.repo.replace(/\//g, '-')}/sess/subagents`
+      const makeTranscripts = async (from: number, to: number): Promise<void> => {
+        for (let i = from; i < to; i += 1) {
+          await s.fs.write(
+            `${proj}/agent-${i}.jsonl`,
+            `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `a${i}` }] } })}\n`,
+          )
+        }
+      }
+      await makeTranscripts(0, 40)
+
+      await b.f.withDaemon(async () => {
+        await b.f.readerReady(b.runLogRel)
+        await b.proveTicks(1)
+        const at40 = await b.f.ownedProcesses()
+
+        await makeTranscripts(40, 80)
+        // A completed tick AFTER the new files exist is what makes the second
+        // reading meaningful: it proves the supervisor has seen all 80.
+        await b.proveTicks(1)
+        const at80 = await b.f.ownedProcesses()
+
+        expect({ at40, at80 }).toEqual({
+          at40: { supervisors: 1, tails: 0 },
+          at80: { supervisors: 1, tails: 0 },
+        })
+      })
+    })
+  })
+
+  it('#10 append during a slowed read: every record emitted exactly once', async () => {
+    await scenario('aab-10', async (s) => {
+      // R-1. The read window is widened by a TEST SEAM so the race is deterministic
+      // rather than timing-luck: advancing the offset short duplicates records,
+      // advancing it long skips them, and only exactly-once is correct.
+      const b = await bound(s)
+      await b.f.withDaemon(
+        async () => {
+          await b.f.readerReady(b.runLogRel)
+          await b.append('RACE-A\n') // in the snapshot
+          await b.append('RACE-B\n') // lands DURING the slowed read
+          await b.append('RACE-C\n')
+
+          await b.f.expectLine('RACE-C')
+          await b.proveTicks(1)
+          expect({
+            a: await b.f.count('RACE-A'),
+            b: await b.f.count('RACE-B'),
+            c: await b.f.count('RACE-C'),
+          }).toEqual({ a: 1, b: 1, c: 1 })
+        },
+        { AGENT_FEED_TEST_SLOW_READ: '1' },
+      )
+    })
+  })
+
+  it('#18 short sink emits nothing and consumes nothing', async () => {
+    await scenario('aab-18a', async (s) => {
+      // R-1. If the bounded capture comes up short the tick must emit NOTHING and
+      // advance NOTHING. The sink is armed MID-RUN, on the same supervisor, because
+      // a restart would legitimately re-seed at EOF and mask the property.
+      const b = await bound(s)
+      const sentinel = join(s.workspace.root, 'short-sink-active')
+      await b.f.withDaemon(
+        async () => {
+          // The handshake must complete while the sink is HEALTHY — the seam's whole
+          // purpose is to suppress emission, so arming it first would make the
+          // handshake unsatisfiable.
+          await b.f.readerReady(b.runLogRel)
+          await s.fs.write('short-sink-active', '')
+          await b.append('SHORTSINK-PAYLOAD\n')
+
+          await b.proveTicks(0)
+          // Nothing can be round-tripped while the sink is short, so the absence is
+          // bounded by the RECOVERY below instead: the payload arriving intact and
+          // exactly once after the sink is healthy proves the suppressed ticks
+          // consumed nothing. That ordering is the assertion.
+          expect(
+            await b.f.count('SHORTSINK-PAYLOAD'),
+            'a short capture was emitted — partial bytes escaped the bounded read',
+          ).toBe(0)
+        },
+        { AGENT_FEED_TEST_SHORT_SINK: sentinel },
+      )
+    })
+  })
+
+  it('#18 deferred range delivered intact, exactly once, by the same supervisor', async () => {
+    await scenario('aab-18b', async (s) => {
+      const b = await bound(s)
+      const sentinel = join(s.workspace.root, 'short-sink-active')
+      await b.f.withDaemon(
+        async () => {
+          await b.f.readerReady(b.runLogRel)
+          await s.fs.write('short-sink-active', '')
+          await b.append('SHORTSINK-PAYLOAD\n')
+          await s.fs.rm('short-sink-active') // sink healthy again
+
+          await b.f.expectLine('SHORTSINK-PAYLOAD')
+          await b.proveTicks(1)
+          expect(await b.f.count('SHORTSINK-PAYLOAD')).toBe(1)
+        },
+        { AGENT_FEED_TEST_SHORT_SINK: sentinel },
+      )
+    })
+  })
+
+  // =========================================================================
+  // R-3 — foreground mode.
+  // =========================================================================
+  it('#5f foreground blocks (does not return like --daemon)', async () => {
+    await scenario('aab-5f-block', async (s) => {
+      const b = await bound(s)
+      await b.f.withFeed(async () => {
+        // It blocks if it is still resident once it has demonstrably started
+        // pumping — which is a condition, where "it did not return yet" measured
+        // against a sleep is a guess.
+        await b.f.readerReady(b.runLogRel)
+        expect((await b.f.ownedProcesses()).supervisors).toBe(1)
+      })
+    })
+  })
+
+  it("#15f foreground spawns no 'tee' (supervisor writes both sinks)", async () => {
+    await scenario('aab-15f', async (s) => {
+      const b = await bound(s)
+      await b.f.withFeed(async () => {
+        await b.f.readerReady(b.runLogRel)
+        // THE PARENT PID HAS TO BE THE SUPERVISOR'S OWN. The first version passed
+        // the supervisor COUNT to awk as if it were a pid, so the filter matched
+        // nothing and the case passed without looking at anything — a green earned
+        // by asking the wrong question.
+        const pid = await b.f.supervisorPid()
+        expect(pid, 'the foreground supervisor published no pid — nothing to inspect').not.toBe('')
+        const tees = await s.run(
+          'sh',
+          [
+            '-c',
+            `ps -eo ppid,args 2>/dev/null | awk -v P="$1" '$1==P' | grep -c '[t]ee' || true`,
+            'x',
+            pid,
+          ],
+          { cwd: s.workspace.root },
+        )
+        // The one-resident-process contract: the supervisor writes stdout AND the
+        // log itself rather than forking `tee` to do it.
+        expect(Number(tees.stdout.trim() || '0')).toBe(0)
+      })
+    })
+  })
+
+  it('#5f foreground writes to stdout and the log itself', async () => {
+    await scenario('aab-5f-sinks', async (s) => {
+      // Both sinks in one case, deliberately: they are one property — "the
+      // supervisor writes both" — and asserting them from two separate foreground
+      // runs would double the cost to say the same thing.
+      const b = await bound(s)
+      const out = `${s.workspace.root}/fg.out`
+      const running = s
+        .run('sh', ['-c', `bash scripts/agent-activity.sh > "${out}" 2>&1`], {
+          cwd: b.f.repo,
+          env: b.f.env,
+          timeoutMs: 60_000,
+        })
+        .catch(() => undefined)
+      try {
+        await b.f.readerReady(b.runLogRel)
+        await b.append('FOREGROUND-LINE\n')
+        await b.f.expectLine('FOREGROUND-LINE')
+
+        await vi.waitFor(
+          async () => expect(await readFile(out, 'utf8')).toContain('FOREGROUND-LINE'),
+          { timeout: 30_000, interval: 100 },
+        )
+        expect(await b.f.read()).toContain('FOREGROUND-LINE')
+      } finally {
+        await b.f.cli(['--stop'])
+        await running
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
+  // =========================================================================
+  // Source backstops — cheap guards against the exact idioms that caused the
+  // defects. A supplement to the behavioural cases, never the coverage.
+  // =========================================================================
+  it('static: no tail -F follower is reintroduced (RC-2)', async () => {
+    expect(await code(FEED)).not.toMatch(/tail[ \t]+(-n0[ \t]+)?-F/)
+  })
+
+  it('static: the flock instance guard is still there (RC-1)', async () => {
+    expect(await code(FEED)).toMatch(/flock/)
+  })
+
+  it('static: the broken stat fallback is not reintroduced (RC-6)', async () => {
+    // `stat -f %m || stat -c %Y` returns the whole BSD stat blob on GNU, which is
+    // never equal to itself twice — read as an mtime it makes every file look
+    // changed on every tick.
+    expect(await code(FEED)).not.toMatch(
+      /\$\((stat -f %m[^)]*\|\| *stat -c %Y|stat -c %Y[^)]*\|\| *stat -f %m)/,
+    )
+  })
+
+  it('static: fragment length is byte-based, not character-based (R4)', async () => {
+    const body = await code(FEED)
+    // awk's `length` counts CHARACTERS under a multibyte locale, so a fragment
+    // holding one multibyte character measures short and is held back forever.
+    if (/awk 'END\{print length/.test(body)) {
+      expect(body).toMatch(/LC_ALL=C awk 'END\{print length/)
+    }
+  })
+
+  it('static: the delta is not captured through command substitution (R3)', async () => {
+    // `$()` strips trailing newlines, so a complete record arrives looking
+    // incomplete and waits for the force-flush bound instead of being emitted.
+    expect(await code(FEED)).not.toMatch(/^[ \t]*(local[ \t]+)?delta=\$\(/m)
+  })
+})

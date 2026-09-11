@@ -30,6 +30,7 @@
  */
 
 import { afterEach, expect } from 'vitest'
+import type { ChildProcess } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWorkspace, type Workspace } from './workspace.js'
@@ -71,6 +72,25 @@ export interface Scenario {
 
   /** Run a shell script from the blueprint under test. */
   runScript(relPath: string, args?: string[], options?: Partial<SpawnOptions>): Promise<RunResult>
+
+  /**
+   * Start a long-lived process WITHOUT waiting for it to exit.
+   *
+   * For the one thing `run()` structurally cannot express: a subject whose
+   * behaviour IS whether and when it exits. `scripts/wait-mic.sh` exists to
+   * turn "the mic moved" into an exit; `codex-signal-watch.sh` runs until it
+   * dispatches. A spec that could only await completion would have to wrap
+   * them in `timeout` and then throw the status away — which is precisely the
+   * 125.4 s scaffolding tests/signal-dispatch's header describes removing.
+   *
+   * The registry still owns it, so teardown reaps it and a SURVIVOR FAILS THE
+   * TEST. That is deliberate and it is not an inconvenience: a spec that starts
+   * a watcher owes an explicit stop, and `watcher.ts` is the wrapper that makes
+   * the stop a single call. Nothing here is an escape from the process
+   * ownership the harness exists to enforce — it is the same registry, minus
+   * the await.
+   */
+  background(command: string, args: string[], options: SpawnOptions): ChildProcess
 
   /**
    * Filesystem operations that REFUSE to write outside this workspace.
@@ -227,6 +247,13 @@ export async function scenario(
       return registry.run('bash', [join(REPO_ROOT, relPath), ...args], {
         cwd: options.cwd ?? workspace.root,
         timeoutMs: options.timeoutMs,
+        env: { ...baseEnv, ...(options.env ?? {}) },
+      })
+    },
+
+    background(command, args, options) {
+      return registry.startBackground(command, args, {
+        ...options,
         env: { ...baseEnv, ...(options.env ?? {}) },
       })
     },

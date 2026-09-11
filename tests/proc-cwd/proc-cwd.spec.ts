@@ -24,10 +24,25 @@
  * processes it started, on this OS — rather than re-testing a shell helper that
  * the TS harness does not use. Case IDs are preserved so the mapping to the
  * shell suite, and to the bug row, stays legible.
+ *
+ * THAT PARAGRAPH WAS TRUE AND INCOMPLETE, and the second `describe` block at the
+ * bottom of this file is the correction. "A helper the TS harness does not use"
+ * is not the same as "a helper nothing uses": two live shell suites source it,
+ * neither tests it, and `tests/proc-cwd/test.sh` held the only assertion that a
+ * cwd mechanism exists on the host at all. Retiring the shell runner on the
+ * strength of the block above would have made `agent-activity-bound` #5b pass
+ * over zero information. Measured, not reasoned — see that block's header for
+ * the four-part measurement, and BUG-089 for the fail-open it exposed in the two
+ * consumers.
+ *
+ * RETIREMENT READINESS: with that block present, this spec is a genuine superset
+ * of `tests/proc-cwd/test.sh` — #1 to #5 are carried across by driving the
+ * shipped helper — and the shell runner can go.
  */
 
 import { describe, it, expect } from 'vitest'
-import { scenario } from '../harness/index.js'
+import { join } from 'node:path'
+import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
 import { platform } from 'node:os'
 
 describe('BUG-036 — process identity resolves on this OS', () => {
@@ -100,6 +115,155 @@ describe('BUG-036 — process identity resolves on this OS', () => {
       expect(r.stdout.trim()).toBe(s.signalFile)
       expect(r.stdout).toContain(s.workspace.root)
       expect(r.stdout.trim()).not.toContain('/sources/struct2flow/blueprint/logs')
+    })
+  })
+})
+
+/**
+ * THE SHELL HELPER ITSELF — and why this block had to be added before
+ * `tests/proc-cwd/test.sh` could retire.
+ *
+ * The block above was written as the exemplar port and it is honest about what it
+ * changed: "these scenarios assert the PROPERTY the shell function existed to
+ * provide … rather than re-testing a shell helper that the TS harness does not
+ * use." That was true, and it left a hole, because the harness is not the only
+ * consumer: `tests/helpers/proc-cwd.sh` is SOURCED by two live shell suites,
+ * `tests/agent-activity-bound` and `tests/subagent-feed`, and neither of them
+ * tests it.
+ *
+ * MEASURED RATHER THAN REASONED, by breaking the helper in a copy of the tree and
+ * running all three things over it:
+ *
+ *   1. the shell suite CATCHES it — #1 red, exit 1;
+ *   2. the spec above does not, and cannot: it never loads the helper (grepped,
+ *      not remembered — no reference to `helpers/proc-cwd.sh`, no call to
+ *      `bp_proc_cwd`);
+ *   3. and the shape the two consumers actually use goes VACUOUS. With one live
+ *      process whose cwd is genuinely under `$WORK`, the real helper counts 1 and
+ *      the assertion correctly fails; the broken helper counts 0 and
+ *      `[ "$(supervisors)" -eq 0 ]` — `agent-activity-bound` #5b, "--stop leaves
+ *      zero residue" — PASSES. A leaked supervisor becomes invisible.
+ *
+ * That is exactly the trap `bp_proc_cwd_available` was written to refuse, and its
+ * ONLY caller anywhere is the shell suite being retired. So these five cases
+ * carry #1-#5 across, by DRIVING the shipped helper rather than restating it —
+ * the helper stays shell because its consumers are shell, and a TypeScript
+ * reimplementation of it would be a second mechanism agreeing by coincidence,
+ * which is the A-09 defect.
+ *
+ * When `agent-activity-bound` and `subagent-feed` become specs, the helper loses
+ * its last consumer and this block retires with it.
+ */
+describe('BUG-036 — the shell helper two live suites depend on', () => {
+  /** Source the SHIPPED helper and call it. Never a reimplementation. */
+  const helper = join(REPO_ROOT, 'tests/helpers/proc-cwd.sh')
+
+  /**
+   * Ask the helper about one pid.
+   *
+   * `sh -c '. "$1"; bp_proc_cwd "$2"'` and not a wrapper script: the point is to
+   * exercise the shipped file, and anything that copies or rewrites it first has
+   * stopped testing it.
+   */
+  const lookup = (s: Scenario, pid: number | undefined): Promise<RunResult> =>
+    s.run('sh', ['-c', '. "$1"; bp_proc_cwd "$2"', 'sh', helper, String(pid)], {
+      cwd: s.workspace.root,
+    })
+
+  /**
+   * A sleeper in `dir`, and its reaping.
+   *
+   * The kill is AWAITED on the close event rather than followed by a sleep (R4),
+   * and it is not optional: `background` detaches the child into its own process
+   * group, and the harness FAILS a scenario that leaves one running — orphaned
+   * supervisors at ppid 1 caused a real, hours-long misdiagnosis.
+   */
+  async function sleeper(s: Scenario, dir: string) {
+    const child = s.background('sh', ['-c', 'exec sleep 30'], { cwd: dir })
+    const exited = new Promise<void>((done) => child.on('close', () => done()))
+    return {
+      pid: child.pid,
+      async reap(): Promise<void> {
+        child.kill('SIGKILL')
+        await exited
+      },
+    }
+  }
+
+  it('#1 a cwd mechanism is available on this host — without which every count is 0', async () => {
+    await scenario('proc-cwd-h1', async (s) => {
+      // If this fails the rest is vacuous, so it is asserted rather than assumed
+      // — the BUG-005 lesson, and the one assertion that exists nowhere else in
+      // the repository.
+      const r = await s.run('sh', ['-c', '. "$1"; bp_proc_cwd_available', 'sh', helper], {
+        cwd: s.workspace.root,
+      })
+
+      expect(
+        r.code,
+        'no cwd mechanism on this host — every process count would be 0 and every ' +
+          '"expected 0" assertion in agent-activity-bound and subagent-feed would ' +
+          'pass for the wrong reason',
+      ).toBe(0)
+    })
+  })
+
+  it('#2 a live process resolves to the directory it was started in', async () => {
+    await scenario('proc-cwd-h2', async (s) => {
+      // THIS is what returned empty on macOS and produced BUG-036.
+      const dir = await s.workspace.dir('plain')
+      const proc = await sleeper(s, dir)
+
+      const r = await lookup(s, proc.pid)
+      await proc.reap()
+
+      expect(r.stdout.trim(), `cwd lookup returned '${r.stdout.trim()}', expected '${dir}'`).toBe(dir)
+    })
+  })
+
+  it('#3 a cwd containing SPACES survives the lookup intact', async () => {
+    await scenario('proc-cwd-h3', async (s) => {
+      // agent-activity-bound #7 asserts exactly this, and column-parsing lsof
+      // output reintroduces the break — which is why the helper uses `-Fn`.
+      const dir = await s.workspace.dir('with space', 'inner')
+      const proc = await sleeper(s, dir)
+
+      const r = await lookup(s, proc.pid)
+      await proc.reap()
+
+      expect(r.stdout.trim()).toBe(dir)
+      expect(r.stdout).toContain('with space')
+    })
+  })
+
+  it('#4 a DEAD pid yields empty, not a stale or wrong path', async () => {
+    await scenario('proc-cwd-h4', async (s) => {
+      // Callers use the result to decide "is this MY process", so a confident
+      // wrong answer is worse than none. The pid is one this scenario owned and
+      // reaped, so it is known dead rather than assumed unused.
+      const dir = await s.workspace.dir('dead')
+      const proc = await sleeper(s, dir)
+      // Awaited, not slept on: the lookup must happen after the kernel has reaped
+      // it, and `close` is the condition that says so (R4).
+      await proc.reap()
+
+      const r = await lookup(s, proc.pid)
+
+      expect(
+        r.stdout.trim(),
+        'a dead pid resolved to a path — callers would count a process that no longer exists',
+      ).toBe('')
+    })
+  })
+
+  it('#5 an EMPTY pid is a no-op, not an error under `set -u`', async () => {
+    await scenario('proc-cwd-h5', async (s) => {
+      const r = await s.run('sh', ['-cu', '. "$1"; bp_proc_cwd ""', 'sh', helper], {
+        cwd: s.workspace.root,
+      })
+
+      expect(r.code).toBe(0)
+      expect(`${r.stdout}${r.stderr}`.trim()).toBe('')
     })
   })
 })

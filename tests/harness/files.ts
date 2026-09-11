@@ -88,14 +88,21 @@ export class ScopedFs {
     }
   }
 
+  /**
+   * `append` is not a convenience. The feed suites drive a live supervisor that
+   * tracks each watched file by its SIZE, so rewriting a log to add a line looks
+   * like a truncate-and-replace and resets the offset — the very event
+   * agent-activity-bound #8 asserts about. An append is the only write that means
+   * "one more record arrived", which is what every sentinel round-trip needs.
+   */
   async write(
     relPath: string,
     content: string,
-    options: { mode?: number } = {},
+    options: { mode?: number; append?: boolean } = {},
   ): Promise<string> {
     const target = await this.resolve(relPath)
     await mkdir(dirname(target), { recursive: true })
-    await writeFile(target, content, 'utf8')
+    await writeFile(target, content, { encoding: 'utf8', flag: options.append ? 'a' : 'w' })
     if (options.mode !== undefined) await chmod(target, options.mode)
     return target
   }

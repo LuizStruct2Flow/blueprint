@@ -93,7 +93,7 @@ bp_file_push() {
       # The identical request, already filed — same project, content and base.
       # Adopt it rather than failing: this is the ordinary retry after a
       # network error, and it is only safe because the build is byte-
-      # reproducible (tests/a2bp-build/test.sh #3, #4).
+      # reproducible (tests/a2bp-build/a2bp-build.spec.ts #3, #4).
       echo "  branch already present with the identical commit — adopting it" >&2
       return 0
     fi

@@ -50,32 +50,11 @@ command -v pipe_stage >/dev/null 2>&1 || . scripts/lib/pipeline.sh
 # lets a non-zero stage through, EVERY gate in this repo silently stops
 # guarding anything — and it would look exactly like a passing gate. Cheapest
 # high-value suite here at ~0.5s.
-if [ -f tests/pipeline/test.sh ]; then
-  _st_pipeline(){
-    bash tests/pipeline/test.sh || {
-      echo "❌ tests/pipeline/test.sh failed (FEATURE-002)."
-      echo "   The gate renderer must fail closed: a non-zero stage has to block"
-      echo "   the push, including with no scratch dir available."
-      return 1
-    }
-  }
-  pipe_stage "pipeline · FEATURE-002" _st_pipeline
-else
-  pipe_skip "pipeline · FEATURE-002" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/pipeline/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
-if [ -f tests/marker-merge/test.sh ]; then
-  _st_marker_merge(){
-    bash tests/marker-merge/test.sh || {
-      echo "❌ tests/marker-merge/test.sh failed — marker-aware merge is broken."
-      echo "   A pull would clobber project-owned content outside the markers."
-      return 1
-    }
-  }
-  pipe_stage "marker-merge" _st_marker_merge
-else
-  pipe_skip "marker-merge" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/marker-merge/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-001 — the activity feed must hold exactly one instance with a bounded
 # process set, and must read file deltas byte-correctly. Guards the fork-bomb
@@ -85,182 +64,63 @@ fi
 # race / fault-injection cases (#10, #18) and foreground mode. Those guard
 # BUG-001, which pegged ~24 of 32 threads for 2.7 days, so running them on every
 # push is worth the seconds.
-if [ -f tests/agent-activity-bound/test.sh ]; then
-  _st_agent_activity_bound(){
-    bash tests/agent-activity-bound/test.sh || {
-      echo "❌ tests/agent-activity-bound/test.sh failed (BUG-001)."
-      echo "   The feed must stay one flock-guarded process with no 'tail -F'"
-      echo "   followers, and its delta reads must stay byte-exact."
-      return 1
-    }
-  }
-  pipe_stage "agent-activity-bound · BUG-001" _st_agent_activity_bound
-else
-  pipe_skip "agent-activity-bound · BUG-001" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/agent-activity-bound/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-003 — the security gate must distinguish "scanner found something" from
 # "scanner could not run". Drives this hook in an isolated fixture with shim
 # scanners, so every exit-code path is deterministic. ~0.2s.
 # NOTE: the fixture copies only .githooks/pre-push (not this file), so the
 # nested hook run terminates rather than recursing.
-if [ -f tests/pre-push-scanners/test.sh ]; then
-  _st_pre_push_scanners(){
-    bash tests/pre-push-scanners/test.sh || {
-      echo "❌ tests/pre-push-scanners/test.sh failed (BUG-003)."
-      echo "   A broken scanner must never be reported as a security finding, and"
-      echo "   a tool failure must fail closed rather than pass as a clean scan."
-      return 1
-    }
-  }
-  pipe_stage "pre-push-scanners · BUG-003" _st_pre_push_scanners
-else
-  pipe_skip "pre-push-scanners · BUG-003" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/pre-push-scanners/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-004 — the gate must arm itself on paths that already run, so a fresh clone
 # is not silently ungated. Also pins the boundaries: --status/--stop must not
 # arm (each on its own unset fixture — running --stop after --daemon cannot
 # tell "preserved unset" from "armed it"), a deliberate foreign core.hooksPath
 # must never be clobbered, and arm_gate must never fail its caller. ~2.3s.
-if [ -f tests/gate-arming/test.sh ]; then
-  _st_gate_arming(){
-    bash tests/gate-arming/test.sh || {
-      echo "❌ tests/gate-arming/test.sh failed (BUG-004)."
-      echo "   A tracked hook is not an active hook — if arming regresses, clones"
-      echo "   go back to pushing completely ungated."
-      return 1
-    }
-  }
-  pipe_stage "gate-arming · BUG-004" _st_gate_arming
-else
-  pipe_skip "gate-arming · BUG-004" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/gate-arming/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # A-09 — the feed and the dispatchers must derive ONE per-project state dir. An
 # unrun regression is the A-15 defect this repo already carried once: deleting
 # the shared helper or restoring a literal state path could otherwise push green
 # while cross-project log contamination silently returns. ~0.1s.
-if [ -f tests/proc-cwd/test.sh ]; then
-  _st_proc_cwd(){
-    bash tests/proc-cwd/test.sh || {
-      echo "❌ tests/proc-cwd/test.sh failed (BUG-036)."
-      echo "   Process-cwd lookup must work on this OS (procfs on Linux, lsof on"
-      echo "   BSD/macOS) via tests/helpers/proc-cwd.sh. Without it every suite"
-      echo "   that counts 'my running processes' counts 0 and fails closed."
-      return 1
-    }
-  }
-  pipe_stage "proc-cwd · BUG-036" _st_proc_cwd
-else
-  pipe_skip "proc-cwd · BUG-036" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/proc-cwd/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
-if [ -f tests/state-dir/test.sh ]; then
-  _st_state_dir(){
-    bash tests/state-dir/test.sh || {
-      echo "❌ tests/state-dir/test.sh failed (A-09)."
-      echo "   Feed and dispatchers must share one derivation (scripts/lib/state-dir.sh)"
-      echo "   or another project's Codex output bleeds into this feed."
-      return 1
-    }
-  }
-  pipe_stage "state-dir · A-09" _st_state_dir
-else
-  pipe_skip "state-dir · A-09" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/state-dir/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # TASK-007 — the DoD stages themselves must fail when they should. Four extra
 # greens that check nothing would be worse than no stages at all, because the
 # stage COUNT is what signals a skipped step. ~1s.
-if [ -f tests/dod-gate/test.sh ]; then
-  _st_dodgate(){
-    bash tests/dod-gate/test.sh || {
-      echo "❌ tests/dod-gate/test.sh failed (TASK-007)."
-      echo "   A DoD stage stopped catching what it claims to."
-      return 1
-    }
-  }
-  pipe_stage "dod-gate · TASK-007" _st_dodgate
-else
-  pipe_skip "dod-gate · TASK-007" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/dod-gate/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # TASK-002 — every commit names its backlog item (DoD §1b rule 1). ~0.3s.
-if [ -f tests/commit-msg-gate/test.sh ]; then
-  _st_cmsg(){
-    bash tests/commit-msg-gate/test.sh || {
-      echo "❌ tests/commit-msg-gate/test.sh failed (TASK-002)."
-      echo "   The commit-msg hook must reject a subject that names no item."
-      return 1
-    }
-  }
-  pipe_stage "commit-msg-gate · TASK-002" _st_cmsg
-else
-  pipe_skip "commit-msg-gate · TASK-002" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/commit-msg-gate/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # TASK-002 (reopened) — the rule is checked where the commit actually lands.
 # The hook above is client-side; this pins the shared rule, the CI wiring, and
 # the PR-title check that covers the squash-merge door. ~0.4s.
-if [ -f tests/commit-subjects/test.sh ]; then
-  _st_csubj(){
-    bash tests/commit-subjects/test.sh || {
-      echo "❌ tests/commit-subjects/test.sh failed (TASK-002)."
-      echo "   The hook and CI must share ONE rule, and CI must check the PR title."
-      return 1
-    }
-  }
-  pipe_stage "commit-subjects · TASK-002" _st_csubj
-else
-  pipe_skip "commit-subjects · TASK-002" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/commit-subjects/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-021 — Codex output carries the persona that produced it. ~0.3s.
-if [ -f tests/codex-persona-label/test.sh ]; then
-  _st_cplabel(){
-    bash tests/codex-persona-label/test.sh || {
-      echo "❌ tests/codex-persona-label/test.sh failed (BUG-021)."
-      echo "   The launcher must label its own output from the shared roster lookup."
-      return 1
-    }
-  }
-  pipe_stage "codex-persona-label · BUG-021" _st_cplabel
-else
-  pipe_skip "codex-persona-label · BUG-021" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/codex-persona-label/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-027 — delegated work is visible in the feed, under its persona. ~2.3s
 # (it drives a real supervisor over a real subagent transcript).
-if [ -f tests/subagent-feed/test.sh ]; then
-  _st_subfeed(){
-    bash tests/subagent-feed/test.sh || {
-      echo "❌ tests/subagent-feed/test.sh failed (BUG-027)."
-      echo "   A subagent transcript is 100% isSidechain — the feed must stream it,"
-      echo "   labelled with the persona from the roster, while the SESSION"
-      echo "   transcript still drops sidechain records."
-      return 1
-    }
-  }
-  pipe_stage "subagent-feed · BUG-027" _st_subfeed
-else
-  pipe_skip "subagent-feed · BUG-027" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/subagent-feed/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-022 — a dispatch into silence is visible. ~8s (it runs real supervisors).
-if [ -f tests/watcher-liveness/test.sh ]; then
-  _st_wlive(){
-    bash tests/watcher-liveness/test.sh || {
-      echo "❌ tests/watcher-liveness/test.sh failed (BUG-022)."
-      echo "   The feed must warn when the mic is held with no watcher alive —"
-      echo "   from the LOCK, never the process table."
-      return 1
-    }
-  }
-  pipe_stage "watcher-liveness · BUG-022" _st_wlive
-else
-  pipe_skip "watcher-liveness · BUG-022" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/watcher-liveness/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 
 # FEATURE-005 — the mic waiter must exit on a handoff and ONLY on a handoff. A
@@ -270,19 +130,8 @@ fi
 # positives guard the opposite defect, a reader that fails closed and sleeps
 # through a real handoff. ~16s (the negatives wait out real timeouts, which is
 # the only honest way to assert "did not fire").
-if [ -f tests/wait-mic/test.sh ]; then
-  _st_wait_mic(){
-    bash tests/wait-mic/test.sh || {
-      echo "❌ tests/wait-mic/test.sh failed (FEATURE-005)."
-      echo "   The waiter must fire on a real atomic publish and exit, and must"
-      echo "   NOT fire on a neighbouring file or a Task-only edit."
-      return 1
-    }
-  }
-  pipe_stage "wait-mic · FEATURE-005" _st_wait_mic
-else
-  pipe_skip "wait-mic · FEATURE-005" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/wait-mic/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # FEATURE-003 — a woken session must be able to derive where it is, and an
 # INCOMPLETE replay must be LOUD. The guarded failure is SILENCE: the activity
@@ -290,53 +139,21 @@ fi
 # window is the ordinary case, and a short one reads exactly like a quiet one.
 # Nothing about that is visible without a test, which is why it blocks a push
 # rather than reporting after it. ~1s.
-if [ -f tests/session-resume/test.sh ]; then
-  _st_session_resume(){
-    bash tests/session-resume/test.sh || {
-      echo "❌ tests/session-resume/test.sh failed (FEATURE-003)."
-      echo "   An incomplete replay must warn AND exit non-zero, ordering must stay"
-      echo "   positional, and --rollback must stash rather than discard."
-      return 1
-    }
-  }
-  pipe_stage "session-resume · FEATURE-003" _st_session_resume
-else
-  pipe_skip "session-resume · FEATURE-003" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/session-resume/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # Relative links under docs/ must resolve. Files move through the lifecycle
 # constantly and every move breaks the references pointing at the old location —
 # 13 were broken on 2026-08-03, one of them wrong across two relocations. ~0.2s.
-if [ -f tests/doc-links/test.sh ]; then
-  _st_doclinks(){
-    bash tests/doc-links/test.sh || {
-      echo "❌ tests/doc-links/test.sh failed."
-      echo "   A doc moved and something still points at where it used to be."
-      return 1
-    }
-  }
-  pipe_stage "doc-links" _st_doclinks
-else
-  pipe_skip "doc-links" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/doc-links/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # The lifecycle documents must say something true: artefacts sit with their row,
 # and no table carries a phantom placeholder. Smaller than it was — the
 # index-vs-rows half went away with INDEX.md, because one record cannot disagree
 # with itself. ~0.1s.
-if [ -f tests/lifecycle-docs/test.sh ]; then
-  _st_lcdocs(){
-    bash tests/lifecycle-docs/test.sh || {
-      echo "❌ tests/lifecycle-docs/test.sh failed."
-      echo "   An artefact is stranded away from its row, or a table claims an"
-      echo "   item that does not exist."
-      return 1
-    }
-  }
-  pipe_stage "lifecycle-docs" _st_lcdocs
-else
-  pipe_skip "lifecycle-docs" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/lifecycle-docs/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-019 — a branch operation must not destroy a live dispatch. The baton used
 # to be a TRACKED file holding LIVE state, so checkout/switch/stash/rebase
@@ -345,19 +162,8 @@ fi
 # window, so it costs a few seconds of real waiting — the only honest way to
 # test a race. It stays in the gate because every fix here is a branch, which is
 # exactly the condition that made the bug routine. ~10s.
-if [ -f tests/baton-durability/test.sh ]; then
-  _st_baton(){
-    bash tests/baton-durability/test.sh || {
-      echo "❌ tests/baton-durability/test.sh failed (BUG-019)."
-      echo "   Live mic state must be untracked, so git cannot rewrite it under a"
-      echo "   running dispatch. Check scripts/lib/state-dir.sh agent_signal_file()."
-      return 1
-    }
-  }
-  pipe_stage "baton-durability · BUG-019" _st_baton
-else
-  pipe_skip "baton-durability · BUG-019" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/baton-durability/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-010 — the roster is the single source of persona identity. Guards both
 # halves: a persona name hardcoded in a script that ships to every project
@@ -367,19 +173,8 @@ fi
 # Runs in FULL as of 2026-08-02: case #12 drives a real supervisor to prove a
 # RUNNING feed follows a roster rename — the half of BUG-010 the founder
 # actually hit ("you are still logging as anna").
-if [ -f tests/roster/test.sh ]; then
-  _st_roster(){
-    bash tests/roster/test.sh || {
-      echo "❌ tests/roster/test.sh failed (BUG-010)."
-      echo "   Persona identity must resolve from AGENT_ROSTER.md by ROLE, via"
-      echo "   scripts/lib/roster.sh — never from a name baked into a managed script."
-      return 1
-    }
-  }
-  pipe_stage "roster · BUG-010" _st_roster
-else
-  pipe_skip "roster · BUG-010" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/roster/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # A-03 — the secret gate must scan the COMMITS BEING PUSHED, not the index.
 # `gitleaks protect --staged` scanned an index that is always empty at pre-push
@@ -389,19 +184,8 @@ fi
 # Runs in FULL as of 2026-08-02. The budget cases drive a hanging scanner and
 # were skipped purely on cost; they prove the scan fails CLOSED when it cannot
 # finish, which is exactly the case where a silent pass ships secrets.
-if [ -f tests/pre-push-secrets/test.sh ]; then
-  _st_pre_push_secrets(){
-    bash tests/pre-push-secrets/test.sh || {
-      echo "❌ tests/pre-push-secrets/test.sh failed (A-03)."
-      echo "   The secret scan must cover remote..local for every ref being"
-      echo "   pushed, or secrets ride out in commits nothing ever looked at."
-      return 1
-    }
-  }
-  pipe_stage "pre-push-secrets · A-03" _st_pre_push_secrets
-else
-  pipe_skip "pre-push-secrets · A-03" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/pre-push-secrets/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # RESTORED 2026-08-02 after Codex F2. This suite guards the autonomous handoff
 # path: a regression here silently dispatches an agent against work that is
@@ -411,20 +195,8 @@ fi
 # fixed timeout regardless of when each assertion became decidable). Re-clocked
 # to 75.0 s with every assertion intact, so the tier question answers itself.
 # (37.5 s was measured first, at SETTLE=1 — an unsound clock; see the suite.)
-if [ -f tests/signal-dispatch/test.sh ]; then
-  _st_signal_dispatch(){
-    bash tests/signal-dispatch/test.sh || {
-      echo "❌ tests/signal-dispatch/test.sh failed."
-      echo "   The watcher must not dispatch on a Task nobody updated — a"
-      echo "   State-first edit publishes a torn baton and sends an agent"
-      echo "   against the previous round's work."
-      return 1
-    }
-  }
-  pipe_stage "signal-dispatch" _st_signal_dispatch
-else
-  pipe_skip "signal-dispatch" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/signal-dispatch/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # ADDED 2026-08-02. Found by tests/manifest on its FIRST run: this suite was in
 # neither the gate nor CI — it ran nowhere at all, which is audit finding A-15
@@ -486,94 +258,38 @@ fi
 # code it no longer runs. Syncing a directory is only correct if it is additive:
 # the property that must never regress is that a project-authored suite is
 # neither reported nor removed.
-if [ -f tests/suite-sync/test.sh ]; then
-  _st_suite_sync(){
-    bash tests/suite-sync/test.sh || {
-      echo "❌ tests/suite-sync/test.sh failed (BUG-029)."
-      echo "   A managed directory must expand from 'git archive HEAD', deliver"
-      echo "   new suites, leave project-authored ones alone, and never rewrite"
-      echo "   a suite that carries the placeholder as fixture data."
-      return 1
-    }
-  }
-  pipe_stage "suite-sync · BUG-029" _st_suite_sync
-else
-  pipe_skip "suite-sync · BUG-029" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/suite-sync/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-014 — a test suite must never write into the repo it runs from. Git exports
 # GIT_DIR to every hook, so the fixtures below inherited it and their `git init`
 # landed in the REAL repository. That is what wiped core.hooksPath on 2026-08-02
 # and sent a push out ungated. The suite that proves the gate arms was disarming
 # it. Cheap (~1 s) and guards the gate's own integrity.
-if [ -f tests/git-isolation/test.sh ]; then
-  _st_git_isolation(){
-    bash tests/git-isolation/test.sh || {
-      echo "❌ tests/git-isolation/test.sh failed (BUG-014)."
-      echo "   A suite is writing into the repository GIT_DIR points at. Fixtures"
-      echo "   must unset GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE before git init."
-      return 1
-    }
-  }
-  pipe_stage "git-isolation · BUG-014" _st_git_isolation
-else
-  pipe_skip "git-isolation · BUG-014" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/git-isolation/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # The no-chain guard is an ENFORCEMENT control, and Codex F4 found it failing
 # OPEN on malformed input and missing jq — the opposite of its stated contract,
 # and undetectable without a test. A guard that evaporates when something is
 # already wrong is worse than no guard, because it is trusted. ~0.3s.
-if [ -f tests/no-chain-guard/test.sh ]; then
-  _st_no_chain_guard(){
-    bash tests/no-chain-guard/test.sh || {
-      echo "❌ tests/no-chain-guard/test.sh failed."
-      echo "   The guard must block chains, permit pipes, and FAIL CLOSED on"
-      echo "   anything it cannot parse — including a missing jq."
-      return 1
-    }
-  }
-  pipe_stage "no-chain-guard" _st_no_chain_guard
-else
-  pipe_skip "no-chain-guard" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/no-chain-guard/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-016 / BUG-018 — pull must record only what it actually synced, and must
 # survive having no TTY. A partial pull that advances bootstrap_sha makes every
 # later drift report "0 commits since sync" while the project is still behind,
 # and nothing recomputes that number — linkedin-watcher-agent sat 18 commits
 # behind partly this way. ~3s.
-if [ -f tests/pull-behaviour/test.sh ]; then
-  _st_pull_behaviour(){
-    bash tests/pull-behaviour/test.sh || {
-      echo "❌ tests/pull-behaviour/test.sh failed (BUG-016/BUG-018)."
-      echo "   A partial pull must not claim a full sync, and pull must degrade"
-      echo "   rather than die when there is no terminal."
-      return 1
-    }
-  }
-  pipe_stage "pull-behaviour · BUG-016/018" _st_pull_behaviour
-else
-  pipe_skip "pull-behaviour · BUG-016/018" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/pull-behaviour/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-011 — a2bp must report "filed" only when a PR actually exists. It returned
 # exit 3 ("filed, awaiting a decision") while opening nothing, which is the one
 # thing CLAUDE.md says no script may do: read "PR opened" as "the blueprint has
 # this". Guards the only sanctioned path for improvements to reach the blueprint.
-if [ -f tests/a2bp-pr-filing/test.sh ]; then
-  _st_a2bp_pr_filing(){
-    bash tests/a2bp-pr-filing/test.sh || {
-      echo "❌ tests/a2bp-pr-filing/test.sh failed (BUG-011)."
-      echo "   A non-existent PR must not read as an existing one, and a pushed"
-      echo "   branch with no PR must exit 5, never 3."
-      return 1
-    }
-  }
-  pipe_stage "a2bp-pr-filing · BUG-011" _st_a2bp_pr_filing
-else
-  pipe_skip "a2bp-pr-filing · BUG-011" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/a2bp-pr-filing/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-008 — pull must preserve the executable bit. A pulled `.githooks/pre-push`
 # that comes out 600 is ARMED but never runs: core.hooksPath is set, and git
@@ -591,19 +307,8 @@ fi
 # guard is generic on purpose: this repo has now found four instances of "a
 # specific thing baked into a travelling file" by hand (BUG-002, 006, 009, 010).
 # ~0.3s.
-if [ -f tests/env-namespace/test.sh ]; then
-  _st_env_namespace(){
-    bash tests/env-namespace/test.sh || {
-      echo "❌ tests/env-namespace/test.sh failed (BUG-006)."
-      echo "   A managed script defines an env var outside the generic"
-      echo "   namespaces, or duplicates the shared feed appender."
-      return 1
-    }
-  }
-  pipe_stage "env-namespace · BUG-006" _st_env_namespace
-else
-  pipe_skip "env-namespace · BUG-006" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/env-namespace/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # BUG-009 — the seed template and this repo's own config must stay separate.
 # They were the same files, so anything the blueprint wrote about itself shipped
@@ -637,48 +342,15 @@ fi
 # A-07 — RESTORED 2026-08-02. The contamination scan on the a2bp request path is
 # the only thing stopping one project's host paths and project name reaching
 # every other project on their next pull.
-if [ -f tests/a2bp-contamination/test.sh ]; then
-  _st_a2bp_contamination(){
-    bash tests/a2bp-contamination/test.sh || {
-      echo "❌ tests/a2bp-contamination/test.sh failed (A-07)."
-      echo "   The detection matrix is what keeps one project's specifics out of"
-      echo "   the blueprint — the door BUG-002 and A-09 both came through."
-      return 1
-    }
-  }
-  pipe_stage "a2bp-contamination · A-07" _st_a2bp_contamination
-else
-  pipe_skip "a2bp-contamination · A-07" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/a2bp-contamination/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # RESTORED 2026-08-02. Atomic baton publication, 0.2 s.
-if [ -f tests/signal-set/test.sh ]; then
-  _st_signal_set(){
-    bash tests/signal-set/test.sh || {
-      echo "❌ tests/signal-set/test.sh failed."
-      echo "   Holder/State/Task must publish as ONE indivisible write, or a"
-      echo "   poller samples a new State beside the previous round's Task."
-      return 1
-    }
-  }
-  pipe_stage "signal-set" _st_signal_set
-else
-  pipe_skip "signal-set" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/signal-set/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
-if [ -f tests/a2bp-request/test.sh ]; then
-  _st_a2bp_request(){
-    bash tests/a2bp-request/test.sh || {
-      echo "❌ tests/a2bp-request/test.sh failed (FEATURE-001)."
-      echo "   The request key must stay framed and the ref must stay validated by"
-      echo "   git itself, or two distinct requests can collide on one branch."
-      return 1
-    }
-  }
-  pipe_stage "a2bp-request · FEATURE-001" _st_a2bp_request
-else
-  pipe_skip "a2bp-request · FEATURE-001" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/a2bp-request/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # FEATURE-001 — request construction. Two properties, both load-bearing:
 #   1. The request tree is seeded from the fetched base, so a request changes
@@ -686,38 +358,16 @@ fi
 #   2. The commit is byte-reproducible, which is what lets a retry recognise its
 #      own earlier request instead of refusing forever.
 # Runs git plumbing against a scratch fixture; no network. ~1.5s.
-if [ -f tests/a2bp-build/test.sh ]; then
-  _st_a2bp_build(){
-    bash tests/a2bp-build/test.sh || {
-      echo "❌ tests/a2bp-build/test.sh failed (FEATURE-001)."
-      echo "   A request must touch exactly the files it names and rebuild to the"
-      echo "   same SHA on any machine."
-      return 1
-    }
-  }
-  pipe_stage "a2bp-build · FEATURE-001" _st_a2bp_build
-else
-  pipe_skip "a2bp-build · FEATURE-001" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/a2bp-build/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # FEATURE-001 §5.1/§8 — where a request is filed, and which bytes go into it. The
 # contamination guard checks what the content SAYS; this checks that the content
 # came from the file the operator named (not a symlink to somewhere else, not a
 # path escaping the root) and that it is going to the repository they declared
 # (never a remote inferred from a local checkout). ~0.2s.
-if [ -f tests/a2bp-inputs/test.sh ]; then
-  _st_a2bp_inputs(){
-    bash tests/a2bp-inputs/test.sh || {
-      echo "❌ tests/a2bp-inputs/test.sh failed (FEATURE-001)."
-      echo "   a2bp must refuse symlinks, root-escaping paths, unmanaged files and"
-      echo "   version 1 configs — before anything reaches a remote."
-      return 1
-    }
-  }
-  pipe_stage "a2bp-inputs · FEATURE-001" _st_a2bp_inputs
-else
-  pipe_skip "a2bp-inputs · FEATURE-001" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/a2bp-inputs/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # FEATURE-001 §3b — `drift` reports whether the LOCAL blueprint checkout is behind
 # its remote, because otherwise "✓ all files match the blueprint HEAD" can mean
@@ -730,52 +380,19 @@ fi
 # fast-forward into a dirty or diverged checkout. They were CI-only because the
 # gate sat at ~29 s of a hard 30 s ceiling and this was called "a forced choice,
 # not a preference". The ceiling is gone, so the choice is no longer forced.
-if [ -f tests/staleness/test.sh ]; then
-  _st_staleness_probe(){
-    bash tests/staleness/test.sh || {
-      echo "❌ tests/staleness/test.sh failed."
-      echo "   The staleness probe must bound its offer and never report an"
-      echo "   unknown checkout as current."
-      return 1
-    }
-  }
-  pipe_stage "staleness probe" _st_staleness_probe
-else
-  pipe_skip "staleness probe" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/staleness/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
-if [ -f tests/staleness/drift-integration.sh ]; then
-  _st_staleness(){
-    bash tests/staleness/drift-integration.sh || {
-      echo "❌ tests/staleness/drift-integration.sh failed (FEATURE-001 §3b)."
-      echo "   'blueprint drift' must not prompt, hang, mutate the blueprint"
-      echo "   checkout, or change its exit status because of staleness."
-      return 1
-    }
-  }
-  pipe_stage "staleness" _st_staleness
-else
-  pipe_skip "staleness" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/staleness/drift-integration.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # FEATURE-001 — the assembly. Layered suites prove each part; this proves the whole
 # command, and carries the single most important assertion in the feature: the
 # blueprint's working tree and its main branch are never written to. a2bp used to
 # `cp` straight into that tree, which is how BUG-002 and A-09 fanned out to every
 # project. ~1.1s.
-if [ -f tests/a2bp-e2e/test.sh ]; then
-  _st_a2bp_e2e(){
-    bash tests/a2bp-e2e/test.sh || {
-      echo "❌ tests/a2bp-e2e/test.sh failed (FEATURE-001)."
-      echo "   a2bp must file a request and must not be able to write into the"
-      echo "   blueprint, force-push a request branch, or file an empty one."
-      return 1
-    }
-  }
-  pipe_stage "a2bp-e2e · FEATURE-001" _st_a2bp_e2e
-else
-  pipe_skip "a2bp-e2e · FEATURE-001" "suite absent"
-fi
+# MIGRATED to TypeScript (TASK-018). tests/a2bp-e2e/test.sh is gone, so this stage is
+# gone with it. No `[ -f ]` guard: it would pipe_skip "suite absent" forever.
 
 # A-05 — bootstrap must ship tracked template content only: no .env/SONAR_TOKEN,
 # no logs/, and none of the blueprint's own tracked work items. ~1s.

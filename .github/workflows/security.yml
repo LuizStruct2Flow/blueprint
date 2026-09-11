@@ -174,73 +174,14 @@ jobs:
       - name: Check out
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Blueprint shell regression tests
-        # The FULL agent-activity suite. Beyond what the blocking pre-push gate
-        # already runs with --fast, this ADDS: #10 append-during-read, #18 short
-        # sink, and foreground mode. It does NOT add #2 (transcript scaling) —
-        # that runs in pre-push, because resident count staying independent of
-        # watched-file count is the shipped BUG-001 mechanism and belongs in the
-        # blocking gate. Pre-push has a 30s ceiling; CI does not, so the split
-        # keeps both halves executing rather than letting the expensive half
-        # quietly run nowhere.
+        # ONE LINE LEFT. TASK-018 migrated the other 35 shell suites to vitest;
+        # they run in the ts-tests job below. tests/ts-bridge is held back on
+        # purpose (TASK-023): it is the only assertion about the vitest bridge
+        # that is NOT executed by the vitest the bridge starts, so retiring it
+        # would answer a founder-pending question by deletion.
         run: |
           set -euo pipefail
-          bash tests/gate-arming/test.sh
-          bash tests/proc-cwd/test.sh
-          bash tests/state-dir/test.sh
-          bash tests/baton-durability/test.sh
-          bash tests/lifecycle-docs/test.sh
-          bash tests/session-resume/test.sh
-          bash tests/wait-mic/test.sh
-          bash tests/doc-links/test.sh
-          bash tests/commit-msg-gate/test.sh
-          bash tests/commit-subjects/test.sh
-          bash tests/codex-persona-label/test.sh
-          bash tests/subagent-feed/test.sh
-          bash tests/watcher-liveness/test.sh
-          bash tests/dod-gate/test.sh
-          bash tests/roster/test.sh
-          bash tests/pipeline/test.sh
-          # Added 2026-08-02 — tests/manifest found these running NOWHERE.
-          # drift-in-blueprint was in neither the gate nor CI (A-15 exactly);
-          # a2bp-e2e was gate-only, so CI carried no backstop for it.
-          # manifest itself migrated to TypeScript (TASK-018) and now runs in
-          # the ts-tests job below, not here.
           bash tests/ts-bridge/test.sh
-          bash tests/env-namespace/test.sh
-          bash tests/no-chain-guard/test.sh
-          bash tests/pull-behaviour/test.sh
-          bash tests/git-isolation/test.sh
-          bash tests/a2bp-pr-filing/test.sh
-          # pull-exec-bit and drift-in-blueprint migrated to TypeScript
-          # (TASK-018) and now run in the ts-tests job below, not here.
-          bash tests/a2bp-e2e/test.sh
-          bash tests/marker-merge/test.sh
-          bash tests/suite-sync/test.sh
-          # BUG-028 — bootstraps a project and runs THAT project's whole gate.
-          # The only suite that speaks for the projects downstream, whose first
-          # push is where every defect in the export boundary actually lands.
-          bash tests/pre-push-scanners/test.sh
-          bash tests/a2bp-contamination/test.sh
-          bash tests/a2bp-request/test.sh
-          bash tests/a2bp-build/test.sh
-          bash tests/a2bp-inputs/test.sh
-          # Full, not --fast: these add the deliberate-hang cases, which spend a
-          # real wall-clock timeout and so cannot fit the pre-push ceiling. They
-          # are the ones that prove a black-holed remote cannot stall an agent
-          # wake, so they must execute somewhere rather than nowhere.
-          bash tests/staleness/test.sh
-          bash tests/staleness/drift-integration.sh
-          bash tests/pre-push-secrets/test.sh
-          bash tests/signal-set/test.sh
-          # CI only, deliberately: this one drives the real watcher through a
-          # Also runs in the pre-push gate as of 2026-08-02. It is kept here so
-          # both halves run on every push — a suite nothing executes is the A-15
-          # defect this repo already had once. CI additionally runs it at the
-          # ORIGINAL pacing (SIGNAL_TEST_SETTLE=3), because the local run uses a
-          # 1s settle unit and a slower unit is the only thing that would catch
-          # a timing assumption baked into the fast clock.
-          SIGNAL_TEST_SETTLE=3 bash tests/signal-dispatch/test.sh
-          bash tests/agent-activity-bound/test.sh
 
   ts-tests:
     name: TypeScript regression suites (vitest)

@@ -71,11 +71,11 @@ bp_inputs_mode() {
 # that never calls `read_blueprint_source` — it works against the fetched REMOTE
 # base rather than a local checkout, deliberately — so it has no HEAD to expand
 # the directory from and validates against the raw MANAGED_FILES list. Without
-# this, `a2bp tests/pipeline/test.sh` is refused as unmanaged, i.e. no suite
+# this, `a2bp tests/pipeline/pipeline.spec.ts` is refused as unmanaged, i.e. no suite
 # could ever be back-propagated.
 #
 # Prefix, and the trailing `/` is what makes it a safe one: `tests/` matches
-# `tests/pipeline/test.sh` and not the sibling `testsuite/test.sh`. This is a
+# `tests/pipeline/pipeline.spec.ts` and not a sibling `testsuite/…`. This is a
 # MEMBERSHIP test only — whether the path really exists in the base is checked
 # after the fetch by bp_build_validate_base, and whether it exists HERE is
 # checked below, which is what refuses a suite this project does not have.

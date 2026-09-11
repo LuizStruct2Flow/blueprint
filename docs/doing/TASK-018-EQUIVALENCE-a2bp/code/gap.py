@@ -31,12 +31,14 @@ for s in SUITES:
 
 # --- observed reds, from the run logs --------------------------------------
 red_by_mut = {}          # mutant -> set of "suite:id"
+executed_rows = 0        # verdict ROWS, which repeats make larger than the keys
 cur = None
 for path in sys.argv[1:]:
     for line in pathlib.Path(path).read_text().splitlines():
         m = re.match(r'^(\S+)\s+shell=(PASS|FAIL) \[(.*)\]$', line)
         if m:
             cur = m.group(1)
+            executed_rows += 1
             red_by_mut.setdefault(cur, {})['shell'] = {
                 norm(t) for t in m.group(3).split() if t}
             continue
@@ -48,7 +50,14 @@ observed_ts = set()
 for mut, d in red_by_mut.items():
     observed_ts |= d.get('ts', set())
 
-print(f'mutants with a verdict: {len(red_by_mut)}')
+# UNIQUE LABELS AND EXECUTED ROWS ARE DIFFERENT NUMBERS, and reporting only the
+# first is how "how many trees were built?" became unanswerable. Serial
+# re-confirmation runs the same label again, so the rows always outnumber the
+# labels; a label retired from the catalogue (C23) survives in older logs, so
+# the labels can outnumber the current catalogue. Both are printed, and
+# `equiv.sh` prints the catalogue size itself — nothing here is transcribed.
+print(f'mutants with a verdict: {len(red_by_mut)} unique label(s) '
+      f'from {executed_rows} executed row(s)')
 print()
 total_declared = total_covered = 0
 for s in SUITES:

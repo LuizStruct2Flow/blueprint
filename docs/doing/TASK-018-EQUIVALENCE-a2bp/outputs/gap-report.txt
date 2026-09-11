@@ -1,24 +1,25 @@
-mutants with a verdict: 98
+mutants with a verdict: 99 unique label(s) from 114 executed row(s)
 
 === a2bp-build: 17 assertions, 17 with negative proof, 0 in the GAP
-=== a2bp-contamination: 36 assertions, 36 with negative proof, 0 in the GAP
-=== a2bp-e2e: 13 assertions, 13 with negative proof, 0 in the GAP
+=== a2bp-contamination: 38 assertions, 38 with negative proof, 0 in the GAP
+=== a2bp-e2e: 14 assertions, 14 with negative proof, 0 in the GAP
 === a2bp-inputs: 21 assertions, 21 with negative proof, 0 in the GAP
 === a2bp-pr-filing: 7 assertions, 7 with negative proof, 0 in the GAP
 === a2bp-request: 15 assertions, 15 with negative proof, 0 in the GAP
 
-TOTAL 109/109 assertions have an observed red mutant
+TOTAL 112/112 assertions have an observed red mutant
 
 --- shell/ts disagreements (port-stricter or port-weaker) ---
   B1: shell-only=[] ts-only=['a2bp-contamination:#1b']
   B13: shell-only=['a2bp-e2e:#10'] ts-only=['a2bp-build:#2', 'a2bp-contamination:#1b']
+  B15: shell-only=[] ts-only=['a2bp-contamination:#29']
   B2: shell-only=[] ts-only=['a2bp-contamination:#1b']
   B3: shell-only=['a2bp-build:#4'] ts-only=[]
   B7: shell-only=[] ts-only=['a2bp-contamination:#1b']
   B8: shell-only=['a2bp-e2e:#10'] ts-only=[]
   C0: shell-only=[] ts-only=['a2bp-contamination:#0']
   C1: shell-only=[] ts-only=['a2bp-contamination:#1b']
-  C15: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  C15: shell-only=[] ts-only=['a2bp-contamination:#21']
   C16: shell-only=['a2bp-e2e:#10'] ts-only=[]
   C17: shell-only=[] ts-only=['a2bp-contamination:#1b']
   C26: shell-only=[] ts-only=['a2bp-contamination:#1b']
@@ -26,7 +27,11 @@ TOTAL 109/109 assertions have an observed red mutant
   C5: shell-only=['a2bp-e2e:#10'] ts-only=[]
   C8: shell-only=['a2bp-e2e:#10'] ts-only=[]
   C9: shell-only=['a2bp-e2e:#10'] ts-only=[]
+  E7: shell-only=[] ts-only=['a2bp-contamination:#30']
   E8: shell-only=['a2bp-contamination:a2bp'] ts-only=['a2bp-contamination:#1', 'a2bp-contamination:#1b', 'a2bp-contamination:#20', 'a2bp-contamination:#22[]']
+  E9: shell-only=[] ts-only=['a2bp-e2e:#12']
+  F2: shell-only=[] ts-only=['a2bp-pr-filing:#2', 'a2bp-pr-filing:#3']
+  F3: shell-only=[] ts-only=['a2bp-pr-filing:#3']
   F4: shell-only=['a2bp-e2e:#3'] ts-only=[]
   F5: shell-only=[] ts-only=['a2bp-e2e:#3']
   I1: shell-only=['a2bp-e2e:#10'] ts-only=[]
@@ -35,6 +40,8 @@ TOTAL 109/109 assertions have an observed red mutant
   I2: shell-only=[] ts-only=['a2bp-e2e:#3']
   K14: shell-only=[] ts-only=['a2bp-request:#3c']
   K15: shell-only=[] ts-only=['a2bp-contamination:#1b']
+  K3: shell-only=[] ts-only=['a2bp-request:#3']
+  K4: shell-only=[] ts-only=['a2bp-request:#3b']
   K9: shell-only=[] ts-only=['a2bp-contamination:#1b']
 
 --- per-mutant observed TS red sets ---
@@ -52,7 +59,7 @@ TOTAL 109/109 assertions have an observed red mutant
   B12: a2bp-build:#9c
   B13: a2bp-build:#2 a2bp-build:#5 a2bp-build:#6 a2bp-build:#7 a2bp-build:#7c a2bp-build:#9c a2bp-build:#9f a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#1b a2bp-e2e:#2b a2bp-e2e:#5 a2bp-inputs:#11 a2bp-inputs:#12
   B14: a2bp-build:#9d
-  B15: (none)
+  B15: a2bp-contamination:#29
   B17: a2bp-build:#9a a2bp-build:#9b a2bp-build:#9d a2bp-build:#9e
   C0: a2bp-contamination:#0
   C1: a2bp-contamination:#1 a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#22b[] a2bp-contamination:#24[]
@@ -69,7 +76,7 @@ TOTAL 109/109 assertions have an observed red mutant
   C12: a2bp-contamination:#13
   C13: a2bp-contamination:#14
   C14: a2bp-contamination:#15 a2bp-contamination:#20
-  C15: (none)
+  C15: a2bp-contamination:#21
   C16: (none)
   C17: a2bp-contamination:#1 a2bp-contamination:#16 a2bp-contamination:#1b a2bp-contamination:#22b[] a2bp-contamination:#24[] a2bp-contamination:#7 a2bp-contamination:#7b a2bp-contamination:#8 a2bp-contamination:#9
   C18: a2bp-contamination:#25b
@@ -89,11 +96,12 @@ TOTAL 109/109 assertions have an observed red mutant
   E4: a2bp-e2e:#6
   E5: a2bp-e2e:#10
   E6: a2bp-e2e:#9
-  E7: (none)
+  E7: a2bp-contamination:#30
   E8: a2bp-contamination:#1 a2bp-contamination:#10 a2bp-contamination:#15 a2bp-contamination:#18b a2bp-contamination:#19 a2bp-contamination:#1b a2bp-contamination:#20 a2bp-contamination:#22[] a2bp-contamination:#4 a2bp-contamination:#6 a2bp-contamination:#7b a2bp-e2e:#2 a2bp-e2e:#2b a2bp-e2e:#3 a2bp-e2e:#4
+  E9: a2bp-e2e:#12
   F1: a2bp-pr-filing:#1
-  F2: (none)
-  F3: (none)
+  F2: a2bp-pr-filing:#2 a2bp-pr-filing:#3
+  F3: a2bp-pr-filing:#3
   F4: a2bp-pr-filing:#4
   F5: a2bp-e2e:#1 a2bp-e2e:#3 a2bp-pr-filing:#4b
   F6: a2bp-pr-filing:#4c
@@ -121,8 +129,8 @@ TOTAL 109/109 assertions have an observed red mutant
   I19: a2bp-inputs:#1b
   K1: a2bp-e2e:#3 a2bp-e2e:#4 a2bp-request:#1
   K2: a2bp-request:#2 a2bp-request:#4
-  K3: (none)
-  K4: (none)
+  K3: a2bp-request:#3
+  K4: a2bp-request:#3b
   K5: a2bp-request:#5e a2bp-request:#6
   K6: a2bp-contamination:#22b[] a2bp-request:#5b a2bp-request:#5c
   K7: a2bp-request:#5d

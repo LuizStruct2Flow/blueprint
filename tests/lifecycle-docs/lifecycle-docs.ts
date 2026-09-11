@@ -46,6 +46,11 @@ export const LIFECYCLE_STATES = ['doing', 'waiting-acceptance', 'done'] as const
 export interface LifecycleScan {
   /** How many per-item artefacts were examined. The non-vacuity number. */
   readonly checked: number
+  /** Lifecycle states that actually had a BUGS.md and were walked. This is
+   *  the non-vacuity handle: `checked` counts CONTENT, which a freshly
+   *  bootstrapped project legitimately has none of, so a floor on it is a
+   *  claim about this repository — and this suite ships. */
+  readonly statesScanned: number
   /** `<state>/<artefact>` for each artefact stranded away from its row. */
   readonly orphans: readonly string[]
   /** Files carrying a row of nothing but pipes. */
@@ -116,11 +121,13 @@ async function recordFiles(docsDir: string): Promise<string[]> {
 export async function scanLifecycleDocs(docsDir: string): Promise<LifecycleScan> {
   const orphans: string[] = []
   let checked = 0
+  let statesScanned = 0
 
   for (const state of LIFECYCLE_STATES) {
     // A state with no BUGS.md is not a state this repo uses — the shell version
     // skipped it, and a bootstrapped project legitimately has fewer.
     if ((await readOrEmpty(join(docsDir, state, 'BUGS.md'))) === '') continue
+    statesScanned++
 
     for (const name of await entries(join(docsDir, state))) {
       const isArtefact = name.startsWith('BUG-') && name !== 'BUGS.md'
@@ -162,7 +169,7 @@ export async function scanLifecycleDocs(docsDir: string): Promise<LifecycleScan>
     }
   }
 
-  return { checked, orphans, phantomRows, forwardingNotes }
+  return { checked, statesScanned, orphans, phantomRows, forwardingNotes }
 }
 
 /**

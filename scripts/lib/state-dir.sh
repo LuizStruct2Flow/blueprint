@@ -72,8 +72,12 @@
 # Verified: under a decoy GIT_DIR, `rev-parse` answered `<repo>/scripts` while
 # this walk was unmoved.
 #
-# **The #6c guard must match the COMMAND, not the substring "git"**, or it will
-# reject this safe expression.
+# **The guard must match the COMMAND, not the substring "git"**, or it will
+# reject this safe expression. That guard is `tests/forbidden-idiom` — it began
+# as `tests/state-dir` #6c, scoped to state-dir consumers, and BUG-077 widened
+# it to the HAZARD: nothing under `scripts/` or `.githooks/` resolves a path
+# from `git rev-parse --show-toplevel`, because that command answers about the
+# caller's git environment rather than about either root.
 #
 # WHY THE TERMINATOR IS THREE THINGS AND NOT ONE.
 #   .blueprint-root    this repo (tracked, export-ignore'd)

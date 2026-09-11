@@ -566,6 +566,24 @@ Both fail **loudly** rather than silently — that is the whole point of the
 resolver's no-match refusal, and it is a large improvement on BUG-066's green.
 But loud is still red, so neither ordering is a pushable slice.
 
+**LANDED 2026-09-11 (BUG-066), and the conclusion above is unchanged — but the
+mechanism is sharper than §5.3 proposed.** The hook does not probe for
+`pipeline.sh` and stop; it RANKS candidates on both things the gate consumes,
+rank 1 being renderer **and** `tests/`, rank 2 renderer alone, no-match being a
+refusal. So the two half-moved orderings above resolve differently from the way
+this paragraph predicted, and both still fail loudly:
+
+- move `tests/` first → the root is rank 2 (renderer, no suites) and
+  `scaffolding/` is no candidate at all → the root wins, announces that it has
+  no `tests/`, and the suite stages fail by name;
+- move `scripts/` first → `scaffolding/` is rank 2 and the root is no candidate
+  → `scaffolding/` wins and does the same.
+
+The ranking's real work is the case §5.3 could not answer: **mid-move with the
+root still complete, the root wins**, because a complete tree outranks a
+half-built one regardless of order. `scaffolding/` wins only when it is
+complete too. `tests/code-root` pins all five shapes.
+
 **Therefore `scripts/` + `tests/` move in one commit**, together with whatever
 part of `docs/` decision 3 sends to `scaffolding/docs/` — the suites that read
 `$ROOT/docs` follow the same code root. What remains genuinely separable is the

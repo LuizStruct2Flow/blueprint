@@ -240,6 +240,20 @@ export async function feedFixture(
     async readerReady(workspaceRelFile, options = {}) {
       const { timeoutMs = 30_000, wrap = (t: string) => `${t}\n` } = options
       const tag = `READY-${randomBytes(6).toString('hex')}`
+      // THE FILE MUST ALREADY EXIST. `ScopedFs.write` creates parents, so a wrong
+      // path silently creates a file nothing watches and the handshake then burns
+      // its whole budget reporting "the supervisor has not registered <path>" —
+      // naming a mechanism that is working fine. That happened during this port
+      // (one case pointed at a sibling fixture's directory) and cost a diagnosis;
+      // it is the BUG-041/042 misdirection class, where the message names the one
+      // thing that demonstrably did not go wrong.
+      if (!(await s.fs.exists(workspaceRelFile))) {
+        throw new Error(
+          `readerReady("${workspaceRelFile}"): no such file in this scenario. The ` +
+            `path is WORKSPACE-relative, so it must carry the fixture directory ` +
+            `name (e.g. "myfixture/state/gemini-runs.log").`,
+        )
+      }
       let appends = 0
       await vi.waitFor(
         async () => {
@@ -319,7 +333,13 @@ export async function feedFixture(
       return { supervisors: Number(sup), tails: Number(tails) }
     },
 
-    async expectSupervisors(want, timeoutMs = 30_000) {
+    // 10 s, not 30. A supervisor becomes resident in well under a second here and
+    // the shell suite's own `wait_sup` allowed 4 s, so 30 s bought nothing on a
+    // healthy tree and cost the full bound on every FAILING assertion — under the
+    // RC-1 mutant (instance guard deleted) that is two timeouts per case and turned
+    // a 40 s spec into a 36 minute one, which is what made the equivalence sweep
+    // impractical. R4's note applies: set the bound from a measurement.
+    async expectSupervisors(want, timeoutMs = 10_000) {
       await vi.waitFor(
         async () => {
           const { supervisors } = await fixture.ownedProcesses()

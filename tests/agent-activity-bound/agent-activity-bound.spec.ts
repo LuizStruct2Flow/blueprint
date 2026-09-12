@@ -109,6 +109,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
+import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -973,5 +974,86 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     // `$()` strips trailing newlines, so a complete record arrives looking
     // incomplete and waits for the force-flush bound instead of being emitted.
     expect(await code(FEED)).not.toMatch(/^[ \t]*(local[ \t]+)?delta=\$\(/m)
+  })
+})
+
+
+describe('BUG-95 — the follower count is scoped to what this scenario owns', () => {
+  // The follower half of #15 and #2 used to be a machine-wide `grep -c`, so it
+  // counted any process whose argv merely CONTAINED `tail -n0 -F` — a sibling
+  // suite's follower, an agent's shell wrapper, or the `pgrep -fa 'tail -F'` you
+  // run to find out why the gate is red. The supervisor half had been scoped by
+  // cwd since BUG-036; the fix made both halves one predicate.
+  //
+  // BUG-95 shipped deliberately without a case ("the all-TypeScript ruling
+  // forbids new shell test coverage"), which left DoD §2 failing on every push
+  // in this repo. This is that case, in TypeScript, against the port.
+  it('#95 a follower OUTSIDE the fixture is not ours; one INSIDE it is', async () => {
+    await scenario('aab-95', async (s) => {
+      const b = await bound(s)
+
+      // Resident, and demonstrably so before anything is asserted about it.
+      // A decoy nobody proved was running would make the `tails: 0` below pass
+      // for the wrong reason — which is the shape of bug this suite exists for.
+      const resident = async (pid: number): Promise<boolean> => {
+        const r = await s.run('sh', ['-c', `ps -p ${pid} -o args= 2>/dev/null || true`], {
+          cwd: s.workspace.root,
+        })
+        return r.stdout.includes('tail -n0 -F')
+      }
+
+      // Rooted at the blueprint checkout — outside this scenario's workspace, and
+      // therefore outside every other scenario's too, so it cannot cross-talk.
+      const outside = spawn('tail', ['-n0', '-F', join(REPO_ROOT, 'package.json')], {
+        cwd: REPO_ROOT,
+        stdio: 'ignore',
+        detached: true,
+      })
+      const outsidePid = outside.pid ?? 0
+
+      // Rooted INSIDE the fixture. Without this half the case would pass against a
+      // predicate that always answers 0 — non-vacuity, not belt-and-braces.
+      const inside = spawn('tail', ['-n0', '-F', join(b.f.repo, 'AGENT_SIGNAL.md')], {
+        cwd: b.f.repo,
+        stdio: 'ignore',
+        detached: true,
+      })
+      const insidePid = inside.pid ?? 0
+
+      try {
+        expect(outsidePid, 'the outside decoy did not spawn').toBeGreaterThan(0)
+        expect(insidePid, 'the inside follower did not spawn').toBeGreaterThan(0)
+        await vi.waitFor(
+          async () => {
+            if (!(await resident(outsidePid))) throw new Error('outside decoy not resident yet')
+            if (!(await resident(insidePid))) throw new Error('inside follower not resident yet')
+          },
+          { timeout: 4_000, interval: 50 },
+        )
+
+        // Both are resident and both match the argv pattern. A machine-wide count
+        // answers 2 here; an ownership-scoped one answers 1.
+        expect(
+          await b.f.ownedProcesses(),
+          'a follower rooted outside this scenario was counted as ours — the '
+            + 'machine-wide grep is back, and a sibling suite can now change this '
+            + "suite's verdict",
+        ).toEqual({ supervisors: 0, tails: 1 })
+      } finally {
+        for (const pid of [outsidePid, insidePid]) {
+          if (pid > 0) {
+            try {
+              process.kill(-pid, 'SIGKILL')
+            } catch {
+              try {
+                process.kill(pid, 'SIGKILL')
+              } catch {
+                /* already gone */
+              }
+            }
+          }
+        }
+      }
+    })
   })
 })

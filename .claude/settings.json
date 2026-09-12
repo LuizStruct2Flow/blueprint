@@ -31,7 +31,6 @@
       "Bash(aws codepipeline get-* *)",
       "Bash(aws codepipeline list-* *)",
       "Bash(aws codepipeline start-pipeline-execution *)",
-      "Bash(aws codepipeline put-approval-result *)",
       "Bash(aws codebuild batch-get-builds *)",
       "Bash(aws codebuild list-* *)",
       "Bash(aws sesv2 get-* *)",
@@ -206,6 +205,7 @@
       "Bash(cat *.env.*)"
     ],
     "ask": [
+      "Bash(aws codepipeline put-approval-result *)",
       "Bash(git push --force*)",
       "Bash(git push -f *)",
       "Bash(git push *--force*)",

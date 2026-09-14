@@ -144,6 +144,11 @@ function scenarioEnv(s: {
     // TASK-025 H2 — the blueprint cache reads it. Without this an operator's
     // ambient value puts every fixture's cache in their real cache directory.
     XDG_CACHE_HOME: join(s.home, '.cache'),
+    // BUG-110 — the upward walk in scripts/lib/state-dir.sh stops at the
+    // workspace. A project marker above it (the empty /tmp/.git a Codex sandbox
+    // provides) otherwise becomes the "project root" of every markerless
+    // fixture. workspace.ts also refuses to create a workspace under one.
+    BP_STATE_ROOT_CEILING: s.workspaceRoot,
     AGENT_STATE_HOME: s.stateHome,
     AGENT_SIGNAL_FILE: s.signalFile,
     AGENT_FEED_LOG: s.feedLog,

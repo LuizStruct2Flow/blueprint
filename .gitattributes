@@ -120,6 +120,12 @@ tests/bootstrap-gate/              export-ignore
 # has none.
 tests/blueprint-relocation/        export-ignore
 
+# BUG-114 — `managed-references` asks whether THE BLUEPRINT's MANAGED_FILES
+# names every script its managed files call. In a derived project a locally
+# edited managed file may name that project's own scripts, which would read as a
+# gap there is nothing to fix for — so this one is blueprint-only by subject.
+tests/managed-references/          export-ignore
+
 # --- TASK-018 PHASE 2: the TypeScript harness SHIPS -------------------------
 #
 # THE INVARIANT IS UNCHANGED, and it is asserted rather than remembered:

@@ -92,9 +92,11 @@ are in revision 3 (`90fa82a`: H5 scrubs undeclared `GIT_*`/`AGENT_*` in direct r
 case #23 runs group INT and group TERM). **The only blocker left is the founder's:**
 record T ("matches the newest blueprint") or P ("matches the version last pulled, plus
 a newer-exists line") — plan §2.2 lists what changes under P. Build nothing before that.
-**Founder decisions recorded 2026-09-14** (not yet written into the plan): adopt the
-`released` branch — yes; a leftover `blueprint_source` field — warn on every run (no
-cut-off date); the toolchain installer writes the per-machine `blueprint` command — yes.
+**Founder decisions recorded 2026-09-14:** **T** — `drift` means "matches the newest
+blueprint" (unblocks implementation); adopt the `released` branch — yes; a leftover
+`blueprint_source` field — warn on every run (no cut-off date); the toolchain installer
+writes the per-machine `blueprint` command — yes. Christian is writing them into the
+plan; implementation starts after the TASK-026 settings commit is pushed.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

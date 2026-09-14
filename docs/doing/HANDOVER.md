@@ -200,6 +200,21 @@ independent checking in one session. Re-measure a number before repeating it.
 
 ## 5. OPEN FOR THE FOUNDER
 
+- **Repository settings (founder, 2026-09-14): squash-merge only, and a branch is deleted
+  when its PR merges.** A closed-unmerged PR's branch is NOT auto-deleted — delete it by
+  hand (`gh api -X DELETE repos/LuizStruct2Flow/blueprint/git/refs/heads/<branch>`, which
+  triggers no pre-push hook). Leftover merged branches were removed the same day.
+- **PR #64 (open since 2026-09-12) — a live security gap.** `.claude/settings.json` still
+  auto-allows `aws codepipeline put-approval-result`, so an agent can approve a production
+  deployment unprompted; the PR moves it to `ask`. Its `BUG#110` collides with the
+  `/tmp/.git` BUG-110 — re-implement on main under a new number, reproducer first; the
+  settings edit itself must be the founder's (agents are refused). Then close #64 and
+  delete `bug/110-approval-result-ask` (remote and local).
+- **Five untriaged a2bp requests from linkedin-watcher-agent, filed 2026-09-14:**
+  #65 (`security.yml` — may duplicate BUG-115), #67 (toolchain installer), #68 (harness
+  and state-root, 10 files), #69 (`scripts/blueprint` + suite-sync), #70 (codex signal
+  watcher). Treat like #66: cross-provider review first, then a founder decision.
+
 - **TASK-023** — `tests/manifest` #9 (the control proving itself independent of
   the toolchain) could not be ported; `tests/ts-bridge/test.sh` is held back until
   this is decided.

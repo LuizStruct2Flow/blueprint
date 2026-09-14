@@ -102,10 +102,12 @@ Implementation order: (1) reproducer + harness scrubs, (2) drift/pull by address
 revision-4 additions (Alexey, 2026-09-14): revise again** →
 `.scratch/ALEXEY-plan025-rev4-review.md` — installer ownership is forgeable by a marker
 line; migration step 8 deletes the working command before installing; rollback cannot
-reach projects already on `released`; the release job's cases never run it. Philipp is
-writing revision 5 for commits 3–4, migration and rollback only. **Commits 1–2 are
-unaffected and Christian is building them now.** Commit 3 does not start before
-revision 5 is reviewed.
+reach projects already on `released`; the release job's cases never run it. **Revision 5
+(`cb18a17`, Philipp) adopts all four**, with measurements in its §R4 table, and found two
+more: a SIGINT to the installer alone was absorbed and the command swap went ahead, and
+revision 4's release job wrongly failed an old-run rerun (`origin/released` vs
+`FETCH_HEAD`). **Alexey is re-reviewing revision 5.** Commits 1–2 are unaffected and
+Christian is building them now; commit 3 does not start before that verdict.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

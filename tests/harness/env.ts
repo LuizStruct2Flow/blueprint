@@ -127,6 +127,10 @@ const ENV_KIND = {
   // inherited into a fixture that was never told about it.
   BP_CODE_ROOT: 'path',
   BP_STATE_ROOT: 'path',
+  // BUG-110 — the ceiling on bp_state_root's upward walk. scenarioEnv sets it to
+  // the workspace root. 'path', so an ambient value is scrubbed and an override
+  // cannot move the ceiling outside the workspace.
+  BP_STATE_ROOT_CEILING: 'path',
   // TASK-025 H1 — the documented per-shell override of where `drift` and `pull`
   // read the blueprint, and the CLI's own internal global. An ambient value makes
   // a fixture compare against the operator's real checkout. It is UNPREFIXED, so

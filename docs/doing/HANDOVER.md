@@ -64,22 +64,18 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
-**First: TASK-026 — implement PR #66** (the `a2bp` request from struct2flow-www),
-all six changes, **in the blueprint** rather than merged as-is (founder decision
-2026-09-14, after Jesko's cross-provider review). Being built. The row carries the
-specification; two changes differ from what the PR says — the missing managed
-scripts hurt *existing* projects that `pull`, not fresh bootstraps, and `drift`'s
-managed-region comparison must be ONE helper shared with `pull`'s selection and
-preview, refusing inverted markers. Close the PR with a comment linking the commits.
-**Five of six pushed 2026-09-14** (BUG-114, BUG-112, BUG-034, BUG-113, the skip hint,
-the annotation). **Only (6) remains, and it is blocked on the founder:** removing the
-`agent-exchange` entries from `.claude/settings.json` is refused to agents as
-self-modification, twice. The `settings.local.json` half is already in place (untracked).
-Once the founder edits `settings.json`, commit it as `TASK#26:`, put its SHA into
-`.scratch/t026/pr66-close-comment.md`, and close PR #66 with that comment. The shared
-comparison is `bp_prospective_pull` / `bp_prospective_for` in `scripts/blueprint`.
+**TASK-026 (PR #66) is DONE and waiting for acceptance** — all six changes pushed
+2026-09-14, PR closed with a comment linking the commits, its branch deleted. The shared
+comparison it built is `bp_prospective_pull` / `bp_prospective_for` in
+`scripts/blueprint`; TASK-025 swaps only the latter.
 
-**Then: TASK-025 — `drift` and `pull` read the blueprint by its repository
+**Derived projects may pull now** (this checkout matches GitHub again) — with care:
+struct2flow-www freely; storm2flow file by file (its `settings.json` is ~5 months old);
+**linkedin-watcher-agent not yet** — its five open a2bp requests (§5) are its own edits
+to managed files that a pull would offer to overwrite, and the pull removes its
+`agent-exchange` permissions, which it uses (move them to its `settings.local.json` first).
+
+**Now: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)
 is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md`.
 **First review (Alexey, Codex): build A with changes** —

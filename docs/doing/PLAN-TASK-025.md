@@ -1,9 +1,11 @@
 # PLAN — TASK-025: `drift` and `pull` read the blueprint by its address
 
-**Status:** PLAN, **revision 2**. Revised after Alexey's cross-provider review
-(Codex, verdict *"build A with changes"*). It needs a re-review of this revision,
-and a founder answer to §2.1. **No code is authorised by this document.**
-Author: Christian (Senior Architect). Revision 1 and revision 2 both 2026-09-14.
+**Status:** PLAN, **revision 3**. Alexey's re-review of revision 2 (Codex)
+returned *"build with these changes"*, and both technical changes are folded in
+(§R2). **Implementation is BLOCKED until the founder records contract T or P
+(§2.1).** The two contracts produce different code and different tests, so the
+implementer cannot start from an open choice. **No code is authorised by this
+document.** Author: Christian (Senior Architect). Revisions 1–3 all 2026-09-14.
 
 **Two options were on the table; the review chose A with changes.**
 
@@ -43,6 +45,16 @@ exact trap shape finding 1 reproduced (`trap _a2bp_cleanup EXIT INT TERM`,
 `scripts/blueprint:1497`), and a2bp pushes and opens PRs after it. The same
 continuation is likely there, but it was **not** reproduced against a2bp itself.
 It needs its own bug row.
+
+## R2. Response to the re-review (revision 3)
+
+Alexey found findings 1, 2 and 5–9 and 11 resolved. The three that were not:
+
+| # | Finding (short) | Answer | Where |
+|---|---|---|---|
+| 3, 10 | Direct vitest runs still inherit **undeclared** ambient `GIT_*` / `AGENT_*` names; the bridge unsets the whole prefix population, so the two run modes differ | **Adopted. Checked against the code, and it holds.** `fixtureEnv` deletes `FORBIDDEN_ENV` (`env.ts:534`), which is built from *declared* names only (`:267`), then any `GIT_CONFIG*` (`:543`). `assertProcessEnvClean` checks `FORBIDDEN_ENV` only (`:579`). `overrideKind` refuses an undeclared name as an explicit **override** (`:289`) but nothing removes it as an **ambient** value. `run-ts-suites.sh:177` unsets every `GIT_`/`AGENT_`/`BP_` name. No other path covers the gap. So `GIT_EXEC_PATH`, `GIT_ASKPASS`, `GIT_ALLOW_PROTOCOL` and every future git name reach fixtures in a direct run. New rule H5: undeclared ambient `GIT_*`/`AGENT_*` are scrubbed by `fixtureEnv` and refused by `assertProcessEnvClean`; declared `inert` names are kept. ts-bridge #1c compares that rule, not the declared list. H3's two declarations become unnecessary and are dropped, and its witness moves under H5 | §9.1 H5 |
+| 4 | T versus P is still open, and the implementation does **not** survive both answers unchanged | **Adopted.** Revision 2's sentence saying it did is withdrawn. Implementation is blocked until the founder records T or P. §2.2 lists exactly what differs under P | §2.1, §2.2, §10 |
+| 8 | Case #23 pins group INT only; the measured contract covers group TERM too | **Adopted.** #23 now sends group INT and group TERM, as two runs | §9.2 #23 |
 
 ---
 
@@ -266,7 +278,9 @@ route. The tree keeps one oracle for both paths.
 
 ## 2. Which commit is "the blueprint"
 
-**Under contract T (§2.1), which this plan is written for:** the tip of
+**Under contract T (§2.1).** §1 and §3–§10 are written in T's terms. If the
+founder picks P, §2.2 replaces the parts it names before any code is written.
+Under T, "the blueprint" is the tip of
 `blueprint_branch` on `blueprint_remote`, as fetched by this run into its own
 ref. `CURRENT_SHA` is that SHA, and the tree's `HEAD` equals it.
 
@@ -315,15 +329,97 @@ project in sync with the blueprint?":
 | `bootstrap_sha` absent from history | the explicit line, exit 0 | **cannot compare at all: 5** |
 | Wake protocol, CLAUDE.md | four cases (§3) | a fifth: *"in sync with pin X; newer: N commits / unknown"* |
 | Cache design (§1) | as written | unchanged. The refresh is still attempted every run; it only changes what a failure means |
-| Tests that change | — | #5 (report shows availability, not drift), #13, #14, #25 (failed refresh with pin cached → 0 + "unknown"), a new partial-pull wording case |
+| Tests that change | — | see §2.2 |
 | Option B | B's offline advantage stands | **gone**: A with the cache answers the same narrower question offline |
 
 The backlog row's wording (*"an offline wake must say could not reach the
 blueprint rather than report clean"*) reads naturally as T, and both columns
-satisfy it. That is why this is recorded as a question and not inferred. **The
-implementation shape survives either answer.** The cache, the tree, the handlers
-and the harness changes are identical, and P adds one branch in `cmd_drift` plus
-the wording above.
+satisfy it. That is why this is recorded as a question and not inferred.
+
+**Implementation is blocked until the founder records T or P.** Revision 2 said
+the implementation survives either answer. The re-review showed it does not
+(§R2 #4): P changes exit statuses, report text and partial-pull reporting. It
+changes twelve existing cases and adds two (§2.2). What is shared is the cache, the per-run tree mechanism, the
+handlers, the shielded writes and the harness changes (§9.1). The answer is
+recorded here, quoted and dated, and in the TASK-025 backlog row, before the
+reproducer commit (§10) starts.
+
+### 2.2 What changes if the founder picks P
+
+Nothing below applies under T. Under P, each item replaces what §1–§10 say.
+
+**What is compared.** `drift` builds its tree at `bootstrap_sha` (the pin), using
+the same cache, `clone --shared` and `checkout --detach` as §1.3. The refresh
+still runs every run, into its own ref, and is used only for the
+"newer blueprint" line. The pin is **never** read from the bare cache directly:
+building its tree is the validation (review finding 9). `pull` is **unchanged**:
+it previews and applies the fetched tip, so any refresh failure is 5 for `pull`
+under both contracts.
+
+**Refresh-failure status (`drift` only).**
+
+| Cause | T | P |
+|---|---|---|
+| unreachable, timed out, branch missing, no timeout provider | 5 | **0** if the pin's tree builds from the cache, with `newer blueprint: unknown (<cause>)`. **5** if the pin is not in the cache. With no timeout provider, no fetch is attempted |
+| scratch not creatable, cache not creatable, pin's tree fails to build (damaged) | 5 | 5 |
+| refresh succeeded, `bootstrap_sha` not in the remote's history | 0 + the explicit line (§2) | **5**: nothing can be compared |
+| `bootstrap_sha` missing or not a SHA | not needed for the comparison | **4**: *"no bootstrap_sha, so the pinned contract has nothing to compare against. Run a full pull."* |
+
+**Report wording.**
+
+```
+blueprint:  git@github.com:LuizStruct2Flow/blueprint.git  (main)
+pinned:     <bootstrap_sha>
+fetched:    <tip sha> at 2026-09-14T15:02:11Z      | fetched: FAILED (<cause>)
+newer blueprint: N commits since the pin  | up to date  | unknown (could not reach <remote>)
+```
+
+- The clean line becomes `✓ All blueprint-managed files match the pinned
+  blueprint <short>.` No wording under P says "latest", "HEAD" or "in sync"
+  without naming the pin.
+- "Commits since sync" is replaced by the `newer blueprint` count, taken from
+  this run's own ref only.
+- CLAUDE.md §"Wake-time drift check" gets five cases instead of four:
+  (1) matches the pin and up to date; (2) drifted from the pin; (3) matches the
+  pin, newer blueprint available, so offer a pull; (4) matches the pin, newer
+  unknown, so tell the founder availability was not checked; (5) status 5, the
+  check did not run. Case 1's quoted text changes from "match the blueprint
+  HEAD" in the same commit.
+
+**Partial pull.** `bootstrap_sha` still moves only on a full pull (BUG-016). A
+partially pulled file then differs from the pin, so under P:
+
+- **Refresh succeeded.** A file that differs from the pin is compared a second
+  time, against a tree at the fetched tip (built only when such a file exists,
+  about 27 ms). If it matches the tip, it is reported as
+  `^ <file>  ahead of the pin, matches <branch> tip <short>` and does **not**
+  count as drift. Both comparisons go through `bp_prospective_for` (BUG-113's
+  single comparison), with `BLUEPRINT_ROOT` bound to each tree in turn.
+- **Refresh failed.** A partial pull cannot be told from a local edit, so the
+  file is reported as drift:
+  `~ <file>  (differs from the pin; tip unknown, may be a partial pull)`.
+
+**Cases that change** (§9.2). Under P:
+
+| # | Change |
+|---|---|
+| 1 | header asserts the `pinned:`, `fetched:` and `newer blueprint:` lines |
+| 3 | splits. **3a**, pin cached → 0 and `unknown`, no "up to date". **3b**, cold cache → 5. Mutant for 3a: print "up to date" after a failed refresh |
+| 4 | splits the same way; the time bound is unchanged |
+| 5 | run 2's file report is unchanged (the pin did not move), and it shows `newer blueprint: 1 commit`. Mutant: compare against the tip |
+| 13 | the unpushed local commits appear in no count and no report |
+| 14 | pin absent from remote history → **5** (was 0) |
+| 16 | pin cached → 0 and `unknown (no branch '<b>' on that remote)`; cold → 5 |
+| 17 | pin cached → 0 and `unknown`, with no fetch attempted; cold → 5, no cache created |
+| 24 | mutant (b) is re-aimed: A's `newer blueprint` count must come from A's own ref, not C's |
+| 25 | failed refresh with a warm cache → **0** and `unknown` (was 5). Mutant: take the count from the newest cached `bp-run` ref |
+| 27 | (a) deletes the **pin's** root tree object → 5 |
+| 10 | each relocation shape's fixture needs its pin committed at that layout |
+| new 29 | partial pull: ahead-of-pin line when the tip is reachable; drift with the "may be a partial pull" note when it is not. Mutant: compare against the pin only |
+| new 30 | missing `bootstrap_sha` → 4 |
+
+Unchanged under P: #2, #6–#9, #9b (runs against the pin's tree), #11, #12, #15,
+#18–#23, #26, #28, #28b, and every `pull` case.
 
 ---
 
@@ -528,9 +624,9 @@ discovered from the filesystem, so nothing needs registering.
     `unset BLUEPRINT_ROOT`. That is a one-name second copy, pinned rather than
     trusted:
   - `tests/ts-bridge` #1c: the fixture exports `BLUEPRINT_ROOT` into the bridge,
-    the `npx` stub records prefix names **plus** `UNPREFIXED_FORBIDDEN` names
-    (imported, per BUG-063), and the assertion at `:215` accepts a name that is
-    prefixed **or** listed there. Mutant: delete the `unset` → #1c red.
+    and the `npx` stub records prefix names **plus** `UNPREFIXED_FORBIDDEN`
+    names (imported, per BUG-063). The assertion compares H5's rule, not the
+    declared list (below). Mutant: delete the `unset` → #1c red.
   - **Witness W1** (`harness.spec.ts`): with `process.env.BLUEPRINT_ROOT` set,
     `fixtureEnv()` has no `BLUEPRINT_ROOT`. Mutant: drop it from
     `UNPREFIXED_FORBIDDEN` → red.
@@ -550,12 +646,70 @@ discovered from the filesystem, so nothing needs registering.
   every fixture's cache in their real cache directory. Witness: an ambient value
   is replaced; an override outside the workspace is refused. Mutant: remove it
   from `scenarioEnv` → red.
-- **H3 — `GIT_SSH_COMMAND` and `GIT_SSH` are declared `'denied'`** (new). They
-  are undeclared today, so an ambient value is **inherited** by fixtures in a
-  direct vitest run, and it would override the `ssh` PATH shim every hang case
-  relies on. The `GIT_` prefix keeps the ts-bridge invariant intact. Witness: an
-  ambient `GIT_SSH_COMMAND` is absent from `fixtureEnv()`. Same direct-run cost
-  as H1.
+- **H3 — folded into H5** (revision 3). Revision 2 declared `GIT_SSH_COMMAND`
+  and `GIT_SSH` `'denied'` by name. They were two members of a population, and
+  H5 covers the whole population, so the declarations add nothing and are not
+  made. An explicit override of either is already refused as an undeclared
+  `GIT_` name (`env.ts:289`). The witness survives as H5's W3.
+- **H5 — the whole undeclared `GIT_*` / `AGENT_*` population is forbidden in
+  direct runs** (§R2 #3). Today `fixtureEnv` removes `FORBIDDEN_ENV` (declared
+  names, `env.ts:534`) plus `GIT_CONFIG*` (`:543`), and `assertProcessEnvClean`
+  checks `FORBIDDEN_ENV` only (`:579`). The bridge unsets every `GIT_`/`AGENT_`/`BP_`
+  name (`run-ts-suites.sh:177`). Undeclared ambient names such as `GIT_EXEC_PATH`,
+  `GIT_ASKPASS`, `GIT_ALLOW_PROTOCOL` and `GIT_SSH_COMMAND` therefore reach fixtures
+  in a direct `vitest run` and not through the gate.
+  - **One predicate** in `env.ts`, exported:
+    `isForbiddenAmbient(k) = FORBIDDEN_ENV.includes(k) || (/^(GIT|AGENT)_/.test(k) && ENV_KIND[k] !== 'inert')`.
+    It is true for declared hazards (including `BP_` and `UNPREFIXED_FORBIDDEN`
+    names, which reach `FORBIDDEN_ENV` by declaration) and for every
+    **undeclared** `GIT_`/`AGENT_` name. It is false for declared `inert` names
+    (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `env.ts:232–235`), which stay.
+  - **`fixtureEnv` scrubs** `Object.keys(env).filter(isForbiddenAmbient)`. That
+    one loop replaces both loops at `:534` and `:543`. `GIT_CONFIG_KEY_<n>` is
+    an undeclared `GIT_` name, so the prefix loop's reason is kept without the
+    loop. Overrides are still applied after the scrub, under `overrideKind`, as
+    today.
+  - **`assertProcessEnvClean` refuses**
+    `Object.keys(process.env).filter(isForbiddenAmbient)`. It exists to catch a
+    spec that spawns through `child_process` directly, which would inherit the
+    undeclared names just as well as the declared ones.
+  - **`BP_` is deliberately not in the undeclared arm**, as `overrideKind`
+    already records (BUG-066: `BP_NO_PROMPT` and other tunables are passed on
+    purpose). That is the one population where the bridge scrubs more than a
+    direct run, and #1c states it rather than leaving it implied.
+  - **ts-bridge #1c compares the rule.** The driver (`ts-bridge.spec.ts:432–438`)
+    additionally exports an undeclared `GIT_ALLOW_PROTOCOL=decoy`, an undeclared
+    `AGENT_TASK025_DECOY=<escape token>` and the declared-inert
+    `GIT_AUTHOR_NAME=decoy`. None of them can redirect git inside the driver.
+    Assertions:
+    (1) the runner sees no recorded name at all, as today;
+    (2) for every name the driver exports and every `FORBIDDEN_ENV` name,
+    `isForbiddenAmbient(name)` implies the bridge removed it;
+    (3) every name `isForbiddenAmbient` accepts is prefixed or in
+    `UNPREFIXED_FORBIDDEN`, which replaces the declared-list loop at `:215`.
+    Together these say the gate removes at least what a direct run removes, and
+    the only extra it removes is declared-inert or `BP_`.
+  - **Witness W3** (`harness.spec.ts`): with `GIT_ALLOW_PROTOCOL`,
+    `GIT_SSH_COMMAND`, `AGENT_TASK025_DECOY`, `GIT_CONFIG_KEY_0` and
+    `GIT_AUTHOR_NAME` set in `process.env` (restored in `finally`),
+    `fixtureEnv()` lacks the first four and keeps `GIT_AUTHOR_NAME`. Mutants:
+    revert the scrub to `FORBIDDEN_ENV` (red); drop the undeclared arm from the
+    predicate (red); drop the `!== 'inert'` guard (red, `GIT_AUTHOR_NAME` gone).
+  - **Witness W4:** `assertProcessEnvClean` throws naming `GIT_ALLOW_PROTOCOL`
+    when only that is set, and does not throw when only `GIT_AUTHOR_NAME` is
+    set. Mutant: revert it to `FORBIDDEN_ENV.filter` → red.
+  - **Mutant for #1c:** narrow the bridge's loop to unset only the names in
+    `FORBIDDEN_ENV` → #1c red on `GIT_ALLOW_PROTOCOL`.
+  - **Cost, stated:** a direct `vitest run` from a shell that exports any
+    undeclared `GIT_`/`AGENT_` name (`GIT_EDITOR`, `GIT_PAGER`) is refused, with
+    the names listed. The remedy is to unset it, run through the gate's runner,
+    or declare it `'inert'` in `ENV_KIND` if it truly is. That is the existing
+    rule for undeclared names (`env.ts:274`) applied to ambient values. At
+    implementation, grep that no spec or harness module writes a `GIT_`/`AGENT_`
+    name into `process.env` itself.
+  - **Ripples:** the comments at `env.ts:260–265` and `run-ts-suites.sh:164–167`
+    ("FORBIDDEN_ENV is fifteen names … by prefix") are rewritten to describe the
+    predicate.
 - **H4 — `s.pathWithout(names)`**: a `PATH` of one workspace directory holding
   symlinks to every executable on the current `PATH` (first occurrence wins),
   except `names`. It is derived, not hand-listed. It gives the
@@ -564,7 +718,7 @@ discovered from the filesystem, so nothing needs registering.
 - `BP_FETCH_TIMEOUT: 'opaque'`.
 
 Remotes are workspace paths, or `ssh://git@127.0.0.1/blackhole.git` behind the
-FIFO-blocking `ssh` shim that `tests/staleness` #8 uses. With H3, nothing can
+FIFO-blocking `ssh` shim that `tests/staleness` #8 uses. With H5, nothing can
 reach a real host.
 
 ### 9.2 Cases, each with its mutant (R6)
@@ -610,7 +764,7 @@ for the process to exit.
 | 20 | **INT and TERM during fetch** (`ssh` shim) → died of that signal; no scratch; no `refs/bp-run/*`; project files and `.blueprint-source` byte-identical | revision 1's trap: `trap cleanup EXIT INT TERM` without exit → the run continues |
 | 21 | **INT and TERM during compare** (`diff` shim), same assertions | same |
 | 22 | **INT and TERM at pull's write step** (`mkdir` shim, `pull --yes` with drift present), same assertions: **no file written after the signal** | same; also: move the handler install after the refresh |
-| 23 | **Group INT mid-write** (`cat` shim; signal sent to the process group) → the target file holds the **complete** new content (never truncated), `.blueprint-source` is unchanged, and the run died of INT | remove `_bp_shielded_write` (file left empty), or move the redirect outside its subshell |
+| 23 | **Group INT and group TERM mid-write**, two runs (`cat` shim; the signal is sent to the whole process group). Each run: the target file holds the **complete** new content (never truncated), no later write starts, `.blueprint-source` is unchanged, and the run died of that signal (130 for INT, 143 for TERM) | remove `_bp_shielded_write` (file left empty, both runs), move the redirect outside its subshell, or ignore INT only in the subshell (TERM run red) |
 | 24 | **Concurrent runs, one cache.** A blocks in compare (its own `diff` shim dir). B runs a full drift with the same `HOME` → 0. The remote advances; C runs → 0 at the new tip. A is released → 0, its header SHA and "commits since sync" are **its own tip**, not C's. All scratch gone, cache valid | (a) cleanup deletes the cache or all `refs/bp-run/*` → A's history read fails; (b) read the log from a shared branch ref instead of the run's SHA → A lists C's commits |
 | 25 | **Failed refresh with a warm cache.** Run 1 succeeds; the remote is then made unreachable; run 2 → **5**, although the cache holds a complete answer | on fetch failure, use the newest cached ref |
 | 26 | **Interrupted refresh leftovers.** The cache is pre-seeded with what a SIGKILL leaves (§0.4): a `tmp_pack_*` file, a dead `refs/bp-run/<nonce>` at an **older** commit, and that ref's `.lock` → next run 0 at the current tip | pick "the newest `bp-run` ref" instead of the run's own |
@@ -627,18 +781,21 @@ for the process to exit.
 | `pull-behaviour`, `marker-merge`, `drift-in-blueprint`, `bootstrap-gate` | retarget |
 | `staleness` D#1–D#5 | now the override path: set `BLUEPRINT_ROOT` (permitted by H1) |
 | `a2bp-e2e`, `a2bp-inputs`, `a2bp-contamination` | a2bp never reads the field; leave as they are and confirm green |
-| `harness`, `ts-bridge` | H1–H3 witnesses and #1c (§9.1) |
+| `harness`, `ts-bridge` | H1, H2 and H5 witnesses (W1–W4) and #1c (§9.1) |
 
 ---
 
 ## 10. Implementation shape (for review, not authorised)
 
+**Blocked until the founder records T or P (§2.1).** Neither commit below starts
+before that. Under P, §2.2's changes are made to this section and §9.2 first.
+
 Two-commit reproducer pattern (DoD §3):
 
-1. **`TASK#25: minimal reproducer (failing)`** — H1–H3 with witnesses W1/W2
-   and the H2/H3 witnesses, plus §9.2 #1, #2, #3, #13. They fail on the parent:
-   ambient `BLUEPRINT_ROOT`, `XDG_CACHE_HOME` and `GIT_SSH_COMMAND` all reach
-   fixtures today; the CLI reads `blueprint_source`; on #3 it falls back to its
+1. **`TASK#25: minimal reproducer (failing)`** — H1, H2 and H5 with witnesses
+   W1–W4, the H2 witness and ts-bridge #1c, plus §9.2 #1, #2, #3, #13. They fail
+   on the parent: ambient `BLUEPRINT_ROOT`, `XDG_CACHE_HOME`, `GIT_SSH_COMMAND`
+   and `GIT_ALLOW_PROTOCOL` all reach fixtures in a direct run today; the CLI reads `blueprint_source`; on #3 it falls back to its
    own checkout and exits 0; and it reports unpushed commits.
 2. **`TASK#25: drift and pull read the blueprint by its address`** — the CLI
    change (§1–§4), H4, the remaining cases, the §9.3 migrations, and the
@@ -765,8 +922,9 @@ reason beyond gating fan-out.
 
 **For the founder** (this plan does not decide them):
 
-1. **The contract, T or P** (§2.1). The implementation shape survives either
-   answer; only the wording and one drift branch differ.
+1. **The contract, T or P** (§2.1). **Blocking.** Implementation does not start
+   until it is answered: P changes statuses, wording, partial-pull reporting and
+   fourteen cases (§2.2).
 2. **A `released` branch** under §7.4's conditions, or stay on `main`?
 3. **The `blueprint_source` nag** (§5): one dim line per run until removed, or
    refuse (4) after a date?

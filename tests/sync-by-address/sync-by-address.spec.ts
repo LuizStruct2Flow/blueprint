@@ -72,16 +72,21 @@
  *                                                        → 20 cases, #19 among them
  *   M20  revision 1's trap: `trap cleanup EXIT INT TERM` → #20 #21 #22 #23
  *   M20b cleanup kills only the refresh subshell         → #20 (on its bound: the
- *        orphaned fetch held the run's output for the whole 30 s budget)
+ *        orphaned fetch held the run's output for the whole 30 s budget).
+ *        Superseded by the launch fix below: there is no subshell to kill.
+ *   F1   the fetch launched as a shell function, cleanup by `pkill -P`
+ *        (the launch before the implementation review)   → #20b
+ *   F1b  the function launch with a plain `kill $!`      → #20 #20b
  *   M22b the handler installed after the refresh         → #11 #20 — NOT #22: the
  *        write step comes after the refresh either way, so only a signal at the
  *        fetch can see where the handler went in.
- *   M23a no shield on the writer                         → #23
- *   M23b the shield ignores INT only                     → #23 (the TERM run)
- *   M23c the redirect outside the shielding subshell     → NONE. The window
- *        between the parent opening the file and the child ignoring the signals
- *        is microseconds wide, and the seam blocks after it. Recorded, not
- *        engineered around: a seam inside that window would test the seam.
+ *   M23a no shield on the writer                         → #23 #23b #23c
+ *   M23b the shield ignores INT only                     → #23 (the TERM run) #23b #23c
+ *   M23c the redirect outside the shielding subshell     → #23b only. No runtime
+ *        case can see it: the window between the parent opening the file and
+ *        the child ignoring the signals is microseconds wide and runs no
+ *        command, so #23b asserts the helper's text instead.
+ *   F2   the exec bit mirrored after the shielded write  → #23c (mode left 644)
  *   M24  cleanup deletes the cache                       → #5 #11 #26 #27a #27b #28 #28b —
  *        NOT #24: run A reads its history BEFORE it blocks in compare, so a
  *        deleted cache behind it changes nothing it prints. #24's reds are
@@ -1048,8 +1053,14 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
-  it('#24 concurrent runs share one cache, and each answers from its OWN tip', async () => {
+  it('#24 concurrent runs share one cache, and each answers from its OWN tip (per-run-tip isolation)', async () => {
     await scenario('sync-by-address-24', async (s) => {
+      // WHAT THIS DOES NOT PROVE, stated because a reader would assume it: that
+      // cleanup leaves the cache usable for a run still reading through it. A
+      // has built its tree and read its history BEFORE it blocks in compare, so
+      // it no longer depends on the cache — deleting the cache in cleanup leaves
+      // this case green (Alexey, S3). That property is proven by #5, #11, #26,
+      // #27a, #27b, #28 and #28b, which that mutant reddens.
       const remote = await blueprintRemote(s, 'v0')
       const base = remote.head
       const tip1 = await advance(s, remote.dir, 'one-ahead')

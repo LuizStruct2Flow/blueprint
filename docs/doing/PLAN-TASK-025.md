@@ -1,14 +1,17 @@
 # PLAN — TASK-025: `drift` and `pull` read the blueprint by its address
 
-**Status:** PLAN, **revision 5**. Alexey's re-review of revision 2 (Codex)
+**Status:** PLAN, **revision 6**. Alexey's re-review of revision 2 (Codex)
 returned *"build with these changes"*, and both technical changes are in (§R2).
 The founder decided the four open questions on 2026-09-14 (§R3), and revision 4
 writes them in. Alexey's review of revision 4's additions returned *"revise
 again"* with four findings, all on commits 3 and 4, the migration and the
-rollback; revision 5 answers them (§R4). **Commits 1 and 2 are unchanged by
-revision 5** and remain unblocked, in the commit order of §10.
+rollback; revision 5 answers them (§R4). His re-review of revision 5 returned
+*"build with these changes"* with one new finding, on where commit 4's
+replacement mode validates the command; revision 6 answers it (§R5). **Commits
+1 and 2 are unchanged by revisions 5 and 6** and remain unblocked, in the commit
+order of §10.
 Author: Christian (Senior Architect), revisions 1–4; Philipp (Infrastructure),
-revision 5. All 2026-09-14.
+revisions 5–6. All 2026-09-14.
 
 **Two options were on the table; the review chose A with changes.**
 
@@ -102,9 +105,21 @@ kind (`tests/harness/env.ts:341`), so no declaration is needed.
 | # | Finding (short) | Answer | Where |
 |---|---|---|---|
 | 1 | A marker prefix does not prove the installer wrote a file; no marked-but-foreign case | **Adopted.** Ownership is now byte-exact equality (`cmp -s`) with a body from a closed set: every body the installer has released, carried verbatim. At commit 4 the set is one body, v1, which is also the current body. The marker line stays as a note to readers and proves nothing. A marked file with any other body is foreign, exactly like an unmarked one: left byte-identical, with the `⚠` lines. Measured: v1 plus one hand-edited line is refused, the exact body is accepted, and a symlink to the exact body is refused. Revision 4's "marked, different body → replaced" row is deleted, and so is #36's old-body run. No earlier released body exists, so that code would have nothing to act on. It returns with v2, which adds v1 to the set with its case | §8.1, §9.2 #36, #37 (c) |
-| 2 | Step 8's `rm`, then install, leaves no command on any failure | **Adopted.** Step 8 is one installer operation, `--replace-blueprint-command`. It prepares the body beside the target, validates it by running it, copies the old command into a fresh backup directory, and then swaps with one `mv`. Measured with each step made to fail (validation, `chmod`, the backup `cp`, `mv`): every run exited 1, the old command was byte-identical and still ran, and no temp file remained. A symlink target was replaced as a link, and the file it pointed at was untouched. **One thing the review did not name was measured:** an INT sent to the installer process alone, while it waited on a child before the rename, **did not stop it**. Bash treats a child that survives the signal as having handled it, so the script carried on and completed the swap. The group signal a terminal sends did stop it (130/143). §1.4's handler shape (clean up, clear the trap, re-raise) closes the gap: all four shapes, INT and TERM each sent to the group and to the installer alone, ended 130/143 with the old command identical. The success path is unchanged | §7.2 step 8, §8.1, §9.2 #37b |
+| 2 | Step 8's `rm`, then install, leaves no command on any failure | **Adopted.** Step 8 is one installer operation, `--replace-blueprint-command`. It prepares the body beside the target, validates it by running it (in the invoking migrated project since revision 6, §R5 #5), copies the old command into a fresh backup directory, and then swaps with one `mv`. Measured with each step made to fail (validation, `chmod`, the backup `cp`, `mv`): every run exited 1, the old command was byte-identical and still ran, and no temp file remained. A symlink target was replaced as a link, and the file it pointed at was untouched. **One thing the review did not name was measured:** an INT sent to the installer process alone, while it waited on a child before the rename, **did not stop it**. Bash treats a child that survives the signal as having handled it, so the script carried on and completed the swap. The group signal a terminal sends did stop it (130/143). §1.4's handler shape (clean up, clear the trap, re-raise) closes the gap: all four shapes, INT and TERM each sent to the group and to the installer alone, ended 130/143 with the old command identical. The success path is unchanged | §7.2 step 8, §8.1, §9.2 #37b |
 | 3 | Reverting commit 3 removes the job before `released` carries the rollback | **Adopted, after reproducing it.** Bare-remote scenario: four fixture commits, the third adding the job. Reverting all four in one commit left `released` at the fourth, because the workflow at the rollback SHA had no job, and a migrated project kept reading the unreverted CLI. The new order reverts all four **but keeps `security.yml`**, so the job at the rollback SHA fast-forwards `released` to it (measured: `released` = rollback, old CLI). Projects then pull through their own address path, and only after that is the job removed, in a second publication, after which `released` stayed at the rollback SHA (measured). A reviewed, explicit, non-force fast-forward is the fallback if the rollback commit cannot go green | §10 Rollback, §9.2 #39 |
 | 4 | #30–#33 inspect YAML and never run the release commands | **Adopted, and it found a defect in revision 4's block.** The block ran as a `shell: bash` step runs (`bash --noprofile --norc -eo pipefail`) against a bare remote, in four states and two checkout shapes. Revision 4 fetched `released` and then tested `origin/released`, which exists only if the checkout configured a fetch refspec. Without one, **the legitimate old-run rerun exited 1**. With the check reading `FETCH_HEAD`, all 8 runs were right: missing → created at the tested SHA (0); newer descendant published → 0, not moved; diverged → 1, not moved; older ancestor → advanced (0). Measured red: `--force` moves a newer ref back and moves a diverged one; `is-ancestor` replaced by `true` exits 0 when diverged; pushing `origin/main` creates the ref at `main`'s tip instead of the tested SHA. The step now declares `shell: bash`, so the case runs the block the way the workflow declares | §7.4, §9.2 #33, #33b |
+
+## R5. Response to the re-review of revision 5 (revision 6)
+
+Alexey re-reviewed revision 5 and returned *"build with these changes"*.
+Findings 1–4 are resolved, and finding 6 confirms commits 1–2 are untouched.
+Revision 6 adopts finding 5 and changes nothing else. **Nothing commits 1 and 2
+depend on changed:** the edits are to commit 4's installer mode, §7.2 step 8
+and #37b.
+
+| # | Finding (short) | Answer | Where |
+|---|---|---|---|
+| 5 | `--replace-blueprint-command` validated the new command with the installer's `$ROOT` as working directory. `$ROOT` always has its own CLI, so the check proved nothing about the project, and contradicted the plan's claim that it fails from an unmigrated project | **Adopted.** The installer records `CALLER_DIR="$PWD"` before any `cd` and takes `--project=<dir>` to name a project from elsewhere, the blueprint included. That directory must be a migrated project (`.blueprint-source` sets `blueprint_release_branch`, no `blueprint_source`), and the temp command runs `help` there. #37b now keeps the installer root and the project apart, with a working CLI in the root in every run. It adds the root-has-a-CLI, project-has-none run, an unmigrated-project run and a root-without-`--project` run, each non-zero with the old command byte-identical. Revision 5's `$ROOT` validation is a named mutant | §7.2 step 8, §8.1, §9.2 #37b |
 
 ---
 
@@ -519,9 +534,15 @@ placeholder. It writes `blueprint_release_branch = released` (§7.4).
      do not run the full pull unasked.
 7. **Verify again:** drift's header shows `(released)`, it exits 0 or shows
    drift, and the §5 warning is gone.
-8. **Only then replace the per-machine command, on each machine** (§8.1). From
-   a project that has passed step 7, or from the blueprint, run
-   `bash scripts/install-toolchain.sh --replace-blueprint-command`. That single
+8. **Only then replace the per-machine command, on each machine** (§8.1). With
+   a project that has passed step 7 as the working directory, run
+   `bash scripts/install-toolchain.sh --replace-blueprint-command`. From anywhere
+   else, the blueprint included, name that project:
+   `bash scripts/install-toolchain.sh --replace-blueprint-command --project=<project root>`.
+   The new command is validated by running it **in that project**, and the
+   installer refuses a directory that is not a migrated project, so a working
+   CLI in the installer's own checkout cannot stand in for the project's (§R5
+   #5). That single
    operation prepares and validates the new command beside the old one, copies
    the old one into a backup directory, and only then exposes the new one with
    one rename. On every failure before the rename, the old command is left
@@ -690,7 +711,10 @@ exit 1
   install mode **before** the OS branch, so a missing Homebrew or `curl` cannot
   skip it. The existing `mkdir -p "$BIN_DIR"` and "not on PATH" warning move
   above the OS branch with it and serve both OSes. `--replace-blueprint-command`
-  joins the argument `case` (`:82`), and the usage line names it.
+  and `--project=<dir>` join the argument `case` (`:82`), and the usage line
+  names both. `--project` is accepted only with `--replace-blueprint-command`
+  (exit 2 otherwise). It is one `=` token because the loop reads one argument
+  at a time.
 - **Ownership is byte-exact membership in a closed set** (revision 5, §R4 #1).
   The installer carries, verbatim, every body it has ever released. A file is
   the installer's only if it is a regular file, not a symlink, whose bytes equal
@@ -717,10 +741,27 @@ exit 1
   the temp file removed:
   1. **Prepare:** `mktemp "$BIN_DIR/.blueprint.new.XXXXXX"`, write the body,
      `chmod 0755`.
-  2. **Validate:** run the temp file as `help`, with the installer's `$ROOT` as
-     its working directory. That proves it is executable, its shebang resolves,
-     and it reaches a CLI that runs. It fails, for example, from a project that
-     has not done §7.2 step 4.
+  2. **Validate, in the project the command will serve** (revision 6, §R5 #5).
+     The installer's `$ROOT` is the wrong place: it is whichever tree supplied
+     the installer, usually the blueprint, and it always has its own
+     `scripts/blueprint`, so a run there proves nothing about any project.
+     - **Which project.** `--project=<dir>` when given, else the caller's
+       working directory. The installer records that as
+       `CALLER_DIR="$PWD"` beside `ROOT` (`:47`), before any `cd`. The installer
+       changes no directory of its own today (`ROOT` is computed in a
+       subshell), and recording it first keeps that true if one is added.
+     - **It must be a migrated project**, the state §7.2 step 7 verifies:
+       `<dir>/.blueprint-source` is a regular file that sets
+       `blueprint_release_branch` and has no `blueprint_source` line. Otherwise
+       exit 1 with
+       `✗ <dir> is not a migrated project (§7.2 steps 4–7); run from one, or pass --project=<dir>`.
+       The blueprint has no `.blueprint-source`, so running there without
+       `--project` is refused rather than validated against the blueprint's own
+       CLI.
+     - **Then run the temp file as `help` with `<dir>` as its working
+       directory.** That proves it is executable, its shebang resolves, and it
+       reaches **that project's** CLI. It fails from a project that has not done
+       §7.2 step 4, even when the installer's root has a working CLI (#37b (c)).
   3. **Back up:** if a target exists, `mktemp -d "$BIN_DIR/.blueprint-replaced.XXXXXX"`,
      then `cp -pP` the target into it. `-P` copies a symlink as a link. The
      destination is a new name inside a fresh directory, so nothing is written
@@ -957,7 +998,7 @@ for the process to exit.
 | 35 | **Layouts.** Only `scaffolding/scripts/blueprint` present → it runs. Neither present → 1, with §8.1's message on stderr | drop the `scaffolding/` candidate; `exit 0` when no CLI is found |
 | 36 | **Idempotent.** In #34's environment, run the installer, set the command's mtime to the epoch, run it again: the mtime is unchanged. (The "earlier released body → replaced" run joins this case when a v2 body ships, §8.1) | rewrite unconditionally (the mtime moves) |
 | 37 | **Never overwrites what it did not write.** In #34's environment, with a plain install. (a) Today's shape, `exec <workspace>/bp/scripts/blueprint "$@"`, as a regular file → byte-identical afterwards, and the `⚠` lines with the `--replace-blueprint-command` remedy are printed; `check` prints the `⚠` line too. (b) A symlink to `<workspace>/bp/scripts/blueprint` → the link and its target are both byte-identical. (c) **Marked but unknown:** §8.1's exact body plus one hand-edited line, as a regular file → byte-identical afterwards, and the same `⚠` lines; `check` prints the `⚠` line | overwrite any file without the marker; write through the path with `cat >` (the target is overwritten); treat any file carrying the marker as the installer's ((c) is overwritten) |
-| 37b | **The approved replacement, and every failure before the swap** (§R4 #2). In #34's environment. The target is today's hand-written wrapper, running a stub checkout CLI that prints `OLD`, and the installer's root has a stub `scripts/blueprint` that prints `NEW`. (a) `--replace-blueprint-command` → 0: the target is §8.1's body and, run from the project, prints `NEW`; exactly one `.blueprint-replaced.*/blueprint` exists, byte-identical to the old wrapper; no `.blueprint.new.*` remains. (b) The same with a symlink target → the target is the body, the backup is a symlink with the old link text, and the file it pointed at is byte-identical. (c) **Injected failures**, one per run, each a `PATH` shim that exits 1: `chmod`, the backup's `cp`, `mv`; plus validation failing (the installer's root has no `scripts/blueprint`) → each run exits non-zero, the target is byte-identical and still prints `OLD`, and no `.blueprint.new.*` remains. (d) **Interrupted before the swap:** a `cp` shim that writes `reached` and blocks on a FIFO (§9.2's seam pattern). INT and TERM are each sent once to the installer's process group and once to the installer alone, four runs → each died of that signal (130 or 143), the target is byte-identical and still prints `OLD`, and no `.blueprint.new.*` remains | `rm` the target before preparing (every (c) and (d) run leaves no command); write the body straight onto the target (a failed `chmod` leaves it replaced and not executable); swap before validating (the validation-failure run replaces it); drop the signal handler (the INT-to-installer-alone run completes the swap: measured, §R4 #2) |
+| 37b | **The approved replacement, and every failure before the swap** (§R4 #2). In #34's environment. The target is today's hand-written wrapper, running a stub checkout CLI that prints `OLD`. **The installer's root and the invoking project are separate directories** (§R5 #5): the installer runs from its root, which has a working stub `scripts/blueprint` that prints `ROOT`, and the project is a migrated fixture (`.blueprint-source` with `blueprint_release_branch = released`, no `blueprint_source`) whose stub prints `NEW`. The installer is invoked with the project as its working directory unless a run says otherwise. (a) `--replace-blueprint-command` → 0: the target is §8.1's body and, run from the project, prints `NEW`; exactly one `.blueprint-replaced.*/blueprint` exists, byte-identical to the old wrapper; no `.blueprint.new.*` remains. (a2) The same, invoked with the installer's root as working directory and `--project=<project>` → 0, and the same result. (b) The same as (a) with a symlink target → the target is the body, the backup is a symlink with the old link text, and the file it pointed at is byte-identical. (c) **Injected failures**, one per run, each a `PATH` shim that exits 1: `chmod`, the backup's `cp`, `mv`. **Validation failing**, three runs, the installer's root keeping its working `ROOT` CLI in all of them: the project has no `scripts/blueprint` (§7.2 step 4 not done); the project's `.blueprint-source` still carries `blueprint_source` (step 6 not done); invoked from the installer's root without `--project`. Each run exits non-zero, the target is byte-identical and still prints `OLD`, and no `.blueprint.new.*` remains. (d) **Interrupted before the swap:** a `cp` shim that writes `reached` and blocks on a FIFO (§9.2's seam pattern). INT and TERM are each sent once to the installer's process group and once to the installer alone, four runs → each died of that signal (130 or 143), the target is byte-identical and still prints `OLD`, and no `.blueprint.new.*` remains | `rm` the target before preparing (every (c) and (d) run leaves no command); write the body straight onto the target (a failed `chmod` leaves it replaced and not executable); swap before validating (every validation-failure run replaces it); validate with `$ROOT` as working directory, revision 5's text (the no-CLI project run passes on the root's `ROOT` stub and replaces it); skip the migrated-project test (the `blueprint_source` run and the no-`--project` run replace it); ignore `--project` ((a2) exits non-zero); drop the signal handler (the INT-to-installer-alone run completes the swap: measured, §R4 #2) |
 | 38 | **Shadowed on `PATH`.** In #34's environment, with `PATH` holding a directory that contains another `blueprint` and then `$BIN_DIR` (on `PATH` already, so the installer's own prepend does not apply) → the "resolves to … first on PATH" warning names that other file | drop the check |
 | 39 | **The rollback reaches migrated projects** (§10 Rollback, §R4 #3). A bare fixture remote: base commit `B`; then `Ta`, which changes a managed file F; then `Tb`, which adds the `release` job (taken from the working tree's `security.yml`) to a workflow that lacked it. "CI" is the harness: after each push, if the workflow **at the pushed SHA** has the `release` job, it runs #33b's extracted block at that SHA, which is how GitHub chooses the workflow. A project with `blueprint_release_branch = released` runs the real CLI with `BLUEPRINT_ROOT` scrubbed. §10's rollback commands run verbatim in a clone. After step 1 (revert, keep the workflow, push): the project's `drift` header shows the rollback SHA, F is reported against `B`'s content, and `pull --yes F` writes `B`'s content. After step 5 (remove the job, push): `refs/heads/released` is still the rollback SHA, and the project's header is unchanged | omit `git checkout HEAD -- .github/workflows/security.yml` from step 1: `released` stays at `Tb`, and the project goes on reading `Ta`'s F (measured, §R4 #3) |
 
@@ -1005,7 +1046,8 @@ the same commit as the code.
    gain the field.
 4. **`TASK#25: the toolchain installer writes the per-machine blueprint command`**
    — `install_blueprint_command`, its closed-set ownership check, the
-   `--replace-blueprint-command` mode and the `check` line (§8.1), cases #34–#38
+   `--replace-blueprint-command` mode with `--project=<dir>` and its
+   migrated-project validation, and the `check` line (§8.1), cases #34–#38
    and #37b, README §"One-time setup", and §8.2's precondition added to
    `PLAN-TASK-021-RESTRUCTURE.md`.
 

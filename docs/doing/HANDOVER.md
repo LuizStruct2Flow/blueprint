@@ -145,12 +145,6 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
-- **CI did not run from 2026-09-10 21:06 UTC to 2026-09-14 (BUG-115).** An unquoted
-  colon in a `run:` line (from `44bcdf7`) made `security.yml` invalid YAML, so every run
-  had zero jobs while every push printed green. Fixed in `d27e1db`, pushed as
-  `b76702d`; the run on that head started jobs again. `tests/manifest` #5b now parses
-  every workflow. **Check that run's conclusion** — four days of changes had never run
-  on a GitHub runner, and a red there is a real failure, not the parse error.
 
 - **Do not push while a Codex review is running (BUG-110).** An empty
   `/tmp/.git` appeared during one and vanished again on its own. While it exists,

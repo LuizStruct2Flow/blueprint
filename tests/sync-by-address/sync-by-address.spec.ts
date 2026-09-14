@@ -292,6 +292,8 @@ async function snapshot(dir: string): Promise<string[]> {
 
 interface Seam {
   path: string
+  /** The shim directory alone, to put two seams on one PATH. */
+  dir: string
   marker: string
   fifo: string
 }
@@ -325,7 +327,18 @@ async function seam(s: Scenario, name: string, tool: string, when = 'true'): Pro
       `fi\n` +
       tail,
   )
-  return { path: shims.path(), marker, fifo }
+  return { path: shims.path(), dir: shims.dir, marker, fifo }
+}
+
+/** The command names of a process's direct children. */
+async function childNames(s: Scenario, pid: number): Promise<string[]> {
+  const listed = await s.run('pgrep', ['-P', String(pid)], { cwd: s.workspace.root })
+  const names: string[] = []
+  for (const kid of listed.stdout.split('\n').filter(Boolean)) {
+    const ps = await s.run('ps', ['-o', 'comm=', '-p', kid], { cwd: s.workspace.root })
+    if (ps.stdout.trim()) names.push(ps.stdout.trim())
+  }
+  return names.sort()
 }
 
 async function reached(seam: Seam) {
@@ -831,6 +844,62 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         await expectNothingLeft(s, sig)
         expect(await snapshot(proj), `${sig}: the project was written`).toEqual(before)
       }
+    })
+  })
+
+  it('#20b the refresh child IS the fetch process, and a signal before it becomes `timeout` still ends the run', async () => {
+    await scenario('sync-by-address-20b', async (s) => {
+      // WHY THE FIRST HALF IS STRUCTURAL. The fetch used to be launched as a
+      // shell FUNCTION in the background, so `$!` named a bash subshell that had
+      // not necessarily forked `timeout` yet. Cleanup then looked the fetch up
+      // by parent (`pkill -P`), a snapshot: a signal landing between `$!` and
+      // that fork found no child, and the subshell went on to start the fetch
+      // after cleanup, holding the run open for the whole budget (Alexey, S1).
+      // That window is inside bash — no command on PATH runs in it — so no shim
+      // can open it. What CAN be asserted is the property that removes it: the
+      // process `$!` names is the one that runs the fetch.
+      const hole = await seam(s, 'identity', 'ssh')
+      const proj = await project(s, BLACKHOLE, 'no-sha', 'OLD', { tag: 'identity' })
+      const cli = await cliCopy(s, 'cli-identity')
+
+      const one = start(s, cli, proj, ['drift'], { PATH: hole.path, BP_FETCH_TIMEOUT: '30' })
+      await reached(hole)
+      const kids = await childNames(s, one.child.pid ?? 0)
+      one.child.kill('SIGTERM')
+      const d1 = await one.done
+      release(hole)
+
+      expect(kids, 'the run\'s refresh child is not the fetch process itself').toEqual([
+        expect.stringMatching(/^g?timeout$/),
+      ])
+      expect(diedOf(d1, 'SIGTERM'), show(d1)).toBe(true)
+
+      // SECOND HALF: the earliest point a command on PATH can observe. `env` is
+      // what becomes `timeout`; its shim blocks BEFORE exec'ing it, so the fetch
+      // process exists but has not become `timeout` and has started nothing.
+      // A signal there must end the run at once, and ssh must never be reached.
+      // Honest limit: the old launch passed this half too, because the shim is
+      // already a child for `pkill -P` to find. The first half is the witness.
+      const early = await seam(s, 'env-early', 'env', 'printf "%s\\n" "$@" | grep -qx fetch')
+      const never = await seam(s, 'never', 'ssh')
+      const proj2 = await project(s, BLACKHOLE, 'no-sha', 'OLD', { tag: 'early' })
+      const cli2 = await cliCopy(s, 'cli-early')
+
+      const two = start(s, cli2, proj2, ['drift'], {
+        PATH: `${early.dir}:${never.path}`,
+        BP_FETCH_TIMEOUT: '30',
+      })
+      await reached(early)
+      const signalled = Date.now()
+      two.child.kill('SIGINT')
+      const d2 = await two.done
+      const ending = Date.now() - signalled
+      release(early)
+
+      expect(diedOf(d2, 'SIGINT'), show(d2)).toBe(true)
+      expect(ending, `a signal before the fetch started held the run for ${ending}ms`).toBeLessThan(10_000)
+      expect(existsSync(never.marker), 'the fetch started after the run was signalled').toBe(false)
+      await expectNothingLeft(s, 'signal before the fetch process became timeout')
     })
   })
 

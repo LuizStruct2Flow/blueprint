@@ -908,6 +908,72 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
+  it('#20c a signal while the refresh child exists but has not started the fetch: no fetch ever starts', async () => {
+    await scenario('sync-by-address-20c', async (s) => {
+      // THE SPAWN WINDOW, HELD OPEN. The refresh's stderr goes to
+      // "$BP_SYNC_SCRATCH/fetch.err", and bash applies an async command's
+      // redirections in the FORKED child before that child runs anything. A
+      // `mktemp` shim makes this one scratch directory predictable and puts a
+      // FIFO there, so the child blocks opening its stderr: forked, `$!`
+      // published, no fetch process yet.
+      //
+      // Under the old launch (a shell function in the background, cleanup by
+      // `pkill -P`) that child was a subshell with NO child of its own, so
+      // cleanup found nothing to stop; released, it went on to start the fetch
+      // after the run had been signalled (Alexey, S1). Under the current launch
+      // the held process IS `$!`, cleanup ends it, and nothing starts.
+      const never = await seam(s, 'never', 'ssh')
+      const proj = await project(s, BLACKHOLE, 'no-sha', 'OLD')
+      const cli = await cliCopy(s, 'cli')
+      const tmp = s.workspace.path('tmp')
+      const held = join(tmp, 'blueprint-sync.HELD0000')
+      const fifo = join(held, 'fetch.err')
+
+      const real = (await s.run('sh', ['-c', 'command -v mktemp'], { cwd: s.workspace.root })).stdout.trim()
+      expect(real, 'no real mktemp to hand over to').not.toBe('')
+      const shims = await s.shimDir('mktemp-held')
+      await shims.add(
+        'mktemp',
+        `case "$*" in\n` +
+          `  *blueprint-sync.XXXXXXXX*) mkdir '${held}' && mkfifo '${fifo}' && printf '%s\\n' '${held}' ;;\n` +
+          `  *) exec '${real}' "$@" ;;\n` +
+          `esac`,
+      )
+
+      const run1 = start(s, cli, proj, ['drift'], {
+        PATH: `${shims.dir}:${never.path}`,
+        BP_FETCH_TIMEOUT: '3',
+      })
+      const pid = run1.child.pid ?? 0
+
+      // Held: the cache exists (the last step before the launch) and the run has
+      // a `bash` child — the refresh child, blocked opening its stderr. No
+      // timing: that child cannot get past the open until something reads.
+      await vi.waitFor(
+        async () => {
+          if ((await caches(s)).length === 0) throw new Error('the cache is not created yet')
+          if (!(await childNames(s, pid)).includes('bash')) throw new Error('no refresh child yet')
+        },
+        { timeout: 60_000, interval: 10 },
+      )
+
+      run1.child.kill('SIGINT')
+      // Now let any still-waiting writer open the FIFO, and keep the read end
+      // open so a fetch that does start is not killed by a closed pipe.
+      const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+      const d = await run1.done
+      closeSync(reader)
+      release(never)
+
+      expect(diedOf(d, 'SIGINT'), show(d)).toBe(true)
+      expect(
+        existsSync(never.marker),
+        'a fetch started AFTER the run was signalled — cleanup could not see the refresh child',
+      ).toBe(false)
+      await expectNothingLeft(s, 'signal before the fetch started')
+    })
+  })
+
   it('#21 INT and TERM during the compare: died of the signal, no scratch, no ref, no write', async () => {
     await scenario('sync-by-address-21', async (s) => {
       const remote = await blueprintRemote(s, 'published')

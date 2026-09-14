@@ -736,9 +736,11 @@ _bp_on_signal() {
 # and cleanup found the fetch by parent with `pkill -P` — a snapshot, so a signal
 # before the subshell forked `timeout` found nothing and the fetch started after
 # cleanup, holding the run for the whole budget (Alexey, S1; tests #20b).
-# `# ponytail:` a TERM landing between bash's fork and its exec of `env` can be
-# lost with bash's own signal reset; the wait then lasts until the budget ends
-# the fetch. No command runs in that window, so nothing outside bash can close it.
+# #20c holds that window open (the child blocked applying its stderr redirection)
+# and signals there: under the old launch the fetch started anyway.
+# `# ponytail:` a TERM landing between bash's fork and its own signal reset in the
+# child can still be lost; the wait then lasts until the fetch ends, which the
+# budget bounds, and cleanup runs only after it. No command runs in that window.
 _bp_sync_cleanup() {
   if [ -n "$BP_SYNC_CHILD" ]; then
     kill -TERM "$BP_SYNC_CHILD" 2>/dev/null || true

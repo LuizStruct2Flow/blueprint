@@ -131,6 +131,12 @@ hangs off that root.
   `state-root` #A6 turns the gate red on a change that did nothing wrong.
   Attribution to the Codex sandbox is likely, not proven. If a push goes red on
   #A6, check `ls -ld /tmp/.git` before debugging anything else.
+- **The harness can report a process it killed itself (BUG-111, parked).** On
+  timeout it SIGKILLs the group without waiting for it to be gone, and teardown
+  counts the not-yet-reaped process as a leftover. Under gate load that turns
+  `harness` › *reaps a background process the scenario forgot* red with nothing
+  wrong in the change. If you retry a red push on that case, **cite BUG-111** —
+  a quietly retried red is how merging over red starts.
 - **`fileParallelism` is still `false`** in `tests/vitest.config.ts`: two suites
   pass partly *because* the run is serial. Measure before flipping.
 - **Flakes in the nested gate (BUG-065, parked).** If you retry a red gate, say

@@ -197,7 +197,14 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
-- **MAIN IS RED IN CI since `8ee949f` (2026-09-15) — BUG-117.** GitHub-hosted runners export
+- **CI GREEN AGAIN on `4bbcac7` (run 34904164240, 2026-09-15); BUG-117 is in
+  waiting-acceptance.** In flight now, concurrently: **Philipp — TASK-028** (PR #68 port;
+  owns `tests/harness/*`, `scripts/lib/state-dir.sh`, state-root, code-root, tsconfig) and
+  **Christian — TASK-025 commits 3–4 with TASK-027 (#67) and TASK-029 (#69) inside commit 4**
+  (owns `security.yml`, `scripts/blueprint`, `new-project.sh`, `install-toolchain.sh`).
+  **Vitali — BUG-118 (#64) waits until both land**: its reproducer fails until the founder's
+  settings edit and would block every push. History of the red:
+- **Main was red in CI from `8ee949f` to `4bbcac7` (2026-09-15) — BUG-117.** GitHub-hosted runners export
   `AGENT_TOOLSDIRECTORY`; TASK-025's H5 makes the harness refuse any undeclared ambient
   `AGENT_*`/`GIT_*`, and the workflow runs vitest directly instead of through
   `scripts/run-ts-suites.sh`'s scrub — 697/770 refused in 11 s. The local gate is green and

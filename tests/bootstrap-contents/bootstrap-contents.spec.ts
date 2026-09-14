@@ -12,8 +12,9 @@
  *            as the blueprint and `drift` compares nothing and exits 0
  *   BUG-015  every lib in scripts/lib/ must be in MANAGED_FILES, or a derived
  *            project receives a CLI it cannot run
- *   BUG-012  `blueprint_source` must be RELATIVE — an absolute host path cannot
- *            be right on two machines at once
+ *   TASK-025 no `blueprint_source` at all — drift and pull read the blueprint's
+ *            address, so there is no local path to record (this replaced BUG-012's
+ *            rule that the path be RELATIVE)
  *   A-09     every file carrying {{PROJECT_NAME}} must be substituted, the
  *            SonarQube key included, or every project collides on one key
  *
@@ -341,30 +342,23 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
-  it('#8 BUG-012: blueprint_source is relative and resolves from the project root', async () => {
+  it('#8 TASK-025: bootstrap records no blueprint_source, only the address drift and pull read', async () => {
     await scenario('bootstrap-contents-8', async (s) => {
       const { derived } = await build(s)
 
-      // Bootstrap used to write an absolute host path. It is the one field in
-      // .blueprint-source that cannot be correct on two machines at once, and a
-      // derived project proved it: a `/Users/…` path carried onto a Linux box
-      // killed every blueprint command. A relative path survives that, and the
-      // commoner case of moving or re-cloning the tree, because what it pins is
-      // the LAYOUT — blueprint beside project — which is what bootstrap knows.
+      // BUG-012 made this field RELATIVE, because an absolute host path cannot
+      // be right on two machines at once. TASK-025 removes it: the blueprint is
+      // read by its address, and a local path was exactly what let a stale or
+      // unpushed checkout become "the blueprint". A bootstrap that still wrote
+      // it would hand every new project a line the CLI warns about on every run.
       const conf = await readFile(join(derived, '.blueprint-source'), 'utf8')
-      const line = conf.split('\n').find((l) => l.startsWith('blueprint_source'))
-      expect(line, 'derived .blueprint-source has no blueprint_source field').toBeDefined()
-
-      const value = line!.split('=').slice(1).join('=').trim()
-      expect(value).not.toBe('')
-      expect(value.startsWith('/'), `bootstrap wrote an ABSOLUTE blueprint_source (${value})`).toBe(
-        false,
-      )
-
       expect(
-        await s.fs.exists(join(derived, value, 'scripts/blueprint')),
-        `blueprint_source (${value}) does not resolve to a blueprint checkout from the project root — relative, but pointing nowhere`,
-      ).toBe(true)
+        conf.split('\n').filter((l) => /^\s*blueprint_source\s*=/.test(l)),
+        'bootstrap still records a local blueprint path',
+      ).toEqual([])
+      expect(conf, 'bootstrap no longer records the address placeholder drift and pull read').toMatch(
+        /^blueprint_remote\s*=\s*FILL-ME-IN$/m,
+      )
     })
   })
 })

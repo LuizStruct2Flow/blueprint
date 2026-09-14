@@ -125,6 +125,28 @@ async function bootstrap(s: Scenario, bp: string, name: string, target: string) 
   })
 }
 
+/**
+ * TASK-025 — point a fresh bootstrap at its source BY ADDRESS, which is the one
+ * edit an operator makes to it. Bootstrap writes the FILL-ME-IN placeholder on
+ * purpose, and drift and pull refuse it (exit 4) rather than guess.
+ *
+ * The branch is read from the fixture rather than assumed: it is initialised
+ * with no `-b`, under a scenario HOME with no init.defaultBranch.
+ */
+async function addressed(s: Scenario, bp: string, target: string) {
+  const conf = join(target, '.blueprint-source')
+  const text = await s.fs.read(conf)
+  expect(text, 'bootstrap no longer writes the remote placeholder').toContain('blueprint_remote = FILL-ME-IN')
+  const branch = await s.run('git', ['-C', bp, 'symbolic-ref', '--short', 'HEAD'], { cwd: bp })
+  expect(branch.code, branch.output).toBe(0)
+  await s.fs.write(
+    conf,
+    text
+      .replace('blueprint_remote = FILL-ME-IN', `blueprint_remote = ${bp}`)
+      .replace(/^blueprint_branch\s*=.*$/m, `blueprint_branch = ${branch.stdout.trim()}`),
+  )
+}
+
 /** A blueprint plus a project bootstrapped from it. */
 async function bootstrapped(s: Scenario) {
   const bp = await fixtureBlueprint(s)
@@ -327,7 +349,8 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
 
   it('#4 a fresh bootstrap is drift-clean against its own source', async () => {
     await scenario('bootstrap-gate-4', async (s) => {
-      const { target } = await bootstrapped(s)
+      const { bp, target } = await bootstrapped(s)
+      await addressed(s, bp, target)
 
       // The OTHER command CLAUDE.md mandates on every wake, run against a
       // zero-second-old project. It once reported 5 drifted files: the
@@ -413,7 +436,8 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
 
   it("#6 a full pull is a no-op on a fresh bootstrap, and the project's manifest still passes", async () => {
     await scenario('bootstrap-gate-6', async (s) => {
-      const { target } = await bootstrapped(s)
+      const { bp, target } = await bootstrapped(s)
+      await addressed(s, bp, target)
 
       // BUG-029. `tests/` is a managed DIRECTORY, so pull writes into the one
       // tree the gate reads its own membership from. Two things must hold at

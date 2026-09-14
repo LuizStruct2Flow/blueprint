@@ -704,7 +704,9 @@ async function driftFixture(s: Scenario) {
   await s.fs.write(
     join(proj, '.blueprint-source'),
     [
-      `blueprint_source = ${bp}`,
+      // TASK-025: these cases exercise the OVERRIDE path. drift reads a local
+      // checkout only when BLUEPRINT_ROOT names one, and only there is there a
+      // checkout whose staleness means anything — so every case passes it.
       `bootstrap_sha    = ${bpSha}`,
       'bootstrap_date   = 2026-01-01',
       '',
@@ -722,10 +724,10 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       // serial-timing. The harness gives every child /dev/null on stdin, which
       // is what `report_staleness` asks about (`[ ! -t 0 ]`) — so a hang here
       // means the code prompted somewhere it should not have.
-      const { proj } = await driftFixture(s)
+      const { bp, proj } = await driftFixture(s)
 
       const start = Date.now()
-      const r = await s.run(CLI, ['drift'], { cwd: proj, timeoutMs: 60_000 })
+      const r = await s.run(CLI, ['drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
       const elapsed = Date.now() - start
 
       expect(elapsed, `drift took ${elapsed}ms without a TTY — this runs at every wake`).toBeLessThan(20_000)
@@ -742,7 +744,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       const { bp, proj } = await driftFixture(s)
       const before = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      await s.run(CLI, ['drift'], { cwd: proj, timeoutMs: 60_000 })
+      await s.run(CLI, ['drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
 
       expect(
         (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim(),
@@ -770,7 +772,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       // pull-behaviour's helper uses — here stdin must BE the terminal. `script`
       // closes the pty as soon as its own stdin (the harness's /dev/null) hits
       // EOF, so the prompt's `read` returns immediately and nothing blocks.
-      const { proj } = await driftFixture(s)
+      const { bp, proj } = await driftFixture(s)
 
       const withTty = async (env: Record<string, string>) => {
         const probe = await s.run('script', ['-qec', 'true', '/dev/null'], { cwd: proj })
@@ -779,7 +781,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
           probe.code === 0
             ? ['-qec', cmd, '/dev/null']
             : ['-q', '/dev/null', '/bin/sh', '-c', cmd]
-        return s.run('script', args, { cwd: proj, env, timeoutMs: 60_000 })
+        return s.run('script', args, { cwd: proj, env: { ...env, BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
       }
 
       // THE CONTROL FIRST. Without it, "no prompt appeared" is satisfied by a
@@ -804,9 +806,9 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       // A staleness WARNING must not become a drift FAILURE. They answer
       // different questions, and conflating them breaks every caller that
       // checks the status — which is every agent wake.
-      const { proj } = await driftFixture(s)
+      const { bp, proj } = await driftFixture(s)
 
-      const r = await s.run(CLI, ['drift'], { cwd: proj, timeoutMs: 60_000 })
+      const r = await s.run(CLI, ['drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
 
       expect(r.code, `drift exited ${r.code} because the checkout was stale — staleness is advisory`).toBe(0)
     })
@@ -822,7 +824,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       const start = Date.now()
       const r = await s.run(CLI, ['drift'], {
         cwd: proj,
-        env: { BP_STALENESS_TIMEOUT: '2', PATH: path },
+        env: { BP_STALENESS_TIMEOUT: '2', PATH: path, BLUEPRINT_ROOT: bp },
         timeoutMs: 60_000,
       })
       const elapsed = Date.now() - start

@@ -23,11 +23,15 @@
 #   blueprint files             List the blueprint-managed files (source of truth).
 #   blueprint help              This message.
 #
-# `drift` and `pull` read the LOCAL blueprint checkout named by
-# blueprint_source in .blueprint-source. `a2bp` and `prs` talk to the REMOTE
-# named by blueprint_remote (config_version 2), because a request has to go
-# somewhere other people can see. All commands except `files` and `help` must
-# run from inside a struct2flow project.
+# `drift` and `pull` read the blueprint by its ADDRESS — blueprint_remote and
+# blueprint_branch in .blueprint-source (config_version 2). Every run refreshes a
+# per-machine cache of that remote and compares against the tip it just fetched,
+# so a report never describes whatever a local folder happens to hold
+# (TASK-025). An unreachable remote exits 5, never with a report. To compare
+# against a local checkout instead — offline, or to preview an unpushed
+# blueprint change — export BLUEPRINT_ROOT=<checkout>, and the report says so.
+# `a2bp` and `prs` talk to the same remote. All commands except `files` and
+# `help` must run from inside a struct2flow project.
 #
 # Add this directory to PATH so the command is callable as `blueprint`:
 #   export PATH="$HOME/sources/struct2flow/blueprint/scripts:$PATH"
@@ -641,83 +645,299 @@ pull_file() {
       echo "  ${C_RED}    refuse: ${BP_PP_WHY}. Nothing written.${C_RESET}"
       return 1 ;;
     new)
-      # cp first so a new file takes the blueprint's mode, as it always did.
-      cp "$bp" "$f" ;;
+      # No `cp` first any more: it was a second, unshielded write. The mode
+      # comes from _bp_sync_exec_bit below, which mirrors the one bit that
+      # matters (BUG-008).
+      ;;
     backup-copy)
       echo "  ${C_YELLOW}    warn: ${BP_PP_WHY} — backing up + whole-file copy${C_RESET}"
-      cp "$f" "$f.bp-bak"
+      _bp_shielded_write "$f" "$f.bp-bak"
       echo "  ${C_DIM}    backup at $f.bp-bak — reconcile manually${C_RESET}" ;;
     merge)
       echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}" ;;
   esac
 
   # `cat >`, not `mv`: the destination keeps its own inode and mode, and only the
-  # executable bit is mirrored from the blueprint (BUG-008).
-  cat "$out" > "$f"
+  # executable bit is mirrored from the blueprint (BUG-008). Shielded (TASK-025):
+  # a Ctrl-C reaches the whole process group, and a writer killed mid-write
+  # truncates the project's file.
+  _bp_shielded_write "$out" "$f"
   _bp_sync_exec_bit "$bp" "$f"
 }
 
-# Where is the blueprint checkout on THIS machine?
+# --- TASK-025: the blueprint is read by its ADDRESS --------------------------
 #
-# `blueprint_source` is an absolute host path, which makes it the one field in
-# `.blueprint-source` that cannot be correct on two machines at once. storm2flow
-# carried `/Users/luizscheidegger/...` and every command died on the Linux box; # a2bp-allow: historical BUG-007 incident record quoting the path that broke, not a live host path
-# writing the Linux path would have broken the Mac instead. Picking a machine to
-# break is not a fix, so the value is now RESOLVED rather than read (BUG-007):
+# `drift` and `pull` used to compare against a LOCAL checkout: $BLUEPRINT_ROOT,
+# else `blueprint_source`, else the checkout this CLI runs from. Whatever that
+# folder held became "the blueprint" — a stale sibling, or commits nobody had
+# pushed — and a pull could record an unpushed SHA as bootstrap_sha. The third
+# step was also the one that would quietly bring the local answer back on the day
+# the network failed (F-002). So a local checkout is now used only when an
+# operator says so with BLUEPRINT_ROOT, and the report labels it. Otherwise every
+# run refreshes a per-machine cache of blueprint_remote and answers from the tip
+# it just fetched, and nothing else.
 #
-#   1. $BLUEPRINT_ROOT, if exported and real — an explicit per-shell override.
-#   2. `blueprint_source` from the file, if it exists on this machine.
-#   3. The repo the RUNNING CLI lives in, if that looks like a blueprint.
+# BLUEPRINT_ROOT then names a detached checkout built from that cache at the
+# fetched SHA, so every reader below — bp_prospective_for's content, drift and
+# pull's existence checks, pull_file's mode, bp_expand_managed_dirs' archive and
+# the history — runs unchanged against one oracle. Swapping only the content
+# read would leave two answers to "does the blueprint have this file", which is
+# BUG-113's shape arriving by another route.
 #
-# Step 3 is what makes it machine-independent, and it is not a guess: if you are
-# executing `…/blueprint/scripts/blueprint`, then `…/blueprint` is a blueprint
-# checkout by construction. It is verified (MANAGED_FILES must be present) and
-# announced, never silent — a silently-substituted comparison base would make
-# every drift report untrustworthy.
-_bp_resolve_blueprint_root() {
-  local from_file="$1" cli_root self
+# Plan: docs/doing/PLAN-TASK-025.md §1–§5.
 
-  if [ -n "${BLUEPRINT_ROOT:-}" ] && [ -d "$BLUEPRINT_ROOT" ]; then
-    printf '%s' "$BLUEPRINT_ROOT"; return 0
+# One budget for the refresh, in seconds. A warm refresh is one round trip; only
+# a first run transfers the pack.
+BP_FETCH_TIMEOUT="${BP_FETCH_TIMEOUT:-30}"
+
+# Run state lives in GLOBALS, never locals: the EXIT trap fires after the frame
+# that would own a local has returned — a2bp leaked a clone per run that way.
+BP_SYNC_MODE="" BP_SYNC_SCRATCH="" BP_SYNC_CACHE="" BP_SYNC_REF="" BP_SYNC_CHILD=""
+BP_SYNC_REMOTE="" BP_SYNC_BRANCH="" BP_SYNC_SHA="" BP_SYNC_FETCHED_AT=""
+
+# _bp_terminating_traps CLEANUP — run CLEANUP on EXIT, and on INT or TERM run it,
+# clear the traps and die of that same signal.
+#
+# `trap cleanup EXIT INT TERM` is the obvious shape and it is WRONG: a trapped INT
+# runs the handler and then RESUMES the script, so an interrupted pull cleaned up
+# and went on to its next write. Re-raising with the trap cleared is what makes
+# the caller see 130 or 143 and makes nothing after the signal run (measured 12/12
+# across fetch, compare and write, foreground and `wait`, under this file's
+# `set -euo pipefail`). EXIT still covers `die` and normal returns.
+#
+# Generic on purpose. a2bp installs the resuming shape (BUG-116) and adopts this
+# by replacing `trap _a2bp_cleanup EXIT INT TERM` with
+# `_bp_terminating_traps _a2bp_cleanup`; the installer's command swap is meant to
+# use it too.
+_bp_terminating_traps() {
+  # shellcheck disable=SC2064  # the cleanup's NAME is bound here, on purpose
+  trap "$1" EXIT
+  # shellcheck disable=SC2064
+  trap "_bp_on_signal $1 INT" INT
+  # shellcheck disable=SC2064
+  trap "_bp_on_signal $1 TERM" TERM
+}
+
+_bp_on_signal() {
+  "$1"
+  trap - "$2" EXIT
+  kill -s "$2" "$$"
+}
+
+# Idempotent, and if-form throughout because of `set -e`. It deletes only this
+# run's ref and never the cache: another run may be reading through it.
+#
+# The refresh is a shell FUNCTION run in the background, so BP_SYNC_CHILD is a
+# subshell and the fetch is that subshell's child. Killing only the subshell
+# orphaned a fetch that went on until its budget ran out, still able to write
+# into the cache after this cleanup had run (measured: the interrupted run's
+# output stayed open for the full 30 s). So the signal goes to the subshell's
+# CHILDREN — `timeout`, which forwards it to its own process group, git and ssh
+# with it — and the subshell is then waited for, so nothing outlives the run.
+# `# ponytail:` without pkill the wait still holds; it just lasts until the fetch
+# ends by itself, which the budget bounds.
+_bp_sync_cleanup() {
+  if [ -n "$BP_SYNC_CHILD" ]; then
+    pkill -TERM -P "$BP_SYNC_CHILD" 2>/dev/null || true
+    wait "$BP_SYNC_CHILD" 2>/dev/null || true
   fi
-  if [ -n "$from_file" ] && [ -d "$from_file" ]; then
-    printf '%s' "$from_file"; return 0
+  if [ -n "$BP_SYNC_REF" ]; then
+    bp_request_transport_env git -c gc.auto=0 --git-dir="$BP_SYNC_CACHE" \
+      update-ref -d "$BP_SYNC_REF" 2>/dev/null || true
+  fi
+  if [ -n "$BP_SYNC_SCRATCH" ]; then rm -rf "$BP_SYNC_SCRATCH"; fi
+  BP_SYNC_CHILD="" BP_SYNC_REF="" BP_SYNC_SCRATCH=""
+}
+
+# _bp_shielded_write SRC DEST — DEST gets SRC's bytes, and the write FINISHES even
+# if a signal arrives. A terminal's Ctrl-C reaches the whole process group, the
+# writer included, and an unshielded `cat > file` killed mid-write left a project
+# file truncated (6 of 40 lines, measured). The ignore is set inside the subshell
+# BEFORE the redirect opens DEST, so there is no moment where DEST is truncated
+# and the writer is still killable. The parent's handler runs once this returns,
+# and it exits, so the next write never starts.
+_bp_shielded_write() { ( trap '' INT TERM; exec cat "$1" > "$2" ); }
+
+# _bp_git ARGS — git against the blueprint side. On the address path the caller's
+# git environment is scrubbed first: `drift` runs inside hooks, where an exported
+# GIT_DIR overrides `-C` and would aim every read at the project's own repository
+# (BUG-077). The override path keeps plain git, because it must work with no
+# network libraries present at all (the recovery path, PLAN §5).
+_bp_git() {
+  if [ "$BP_SYNC_MODE" = address ]; then
+    bp_request_transport_env git "$@"
+  else
+    git "$@"
+  fi
+}
+
+# Exit 5, on stderr: "could not read the blueprint", why, and that NOTHING was
+# compared. A failed read never yields a report and never falls back — not to a
+# local checkout, not to a cached ref.
+_bp_fetch_fail() {
+  echo "${C_RED}error:${C_RESET} could not read the blueprint at ${BP_SYNC_REMOTE} (${BP_SYNC_BRANCH})" >&2
+  echo "  $1" >&2
+  echo "  Nothing was compared. This is NOT a clean drift report." >&2
+  echo "  Offline? Compare against a local checkout explicitly:" >&2
+  echo "    BLUEPRINT_ROOT=<path to a blueprint checkout> blueprint drift" >&2
+  exit 5
+}
+
+# A cache can refresh "successfully" while missing an object the tip needs, so
+# building the tree is the corruption check (PLAN §0.4). The run does not delete
+# the cache itself: another run may be reading through it.
+_bp_fetch_damaged() {
+  _bp_fetch_fail "cache $BP_SYNC_CACHE is damaged — remove it (rm -rf $BP_SYNC_CACHE) and run again"
+}
+
+# _bp_fetch_blueprint — refresh the cache, then bind BLUEPRINT_ROOT to a detached
+# checkout of exactly the tip this run fetched. Cheap failures come first, so
+# nothing touches the network or the cache before config, timeout and scratch
+# are known good.
+_bp_fetch_blueprint() {
+  local libdir lib missing="" cfg_out tcmd rc=0 err cache_root key tmp cause
+
+  # Sourced HERE and not at load time, so the override path works in a project
+  # whose libs are missing — that is how it recovers them (PLAN §5, BUG-028).
+  libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+  for lib in request.sh request-config.sh staleness.sh; do
+    [ -r "$libdir/$lib" ] || missing="$missing scripts/lib/$lib"
+  done
+  if [ -n "$missing" ]; then
+    echo "${C_RED}error:${C_RESET} reading the blueprint needs$missing, which this project does not have." >&2
+    echo "  Fetch it once from a local blueprint checkout:" >&2
+    echo "    BLUEPRINT_ROOT=<path to a blueprint checkout> blueprint pull$missing" >&2
+    exit 1
+  fi
+  for lib in request.sh request-config.sh staleness.sh; do
+    # shellcheck source=/dev/null
+    . "$libdir/$lib"
+  done
+
+  # 4 — the config names no readable address. Validated by the same function
+  # a2bp uses, so the two commands cannot disagree about what a valid one is.
+  cfg_out=$(bp_config_load .blueprint-source) || {
+    echo "  Or compare against a local checkout: export BLUEPRINT_ROOT=<path to a blueprint checkout>" >&2
+    exit 4
+  }
+  eval "$cfg_out"
+  BP_SYNC_REMOTE="$BP_CFG_REMOTE"
+  BP_SYNC_BRANCH="$BP_CFG_BRANCH"
+
+  tcmd=$(bp_staleness_timeout_cmd)
+  [ -n "$tcmd" ] || _bp_fetch_fail "no 'timeout' or 'gtimeout' on PATH, so the fetch could not be bounded"
+
+  if ! BP_SYNC_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/blueprint-sync.XXXXXXXX" 2>/dev/null); then
+    BP_SYNC_SCRATCH=""
+    _bp_fetch_fail "could not create a scratch directory under ${TMPDIR:-/tmp}"
   fi
 
-  # Resolve through a symlink: CLAUDE.md documents `ln -s .../scripts/blueprint`
-  # as an install method, and dirname of the symlink is /usr/local/bin.
-  self="${BASH_SOURCE[0]}"
-  if command -v readlink >/dev/null 2>&1; then
-    local resolved
-    resolved=$(readlink -f "$self" 2>/dev/null) && [ -n "$resolved" ] && self="$resolved"
+  # --- the cache: one per remote address, shared by every project here ------
+  cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/struct2flow"
+  key=$(printf '%s' "$BP_SYNC_REMOTE" | bp_request_transport_env git hash-object --stdin) \
+    || _bp_fetch_fail "could not derive a cache key for the remote address"
+  BP_SYNC_CACHE="$cache_root/blueprint-$key.git"
+  if [ ! -d "$BP_SYNC_CACHE" ]; then
+    # Initialised BESIDE the cache and renamed into place, never initialised in
+    # place: concurrent first runs failed 3/160 with plain `git init`, 0/160 like
+    # this. A loser's `mv` puts its temp INSIDE the winner, removed just below.
+    mkdir -p "$cache_root" 2>/dev/null || _bp_fetch_fail "could not create the cache directory $cache_root"
+    tmp=$(mktemp -d "$cache_root/.bp-cache-init.XXXXXXXX" 2>/dev/null) \
+      || _bp_fetch_fail "could not create the cache under $cache_root"
+    if ! bp_request_transport_env git init -q --bare "$tmp" >/dev/null 2>&1; then
+      rm -rf "$tmp"
+      _bp_fetch_fail "could not initialise the cache under $cache_root"
+    fi
+    mv "$tmp" "$BP_SYNC_CACHE" 2>/dev/null || rm -rf "$tmp"
   fi
-  cli_root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P) || return 1
+  # A lost race's temp, this run's or one a killed run left behind.
+  rm -rf "$BP_SYNC_CACHE"/.bp-cache-init.*
+  [ -d "$BP_SYNC_CACHE" ] || _bp_fetch_fail "the cache $BP_SYNC_CACHE could not be created"
 
-  # TASK-021 — after the restructure this CLI lives at
-  # <root>/scaffolding/scripts/blueprint, so one `..` lands on `scaffolding/`
-  # rather than on the repo root. BLUEPRINT_ROOT must be the REPO root: every
-  # `git -C "$BLUEPRINT_ROOT" archive HEAD scaffolding/…` below depends on it,
-  # and so does `.blueprint-root`.
-  if [ "${cli_root##*/}" = "scaffolding" ]; then
-    cli_root=$(cd "$cli_root/.." 2>/dev/null && pwd -P) || return 1
+  # --- refresh, into a ref only this run uses -------------------------------
+  # Runs never update the same ref, so they never contend on a ref lock, and no
+  # run can read an answer another run fetched. gc and maintenance are off per
+  # command rather than in the cache's config: nothing prunes under another
+  # run's checkout, and no run ever contends on config.lock.
+  #
+  # In the BACKGROUND, with `wait`: a trapped signal interrupts `wait` at once,
+  # while a foreground fetch would hold the handler until the fetch returned.
+  BP_SYNC_REF="refs/bp-run/${BP_SYNC_SCRATCH##*/}"
+  err="$BP_SYNC_SCRATCH/fetch.err"
+  bp_request_transport_env "$tcmd" "$BP_FETCH_TIMEOUT" \
+    git -c gc.auto=0 -c maintenance.auto=false --git-dir="$BP_SYNC_CACHE" \
+    fetch -q --no-tags "$BP_SYNC_REMOTE" "+refs/heads/$BP_SYNC_BRANCH:$BP_SYNC_REF" 2>"$err" &
+  BP_SYNC_CHILD=$!
+  wait "$BP_SYNC_CHILD" || rc=$?
+  BP_SYNC_CHILD=""
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 124 ]; then
+      cause="timed out after ${BP_FETCH_TIMEOUT}s"
+    elif grep -q "couldn't find remote ref" "$err" 2>/dev/null; then
+      cause="no branch '$BP_SYNC_BRANCH' on that remote"
+    else
+      cause=$(grep -m1 -E '^(fatal|error):' "$err" 2>/dev/null || head -n 1 "$err" 2>/dev/null || true)
+      [ -n "$cause" ] || cause="git fetch exited $rc"
+    fi
+    _bp_fetch_fail "$cause"
   fi
 
-  # Verified, not assumed — a directory containing scripts/blueprint is not
-  # necessarily a blueprint. Each anchor is accepted at either coordinate: this
-  # check is what ESTABLISHES the root, so it cannot itself depend on knowing
-  # where the tree sits. (The root `CLAUDE.md` will be a stub importing
-  # `@scaffolding/CLAUDE.md`, but requiring the stub would make this resolver
-  # fail on a tree mid-move, which is the state it most needs to survive.)
-  if [ -n "$cli_root" ] &&
-     { [ -f "$cli_root/CLAUDE.md" ] || [ -f "$cli_root/scaffolding/CLAUDE.md" ]; } &&
-     { [ -f "$cli_root/docs/DoD.md" ] || [ -f "$cli_root/scaffolding/docs/DoD.md" ]; }; then
-    echo "${C_YELLOW}⚠ .blueprint-source names '${from_file:-<empty>}', which does not exist here.${C_RESET}" >&2
-    echo "${C_DIM}  Falling back to the blueprint this CLI runs from: $cli_root${C_RESET}" >&2
-    echo "${C_DIM}  (that field is an absolute host path, so it cannot be right on two${C_RESET}" >&2
-    echo "${C_DIM}   machines at once — export BLUEPRINT_ROOT to pin it explicitly)${C_RESET}" >&2
-    printf '%s' "$cli_root"; return 0
+  # --- the tree this run answers from ---------------------------------------
+  # Its own .git is nearer than any ancestor marker, and the cache is only ever
+  # addressed with --git-dir, so nothing resolves a repository from the scratch
+  # parent (BUG-110).
+  BP_SYNC_SHA=$(bp_request_transport_env git --git-dir="$BP_SYNC_CACHE" \
+    rev-parse -q --verify "$BP_SYNC_REF^{commit}" 2>/dev/null) || _bp_fetch_damaged
+  BP_SYNC_FETCHED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  if ! bp_request_transport_env git clone -q --shared --no-checkout \
+         "$BP_SYNC_CACHE" "$BP_SYNC_SCRATCH/tree" >/dev/null 2>&1 \
+     || ! bp_request_transport_env git -c gc.auto=0 -C "$BP_SYNC_SCRATCH/tree" \
+         checkout -q --detach "$BP_SYNC_SHA" >/dev/null 2>&1; then
+    _bp_fetch_damaged
   fi
-  return 1
+  BLUEPRINT_ROOT="$BP_SYNC_SCRATCH/tree"
+}
+
+# The commits since this project last synced, from the history this run compared
+# against. A bootstrap_sha that history does not contain is said so explicitly.
+# A history that cannot be READ is not "unknown" — it is a damaged cache, and
+# `2>/dev/null || echo "?"` used to make the two look the same (PLAN §2).
+#
+# Ancestry, not mere object presence: the cache holds every branch any run ever
+# fetched from this remote, so a commit can be present and still not be on the
+# branch this run read.
+_bp_report_history() {
+  local rc=0 count log where
+  if [ "$BP_SYNC_MODE" = address ]; then
+    where="$BP_SYNC_REMOTE $BP_SYNC_BRANCH"
+  else
+    where="the local checkout's"
+  fi
+
+  if _bp_git -C "$BLUEPRINT_ROOT" cat-file -e "$BOOTSTRAP_SHA^{commit}" 2>/dev/null; then
+    _bp_git -C "$BLUEPRINT_ROOT" merge-base --is-ancestor "$BOOTSTRAP_SHA" "$CURRENT_SHA" 2>/dev/null || rc=$?
+  else
+    rc=1
+  fi
+  if [ "$rc" -eq 1 ]; then
+    echo "${C_YELLOW}bootstrap_sha $BOOTSTRAP_SHA is not in $where history.${C_RESET} It was recorded from a commit that is not on that branch (never pushed, rewritten, or not yet released), so commits since sync are unknown."
+    echo
+    return 0
+  fi
+  [ "$rc" -eq 0 ] || _bp_history_unreadable
+
+  count=$(_bp_git -C "$BLUEPRINT_ROOT" rev-list --count "$BOOTSTRAP_SHA..$CURRENT_SHA" 2>/dev/null) \
+    || _bp_history_unreadable
+  log=$(_bp_git -C "$BLUEPRINT_ROOT" log --oneline "$BOOTSTRAP_SHA..$CURRENT_SHA" 2>/dev/null) \
+    || _bp_history_unreadable
+  echo "${C_BLUE}Blueprint has $count commit(s) since this project was last synced:${C_RESET}"
+  printf '%s\n' "$log" | sed 's/^/  /'
+  echo
+}
+
+_bp_history_unreadable() {
+  if [ "$BP_SYNC_MODE" = address ]; then _bp_fetch_damaged; fi
+  die "could not read the history of $BLUEPRINT_ROOT"
 }
 
 # --- BUG-008: a pulled file must keep the blueprint's executable bit ----------
@@ -762,7 +982,6 @@ read_blueprint_source() {
       echo "$(pwd)/.blueprint-source with:" >&2
       echo >&2
       echo "  config_version   = 2" >&2
-      echo "  blueprint_source = <path to your blueprint checkout, RELATIVE to here, e.g. ../blueprint>" >&2
       echo "  blueprint_remote = git@github.com:<owner>/<blueprint>.git" >&2
       echo "  blueprint_branch = main" >&2
       echo "  bootstrap_sha    = <blueprint commit you are adopting against>" >&2
@@ -772,17 +991,37 @@ read_blueprint_source() {
     die "no .blueprint-source in $(pwd) — not a struct2flow project (run from project root)"
   fi
 
-  local from_file
-  from_file=$(grep '^blueprint_source' .blueprint-source | cut -d= -f2- | xargs)
-  BOOTSTRAP_SHA=$(grep '^bootstrap_sha' .blueprint-source | cut -d= -f2- | xargs)
-  BOOTSTRAP_DATE=$(grep '^bootstrap_date' .blueprint-source | cut -d= -f2- | xargs)
+  # `sed`, not `grep | cut | xargs`: under pipefail a grep that matched nothing
+  # killed the CLI through `set -e` with no message, so a config missing one
+  # field made drift and pull exit 1 silently (tests/sync-by-address, reproducer).
+  BOOTSTRAP_SHA=$(_bp_config_value bootstrap_sha)
+  BOOTSTRAP_DATE=$(_bp_config_value bootstrap_date)
 
-  BLUEPRINT_ROOT=$(_bp_resolve_blueprint_root "$from_file") || \
-    die ".blueprint-source points at '$from_file' which does not exist, and no blueprint checkout could be resolved (export BLUEPRINT_ROOT=<path>)"
+  # PLAN §5 — no longer read, and said so on EVERY run until the line is gone.
+  # A warning shown once is a warning nobody who missed it will see.
+  if grep -q '^[[:space:]]*blueprint_source[[:space:]]*=' .blueprint-source; then
+    echo "${C_YELLOW}warning:${C_RESET} .blueprint-source still has blueprint_source, which is no longer read. The blueprint is read from blueprint_remote (TASK-025). Delete the blueprint_source line." >&2
+  fi
+
+  # Before anything interruptible, so no stage runs unguarded.
+  _bp_terminating_traps _bp_sync_cleanup
+  if [ -n "${BLUEPRINT_ROOT:-}" ]; then
+    [ -d "$BLUEPRINT_ROOT" ] || \
+      die "BLUEPRINT_ROOT is '$BLUEPRINT_ROOT', which is not a directory. Unset it to read the blueprint from blueprint_remote."
+    BP_SYNC_MODE=override
+  else
+    BP_SYNC_MODE=address
+    _bp_fetch_blueprint
+  fi
 
   # Every MANAGED_FILES consumer below this point walks a list of FILES. Expand
   # here, once, so `drift` and both of `pull`'s loops are unchanged (BUG-029).
   bp_expand_managed_dirs
+}
+
+# The first `KEY = value` in .blueprint-source, trimmed; empty when absent.
+_bp_config_value() {
+  sed -n "/^[[:space:]]*$1[[:space:]]*=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*\$//;p;q;}" .blueprint-source
 }
 
 # --- BUG-029: a MANAGED_FILES entry ending in `/` names a directory ----------
@@ -871,7 +1110,7 @@ bp_expand_managed_dirs() {
       tarf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
       listf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
 
-      if ! git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "$cand" >"$tarf" 2>/dev/null; then
+      if ! _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "$cand" >"$tarf" 2>/dev/null; then
         # Not in HEAD under this candidate. The other one answers, or the
         # emptiness check below fails the run.
         rm -f "$tarf" "$listf"
@@ -930,12 +1169,11 @@ cmd_files() {
 }
 
 # --- Is BLUEPRINT_ROOT itself behind its remote? ---
-# `drift` answers "does this project match the blueprint?" by comparing against
-# BLUEPRINT_ROOT — the operator's LOCAL checkout. So a green result can mean
-# "you match a copy of the blueprint that is six weeks old". While a2bp also
-# wrote to that same local copy the two commands at least agreed on what "the
-# blueprint" meant; once a2bp files against the remote, drift is the one command
-# that can be confidently wrong. Plan §3b.
+# Runs only where drift compares against a LOCAL checkout: the blueprint's own
+# checkout, and a derived project under the BLUEPRINT_ROOT override. There a
+# green result can mean "you match a copy of the blueprint that is six weeks
+# old", so the report says how far behind that copy is. On the address path
+# (TASK-025) there is no local copy to judge. Plan §3b.
 report_staleness() {
   local root="$1" out status blocker offer remote count verified branch
 
@@ -1138,20 +1376,25 @@ cmd_drift() {
 
   echo "${C_BOLD}Blueprint drift check${C_RESET}"
   echo "  project:    $(pwd)"
-  echo "  blueprint:  $BLUEPRINT_ROOT"
-  echo "  bootstrap:  $BOOTSTRAP_SHA ($BOOTSTRAP_DATE)"
-
-  CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
-  echo "  blueprint HEAD: $CURRENT_SHA"
-
-  report_staleness "$BLUEPRINT_ROOT"
+  if [ "$BP_SYNC_MODE" = address ]; then
+    CURRENT_SHA="$BP_SYNC_SHA"
+    echo "  blueprint:  $BP_SYNC_REMOTE  ($BP_SYNC_BRANCH)"
+    echo "  fetched:    $CURRENT_SHA  at $BP_SYNC_FETCHED_AT"
+    echo "  bootstrap:  $BOOTSTRAP_SHA ($BOOTSTRAP_DATE)"
+  else
+    CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
+    echo "  blueprint:  LOCAL CHECKOUT $BLUEPRINT_ROOT (BLUEPRINT_ROOT override, not the published address)"
+    echo "  bootstrap:  $BOOTSTRAP_SHA ($BOOTSTRAP_DATE)"
+    echo "  blueprint HEAD: $CURRENT_SHA"
+    # Only here. On the address path there is no local checkout to judge: the
+    # report IS from a tip this run just fetched.
+    report_staleness "$BLUEPRINT_ROOT"
+  fi
   echo
 
-  if [ "$CURRENT_SHA" != "$BOOTSTRAP_SHA" ] && [ "$BOOTSTRAP_SHA" != "no-sha" ]; then
-    AHEAD_COUNT=$(git -C "$BLUEPRINT_ROOT" rev-list --count "$BOOTSTRAP_SHA..$CURRENT_SHA" 2>/dev/null || echo "?")
-    echo "${C_BLUE}Blueprint has $AHEAD_COUNT commit(s) since this project was last synced:${C_RESET}"
-    git -C "$BLUEPRINT_ROOT" log --oneline "$BOOTSTRAP_SHA..$CURRENT_SHA" 2>/dev/null | sed 's/^/  /'
-    echo
+  if [ -n "$BOOTSTRAP_SHA" ] && [ "$BOOTSTRAP_SHA" != "no-sha" ] && \
+     [ "$CURRENT_SHA" != "no-sha" ] && [ "$CURRENT_SHA" != "$BOOTSTRAP_SHA" ]; then
+    _bp_report_history
   fi
 
   DRIFTED=()
@@ -1260,7 +1503,11 @@ cmd_pull() {
     return 0
   fi
 
-  echo "${C_BOLD}Pulling from $BLUEPRINT_ROOT${C_RESET}"
+  if [ "$BP_SYNC_MODE" = address ]; then
+    echo "${C_BOLD}Pulling from $BP_SYNC_REMOTE ($BP_SYNC_BRANCH) at $BP_SYNC_SHA${C_RESET}"
+  else
+    echo "${C_BOLD}Pulling from LOCAL CHECKOUT $BLUEPRINT_ROOT (BLUEPRINT_ROOT override, not the published address)${C_RESET}"
+  fi
   local pulled=0 pull_out=""
   for f in "${files[@]}"; do
     bp=$(bp_blueprint_path "$f")
@@ -1361,7 +1608,13 @@ cmd_pull() {
 
   echo
   if [ $pulled -gt 0 ]; then
-    CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
+    # The FULL SHA of the commit this run fetched and applied — never a local
+    # checkout's HEAD, which may hold commits nobody pushed (TASK-025).
+    if [ "$BP_SYNC_MODE" = address ]; then
+      CURRENT_SHA="$BP_SYNC_SHA"
+    else
+      CURRENT_SHA=$(git -C "$BLUEPRINT_ROOT" rev-parse HEAD 2>/dev/null || echo "no-sha")
+    fi
     # BUG-016 — bootstrap_sha means "this project is synced UP TO this commit".
     # A single-file pull does not make that true, and writing it anyway made
     # every later `drift` report "0 commits since sync" while the project was
@@ -1376,8 +1629,13 @@ cmd_pull() {
       echo "project is not synced to blueprint HEAD. Run 'blueprint pull' with no"
       echo "paths to sync fully.${C_RESET}"
     elif [ -f .blueprint-source ] && [ "$CURRENT_SHA" != "no-sha" ]; then
-      sed -i.bak "s/^bootstrap_sha.*=.*/bootstrap_sha    = $CURRENT_SHA/" .blueprint-source
-      rm -f .blueprint-source.bak
+      # Computed beside, then landed through the shielded writer, so a signal
+      # during a pull cannot leave the config half-written.
+      local cfg_new
+      cfg_new=$(mktemp)
+      sed "s/^bootstrap_sha.*=.*/bootstrap_sha    = $CURRENT_SHA/" .blueprint-source > "$cfg_new"
+      _bp_shielded_write "$cfg_new" .blueprint-source
+      rm -f "$cfg_new"
       echo "Updated .blueprint-source bootstrap_sha → $CURRENT_SHA"
     fi
     echo "${C_GREEN}✓ Pulled $pulled file(s). Review with 'git diff' and commit.${C_RESET}"

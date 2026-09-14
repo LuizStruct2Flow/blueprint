@@ -130,6 +130,10 @@
  *     THIS repository's code can falsify a property of git. So the fixture's own
  *     `.gitattributes` stops ignoring the suite, in both runners.
  *     shell #1b #1c #2 · spec #1b #1c #2 · AGREE.
+ *
+ * TASK-025 retargeted every fixture project from `blueprint_source` to
+ * `blueprint_remote`, so drift and pull fetch the fixture blueprint instead of
+ * reading its folder. Q15 re-run afterwards: spec #1b #1c #2, unchanged.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -245,8 +249,7 @@ async function newProject(s: Scenario, tag: string, name: string, bp: string) {
     join(p, '.blueprint-source'),
     [
       'config_version   = 2',
-      `blueprint_source = ${bp}`,
-      'blueprint_remote = git@github.com:owner/bp.git',
+      `blueprint_remote = ${bp}`,
       'blueprint_branch = main',
       `bootstrap_sha    = ${sha}`,
       'bootstrap_date   = 2026-01-01',
@@ -643,7 +646,7 @@ async function blueprintWithoutTests(s: Scenario) {
     join(p, '.blueprint-source'),
     [
       'config_version   = 2',
-      `blueprint_source = ${bp}`,
+      `blueprint_remote = ${bp}`,
       `bootstrap_sha    = ${sha}`,
       'bootstrap_date   = 2026-01-01',
       '',
@@ -727,7 +730,7 @@ describe('BUG-029 R2-S2 — the substitution predicate reads the FILE path, not 
         join(p, '.blueprint-source'),
         [
           'config_version   = 2',
-          `blueprint_source = ${bp}`,
+          `blueprint_remote = ${bp}`,
           `bootstrap_sha    = ${sha}`,
           'bootstrap_date   = 2026-01-01',
           '',

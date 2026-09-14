@@ -74,7 +74,8 @@ async function createDerivedProject(
   await writeFile(
     join(root, '.blueprint-source'),
     [
-      `blueprint_source = ${blueprintRoot}`,
+      'config_version   = 2',
+      `blueprint_remote = ${blueprintRoot}`,
       `bootstrap_sha    = ${bpSha}`,
       'bootstrap_date   = 2026-01-01',
       '',
@@ -268,7 +269,10 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       expect(r.code).not.toBe(0)
       expect(r.output).not.toContain('not a struct2flow project')
       expect(r.output).toMatch(/never registered|not registered|adopt/i)
-      expect(r.output).toContain('blueprint_source')
+      // TASK-025: the lines to add name the ADDRESS drift reads, and no longer
+      // suggest a local path it would ignore and warn about.
+      expect(r.output).toContain('blueprint_remote')
+      expect(r.output).not.toContain('blueprint_source')
     })
   })
 })

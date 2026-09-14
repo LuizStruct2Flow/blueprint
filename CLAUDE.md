@@ -913,9 +913,13 @@ In the blueprint repo itself there is no `.blueprint-source` — it is the sourc
 and `drift` reports exactly that and exits 0 (BUG-007). It still arms the gate,
 and it still reports whether the checkout is behind its own remote.
 
-Output: which managed files differ from the blueprint HEAD, plus the
+Output: which managed files differ from the blueprint, plus the
 commit log in the blueprint since this project's `.blueprint-source`
-bootstrap_sha. Three cases:
+bootstrap_sha. The blueprint is read **by its address** — `blueprint_remote`,
+fetched fresh on every run — never from a local folder, so the header names the
+remote, the branch and the full SHA it compared against. The one exception is an
+exported `BLUEPRINT_ROOT`, and then the header says `LOCAL CHECKOUT …
+(BLUEPRINT_ROOT override)`. Four cases:
 
 1. **Clean** — `blueprint drift` reports `✓ All blueprint-managed files
    match the blueprint HEAD.` → proceed with founder's task.
@@ -926,6 +930,9 @@ bootstrap_sha. Three cases:
    file-level drift (rare; happens if the project already back-propagated
    everything). Bump `.blueprint-source` bootstrap_sha to the new HEAD
    (next `blueprint pull` does this automatically) and proceed.
+4. **Unreachable** — non-zero (exit 5), and it says so: `could not read the
+   blueprint … This is NOT a clean drift report`. Tell the founder the drift
+   check did not run. Do **not** report the project as in sync.
 
 ### Pulling forward
 

@@ -152,7 +152,7 @@ describe('BUG-114 — every script a managed file names reaches a project that p
         join(proj, '.blueprint-source'),
         [
           'config_version   = 2',
-          `blueprint_source = ${bp}`,
+          `blueprint_remote = ${bp}`,
           `bootstrap_sha    = ${sha}`,
           'bootstrap_date   = 2026-01-01',
           '',

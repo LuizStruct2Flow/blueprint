@@ -379,7 +379,7 @@ function listed(output: string, mark: '~' | '+' | '!' | '✗'): string[] {
   return output
     .split('\n')
     .filter((l) => l.trimStart().startsWith(mark + ' '))
-    .map((l) => l.trim().slice(mark.length + 1).split(' — ')[0].trim())
+    .map((l) => (l.trim().slice(mark.length + 1).split(' — ')[0] ?? '').trim())
 }
 
 describe("BUG-113 — drift, pull's selection and pull's preview give ONE answer for a marker file", () => {

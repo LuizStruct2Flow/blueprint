@@ -539,6 +539,13 @@ fi
 #                    greenfield ≥90% / brownfield ≥70% threshold not met,
 #                    per project_config_dod.md)
 
+# These stages only recognise backend/, frontend/ and infra/. A project laid out
+# any other way skips every one of them and the gate still ends PASSED, so the
+# skip says where that project's own build/lint/test stages belong. (The hint
+# deliberately does not spell the marker token: prose naming a marker is how
+# BUG-052 and BUG-112 both happened.)
+_pp_layout_hint="if your code lives elsewhere, its stages belong after the end marker in .githooks/pre-push-project (declare them in project_config_dod.md)"
+
 # --- Backend (if present) ---
 _st_backend_build(){ ( cd backend && npm run build ) || { echo "❌ Backend build failed."; return 1; }; }
 _st_backend_lint(){ ( cd backend && npm run lint ) || { echo "❌ Backend lint exceeded --max-warnings threshold."; return 1; }; }
@@ -550,7 +557,7 @@ if [ -d backend ]; then
   pipe_stage "backend · format" _st_backend_format_check
   pipe_stage "backend · tests + coverage" _st_backend_test_coverage
 else
-  pipe_skip "backend · build" "no backend/ directory"
+  pipe_skip "backend · build" "no backend/ directory — $_pp_layout_hint"
   pipe_skip "backend · lint" "no backend/ directory"
   pipe_skip "backend · format" "no backend/ directory"
   pipe_skip "backend · tests + coverage" "no backend/ directory"
@@ -565,7 +572,7 @@ if [ -d frontend ]; then
   pipe_stage "frontend · format" _st_frontend_format_check
   pipe_stage "frontend · tests + coverage" _st_frontend_test_coverage
 else
-  pipe_skip "frontend · lint" "no frontend/ directory"
+  pipe_skip "frontend · lint" "no frontend/ directory — $_pp_layout_hint"
   pipe_skip "frontend · format" "no frontend/ directory"
   pipe_skip "frontend · tests + coverage" "no frontend/ directory"
 fi
@@ -631,7 +638,7 @@ if [ -d infra ]; then
     fi
   fi
 else
-  pipe_skip "IaC validate" "no infra/ directory"
+  pipe_skip "IaC validate" "no infra/ directory — $_pp_layout_hint"
 fi
 
 # --- .claude/settings.json host-path guard (generic struct2flow rule) ---

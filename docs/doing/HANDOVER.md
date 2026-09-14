@@ -32,10 +32,14 @@ vitest (5.x) instead of the lockfile's 4.1.11 — a green result from the wrong
 runner. Works from anywhere:
 
 ```
-tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>
+env -u GIT_EDITOR tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>
 ```
 
-`cd tests` does not persist between an agent's Bash calls.
+`cd tests` does not persist between an agent's Bash calls. **The `env -u GIT_EDITOR` is
+required since TASK-025 commit 1:** the harness now refuses to run when the test process
+carries an undeclared `GIT_*` variable, and a Claude Code shell exports
+`GIT_EDITOR=true`. The gate's runner already unsets it; a direct run without it is
+refused with the variable named.
 
 **2. `git push` runs the full gate — ~440 s — and a failing stage stops the
 rest (BUG-057).** One push reveals one problem. Run the specific suite first.
@@ -112,11 +116,18 @@ revision 4's release job wrongly failed an old-run rerun (`origin/released` vs
 the one change: `--replace-blueprint-command` must validate the new command from the
 invoking migrated project, not from the installer's own checkout. Folded in as
 revision 6 (`12b59b5`: records the invoking directory, adds `--project=<dir>`, #37b keeps
-installer checkout and project apart). **The plan is buildable.** **Commit 1 landed locally
-(`6ed93b1`, the failing reproducer); commit 2 is in progress** — Christian's uncommitted
-edits span `scripts/blueprint`, `scripts/lib/staleness.sh`, `scripts/new-project.sh`, the
-three sync docs and a dozen suites. Do not push, and do not run the gate, until commit 2
-is committed. **Commit 3 waits only for** linkedin's #67/#69 to be decided (they
+installer checkout and project apart). **The plan is buildable.** **Commits 1–2 landed locally,
+not pushed** — `6ed93b1` (reproducer + harness scrubs) and `21e2803` (drift and pull read
+the blueprint by its address). Not yet: a Codex review of the implementation, then the
+push. **Christian's report of where the plan met the code** (verify in review): four
+listed mutants do not redden their case (M1→#1h instead, M22b→#11/#20, **M23c reddens
+nothing**, **M24 leaves #24 green**); killing the refresh subshell orphaned the fetch
+(fixed with `pkill -P`, #20 now time-bounded); a damaged cache usually self-heals, exit 5
+only with a leftover ref (#27a); a2bp-contamination #24 and bootstrap-gate #4/#6 needed
+changes. **Live consequence of commit 2:** derived projects run this checkout's CLI
+through the wrapper, so their `blueprint drift` now reads GitHub `main`, warns about
+`blueprint_source`, and exits 5 offline (`BLUEPRINT_ROOT=<checkout>` is the override).
+BUG-116 adopts the handler by replacing its trap with `_bp_terminating_traps _a2bp_cleanup`. **Commit 3 waits only for** linkedin's #67/#69 to be decided (they
 touch the same files).
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a

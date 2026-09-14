@@ -985,6 +985,30 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
+  it('#23b the shield ignores INT and TERM BEFORE it opens the destination (structural)', async () => {
+    // WHY STRUCTURAL. `( trap '' INT TERM; cat "$1" ) > "$2"` opens and
+    // truncates the destination in the child BEFORE the trap runs, still
+    // killable. That window is microseconds wide and no command on PATH runs in
+    // it, so #23's `cat` seam, which blocks after the trap, cannot reach it: the
+    // mutant that moves the redirect outside reddened nothing (Alexey, S2). The
+    // ordering is a property of the helper's text, so the text is asserted.
+    const text = await readFile(join(REPO_ROOT, 'scripts/blueprint'), 'utf8')
+    const found = text.match(/^_bp_shielded_write\(\) \{\n([\s\S]*?)\n\}$/m)
+    expect(found, 'no multi-line _bp_shielded_write() { … } definition to check').not.toBeNull()
+    const body = (found?.[1] ?? '')
+      .split('\n')
+      .map((l) => l.replace(/\s+#.*$/, ''))
+      .join('\n')
+      .trim()
+
+    expect(body, 'the subshell does not open with the INT and TERM ignore').toMatch(/^\(\s*trap '' INT TERM\s*\n/)
+    expect(body.endsWith(')'), 'something follows the subshell — a redirect there opens the file unshielded').toBe(true)
+    const ignore = body.indexOf("trap '' INT TERM")
+    const redirect = body.search(/>\s*"\$2"/)
+    expect(redirect, 'no redirect to the destination inside the helper').toBeGreaterThan(ignore)
+    expect(body.lastIndexOf(')'), 'the destination is opened outside the shielded subshell').toBeGreaterThan(redirect)
+  })
+
   it('#23c group INT and TERM while the executable bit is set: the pulled file ends with the blueprint\'s mode', async () => {
     await scenario('sync-by-address-23c', async (s) => {
       // BUG-008 makes the executable bit part of what a pull lands, so the bit

@@ -32,14 +32,15 @@ vitest (5.x) instead of the lockfile's 4.1.11 — a green result from the wrong
 runner. Works from anywhere:
 
 ```
-env -u GIT_EDITOR tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>
+env -u GIT_EDITOR -u GIT_PAGER -u AGENT_PERSONA tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>
 ```
 
-`cd tests` does not persist between an agent's Bash calls. **The `env -u GIT_EDITOR` is
-required since TASK-025 commit 1:** the harness now refuses to run when the test process
-carries an undeclared `GIT_*` variable, and a Claude Code shell exports
-`GIT_EDITOR=true`. The gate's runner already unsets it; a direct run without it is
-refused with the variable named.
+`cd tests` does not persist between an agent's Bash calls. **The `env -u …` is required
+since TASK-025 commit 1:** the harness refuses to run when the test process carries an
+undeclared `GIT_*` variable or a scrubbed `AGENT_*` one. A Claude Code shell exports
+`GIT_EDITOR`, a Codex shell also `GIT_PAGER`, and a dispatched persona `AGENT_PERSONA`.
+This is deliberate (Alexey's review: those variables change what git launches). The gate's
+runner already unsets them; a direct run without them is refused with the variable named.
 
 **2. `git push` runs the full gate — ~440 s — and a failing stage stops the
 rest (BUG-057).** One push reveals one problem. Run the specific suite first.
@@ -118,8 +119,12 @@ invoking migrated project, not from the installer's own checkout. Folded in as
 revision 6 (`12b59b5`: records the invoking directory, adds `--project=<dir>`, #37b keeps
 installer checkout and project apart). **The plan is buildable.** **Commits 1–2 landed locally,
 not pushed** — `6ed93b1` (reproducer + harness scrubs) and `21e2803` (drift and pull read
-the blueprint by its address). Not yet: a Codex review of the implementation, then the
-push. **Christian's report of where the plan met the code** (verify in review): four
+the blueprint by its address). **Implementation review (Alexey, 2026-09-14): push after
+these fixes** → `.scratch/ALEXEY-025-impl-review.md` — cache, history, `BLUEPRINT_ROOT`,
+H5 and BUG-110 PASS; to fix: (S1) the refresh subshell can spawn its fetch after cleanup
+looked for it; (S1) the exec-bit `chmod` runs outside the write shield; (S2) the
+ignore-before-redirect ordering has no red witness (M23c); (S3) the mutant catalogue names
+the wrong cases. Christian is fixing them. **Do not push commits 1–2 before those land.** **Christian's report of where the plan met the code** (verify in review): four
 listed mutants do not redden their case (M1→#1h instead, M22b→#11/#20, **M23c reddens
 nothing**, **M24 leaves #24 green**); killing the refresh subshell orphaned the fetch
 (fixed with `pkill -P`, #20 now time-bounded); a damaged cache usually self-heals, exit 5

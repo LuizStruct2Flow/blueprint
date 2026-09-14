@@ -194,10 +194,23 @@ projects pull that improvement forward.
 blueprint drift
 ```
 
-Output: which blueprint-managed files differ from the blueprint HEAD, plus
+Output: which blueprint-managed files differ from the blueprint, plus
 the commit log of what's changed in the blueprint since this project was
 last synced (read from `.blueprint-source`). The agent surfaces a short
 summary and offers to pull forward.
+
+**Which blueprint.** `drift` and `pull` read the blueprint **by its address** —
+`blueprint_remote` and `blueprint_branch` in `.blueprint-source` — never from a
+folder on your machine. Every run refreshes a per-machine cache
+(`${XDG_CACHE_HOME:-~/.cache}/struct2flow/`) and compares against the tip it just
+fetched, and the header names that remote, branch and full SHA. So a blueprint
+checkout that is behind, or ahead with unpushed commits, no longer changes the
+answer. If the remote cannot be read, `drift` exits **5** and says that nothing
+was compared. To compare against a local checkout on purpose — offline, or to
+preview an unpushed blueprint change — export `BLUEPRINT_ROOT=<checkout>` for
+that shell; the report then labels itself `LOCAL CHECKOUT … (BLUEPRINT_ROOT
+override)`. `blueprint_source` is no longer read, and a leftover line is warned
+about on every run until you delete it.
 
 ```bash
 blueprint pull                    # interactive: per-file y/n/quit
@@ -205,8 +218,10 @@ blueprint pull docs/DoD.md        # pull a single file
 blueprint pull --yes              # skip the per-file prompt (pull everything drifted)
 ```
 
-`pull` updates `.blueprint-source` to the blueprint's current HEAD when
-it finishes, so the next `drift` call shows the project as up-to-date.
+A full `pull` records the full SHA of the commit it fetched and applied as
+`bootstrap_sha`, so the next `drift` call shows the project as up-to-date. A
+pull of named files leaves it alone, because the project is not synced to that
+commit yet.
 Review with `git diff` and commit in the project repo.
 
 ### 2. Push (project → blueprint) — `blueprint a2bp`

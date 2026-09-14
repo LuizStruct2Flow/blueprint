@@ -130,7 +130,9 @@ async function newProject(s: Scenario, tag: string, name: string, f: Fixture) {
   await s.fs.write(
     join(p, '.blueprint-source'),
     [
-      `blueprint_source = ${f.bp}`,
+      'config_version   = 2',
+      `blueprint_remote = ${f.bp}`,
+      'blueprint_branch = main',
       `bootstrap_sha    = ${f.first}`,
       'bootstrap_date   = 2026-01-01',
       '',

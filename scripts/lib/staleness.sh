@@ -1,12 +1,13 @@
 #!/bin/bash
 # scripts/lib/staleness.sh — is the local blueprint checkout behind its remote?
 #
-# `blueprint drift` compares a project against BLUEPRINT_ROOT, the operator's
-# LOCAL checkout. So it can print "✓ all files match the blueprint HEAD" while
-# meaning "you match your local copy of it, which is six weeks old". That was
-# tolerable while `a2bp` wrote to the same local copy — both commands shared one
-# notion of "the blueprint". Once a2bp files against the REMOTE, drift becomes
-# the one command that can be confidently wrong.
+# Used only where `blueprint drift` still compares against a LOCAL checkout: in
+# the blueprint itself, and in a derived project under the BLUEPRINT_ROOT
+# override. There it can print "✓ all files match the blueprint HEAD" while
+# meaning "you match your local copy of it, which is six weeks old", so this
+# says how far behind that copy is. By default drift reads the blueprint by its
+# address and answers from a tip it just fetched (TASK-025), where there is no
+# local copy to judge.
 #
 # Two constraints shape everything here:
 #

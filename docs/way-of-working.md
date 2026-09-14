@@ -285,7 +285,9 @@ all eight concerns below, plus the agent infra, live in one git repo.
   directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.
 - **Pull** — `blueprint drift` shows what's changed in the blueprint
   since the project's last sync. `blueprint pull` brings the
-  improvements forward.
+  improvements forward. Both read the blueprint **by its address**, fetched
+  fresh on every run — never from whatever a folder on the machine happens to
+  hold — and an unreachable blueprint is a loud exit 5, never a quiet "all clear".
 - **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
   improvement lands in a project, it travels back to the blueprint
   so *every other project* inherits it next time they pull.
@@ -321,7 +323,7 @@ all eight concerns below, plus the agent infra, live in one git repo.
 A single `blueprint` command, four subcommands:
 
 ```
-blueprint drift            # what's drifted vs blueprint HEAD + commits since bootstrap
+blueprint drift            # what's drifted vs the blueprint's fetched tip + commits since bootstrap
 blueprint pull [FILE...]   # pull blueprint changes forward (interactive, founder approves)
 blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement upstream
 blueprint files            # list the blueprint-managed files (single source of truth)
@@ -351,7 +353,9 @@ second description of a test is a copy that drifts.
 
 The agent calls `blueprint drift` on every wake. Drift between blueprint
 and project is treated like drift between code and prod: **detected, not
-assumed away**.
+assumed away**. And a check that could not run says so: when the blueprint's
+address cannot be read, nothing is compared, and the agent must not report the
+project as in sync.
 
 ---
 

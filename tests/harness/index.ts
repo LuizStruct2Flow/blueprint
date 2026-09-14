@@ -31,6 +31,8 @@
 
 import { afterEach, expect } from 'vitest'
 import type { ChildProcess } from 'node:child_process'
+import { constants } from 'node:fs'
+import { access, readdir, stat, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWorkspace, type Workspace } from './workspace.js'
@@ -107,6 +109,17 @@ export interface Scenario {
 
   /** A directory of executable shims, plus a PATH that finds them first. */
   shimDir(name?: string): Promise<ShimDir>
+
+  /**
+   * A PATH that finds every executable the real PATH finds, EXCEPT `names`
+   * (TASK-025 H4).
+   *
+   * One workspace directory of symlinks, first occurrence winning, derived from
+   * the real PATH rather than hand-listed. It exists because hiding a tool had no
+   * contained form: a shim that "is not there" is still there, and a hand-written
+   * system PATH is a portability bug (tests/staleness #8 recorded the gap).
+   */
+  pathWithout(names: string[]): Promise<string>
 }
 
 /**
@@ -283,6 +296,26 @@ export async function scenario(
         (rel, content, o) => scopedFs.write(rel, content, o),
         name,
       )
+    },
+
+    async pathWithout(names) {
+      const dir = await workspace.dir('path-without')
+      const taken = new Set(names)
+      for (const from of (process.env.PATH ?? '').split(':').filter(Boolean)) {
+        const entries = await readdir(from).catch(() => [] as string[])
+        for (const entry of entries) {
+          if (taken.has(entry)) continue
+          const full = join(from, entry)
+          const usable = await access(full, constants.X_OK)
+            .then(() => stat(full))
+            .then((st) => st.isFile())
+            .catch(() => false)
+          if (!usable) continue
+          taken.add(entry)
+          await symlink(full, join(dir, entry))
+        }
+      }
+      return dir
     },
   }
 

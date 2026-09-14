@@ -57,13 +57,21 @@
  *     file gets `{{PROJECT_NAME}}` substituted on the blueprint side only, and
  *     it reports drifted with no pull able to fix it.
  *
+ * RE-RUN FOR TASK-025, with every shape now served through the blueprint's
+ * ADDRESS (a fetched checkout of the fixture's tip) instead of a local path.
+ * Observed: A #2 #3 #4 #5 #6 #7 #8 · B #2 #4 #5 #6 #7 #8 · C #6 · D #3 #4 #6 ·
+ * F #1 #2 #3 #4 #5 #8. Every set matches the one recorded above; the only
+ * addition is #8 under A and F, and #8 is the rewritten case — it now reads a
+ * scaffolding-shaped blueprint through its address rather than pinning the
+ * removed resolve-from-the-CLI's-checkout step, so those mutants reach it.
+ *
  * The a2bp half of TASK-021 lives in tests/a2bp-build #9a–#9f, next to the
  * request builder it constrains. Its mutant (make `bp_base_path` return its
  * argument unchanged) turns #9a #9b #9d #9e red.
  */
 
 import { describe, it, expect } from 'vitest'
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
+import { cp, mkdir, writeFile } from 'node:fs/promises'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -140,7 +148,10 @@ async function derivedProject(s: Scenario, root: string, blueprintRoot: string) 
     join(root, '.blueprint-source'),
     [
       'config_version   = 2',
-      `blueprint_source = ${blueprintRoot}`,
+      // TASK-025: served through the blueprint's ADDRESS. The CLI fetches the
+      // fixture and answers from a checkout of the tip, so every shape below is
+      // exercised through the same path a derived project runs.
+      `blueprint_remote = ${blueprintRoot}`,
       `bootstrap_sha    = ${sha}`,
       'bootstrap_date   = 2026-01-01',
       '',
@@ -330,41 +341,30 @@ describe('TASK-021 — the CLI resolves against a blueprint that has moved under
     })
   })
 
-  it('#8 the CLI still resolves its own blueprint root when it lives under scaffolding/scripts/', async () => {
+  it('#8 a CLI living under scaffolding/scripts/ finds its own libs and reads a moved blueprint by address', async () => {
     await scenario('blueprint-relocation-8', async (s) => {
-      // `_bp_resolve_blueprint_root` walks `dirname($0)/..` and verifies the
-      // anchors. After the move that lands on `scaffolding/`, not the repo root
-      // — and BLUEPRINT_ROOT must be the REPO root or every `git archive HEAD
-      // scaffolding/…` below it queries the wrong repository.
+      // REWRITTEN BY TASK-025. This case used to pin `_bp_resolve_blueprint_root`
+      // walking `dirname($0)/..` to the checkout the CLI runs from — the step
+      // TASK-025 removed, because it is how a stale or unpushed checkout became
+      // "the blueprint". What must still hold after the move is the other half:
+      // a CLI at `<root>/scaffolding/scripts/blueprint` finds the libs beside it
+      // (the address path sources them lazily) and reads a scaffolding-shaped
+      // blueprint through its address. The copy sits outside any blueprint, so
+      // nothing can resolve a root from where it lives.
       const bp = await s.workspace.dir('bp')
       const proj = await s.workspace.dir('proj')
       await fixtureBlueprint(s, bp, 'scaffolding/', 'scaffolding/')
-      await mkdir(join(bp, 'scaffolding/scripts'), { recursive: true })
-      await copyFile(CLI, join(bp, 'scaffolding/scripts/blueprint'))
-      await s.run('chmod', ['+x', join(bp, 'scaffolding/scripts/blueprint')], { cwd: bp })
       await derivedProject(s, proj, bp)
+      const scripts = s.workspace.path('cli', 'scaffolding', 'scripts')
+      await cp(join(REPO_ROOT, 'scripts'), scripts, { recursive: true })
 
-      // Point .blueprint-source at a path that does not exist, so resolution
-      // MUST fall through to "the repo the running CLI lives in".
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        [
-          'config_version   = 2',
-          'blueprint_source = /nonexistent/blueprint',
-          'bootstrap_sha    = no-sha',
-          'bootstrap_date   = 2026-01-01',
-          '',
-        ].join('\n'),
-        'utf8',
-      )
-
-      const r = await s.run(join(bp, 'scaffolding/scripts/blueprint'), ['drift'], {
-        cwd: proj,
-      })
+      const r = await s.run('bash', [join(scripts, 'blueprint'), 'drift'], { cwd: proj })
 
       expect(r.code, r.output).toBe(0)
-      expect(r.output).toContain(`blueprint:  ${bp}`)
+      expect(r.output).toContain(`blueprint:  ${bp}  (main)`)
       expect(r.output).not.toContain('expanded to nothing')
+      expectAllResolved(r.output)
+      expect(marked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
     })
   })
 })

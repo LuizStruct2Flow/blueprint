@@ -336,8 +336,17 @@ async function fixture(s: Scenario, projectName = 'acme-flow'): Promise<Fixture>
     },
     makeProject,
     a2bp: runner,
-    pull: (dir, args) =>
-      s.run(CLI, ['pull', ...args], { cwd: dir, env: { PATH: ghPath } }),
+    // TASK-025 — pull reads the blueprint by its ADDRESS, so what a case wrote
+    // into the blueprint checkout has to reach the remote first, exactly as the
+    // a2bp runner above publishes it before every request.
+    async pull(dir, args) {
+      const add = await bpRepo.git(['add', '-A'])
+      expect(add.code, add.output).toBe(0)
+      await bpRepo.git(['commit', '-q', '-m', 'base', '--allow-empty'])
+      const push = await bpRepo.git(['push', '-q', '-f', 'origin', 'main'])
+      expect(push.code, push.output).toBe(0)
+      return s.run(CLI, ['pull', ...args], { cwd: dir, env: { PATH: ghPath } })
+    },
   }
 }
 

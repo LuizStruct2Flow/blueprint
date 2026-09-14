@@ -134,7 +134,7 @@ async function derivedProject(
     join(proj, '.blueprint-source'),
     [
       'config_version   = 2',
-      `blueprint_source = ${bp}`,
+      `blueprint_remote = ${bp}`,
       `bootstrap_sha    = ${sha}`,
       'bootstrap_date   = 2026-01-01',
       '',
@@ -214,7 +214,7 @@ describe('BP-7 — `blueprint pull` replaces the marker region and keeps the pro
         join(proj, '.blueprint-source'),
         [
           'config_version   = 2',
-          `blueprint_source = ${bp}`,
+          `blueprint_remote = ${bp}`,
           `bootstrap_sha    = ${sha}`,
           'bootstrap_date   = 2026-01-01',
           '',
@@ -257,7 +257,7 @@ async function pair(s: Scenario, tag: string, path: string, bpText: string, proj
     join(proj, '.blueprint-source'),
     [
       'config_version   = 2',
-      `blueprint_source = ${bp}`,
+      `blueprint_remote = ${bp}`,
       `bootstrap_sha    = ${sha}`,
       'bootstrap_date   = 2026-01-01',
       '',

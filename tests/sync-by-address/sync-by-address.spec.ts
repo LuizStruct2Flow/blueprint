@@ -21,6 +21,17 @@
  * keeps every run, red or green, inside the workspace. #13 places its copy
  * inside a FIXTURE checkout on purpose, because that fallback is its subject.
  *
+ * NO NETWORK. Remotes are workspace paths, or `ssh://git@127.0.0.1/…` behind an
+ * `ssh` shim. The harness scrubs GIT_SSH_COMMAND and GIT_SSH (H5), so the shim is
+ * the ssh git runs, not merely the first one on PATH.
+ *
+ * SIGNAL SEAMS, deterministic and sleep-free (R4). A shim opens its FIFO
+ * read-write (which never blocks), writes a `reached` marker, then blocks reading
+ * a line. The case waits for the marker, sends the signal, then writes the line
+ * so the shim returns. Opening read-write BEFORE the marker is what makes the
+ * release race-free: a release that finds no reader means the shim is already
+ * gone, never "not yet there".
+ *
  * REPRODUCER RECORD — observed on the reproducer commit, before the CLI change:
  *
  *   #1   rc=1 with NO message. `.blueprint-source` has no `blueprint_source`
@@ -33,13 +44,75 @@
  *   #13  rc=1, the same silent death as #1. The fallback this case exists for
  *        (the checkout the CLI runs from) is shown red by its mutant instead.
  *
+ * MUTATION RECORD (R6) — each mutant applied alone to scripts/blueprint (M8 to
+ * scripts/lib/request-config.sh), this suite run, the file restored. OBSERVED:
+ *
+ *   M1   fall back to the checkout the CLI runs from    → #12 #13
+ *        #1 cannot see it BY ITS PREMISE: it has no checkout to fall back to,
+ *        and giving it one would make it #13. #1's own red is M1h.
+ *   M1h  drift's header omits the fetched SHA            → #1 #2 #5 #13 #15 #19 #24 #26 #27b
+ *   M2   blueprint_source takes precedence again         → #2 #29
+ *   M3   `wait … || true` (a failed fetch ignored)       → #3 #4 #16 — each still exits 5,
+ *        through the damaged-cache check, so they catch it on the MESSAGE.
+ *   M4   no `timeout` around the fetch                   → #4
+ *   M5   answer from the cache without refreshing        → #5 #24 #25 #26 #27b
+ *   M6   the BLUEPRINT_ROOT override ignored             → #6 #7 #12
+ *   M7   a refused config infers the remote from origin  → #7 #8
+ *   M8   request-config.sh's placeholder arm removed     → #8
+ *   M9   bootstrap_sha recorded as a short SHA           → #9
+ *   M9b  drift compares the raw blueprint copy           → #1 #2 #5 #6 #7 #9b #13 #14 #15 #19 #26 #27b
+ *   M11  cleanup keeps the per-run ref                   → #11 #21 #22 #23 #24 #28
+ *   M12  the network libs sourced unconditionally        → #12
+ *   M14  an absent bootstrap_sha printed as "? commits"  → #14
+ *   M15  git on the cache run without the transport scrub → #15
+ *   M16  fetch the remote's HEAD instead of the branch   → #16
+ *   M17  run the fetch unbounded when no provider exists → #17
+ *   M18  scratch falls back to $PWD                      → #18
+ *   M19  the tree resolved with `rev-parse --show-toplevel` from scratch
+ *                                                        → 20 cases, #19 among them
+ *   M20  revision 1's trap: `trap cleanup EXIT INT TERM` → #20 #21 #22 #23
+ *   M20b cleanup kills only the refresh subshell         → #20 (on its bound: the
+ *        orphaned fetch held the run's output for the whole 30 s budget)
+ *   M22b the handler installed after the refresh         → #11 #20 — NOT #22: the
+ *        write step comes after the refresh either way, so only a signal at the
+ *        fetch can see where the handler went in.
+ *   M23a no shield on the writer                         → #23
+ *   M23b the shield ignores INT only                     → #23 (the TERM run)
+ *   M23c the redirect outside the shielding subshell     → NONE. The window
+ *        between the parent opening the file and the child ignoring the signals
+ *        is microseconds wide, and the seam blocks after it. Recorded, not
+ *        engineered around: a seam inside that window would test the seam.
+ *   M24  cleanup deletes the cache                       → #5 #11 #26 #27a #27b #28 #28b —
+ *        NOT #24: run A reads its history BEFORE it blocks in compare, so a
+ *        deleted cache behind it changes nothing it prints. #24's reds are
+ *        M5 M11 M26.
+ *   M25  a failed refresh answers from the last tip      → #25
+ *   M26  read the first bp-run ref instead of this run's → #24 #26 #28
+ *   M27a a failed tree build ignored                     → #27a
+ *   M27b any fetch stderr treated as corruption          → #27b
+ *   M28b the nested init temp not removed                → #28b (#28 is the smoke
+ *        partner and is not mutant-deterministic)
+ *   M29  no warning on the override path                 → #29
+ *
+ *   M16 onward were run against a COPY of the tree, not this checkout: every
+ *   derived project on the machine runs this checkout's scripts/blueprint
+ *   through the per-machine command, and a mutant there is a broken tool for
+ *   them. REPO_ROOT follows the harness's own location, so the copy is enough.
+ *
  * Plan: docs/doing/PLAN-TASK-025.md §9.2.
  */
 
-import { describe, it, expect } from 'vitest'
-import { cp } from 'node:fs/promises'
+import { describe, it, expect, vi } from 'vitest'
+import type { ChildProcess } from 'node:child_process'
+import { closeSync, constants, existsSync, openSync, writeSync } from 'node:fs'
+import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
+import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+
+const BLACKHOLE = 'ssh://git@127.0.0.1/blackhole.git'
+const WARNING =
+  'warning: .blueprint-source still has blueprint_source, which is no longer read. ' +
+  'The blueprint is read from blueprint_remote (TASK-025). Delete the blueprint_source line.'
 
 async function git(s: Scenario, cwd: string, args: string[]) {
   const r = await s.run('git', args, { cwd })
@@ -70,6 +143,8 @@ async function cliCopy(s: Scenario, at: string): Promise<string> {
   return join(dest, 'blueprint')
 }
 
+const dodText = (who: string, line: string) => `# DoD\nowner ${who}\n${line}\n`
+
 /**
  * A fixture blueprint that serves as the REMOTE. A plain working repository: git
  * fetches from a path as readily as from a bare one, and a working tree lets a
@@ -78,10 +153,10 @@ async function cliCopy(s: Scenario, at: string): Promise<string> {
  * `tests/fixture/test.sh` is mandatory: `tests/` is a managed directory whose
  * expansion is fail-closed (BUG-029).
  */
-async function blueprintRemote(s: Scenario, dod = 'published') {
-  const dir = await s.workspace.dir('remote')
+async function blueprintRemote(s: Scenario, dod = 'published', name = 'remote') {
+  const dir = await s.workspace.dir(name)
   await s.fs.write(join(dir, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\n')
-  await s.fs.write(join(dir, 'docs/DoD.md'), `# DoD\nowner {{PROJECT_NAME}}\n${dod}\n`)
+  await s.fs.write(join(dir, 'docs/DoD.md'), dodText('{{PROJECT_NAME}}', dod))
   await s.fs.write(join(dir, 'tests/fixture/test.sh'), 'echo fixture\n')
   await initRepo(s, dir)
   const head = await commitAll(s, dir, 'base')
@@ -90,34 +165,36 @@ async function blueprintRemote(s: Scenario, dod = 'published') {
 
 /** Advance a fixture repository by rewriting its DoD. Returns the new HEAD. */
 async function advance(s: Scenario, dir: string, dod: string) {
-  await s.fs.write(join(dir, 'docs/DoD.md'), `# DoD\nowner {{PROJECT_NAME}}\n${dod}\n`)
+  await s.fs.write(join(dir, 'docs/DoD.md'), dodText('{{PROJECT_NAME}}', dod))
   return commitAll(s, dir, dod)
+}
+
+interface ProjectOptions {
+  /** Lines appended to the config. */
+  extra?: string[]
+  /** Parent directory, so one scenario can hold several projects named `proj`. */
+  tag?: string
+  branch?: string
 }
 
 /**
  * A derived project named `proj` (the basename IS {{PROJECT_NAME}}), whose DoD
- * carries `dod` already substituted. `extra` lines are appended to its config.
+ * carries `dod` already substituted.
  */
-async function project(
-  s: Scenario,
-  remote: string,
-  sha: string,
-  dod: string,
-  extra: string[] = [],
-) {
-  const dir = await s.workspace.dir('p', 'proj')
+async function project(s: Scenario, remote: string, sha: string, dod: string, o: ProjectOptions = {}) {
+  const dir = await s.workspace.dir(o.tag ?? 'p', 'proj')
   await s.fs.write(join(dir, 'CLAUDE.md'), '# CLAUDE\nfor proj\n')
-  await s.fs.write(join(dir, 'docs/DoD.md'), `# DoD\nowner proj\n${dod}\n`)
+  await s.fs.write(join(dir, 'docs/DoD.md'), dodText('proj', dod))
   await s.fs.write(join(dir, 'tests/fixture/test.sh'), 'echo fixture\n')
   await s.fs.write(
     join(dir, '.blueprint-source'),
     [
       'config_version   = 2',
       `blueprint_remote = ${remote}`,
-      'blueprint_branch = main',
+      `blueprint_branch = ${o.branch ?? 'main'}`,
       `bootstrap_sha    = ${sha}`,
       'bootstrap_date   = 2026-01-01',
-      ...extra,
+      ...(o.extra ?? []),
       '',
     ].join('\n'),
   )
@@ -149,11 +226,13 @@ function fixtureMarked(output: string, mark: '~' | '+' | '!'): string[] {
   return marked(output, mark).filter((p) => FIXTURE_FILES.includes(p))
 }
 
+const fetched = (sha: string) => new RegExp(`fetched:\\s+${sha}\\s+at\\s+\\S+`)
+
 /**
  * A failure must not LOOK like a report, on either stream: no clean mark, and no
  * per-file line a reader could take as the answer (PLAN §9.2 preamble).
  */
-function expectNoReport(r: RunResult) {
+function expectNoReport(r: { stdout: string; stderr: string }) {
   for (const [name, text] of [
     ['stdout', r.stdout],
     ['stderr', r.stderr],
@@ -167,6 +246,146 @@ function expectNoReport(r: RunResult) {
   }
 }
 
+// --- the cache and the scratch, as a case observes them ---------------------
+
+const cacheRoot = (s: Scenario) => join(s.home, '.cache', 'struct2flow')
+
+async function caches(s: Scenario): Promise<string[]> {
+  const names = await readdir(cacheRoot(s)).catch(() => [] as string[])
+  return names.filter((n) => n.startsWith('blueprint-') && n.endsWith('.git')).map((n) => join(cacheRoot(s), n))
+}
+
+async function onlyCache(s: Scenario): Promise<string> {
+  const all = await caches(s)
+  expect(all, 'expected exactly one blueprint cache').toHaveLength(1)
+  return all[0] ?? ''
+}
+
+async function runRefs(s: Scenario, cache: string): Promise<string[]> {
+  const r = await s.run('git', ['--git-dir', cache, 'for-each-ref', '--format=%(refname)', 'refs/bp-run/'], {
+    cwd: s.workspace.root,
+  })
+  expect(r.code, r.output).toBe(0)
+  return r.stdout.split('\n').filter(Boolean)
+}
+
+async function scratchLeft(s: Scenario): Promise<string[]> {
+  const names = await readdir(s.workspace.path('tmp')).catch(() => [] as string[])
+  return names.filter((n) => n.startsWith('blueprint-sync.'))
+}
+
+/** No scratch under TMPDIR and no per-run ref in any cache. */
+async function expectNothingLeft(s: Scenario, label: string) {
+  expect(await scratchLeft(s), `${label}: scratch left under TMPDIR`).toEqual([])
+  for (const c of await caches(s)) {
+    expect(await runRefs(s, c), `${label}: a per-run ref survived in ${c}`).toEqual([])
+  }
+}
+
+const WATCHED = ['CLAUDE.md', 'docs/DoD.md', '.blueprint-source']
+
+async function snapshot(dir: string): Promise<string[]> {
+  return Promise.all(WATCHED.map((f) => readFile(join(dir, f), 'utf8').catch(() => '<absent>')))
+}
+
+// --- seams ------------------------------------------------------------------
+
+interface Seam {
+  path: string
+  marker: string
+  fifo: string
+}
+
+/**
+ * A `tool` shim that blocks once, the first time `when` holds, then behaves as
+ * the real tool (`ssh` exits 255 instead: there is no real one to reach).
+ */
+async function seam(s: Scenario, name: string, tool: string, when = 'true'): Promise<Seam> {
+  const dirName = `seam-${name}`
+  const shims = await s.shimDir(dirName)
+  const marker = s.workspace.path(dirName, 'reached')
+  const fifo = s.workspace.path(dirName, 'release.fifo')
+  const mk = await s.run('mkfifo', [fifo], { cwd: s.workspace.root })
+  expect(mk.code, `mkfifo failed, so the seam would not block:\n${mk.output}`).toBe(0)
+
+  let tail = 'exit 255'
+  if (tool !== 'ssh') {
+    const found = await s.run('sh', ['-c', `command -v ${tool}`], { cwd: s.workspace.root })
+    const real = found.stdout.trim()
+    expect(real, `no real ${tool} to hand over to`).not.toBe('')
+    tail = `exec '${real}' "$@"`
+  }
+  await shims.add(
+    tool,
+    `if [ ! -e '${marker}' ] && ${when}; then\n` +
+      `  exec 3<>'${fifo}'\n` +
+      `  : > '${marker}'\n` +
+      `  read -r _ <&3\n` +
+      `  exec 3<&-\n` +
+      `fi\n` +
+      tail,
+  )
+  return { path: shims.path(), marker, fifo }
+}
+
+async function reached(seam: Seam) {
+  await vi.waitFor(
+    () => {
+      if (!existsSync(seam.marker)) throw new Error(`the seam was never reached: ${seam.marker}`)
+    },
+    { timeout: 60_000, interval: 10 },
+  )
+}
+
+/** Let a blocked shim return. A shim that is already gone has no reader: fine. */
+function release(seam: Seam) {
+  let fd: number
+  try {
+    fd = openSync(seam.fifo, constants.O_WRONLY | constants.O_NONBLOCK)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENXIO') return
+    throw err
+  }
+  try {
+    writeSync(fd, 'go\n')
+  } finally {
+    closeSync(fd)
+  }
+}
+
+interface Done {
+  code: number | null
+  signal: NodeJS.Signals | null
+  stdout: string
+  stderr: string
+}
+
+function start(s: Scenario, cli: string, proj: string, args: string[], env: Record<string, string>) {
+  const child: ChildProcess = s.background('bash', [cli, ...args], { cwd: proj, env })
+  let stdout = ''
+  let stderr = ''
+  child.stdout?.on('data', (d: Buffer) => {
+    stdout += d.toString('utf8')
+  })
+  child.stderr?.on('data', (d: Buffer) => {
+    stderr += d.toString('utf8')
+  })
+  const done = new Promise<Done>((resolve, reject) => {
+    child.on('error', reject)
+    child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }))
+  })
+  return { child, done }
+}
+
+type Sig = 'SIGINT' | 'SIGTERM'
+const SIGNALS: Sig[] = ['SIGINT', 'SIGTERM']
+
+function diedOf(d: Done, sig: Sig): boolean {
+  return d.signal === sig || d.code === (sig === 'SIGINT' ? 130 : 143)
+}
+
+const show = (d: Done) => `code=${d.code} signal=${d.signal}\n${d.stdout}${d.stderr}`
+
 describe('TASK-025 — drift and pull read the blueprint by its address', () => {
   it('#1 drift reads the remote when NO local checkout exists, and says which commit it read', async () => {
     await scenario('sync-by-address-1', async (s) => {
@@ -179,12 +398,10 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       const r = await run(s, cli, proj, ['drift'])
 
       expect(r.code, r.output).toBe(0)
-      expect(r.stdout, 'the header does not name the remote and its branch').toMatch(
-        new RegExp(`blueprint:\\s+${escapeRe(remote.dir)}\\s+\\(main\\)`),
+      expect(r.stdout, 'the header does not name the remote and its branch').toContain(
+        `blueprint:  ${remote.dir}  (main)`,
       )
-      expect(r.stdout, 'the header does not name the full fetched SHA').toMatch(
-        new RegExp(`fetched:\\s+${remote.head}\\s+at\\s+\\S+`),
-      )
+      expect(r.stdout, 'the header does not name the full fetched SHA').toMatch(fetched(remote.head))
       expect(fixtureMarked(r.output, '!'), r.output).toEqual([])
       expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
     })
@@ -197,7 +414,7 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       await git(s, s.workspace.root, ['clone', '-q', remote.dir, sibling])
       // The remote moves on; the sibling does not. The project matches the tip.
       const tip = await advance(s, remote.dir, 'v2')
-      const proj = await project(s, remote.dir, tip, 'v2', [`blueprint_source = ${sibling}`])
+      const proj = await project(s, remote.dir, tip, 'v2', { extra: [`blueprint_source = ${sibling}`] })
       const cli = await cliCopy(s, 'cli')
 
       const r = await run(s, cli, proj, ['drift'])
@@ -207,7 +424,7 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         fixtureMarked(r.output, '~'),
         'drift reported DoD drifted: it compared against the stale sibling, not the remote',
       ).toEqual([])
-      expect(r.stdout).toMatch(new RegExp(`fetched:\\s+${tip}\\b`))
+      expect(r.stdout).toMatch(fetched(tip))
       expect(r.stdout, 'the header names the sibling').not.toContain(`blueprint:  ${sibling}`)
     })
   })
@@ -222,7 +439,213 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       expect(r.code, r.output).toBe(5)
       expect(r.stderr, r.output).toContain('could not read the blueprint')
       expect(r.stderr, r.output).toContain('NOT a clean drift report')
+      // The cause is the transport's, not a misdiagnosis: an ignored fetch
+      // failure would also end in 5, through the damaged-cache check, and would
+      // send the operator to delete a healthy cache.
+      expect(r.stderr, r.output).not.toContain('is damaged')
       expectNoReport(r)
+    })
+  })
+
+  it('#4 a HUNG remote is cut off at the fetch budget and exits 5, naming the timeout', async () => {
+    await scenario('sync-by-address-4', async (s) => {
+      // serial-timing. The ssh shim accepts the connection and never answers,
+      // which is the condition; `timeout` is what ends it.
+      const hole = await seam(s, 'hung', 'ssh')
+      const proj = await project(s, BLACKHOLE, 'no-sha', 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const began = Date.now()
+      const r = await run(s, cli, proj, ['drift'], { PATH: hole.path, BP_FETCH_TIMEOUT: '2' })
+      const elapsed = Date.now() - began
+
+      expect(r.code, r.output).toBe(5)
+      expect(r.stderr, r.output).toContain('timed out after 2s')
+      expect(elapsed, `a hung remote held drift for ${elapsed}ms`).toBeLessThan(20_000)
+      expectNoReport(r)
+    })
+  })
+
+  it('#5 the remote advances between two runs sharing one cache: run 2 answers from the new tip', async () => {
+    await scenario('sync-by-address-5', async (s) => {
+      const remote = await blueprintRemote(s, 'v1')
+      const proj = await project(s, remote.dir, remote.head, 'v1')
+      const cli = await cliCopy(s, 'cli')
+
+      const first = await run(s, cli, proj, ['drift'])
+      expect(first.code, first.output).toBe(0)
+      expect(fixtureMarked(first.output, '~'), first.output).toEqual([])
+
+      const tip = await advance(s, remote.dir, 'v2')
+      const second = await run(s, cli, proj, ['drift'])
+
+      expect(second.code, second.output).toBe(0)
+      expect(second.stdout, 'run 2 answered from what the cache already held').toMatch(fetched(tip))
+      expect(fixtureMarked(second.output, '~'), second.output).toEqual(['docs/DoD.md'])
+      expect(await caches(s), 'the second run built a second cache instead of refreshing').toHaveLength(1)
+    })
+  })
+
+  it('#6 the BLUEPRINT_ROOT override works offline, says it is local, and touches no cache', async () => {
+    await scenario('sync-by-address-6', async (s) => {
+      const local = await blueprintRemote(s, 'published', 'local-checkout')
+      const proj = await project(s, s.workspace.path('no-such-remote'), local.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const r = await run(s, cli, proj, ['drift'], { BLUEPRINT_ROOT: local.dir })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toContain(`LOCAL CHECKOUT ${local.dir}`)
+      expect(r.stdout).toContain('BLUEPRINT_ROOT override')
+      // A local checkout is exactly where staleness means something.
+      expect(r.stdout, 'the override path lost its staleness line').toMatch(/staleness unknown|local checkout is/)
+      expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
+      expect(existsSync(cacheRoot(s)), 'the override path created a cache anyway').toBe(false)
+    })
+  })
+
+  it('#7 a version 1 config exits 4 and names the override; with BLUEPRINT_ROOT it reports', async () => {
+    await scenario('sync-by-address-7', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      await s.fs.write(join(proj, '.blueprint-source'), `bootstrap_sha    = ${remote.head}\nbootstrap_date   = x\n`)
+      // An `origin` that WOULD answer, so "the remote is never inferred from it"
+      // is an observation rather than true for want of anything to infer from.
+      await git(s, proj, ['remote', 'add', 'origin', remote.dir])
+      const cli = await cliCopy(s, 'cli')
+
+      const refused = await run(s, cli, proj, ['drift'])
+      expect(refused.code, refused.output).toBe(4)
+      expect(refused.stderr).toContain('version 1 config')
+      expect(refused.stderr).toContain('BLUEPRINT_ROOT')
+      expectNoReport(refused)
+
+      const local = await run(s, cli, proj, ['drift'], { BLUEPRINT_ROOT: remote.dir })
+      expect(local.code, local.output).toBe(0)
+      expect(fixtureMarked(local.output, '~'), local.output).toEqual(['docs/DoD.md'])
+    })
+  })
+
+  it('#8 a placeholder remote exits 4 without ever starting a transport', async () => {
+    await scenario('sync-by-address-8', async (s) => {
+      // An scp-style placeholder: git WOULD hand it to ssh, so "ssh was never
+      // called" is a real observation and not true of every address.
+      const shims = await s.shimDir('ssh-recorder')
+      const record = s.workspace.path('ssh-recorder', 'called')
+      await shims.add('ssh', `echo called >> '${record}'\nexit 255`)
+      const proj = await project(s, 'git@example.invalid:<owner>/<blueprint>.git', 'no-sha', 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const r = await run(s, cli, proj, ['drift'], { PATH: shims.path() })
+
+      expect(r.code, r.output).toBe(4)
+      expect(r.stderr).toContain('placeholder')
+      expect(existsSync(record), 'a transport was started for a placeholder address').toBe(false)
+      expectNoReport(r)
+    })
+  })
+
+  it('#9 a full pull records the FULL fetched SHA; a partial pull leaves the config byte-identical', async () => {
+    await scenario('sync-by-address-9', async (s) => {
+      const remote = await blueprintRemote(s, 'v1')
+      const tip = await advance(s, remote.dir, 'v2')
+      const cli = await cliCopy(s, 'cli')
+
+      const full = await project(s, remote.dir, remote.head, 'v1', { tag: 'full' })
+      const f = await run(s, cli, full, ['pull', '--yes'])
+      expect(f.code, f.output).toBe(0)
+      const conf = await readFile(join(full, '.blueprint-source'), 'utf8')
+      expect(conf, 'a full pull did not record the full fetched SHA').toMatch(
+        new RegExp(`^bootstrap_sha\\s*=\\s*${tip}$`, 'm'),
+      )
+
+      const partial = await project(s, remote.dir, remote.head, 'v1', { tag: 'partial' })
+      const before = await readFile(join(partial, '.blueprint-source'), 'utf8')
+      const p = await run(s, cli, partial, ['pull', 'docs/DoD.md', '--yes'])
+      expect(p.code, p.output).toBe(0)
+      expect(await readFile(join(partial, 'docs/DoD.md'), 'utf8')).toBe(dodText('proj', 'v2'))
+      expect(await readFile(join(partial, '.blueprint-source'), 'utf8')).toBe(before)
+    })
+  })
+
+  it('#9b BUG-113 through the remote: project-owned lines outside the region are not drift, not selected, not previewed', async () => {
+    await scenario('sync-by-address-9b', async (s) => {
+      const region = (body: string) =>
+        `# DoD\n<!-- BLUEPRINT:BEGIN -->\n${body}\n<!-- BLUEPRINT:END -->\n`
+      const remote = await blueprintRemote(s, 'x')
+      await s.fs.write(join(remote.dir, 'docs/DoD.md'), region('managed {{PROJECT_NAME}}'))
+      const head = await commitAll(s, remote.dir, 'markers')
+      const proj = await project(s, remote.dir, head, 'x')
+      const mine = region('managed proj') + 'PROJECT-TAIL\n'
+      await s.fs.write(join(proj, 'docs/DoD.md'), mine)
+      const cli = await cliCopy(s, 'cli')
+
+      const d = await run(s, cli, proj, ['drift'])
+      expect(d.code, d.output).toBe(0)
+      expect(fixtureMarked(d.output, '~'), d.output).toEqual([])
+
+      const p = await run(s, cli, proj, ['pull', '--yes'])
+      expect(p.code, p.output).toBe(0)
+      expect(p.output).toContain('Nothing to pull')
+      expect(p.output).not.toContain('-PROJECT-TAIL')
+      expect(await readFile(join(proj, 'docs/DoD.md'), 'utf8')).toBe(mine)
+    })
+  })
+
+  it('#11 scratch and the per-run ref are removed on exit 0, exit 5 and exit 1', async () => {
+    await scenario('sync-by-address-11', async (s) => {
+      const cli = await cliCopy(s, 'cli')
+
+      const remote = await blueprintRemote(s, 'published')
+      const ok = await project(s, remote.dir, remote.head, 'OLD', { tag: 'zero' })
+      const r0 = await run(s, cli, ok, ['drift'])
+      expect(r0.code, r0.output).toBe(0)
+      expect(await caches(s), 'the healthy run built no cache, so the ref checks below see nothing').toHaveLength(1)
+      await expectNothingLeft(s, 'exit 0')
+
+      const gone = await project(s, s.workspace.path('no-such-remote'), 'no-sha', 'OLD', { tag: 'five' })
+      const r5 = await run(s, cli, gone, ['drift'])
+      expect(r5.code, r5.output).toBe(5)
+      await expectNothingLeft(s, 'exit 5')
+
+      // A remote whose tests/ holds only export-ignored files: the expansion
+      // fails closed with exit 1 AFTER the fetch, so a cache ref exists by then.
+      const bad = await s.workspace.dir('bad-remote')
+      await s.fs.write(join(bad, 'CLAUDE.md'), '# CLAUDE\n')
+      await s.fs.write(join(bad, 'docs/DoD.md'), '# DoD\n')
+      await s.fs.write(join(bad, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(join(bad, '.gitattributes'), 'tests/ export-ignore\n')
+      await initRepo(s, bad)
+      const badHead = await commitAll(s, bad, 'nothing ships under tests/')
+      const one = await project(s, bad, badHead, 'OLD', { tag: 'one' })
+      const r1 = await run(s, cli, one, ['drift'])
+      expect(r1.code, r1.output).toBe(1)
+      expect(r1.output).toContain('expanded to nothing')
+      await expectNothingLeft(s, 'exit 1')
+    })
+  })
+
+  it('#12 recovery: a project missing a network lib gets it through the override, and is told how without one', async () => {
+    await scenario('sync-by-address-12', async (s) => {
+      const remote = await blueprintRemote(s, 'v1')
+      await cp(join(REPO_ROOT, 'scripts/lib/request-config.sh'), join(remote.dir, 'scripts/lib/request-config.sh'))
+      const head = await commitAll(s, remote.dir, 'ship the lib')
+      const proj = await project(s, remote.dir, head, 'v1')
+      await cp(join(REPO_ROOT, 'scripts'), join(proj, 'scripts'), { recursive: true })
+      await rm(join(proj, 'scripts/lib/request-config.sh'))
+      const own = join(proj, 'scripts/blueprint')
+
+      const told = await run(s, own, proj, ['drift'])
+      expect(told.code, told.output).toBe(1)
+      expect(told.stderr).toContain(
+        'BLUEPRINT_ROOT=<path to a blueprint checkout> blueprint pull scripts/lib/request-config.sh',
+      )
+
+      const fixed = await run(s, own, proj, ['pull', 'scripts/lib/request-config.sh', '--yes'], {
+        BLUEPRINT_ROOT: remote.dir,
+      })
+      expect(fixed.code, fixed.output).toBe(0)
+      expect(existsSync(join(proj, 'scripts/lib/request-config.sh')), fixed.output).toBe(true)
     })
   })
 
@@ -247,12 +670,476 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         fixtureMarked(r.output, '~'),
         'drift reported the UNPUSHED DoD as the blueprint — it read the working checkout',
       ).toEqual([])
-      expect(r.stdout).toMatch(new RegExp(`fetched:\\s+${remote.head}\\b`))
+      expect(r.stdout).toMatch(fetched(remote.head))
       expect(r.output, 'the unpushed commit appears in the report').not.toContain(unpushed)
     })
   })
-})
 
-function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+  it('#14 a bootstrap_sha absent from the remote history is said so, explicitly, and drift still reports', async () => {
+    await scenario('sync-by-address-14', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const absent = '0123456789abcdef0123456789abcdef01234567'
+      const proj = await project(s, remote.dir, absent, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toContain(`bootstrap_sha ${absent} is not in ${remote.dir} main history`)
+      expect(r.stdout).not.toContain('commit(s) since')
+      expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
+    })
+  })
+
+  it("#15 hook context: an exported GIT_DIR does not redirect the fetch, the tree or the history", async () => {
+    await scenario('sync-by-address-15', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const tip = await advance(s, remote.dir, 'published-2')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      // Warm-up, so the gate and keepalive config drift writes are already there
+      // and any change below is the fetch path's.
+      const warm = await run(s, cli, proj, ['drift'])
+      expect(warm.code, warm.output).toBe(0)
+      const before = await Promise.all(
+        ['config', 'HEAD', 'index'].map((f) => readFile(join(proj, '.git', f)).catch(() => Buffer.from(''))),
+      )
+
+      // A FRESH cache, so the cache's creation runs under GIT_DIR too.
+      const r = await run(s, cli, proj, ['drift'], {
+        GIT_DIR: join(proj, '.git'),
+        XDG_CACHE_HOME: s.workspace.path('fresh-cache'),
+      })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toMatch(fetched(tip))
+      expect(r.stdout).toContain('commit(s) since')
+      expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
+      const after = await Promise.all(
+        ['config', 'HEAD', 'index'].map((f) => readFile(join(proj, '.git', f)).catch(() => Buffer.from(''))),
+      )
+      expect(after, "the project's own repository was written through GIT_DIR").toEqual(before)
+    })
+  })
+
+  it('#16 a reachable remote WITHOUT the branch exits 5 and says the branch is missing, not that it could not connect', async () => {
+    await scenario('sync-by-address-16', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD', { branch: 'nope' })
+      const cli = await cliCopy(s, 'cli')
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(5)
+      expect(r.stderr).toContain("no branch 'nope' on that remote")
+      expect(r.stderr).not.toMatch(/could not connect|unable to connect|Could not read from remote/i)
+      expectNoReport(r)
+    })
+  })
+
+  it('#17 no timeout provider exits 5 before any fetch, and creates no cache', async () => {
+    await scenario('sync-by-address-17', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+      const path = await s.pathWithout(['timeout', 'gtimeout'])
+
+      const r = await run(s, cli, proj, ['drift'], { PATH: path })
+
+      expect(r.code, r.output).toBe(5)
+      expect(r.stderr).toContain("no 'timeout' or 'gtimeout'")
+      expect(existsSync(cacheRoot(s)), 'a cache was created for a fetch that could not be bounded').toBe(false)
+      expectNoReport(r)
+    })
+  })
+
+  it('#18 scratch that cannot be created exits 5, with no cache and no project write', async () => {
+    await scenario('sync-by-address-18', async (s) => {
+      // A regular file as TMPDIR: mktemp -d cannot work under it, and unlike a
+      // chmod this holds when the suite runs as root.
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+      await s.fs.write('not-a-directory', 'x\n')
+      const before = await snapshot(proj)
+
+      const r = await run(s, cli, proj, ['pull', '--yes'], { TMPDIR: s.workspace.path('not-a-directory') })
+
+      expect(r.code, r.output).toBe(5)
+      expect(r.stderr).toContain('could not create a scratch directory')
+      expect(existsSync(cacheRoot(s))).toBe(false)
+      expect(await snapshot(proj)).toEqual(before)
+    })
+  })
+
+  it('#19 BUG-110: a .git marker above every scratch directory redirects nothing', async () => {
+    await scenario('sync-by-address-19', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const decoy = await s.workspace.dir('decoy')
+      await s.fs.write(join(decoy, 'CLAUDE.md'), '# CLAUDE\nDECOY\n')
+      await s.fs.write(join(decoy, 'docs/DoD.md'), dodText('proj', 'OLD'))
+      await s.fs.write(join(decoy, 'tests/fixture/test.sh'), 'echo decoy\n')
+      await initRepo(s, decoy)
+      await commitAll(s, decoy, 'decoy')
+      await s.fs.write('tmp/.git', `gitdir: ${join(decoy, '.git')}\n`)
+      const refsBefore = await git(s, decoy, ['for-each-ref'])
+      const cfgBefore = await readFile(join(decoy, '.git/config'), 'utf8')
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toMatch(fetched(remote.head))
+      // The decoy's DoD MATCHES the project, and its CLAUDE.md does not. So a
+      // run that read the decoy would call DoD clean and CLAUDE.md drifted.
+      expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
+      expect(await git(s, decoy, ['for-each-ref'])).toBe(refsBefore)
+      expect(await readFile(join(decoy, '.git/config'), 'utf8')).toBe(cfgBefore)
+    })
+  })
+
+  it('#20 INT and TERM during the fetch: died of the signal, no scratch, no ref, no write', async () => {
+    await scenario('sync-by-address-20', async (s) => {
+      for (const sig of SIGNALS) {
+        const tag = sig.toLowerCase()
+        const hole = await seam(s, `fetch-${tag}`, 'ssh')
+        const proj = await project(s, BLACKHOLE, 'no-sha', 'OLD', { tag })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const before = await snapshot(proj)
+
+        const { child, done } = start(s, cli, proj, ['pull', '--yes'], {
+          PATH: hole.path,
+          BP_FETCH_TIMEOUT: '30',
+        })
+        await reached(hole)
+        const signalled = Date.now()
+        child.kill(sig)
+        // The fetch is waited on in the background, so the handler runs at once
+        // and kills it: nothing needs releasing before the run ends.
+        const d = await done
+        const ending = Date.now() - signalled
+        release(hole)
+
+        expect(diedOf(d, sig), `${sig} did not end the run\n${show(d)}`).toBe(true)
+        // A BOUND, not a sleep. The run's output stays open while any descendant
+        // holds it, so an orphaned fetch shows up here as the 30 s budget —
+        // which is exactly how killing only the refresh subshell presented.
+        expect(ending, `${sig}: a descendant outlived the run for ${ending}ms`).toBeLessThan(10_000)
+        await expectNothingLeft(s, sig)
+        expect(await snapshot(proj), `${sig}: the project was written`).toEqual(before)
+      }
+    })
+  })
+
+  it('#21 INT and TERM during the compare: died of the signal, no scratch, no ref, no write', async () => {
+    await scenario('sync-by-address-21', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      for (const sig of SIGNALS) {
+        const tag = sig.toLowerCase()
+        const blocker = await seam(s, `diff-${tag}`, 'diff')
+        const proj = await project(s, remote.dir, remote.head, 'OLD', { tag })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const before = await snapshot(proj)
+
+        const { child, done } = start(s, cli, proj, ['drift'], { PATH: blocker.path })
+        await reached(blocker)
+        child.kill(sig)
+        release(blocker)
+        const d = await done
+
+        expect(diedOf(d, sig), `${sig} did not end the run\n${show(d)}`).toBe(true)
+        expect(d.stdout, `${sig}: the run went on to report`).not.toContain('Drifted (project')
+        await expectNothingLeft(s, sig)
+        expect(await snapshot(proj)).toEqual(before)
+      }
+    })
+  })
+
+  it("#22 INT and TERM at pull's write step: died of the signal, and no file is written after it", async () => {
+    await scenario('sync-by-address-22', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      for (const sig of SIGNALS) {
+        const tag = sig.toLowerCase()
+        // cmd_pull runs `mkdir -p docs` immediately before writing docs/DoD.md.
+        const blocker = await seam(s, `mkdir-${tag}`, 'mkdir', '[ "$1" = -p ] && [ "$2" = docs ]')
+        const proj = await project(s, remote.dir, remote.head, 'OLD', { tag })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const before = await snapshot(proj)
+
+        const { child, done } = start(s, cli, proj, ['pull', '--yes'], { PATH: blocker.path })
+        await reached(blocker)
+        child.kill(sig)
+        release(blocker)
+        const d = await done
+
+        expect(diedOf(d, sig), `${sig} did not end the run\n${show(d)}`).toBe(true)
+        expect(await snapshot(proj), `${sig}: a file was written after the signal`).toEqual(before)
+        await expectNothingLeft(s, sig)
+      }
+    })
+  })
+
+  it('#23 group INT and group TERM mid-write: the file is complete, nothing later is written, the run dies of it', async () => {
+    await scenario('sync-by-address-23', async (s) => {
+      // The signal goes to the whole process group, as a terminal's Ctrl-C does,
+      // so it reaches the writer too. The `cat` shim blocks AFTER the redirect
+      // has truncated the target, which is the moment an unshielded writer dies
+      // and leaves the file empty.
+      const remote = await blueprintRemote(s, 'SENTINEL-TASK025')
+      for (const sig of SIGNALS) {
+        const tag = sig.toLowerCase()
+        const blocker = await seam(s, `cat-${tag}`, 'cat', `grep -q SENTINEL-TASK025 "$1" 2>/dev/null`)
+        const proj = await project(s, remote.dir, remote.head, 'OLD', { tag })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const config = await readFile(join(proj, '.blueprint-source'), 'utf8')
+
+        const { child, done } = start(s, cli, proj, ['pull', '--yes'], { PATH: blocker.path })
+        await reached(blocker)
+        process.kill(-(child.pid ?? 0), sig)
+        release(blocker)
+        const d = await done
+
+        expect(diedOf(d, sig), `group ${sig} did not end the run\n${show(d)}`).toBe(true)
+        expect(
+          await readFile(join(proj, 'docs/DoD.md'), 'utf8'),
+          `group ${sig}: the file being written is not complete`,
+        ).toBe(dodText('proj', 'SENTINEL-TASK025'))
+        expect(
+          await readFile(join(proj, '.blueprint-source'), 'utf8'),
+          `group ${sig}: a later write (bootstrap_sha) ran after the signal`,
+        ).toBe(config)
+        await expectNothingLeft(s, `group ${sig}`)
+      }
+    })
+  })
+
+  it('#24 concurrent runs share one cache, and each answers from its OWN tip', async () => {
+    await scenario('sync-by-address-24', async (s) => {
+      const remote = await blueprintRemote(s, 'v0')
+      const base = remote.head
+      const tip1 = await advance(s, remote.dir, 'one-ahead')
+      const proj = await project(s, remote.dir, base, 'v0')
+      const cli = await cliCopy(s, 'cli')
+
+      // A fetches tip1 and stops in its compare.
+      const blocker = await seam(s, 'diff-a', 'diff')
+      const a = start(s, cli, proj, ['drift'], { PATH: blocker.path })
+      await reached(blocker)
+
+      const b = await run(s, cli, proj, ['drift'])
+      expect(b.code, b.output).toBe(0)
+
+      const tip2 = await advance(s, remote.dir, 'two-ahead')
+      const c = await run(s, cli, proj, ['drift'])
+      expect(c.code, c.output).toBe(0)
+      expect(c.stdout).toMatch(fetched(tip2))
+
+      release(blocker)
+      const d = await a.done
+
+      expect(d.code, show(d)).toBe(0)
+      expect(d.stdout, "A answered from another run's tip").toMatch(fetched(tip1))
+      expect(d.stdout, 'A lost its own history').toContain('one-ahead')
+      expect(d.stdout, "A listed commits only C fetched").not.toContain('two-ahead')
+      await expectNothingLeft(s, 'after all three')
+      const again = await run(s, cli, proj, ['drift'])
+      expect(again.code, `the shared cache is no longer usable\n${again.output}`).toBe(0)
+    })
+  })
+
+  it('#25 a failed refresh with a WARM cache exits 5 — it does not answer from what the cache holds', async () => {
+    await scenario('sync-by-address-25', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const warm = await run(s, cli, proj, ['drift'])
+      expect(warm.code, warm.output).toBe(0)
+
+      await rename(remote.dir, `${remote.dir}-gone`)
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(5)
+      expect(r.stderr).toContain('could not read the blueprint')
+      expectNoReport(r)
+    })
+  })
+
+  it("#26 an interrupted refresh's leftovers do not change the answer", async () => {
+    await scenario('sync-by-address-26', async (s) => {
+      const remote = await blueprintRemote(s, 'v1')
+      const proj = await project(s, remote.dir, remote.head, 'v1')
+      const cli = await cliCopy(s, 'cli')
+      const warm = await run(s, cli, proj, ['drift'])
+      expect(warm.code, warm.output).toBe(0)
+
+      // What a SIGKILLed run leaves (PLAN §0.4): a dead per-run ref at an OLDER
+      // commit, that ref's lock, and a temp pack.
+      const cache = await onlyCache(s)
+      const tip = await advance(s, remote.dir, 'v2')
+      // Named to sort FIRST among bp-run refs, so a run that reads "some" per-run
+      // ref rather than its own reads this one.
+      await git(s, s.workspace.root, ['--git-dir', cache, 'update-ref', 'refs/bp-run/blueprint-sync.0', remote.head])
+      await writeFile(join(cache, 'refs/bp-run/blueprint-sync.0.lock'), '')
+      await mkdir(join(cache, 'objects/pack'), { recursive: true })
+      await writeFile(join(cache, 'objects/pack/tmp_pack_DEADBEEF'), 'partial')
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout, 'the run answered from a leftover ref').toMatch(fetched(tip))
+      expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
+    })
+  })
+
+  it('#27a a cache missing the tip tree exits 5, naming the cache and how to remove it', async () => {
+    await scenario('sync-by-address-27a', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+      const warm = await run(s, cli, proj, ['drift'])
+      expect(warm.code, warm.output).toBe(0)
+
+      // Every object loose, then the tip's root tree deleted, with a leftover
+      // per-run ref still at the tip — what a killed run leaves. That ref is the
+      // condition, and it is not decoration: a refresh checks connectivity only
+      // against objects NO ref already covers, so with the ref present it trusts
+      // the tip, fetches nothing and reports success. Without one, git notices
+      // the gap and refetches, and the cache heals (observed while writing this).
+      const cache = await onlyCache(s)
+      await git(s, s.workspace.root, ['--git-dir', cache, 'update-ref', 'refs/bp-run/blueprint-sync.0', remote.head])
+      const packDir = join(cache, 'objects/pack')
+      for (const name of await readdir(packDir).catch(() => [] as string[])) {
+        if (!name.endsWith('.pack')) continue
+        const moved = s.workspace.path(`loose-${name}`)
+        await rename(join(packDir, name), moved)
+        const unpack = await s.run('sh', ['-c', 'git --git-dir="$1" unpack-objects -q < "$2"', 'sh', cache, moved], {
+          cwd: s.workspace.root,
+        })
+        expect(unpack.code, unpack.output).toBe(0)
+      }
+      for (const name of await readdir(packDir).catch(() => [] as string[])) {
+        if (name.endsWith('.idx') || name.endsWith('.rev')) await rm(join(packDir, name), { force: true })
+      }
+      const tree = await git(s, s.workspace.root, ['--git-dir', cache, 'rev-parse', `${remote.head}^{tree}`])
+      const object = join(cache, 'objects', tree.slice(0, 2), tree.slice(2))
+      expect(existsSync(object), 'the tree object is not loose, so deleting it proves nothing').toBe(true)
+      await rm(object)
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(5)
+      expect(r.stderr).toContain(`cache ${cache} is damaged`)
+      expect(r.stderr).toContain(`rm -rf ${cache}`)
+      expectNoReport(r)
+    })
+  })
+
+  it('#27b a truncated pack heals on refresh: exit 0 and a correct report', async () => {
+    await scenario('sync-by-address-27b', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+      const warm = await run(s, cli, proj, ['drift'])
+      expect(warm.code, warm.output).toBe(0)
+
+      // A fixture this small is fetched as loose objects, so pack it first — under
+      // a temporary ref, since repack packs only what a ref reaches, and removed
+      // again so the cache holds no refs between runs, as in use.
+      const cache = await onlyCache(s)
+      await git(s, s.workspace.root, ['--git-dir', cache, 'update-ref', 'refs/heads/pack-me', remote.head])
+      await git(s, s.workspace.root, ['--git-dir', cache, 'repack', '-a', '-d', '-q'])
+      await git(s, s.workspace.root, ['--git-dir', cache, 'update-ref', '-d', 'refs/heads/pack-me'])
+      const packs = (await readdir(join(cache, 'objects/pack'))).filter((n) => n.endsWith('.pack'))
+      expect(packs, 'no pack to truncate').not.toEqual([])
+      for (const name of packs) {
+        const file = join(cache, 'objects/pack', name)
+        const { size } = await stat(file)
+        await chmod(file, 0o644)
+        await truncate(file, Math.floor(size / 2))
+      }
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toMatch(fetched(remote.head))
+      expect(fixtureMarked(r.output, '~'), r.output).toEqual(['docs/DoD.md'])
+    })
+  })
+
+  it('#28 eight concurrent first runs all succeed and leave one cache, with no init debris (smoke)', async () => {
+    await scenario('sync-by-address-28', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+
+      const results = await Promise.all(Array.from({ length: 8 }, () => run(s, cli, proj, ['drift'])))
+
+      for (const r of results) expect(r.code, r.output).toBe(0)
+      expect(await caches(s)).toHaveLength(1)
+      const debris = (await readdir(cacheRoot(s))).filter((n) => n.startsWith('.bp-cache-init.'))
+      expect(debris).toEqual([])
+      await expectNothingLeft(s, 'eight runs')
+    })
+  })
+
+  it("#28b a lost creation race's temp directory inside a valid cache is removed by the next run", async () => {
+    await scenario('sync-by-address-28b', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD')
+      const cli = await cliCopy(s, 'cli')
+      const warm = await run(s, cli, proj, ['drift'])
+      expect(warm.code, warm.output).toBe(0)
+
+      // GNU and BSD mv both put a loser's temp INSIDE the winner.
+      const stray = join(await onlyCache(s), '.bp-cache-init.STRAY0001')
+      await mkdir(stray)
+      await writeFile(join(stray, 'HEAD'), 'ref: refs/heads/main\n')
+
+      const r = await run(s, cli, proj, ['drift'])
+
+      expect(r.code, r.output).toBe(0)
+      expect(existsSync(stray), 'the lost race left its temp in the cache').toBe(false)
+    })
+  })
+
+  it('#29 a leftover blueprint_source warns once on every run and changes nothing else', async () => {
+    await scenario('sync-by-address-29', async (s) => {
+      const remote = await blueprintRemote(s, 'published')
+      const decoy = await s.workspace.dir('decoy')
+      await s.fs.write(join(decoy, 'docs/DoD.md'), dodText('proj', 'DECOY'))
+      const cli = await cliCopy(s, 'cli')
+      const withField = await project(s, remote.dir, remote.head, 'OLD', {
+        tag: 'with',
+        extra: [`blueprint_source = ${decoy}`],
+      })
+      const without = await project(s, remote.dir, remote.head, 'OLD', { tag: 'without' })
+
+      // What legitimately differs between two runs: the project's path, the fetch
+      // time, and the preview's `diff -u` header lines (mtimes, temp-file names).
+      const normal = (text: string, proj: string) =>
+        text
+          .split(proj)
+          .join('<PROJ>')
+          .replace(/ at \d{4}-\d\d-\d\dT[\d:]+Z/g, ' at <TIME>')
+          .replace(/^(---|\+\+\+) .*$/gm, '$1 <FILE>')
+      const warnings = (text: string) => text.split(WARNING).length - 1
+
+      for (const args of [['drift'], ['drift'], ['pull', '--yes']]) {
+        const a = await run(s, cli, withField, args)
+        const b = await run(s, cli, without, args)
+        const label = args.join(' ')
+        expect(warnings(a.stderr), `${label}: the warning did not print exactly once\n${a.stderr}`).toBe(1)
+        expect(a.code, `${label}: the field changed the exit status`).toBe(b.code)
+        expect(normal(a.stdout, withField), `${label}: the field changed stdout`).toBe(normal(b.stdout, without))
+        expect(b.output, `${label}: blueprint_source mentioned with no such field`).not.toContain('blueprint_source')
+      }
+
+      const local = await run(s, cli, withField, ['drift'], { BLUEPRINT_ROOT: remote.dir })
+      expect(warnings(local.stderr), 'the override path skipped the warning').toBe(1)
+    })
+  })
+})

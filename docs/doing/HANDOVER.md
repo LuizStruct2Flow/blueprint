@@ -197,6 +197,14 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **MAIN IS RED IN CI since `8ee949f` (2026-09-15) — BUG-117.** GitHub-hosted runners export
+  `AGENT_TOOLSDIRECTORY`; TASK-025's H5 makes the harness refuse any undeclared ambient
+  `AGENT_*`/`GIT_*`, and the workflow runs vitest directly instead of through
+  `scripts/run-ts-suites.sh`'s scrub — 697/770 refused in 11 s. The local gate is green and
+  cannot see it. Christian fixes it reproducer-first (brief
+  `.scratch/brief-christian-bug117-ci-env.md`): CI must run through the same scrub as the
+  gate, not name one runner variable. **Nothing else lands until CI is green again.**
+
 - **Mutation runs rewrite the LIVE `scripts/blueprint`, and every project on this machine
   executes that file.** `~/.local/bin/blueprint` execs this checkout's CLI, so while a
   mutant is applied, `blueprint drift` / `pull` / `a2bp` in linkedin-watcher-agent,
@@ -281,7 +289,10 @@ independent checking in one session. Re-measure a number before repeating it.
 - **Jesko's recommendations on #67–#70 (Codex, 2026-09-14)** →
   `.scratch/JESKO-pr67-70-review.md` — **awaiting the founder's decision**; none blocks
   TASK-025 commit 3. **Tracked as backlog rows TASK-027 (#67), TASK-028 (#68), TASK-029
-  (#69), TASK-030 (#70)** — promote a row to `doing/` when the founder decides it:
+  (#69), TASK-030 (#70).** **Founder ACCEPTED all four recommendations, 2026-09-15.** Order:
+  BUG-117 first (main red); then TASK-030 applied as-is; TASK-028 ported after BUG-117 (same
+  harness area); TASK-027 and TASK-029 built inside TASK-025 commit 4; each PR closed with a
+  comment linking its commits, branch deleted by hand. PR #64 → BUG-118 after CI is green:
   - **#67** accept with changes, folded into TASK-025 commit 4 (reproduced: `install-toolchain
     check` accepts Node 20.0 against `^20.19.0 || >=22.12.0`; fix the custom semver's `^0.x`
     and record observed mutant red sets).

@@ -452,7 +452,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // blueprint has. Asserting the id set stops "manifest passed" from
       // meaning "manifest ran over nothing", which is the shape #7 exists for
       // one level down.
-      expect(manifest.map((c) => c.id), report).toEqual(['#1', '#1b', '#4', '#5', '#7', '#7b'])
+      expect(manifest.map((c) => c.id), report).toEqual(['#1', '#1b', '#4', '#5', '#5b', '#7', '#7b'])
     })
   })
 

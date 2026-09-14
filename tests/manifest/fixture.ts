@@ -84,14 +84,19 @@ function gate(shellSuites: readonly string[]): string {
 }
 
 function workflow(shellSuites: readonly string[]): string {
+  // A REAL workflow shape, not just the text #5 greps: #5b parses it the way
+  // GitHub does, and a fixture GitHub would reject proves nothing (BUG-115).
   return [
+    'on: push',
     'jobs:',
     '  shell-tests:',
+    '    runs-on: ubuntu-latest',
     '    steps:',
     '      - run: |',
     ...shellSuites.map((s) => `          bash tests/${s}/test.sh`),
     `          bash tests/${BP_ONLY_SUITE}/test.sh`,
     '  ts-tests:',
+    '    runs-on: ubuntu-latest',
     '    steps:',
     '      - run: npx vitest run',
   ].join('\n')

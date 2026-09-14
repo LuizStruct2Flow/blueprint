@@ -325,8 +325,19 @@ route. The tree keeps one oracle for both paths.
   two `cp`s, and the `bootstrap_sha` `sed -i`) goes through:
 
   ```bash
-  _bp_shielded_write() { ( trap '' INT TERM; exec cat "$1" > "$2" ); }
+  _bp_shielded_write() {   # SRC DEST [MODE_FROM]
+    (
+      trap '' INT TERM
+      cat "$1" > "$2"
+      if [ -n "${3:-}" ]; then _bp_sync_exec_bit "$3" "$2"; fi
+    )
+  }
   ```
+
+  **Implementation note (review of `21e2803`, finding 2):** the executable-bit
+  sync runs inside the same shield. BUG-008 makes the bit part of what a pull
+  lands, and a `chmod` after the shield could be killed by a group signal,
+  leaving complete bytes at the old mode (§9.2 #23c).
 
   The redirect sits **inside** the subshell, after the ignore, so no gap exists
   in which the file is truncated but the writer is still killable. The parent's

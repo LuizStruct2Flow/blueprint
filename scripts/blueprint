@@ -658,11 +658,11 @@ pull_file() {
   esac
 
   # `cat >`, not `mv`: the destination keeps its own inode and mode, and only the
-  # executable bit is mirrored from the blueprint (BUG-008). Shielded (TASK-025):
-  # a Ctrl-C reaches the whole process group, and a writer killed mid-write
-  # truncates the project's file.
-  _bp_shielded_write "$out" "$f"
-  _bp_sync_exec_bit "$bp" "$f"
+  # executable bit is mirrored from the blueprint (BUG-008). Shielded (TASK-025),
+  # the bit together with the bytes: a Ctrl-C reaches the whole process group,
+  # and a writer or `chmod` killed part-way leaves a file that is not what the
+  # pull promised.
+  _bp_shielded_write "$out" "$f" "$bp"
 }
 
 # --- TASK-025: the blueprint is read by its ADDRESS --------------------------
@@ -752,14 +752,28 @@ _bp_sync_cleanup() {
   BP_SYNC_CHILD="" BP_SYNC_REF="" BP_SYNC_SCRATCH=""
 }
 
-# _bp_shielded_write SRC DEST — DEST gets SRC's bytes, and the write FINISHES even
-# if a signal arrives. A terminal's Ctrl-C reaches the whole process group, the
-# writer included, and an unshielded `cat > file` killed mid-write left a project
-# file truncated (6 of 40 lines, measured). The ignore is set inside the subshell
+# _bp_shielded_write SRC DEST [MODE_FROM] — DEST gets SRC's bytes, and, given
+# MODE_FROM, that file's executable bit; the whole of it FINISHES even if a
+# signal arrives. A terminal's Ctrl-C reaches the whole process group, the writer
+# included, and an unshielded `cat > file` killed mid-write left a project file
+# truncated (6 of 40 lines, measured). The ignore is set inside the subshell
 # BEFORE the redirect opens DEST, so there is no moment where DEST is truncated
 # and the writer is still killable. The parent's handler runs once this returns,
 # and it exits, so the next write never starts.
-_bp_shielded_write() { ( trap '' INT TERM; exec cat "$1" > "$2" ); }
+#
+# The exec bit is inside for the same reason. BUG-008 makes it part of what a
+# pull lands, and a `chmod` after the shield was killed by a group signal,
+# leaving complete bytes at the old mode (Alexey, S1; tests #23c).
+#
+# tests/sync-by-address #23b reads this function's TEXT: the ignore must open the
+# subshell and the redirect must sit inside it. Keep that shape.
+_bp_shielded_write() {
+  (
+    trap '' INT TERM
+    cat "$1" > "$2"
+    if [ -n "${3:-}" ]; then _bp_sync_exec_bit "$3" "$2"; fi
+  )
+}
 
 # _bp_git ARGS — git against the blueprint side. On the address path the caller's
 # git environment is scrubbed first: `drift` runs inside hooks, where an exported

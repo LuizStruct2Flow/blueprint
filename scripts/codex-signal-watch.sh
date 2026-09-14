@@ -312,6 +312,17 @@ refresh_signal_file() {
 # kernel releases it on exit, including SIGKILL, so there is no cleanup path to
 # get wrong and no stale pid to disambiguate.
 #
+# THE FILE IS NEVER REMOVED ON EXIT, and that is a decision, not a missing trap
+# (TASK-006). Its persistence IS the signal: bp_watch_liveness reads "exists but
+# unheld" as `dead`, which is how the feed warns that the mic went to a watcher
+# that is gone. Unlinking on a clean stop turns that into `none`, the answer that
+# says nothing — so stopping the dispatcher and then flipping the mic becomes
+# exactly the silent dispatch BUG-022 exists to surface. Unlinking a flock file
+# also races: a starter that opened the old inode just before the unlink locks
+# it successfully while the next starter creates a fresh file and locks that
+# too, and two watchers dispatch one baton. A leftover file is a correct record;
+# a test that trips over one is reading real state it does not own.
+#
 # Its PURPOSE is not mutual exclusion, though it provides that too. It is the
 # record that a watcher was EXPECTED on this state, which is the fact
 # scripts/agent-activity.sh needs to tell "nobody is listening" apart from "an

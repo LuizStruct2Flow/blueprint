@@ -75,6 +75,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { startWatcher, until } from '../harness/watcher.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
 
 /**
@@ -110,10 +111,10 @@ async function lib(s: Scenario, snippet: string): Promise<string> {
 /**
  * A baton dir with a baton in it — the first argument every lock function takes.
  *
- * The default state is ACTIVE, which is the one the #7 cases need: the watcher
- * takes the lock for the state it is WAITING FOR, not the state the baton
- * currently reads, so a fixture baton that already said OVER_TO_CODEX would
- * dispatch instead of waiting and the case would be measuring something else.
+ * The default state is ACTIVE, so a watcher on it waits rather than dispatches.
+ * The lock is taken for the state the watcher is WAITING FOR, not the state the
+ * baton reads, so #7 passes OVER_TO_CODEX deliberately: the dispatch is its proof
+ * that the watcher got past the lock step.
  */
 async function batonDir(s: Scenario, rel = 'proj/logs/state', state = 'ACTIVE'): Promise<string> {
   const dir = await s.fs.mkdirp(rel)
@@ -170,6 +171,31 @@ async function holdLock(
       )
     },
   }
+}
+
+/**
+ * A "live repo" INSIDE the workspace: the watcher and its libs from the tree
+ * under test, under a root marker, with its own `logs/state/`.
+ *
+ * U8. #7 used to read the REAL checkout's state root, where a genuine dispatcher
+ * — which AGENTS.md says to start once and leave running — legitimately keeps its
+ * lock. The watcher resolves its state root from its own physical location, so a
+ * copy here is a live repo in every respect the lock derivation can see, and a
+ * pre-existing dispatcher lock can be planted without touching real state.
+ */
+async function liveRepo(s: Scenario, name = 'live') {
+  const root = await s.fs.mkdirp(name)
+  await s.fs.write(`${name}/.blueprint-source`, '')
+  const watch = await s.fs.copyIn(WATCH, `${name}/scripts/codex-signal-watch.sh`)
+  // The WHOLE lib dir, never named files — feed-fixture.ts records why.
+  const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
+    cwd: s.workspace.root,
+  })
+  for (const n of libs.stdout.split('\n').filter((f) => f.endsWith('.sh'))) {
+    await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', n), `${name}/scripts/lib/${n}`)
+  }
+  const stateDir = await s.fs.mkdirp(`${name}/logs/state`)
+  return { root, watch, stateDir }
 }
 
 describe('BUG-022 — a dispatch into silence is visible', () => {
@@ -386,63 +412,105 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
     })
   })
 
-  it('#7 a watcher on a fixture baton leaves no lock in this repo', async () => {
-    await scenario('wl-7', async (s) => {
-      // THE ASSERTION THAT WAS MISSING. tests/signal-dispatch runs the REAL
-      // watcher against a fixture baton, and while the lock was derived from the
-      // repo ROOT the watcher happily took the LIVE repo's lock — leaving a record
-      // that made a checkout which never ran a watcher report `dead` forever, and
-      // refusing any genuine watcher started while the suite ran.
-      //
-      // Isolation is not a property a fixture can be careful enough to have. It
-      // has to fall out of where the path comes from.
-      const dir = await batonDir(s, 'fix/state')
+  /**
+   * #7 — ASSERTED ON WHAT THE FIXTURE WATCHER DID, NEVER ON WHAT EXISTS (U8).
+   *
+   * tests/signal-dispatch runs the REAL watcher against a fixture baton, and
+   * while the lock was derived from the repo root the watcher took the LIVE
+   * repo's lock — leaving a record that made a checkout which never ran a
+   * watcher report `dead` forever, and refusing a genuine watcher started while
+   * the suite ran. Isolation has to fall out of where the path comes from.
+   *
+   * The first oracle asked whether a lock EXISTED in the real checkout. A real
+   * dispatcher, which AGENTS.md says to start once and leave running, keeps one
+   * there, and the file outlives it — so a push was refused over a lock no test
+   * had touched. TASK-021 had already deleted the "only if there was no lock
+   * before" conjunct, correctly: it made the check skip itself whenever a lock
+   * existed (tests/live-state-canary pins that shape). So neither "exists" nor
+   * "exists unless it already did" is an oracle.
+   *
+   * WHY NOT A STAT SNAPSHOT. Taking an existing unheld lock is `exec 7>>` plus
+   * `flock` — no write, so inode, size and mtime are unchanged, and once the
+   * watcher exits the kernel has released it. Nothing on disk records the
+   * acquisition. So the live lock's LIVENESS is probed while the watcher runs,
+   * against a live repo built in the workspace (real state is never read), from
+   * every state it can be in beforehand:
+   *
+   *   none   a root-derived watcher CREATES and holds it  → none becomes alive
+   *   dead   it TAKES a stopped dispatcher's leftover     → dead becomes alive
+   *   alive  it is REFUSED and exits                      → no lock beside its own
+   *                                                         baton, and not running
+   *
+   * READINESS IS A DISPATCH, not a probe of the fixture lock: a probe of a lock
+   * the watcher is about to take can win the `flock -n` race and make it refuse.
+   * A wake command runs only after the lock step, so every probe below happens
+   * while the watcher already holds whatever it took.
+   *
+   * MUTATION RECORD (TASK-006), observed via BP_SPEC_ROOT: the watcher's
+   * `bp_watch_hold` handed `"$BP_STATE_ROOT/logs/state"` — the historical
+   * root-derived lock — goes red in all three cases; unmutated, all three green.
+   */
+  it.each(['none', 'dead', 'alive'] as const)(
+    '#7 U8 a watcher on a fixture baton takes no lock in the live repo (live lock before: %s)',
+    async (before) => {
+      await scenario(`wl-7-${before}`, async (s) => {
+        const live = await liveRepo(s)
+        const liveLock = join(live.stateDir, '.watch-over_to_codex.lock')
+        const liveness = (dir: string) => lib(s, `bp_watch_liveness "${dir}" OVER_TO_CODEX`)
 
-      // The live lock lives under the STATE root, not the code root — after the
-      // scaffolding/ split those differ, and naming the code root would watch a
-      // path the watcher never touches, so the guard could not fire. NOT
-      // `agent_state_dir`: this scenario points AGENT_STATE_HOME at a fixture, and
-      // that override is the first thing `agent_state_dir` honours, so calling it
-      // would accuse the watcher of polluting "the LIVE repo" while pointing at a
-      // temp directory.
-      const rootProbe = await s.run(
-        'sh',
-        ['-c', `BP_CODE_ROOT="${SUBJECT}" . "${join(SUBJECT, 'scripts/lib/state-dir.sh')}"; bp_state_root`],
-        { cwd: SUBJECT, env: { AGENT_STATE_HOME: undefined } },
-      )
-      const stateRoot = rootProbe.stdout.trim()
-      expect(stateRoot, 'could not resolve the live state root').not.toBe('')
-      const liveLock = join(stateRoot, 'logs', 'state', '.watch-over_to_codex.lock')
+        // The watcher's own derivation must land on the dir this case watches, or
+        // every assertion below is about a path it never touches (TASK-021).
+        const root = await s.run(
+          'sh',
+          ['-c', `BP_CODE_ROOT="${live.root}" . "${join(live.root, 'scripts/lib/state-dir.sh')}"; bp_state_root`],
+          { cwd: live.root },
+        )
+        expect(join(root.stdout.trim(), 'logs', 'state'), 'the live repo resolves elsewhere').toBe(live.stateDir)
 
-      await s.run(
-        'sh',
-        [
-          '-c',
-          `AGENT_SIGNAL_SETTLE=0 timeout 3 bash "${WATCH}" --file "${join(dir, 'signal.md')}" ` +
-            `--poll 1 --log "${join(dir, 'signal.log')}" -- true`,
-        ],
-        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' }, timeoutMs: 30_000 },
-      )
+        if (before !== 'none') await s.fs.write('live/logs/state/.watch-over_to_codex.lock', '')
+        const holder =
+          before === 'alive' ? await holdLock(s, liveLock, join(s.workspace.root, 'holder.pid')) : undefined
+        expect(await liveness(live.stateDir), 'fixture precondition').toBe(before)
 
-      // TASK-021 deleted the "only if there was no lock before" conjunct that used
-      // to guard this. It made the assertion skip itself whenever a lock already
-      // existed at the watched path — so a canary pointed at the WRONG root passed
-      // on every run, which is the shape tests/live-state-canary now pins.
-      const leaked = await readFile(liveLock).then(
-        () => true,
-        () => false,
-      )
-      expect(
-        leaked,
-        `the watcher created a lock in the LIVE repo (${liveLock}) while watching a fixture baton`,
-      ).toBe(false)
-    })
-  })
+        const dir = await batonDir(s, 'fix/state', 'OVER_TO_CODEX')
+        const w = startWatcher(
+          s,
+          'bash',
+          [
+            live.watch,
+            '--file', join(dir, 'signal.md'),
+            '--poll', '0.2',
+            '--log', join(dir, 'signal.log'),
+            '--', 'touch', s.workspace.path('dispatched'),
+          ],
+          { env: { AGENT_SIGNAL_SETTLE: '0', AGENT_STATE_HOME: undefined, AGENT_SIGNAL_FILE: undefined } },
+        )
+        try {
+          await until('the fixture watcher has dispatched, or exited', async () =>
+            w.exited || (await s.fs.exists('dispatched')),
+          )
+          expect(
+            await liveness(live.stateDir),
+            `the fixture watcher took the LIVE repo's lock (${liveLock})`,
+          ).toBe(before)
+          expect(
+            await liveness(dir),
+            `the fixture watcher holds no lock beside the baton it watches:\n${w.output()}`,
+          ).toBe('alive')
+          w.assertStillRunning('the fixture watcher must still be listening')
+        } finally {
+          await w.stop()
+          await holder?.release('-TERM')
+          await holder?.settled
+        }
+      })
+    },
+  )
 
   it('#7 it put the lock beside the baton it was actually watching', async () => {
     await scenario('wl-7b', async (s) => {
-      // Without this #7 proves nothing: a watcher that took NO lock at all also
-      // leaves none in the live repo.
+      // #7 also asserts this, from a copy of the watcher. This one runs it IN
+      // PLACE: a watcher that took NO lock at all also leaves none in the live repo.
       const dir = await batonDir(s, 'fix/state')
       await s.run(
         'sh',

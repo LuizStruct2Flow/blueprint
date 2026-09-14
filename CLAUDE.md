@@ -164,10 +164,10 @@ live in `.githooks/pre-push-project` and are sourced by the main hook if
 present.
 
 **`.githooks/pre-push-project` is half-managed, and the markers say which
-half.** Between `BLUEPRINT:BEGIN` and `BLUEPRINT:END` the blueprint owns it —
+half.** Between its begin and end markers the blueprint owns it —
 those stages invoke the regression suites under `tests/`, which is itself a
 managed directory — and `blueprint pull` replaces the whole region. Everything
-after `BLUEPRINT:END` is the project's and is preserved byte-for-byte. Put your
+after the end marker is the project's and is preserved byte-for-byte. Put your
 guards there; an edit inside the region is lost at the next pull, so send it
 upstream with `blueprint a2bp .githooks/pre-push-project` instead. The two must
 travel together: a suite is only a suite as two things — the files, and its

@@ -182,6 +182,14 @@ MANAGED_FILES=(
   "scripts/codex-feed-filter.sh"
   "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
+  # U1: wired by managed files and tested by shipped suites, so they must ship.
+  # .claude/settings.json runs no-chain-guard.sh as a PreToolUse hook;
+  # tests/no-chain-guard, tests/session-resume, tests/wait-mic and state-root #G
+  # exercise the three. Unshipped, every derived gate failed those four suites
+  # and the hook pointed at a missing file.
+  "scripts/no-chain-guard.sh"
+  "scripts/session-resume.sh"
+  "scripts/wait-mic.sh"
   "scripts/new-project.sh"
   "scripts/blueprint"
   "scripts/build-deck.sh"
@@ -563,7 +571,7 @@ pull_file() {
 #
 # `blueprint_source` is an absolute host path, which makes it the one field in
 # `.blueprint-source` that cannot be correct on two machines at once. storm2flow
-# carried `/Users/luizscheidegger/...` and every command died on the Linux box;
+# carried `/Users/luizscheidegger/...` and every command died on the Linux box; # a2bp-allow: historical BUG-007 incident record quoting the path that broke, not a live host path
 # writing the Linux path would have broken the Mac instead. Picking a machine to
 # break is not a fix, so the value is now RESOLVED rather than read (BUG-007):
 #
@@ -1075,9 +1083,24 @@ cmd_drift() {
     # the first substitute-on-pull.
     local bp_cmp
     bp_cmp=$(substituted_blueprint_copy "$f")
-    if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
+    # U6: a file with marker regions is compared on its MANAGED regions only,
+    # the same way `pull` treats it. Merging the blueprint's regions into the
+    # project file changes nothing exactly when those regions already match,
+    # so the merge result is the comparison — no second region parser. Content
+    # after the end marker is project-owned (BUG-029) and is not drift. A
+    # structural mismatch (unbalanced or differing region counts) still reports
+    # drift, because pull would fall back to a whole-file copy for it.
+    local drift_cmp="$bp_cmp" drift_tmp=""
+    if grep -q 'BLUEPRINT:BEGIN' "$bp_cmp" 2>/dev/null && grep -q 'BLUEPRINT:BEGIN' "$f" 2>/dev/null; then
+      drift_tmp=$(mktemp)
+      if marker_aware_merge "$bp_cmp" "$f" "$drift_tmp"; then
+        drift_cmp="$drift_tmp"
+      fi
+    fi
+    if ! diff -q "$drift_cmp" "$f" >/dev/null 2>&1; then
       DRIFTED+=("$f")
     fi
+    [ -n "$drift_tmp" ] && rm -f "$drift_tmp"
     [ "$bp_cmp" != "$bp" ] && rm -f "$bp_cmp"
   done
 

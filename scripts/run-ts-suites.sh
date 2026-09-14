@@ -161,10 +161,14 @@ ts_suites_stage(){
   # scrubbed since BUG-014. It is a defence with a real threat and no cost, not
   # a diagnosis.
   #
-  # By PREFIX rather than by list: FORBIDDEN_ENV is fifteen names, all GIT_* or
-  # AGENT_*, and restating them here would be a second copy that drifts. This
-  # file already made that mistake once — `ts_declared_suites` carried a
-  # duplicate of the manifest parse under a comment claiming it could not drift.
+  # By PREFIX rather than by list: the harness scrubs every declared hazard and
+  # every undeclared GIT_*/AGENT_* name (isForbiddenAmbient, tests/harness/env.ts),
+  # and restating that here would be a second copy that drifts. This file already
+  # made that mistake once — `ts_declared_suites` carried a duplicate of the
+  # manifest parse under a comment claiming it could not drift. The one declared
+  # hazard OUTSIDE the prefixes, BLUEPRINT_ROOT (TASK-025), is unset by name after
+  # the loop; tests/ts-bridge #1c imports UNPREFIXED_FORBIDDEN to pin that the two
+  # agree.
   # `cd` into tests/, not into the repo root: that is where the harness manifest
   # and node_modules live (TASK-020), so it is vitest's root and npx's lookup
   # start. The include glob in tests/vitest.config.ts is root-relative to match.
@@ -177,6 +181,7 @@ ts_suites_stage(){
     for _v in $(env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\1/p'); do
       unset "$_v"
     done
+    unset BLUEPRINT_ROOT
     # TWO reporters, deliberately. `json` feeds pipe_stage_report below;
     # `default` is the only thing that tells a human WHICH assertion failed.
     # With json alone the captured output is a path to a file this function

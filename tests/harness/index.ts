@@ -128,6 +128,9 @@ function scenarioEnv(s: {
     // workspace, or it contributes to the $TMPDIR debris that a2bp-e2e:309
     // scans and that BUG-049 measured at 133 MB.
     TMPDIR: join(s.workspaceRoot, 'tmp'),
+    // TASK-025 H2 — the blueprint cache reads it. Without this an operator's
+    // ambient value puts every fixture's cache in their real cache directory.
+    XDG_CACHE_HOME: join(s.home, '.cache'),
     AGENT_STATE_HOME: s.stateHome,
     AGENT_SIGNAL_FILE: s.signalFile,
     AGENT_FEED_LOG: s.feedLog,

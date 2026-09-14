@@ -20,7 +20,7 @@ import { appendFile, readFile, writeFile, stat, symlink } from 'node:fs/promises
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
 import { RealStateCanary } from './canary.js'
-import { fixtureEnv, FORBIDDEN_ENV } from './env.js'
+import { assertProcessEnvClean, fixtureEnv, FORBIDDEN_ENV } from './env.js'
 import { createWorkspace } from './workspace.js'
 
 describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
@@ -320,6 +320,140 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
     } finally {
       await ws.dispose()
     }
+  })
+
+  // --- TASK-025 — the scrub reaches every run mode ---------------------------
+  //
+  // Each witness plants an AMBIENT value in this process, which is the shape of
+  // the defect: nothing was set on purpose, it was simply inherited. Every one
+  // restores in `finally`, and none calls scenario() while a hazard is planted —
+  // assertProcessEnvClean would (correctly) refuse it.
+  //
+  // RED SETS (R6), each mutant applied alone and the suite run — observed:
+  //   parent commit (env.ts, index.ts, run-ts-suites.sh at HEAD~): W1 W2 H2 W3 W4
+  //   drop BLUEPRINT_ROOT from UNPREFIXED_FORBIDDEN          → W1
+  //   declare BLUEPRINT_ROOT 'opaque'                        → W2
+  //   remove XDG_CACHE_HOME from scenarioEnv                 → H2
+  //   fixtureEnv scrubs FORBIDDEN_ENV only                   → W3, BUG-060 GIT_CONFIG_*
+  //   isForbiddenAmbient without the undeclared arm          → W3 W4, BUG-060 GIT_CONFIG_*, ts-bridge #1c
+  //   isForbiddenAmbient without the `!== 'inert'` guard     → W3 W4
+  //   assertProcessEnvClean checks FORBIDDEN_ENV only        → W4
+  //
+  // COST, stated: a direct `vitest run` from a shell exporting any undeclared
+  // GIT_* / AGENT_* name is now refused, names included. Every Claude Code shell
+  // exports GIT_EDITOR=true, so a direct run there needs `env -u GIT_EDITOR`;
+  // the gate's runner unsets it already.
+
+  /** Run `body` with `planted` in process.env, restoring every key afterwards. */
+  async function withAmbient(
+    planted: Record<string, string | undefined>,
+    body: () => void | Promise<void>,
+  ): Promise<void> {
+    const original = Object.fromEntries(
+      Object.keys(planted).map((k) => [k, process.env[k]]),
+    )
+    try {
+      for (const [k, v] of Object.entries(planted)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      await body()
+    } finally {
+      for (const [k, v] of Object.entries(original)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  }
+
+  it('TASK-025 H1 (W1) SCRUBS an ambient BLUEPRINT_ROOT, a hazard outside every scrubbed prefix', async () => {
+    // Declaring it was not enough: FORBIDDEN_ENV kept only GIT_/AGENT_/BP_ names,
+    // so an operator with the documented override exported would have every
+    // fixture compare against their real blueprint checkout.
+    await withAmbient({ BLUEPRINT_ROOT: '/somewhere/a-real-blueprint-checkout' }, () => {
+      expect(
+        fixtureEnv().BLUEPRINT_ROOT,
+        'an ambient BLUEPRINT_ROOT reached a fixture child',
+      ).toBeUndefined()
+    })
+  })
+
+  it('TASK-025 H1 (W2) lets a scenario set BLUEPRINT_ROOT inside its workspace, and refuses one outside', async () => {
+    // The sync suites exercise the override on purpose. Deliberate and contained
+    // is fine; pointing a fixture at a checkout outside the workspace is not.
+    const ws = await createWorkspace('blueprint-root-override')
+    try {
+      const inside = ws.path('bp')
+      expect(fixtureEnv({ BLUEPRINT_ROOT: inside }, ws.root).BLUEPRINT_ROOT).toBe(inside)
+      expect(() => fixtureEnv({ BLUEPRINT_ROOT: '/elsewhere' }, ws.root)).toThrow(
+        /Refusing forbidden environment override BLUEPRINT_ROOT=/,
+      )
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('TASK-025 H2 the scenario OWNS XDG_CACHE_HOME: an ambient value is replaced, an outside override refused', async () => {
+    // The blueprint cache lives under ${XDG_CACHE_HOME:-$HOME/.cache}. A
+    // per-scenario HOME does not cover an operator who exports XDG_CACHE_HOME.
+    await withAmbient({ XDG_CACHE_HOME: '/somewhere/the-operators-real-cache' }, async () => {
+      await scenario('xdg-cache-owned', async (s) => {
+        const r = await s.run('sh', ['-c', 'printf %s "$XDG_CACHE_HOME"'], {
+          cwd: s.workspace.root,
+        })
+        expect(r.stdout, 'the operator\'s cache directory reached a fixture').toBe(
+          join(s.home, '.cache'),
+        )
+        await expect(
+          s.run('sh', ['-c', 'true'], {
+            cwd: s.workspace.root,
+            env: { XDG_CACHE_HOME: '/elsewhere' },
+          }),
+        ).rejects.toThrow(/Refusing forbidden environment override XDG_CACHE_HOME=/)
+      })
+    })
+  })
+
+  it('TASK-025 H5 (W3) SCRUBS every undeclared ambient GIT_*/AGENT_* name, and keeps declared-inert ones', async () => {
+    // The gate's runner unsets the whole prefix population; a direct vitest run
+    // used to remove only the declared names plus GIT_CONFIG*. GIT_SSH_COMMAND
+    // is the one that matters most here: an ambient value bypasses the ssh shim
+    // the sync suites pin their hung remote with.
+    await withAmbient(
+      {
+        GIT_ALLOW_PROTOCOL: 'ext',
+        GIT_SSH_COMMAND: 'sh -c "touch /tmp/pwned"',
+        AGENT_TASK025_DECOY: 'decoy',
+        GIT_CONFIG_KEY_0: 'core.hooksPath',
+        GIT_AUTHOR_NAME: 'Kept',
+      },
+      () => {
+        const env = fixtureEnv()
+        for (const k of [
+          'GIT_ALLOW_PROTOCOL',
+          'GIT_SSH_COMMAND',
+          'AGENT_TASK025_DECOY',
+          'GIT_CONFIG_KEY_0',
+        ]) {
+          expect(env[k], `an ambient undeclared ${k} reached a fixture child`).toBeUndefined()
+        }
+        expect(
+          env.GIT_AUTHOR_NAME,
+          'a declared-inert name was scrubbed — bootstrap fixtures commit with it',
+        ).toBe('Kept')
+      },
+    )
+  })
+
+  it('TASK-025 H5 (W4) assertProcessEnvClean refuses an undeclared GIT_* name, and not a declared-inert one', async () => {
+    // It exists to catch a spec spawning through child_process directly, which
+    // inherits an undeclared name as readily as a declared one.
+    await withAmbient({ GIT_ALLOW_PROTOCOL: 'ext', GIT_AUTHOR_NAME: undefined }, () => {
+      expect(() => assertProcessEnvClean()).toThrow(/GIT_ALLOW_PROTOCOL/)
+    })
+    await withAmbient({ GIT_ALLOW_PROTOCOL: undefined, GIT_AUTHOR_NAME: 'Kept' }, () => {
+      expect(() => assertProcessEnvClean()).not.toThrow()
+    })
   })
 
   it('a real child process sees none of the forbidden variables', async () => {

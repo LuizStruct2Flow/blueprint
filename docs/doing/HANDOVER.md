@@ -85,9 +85,13 @@ is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md`.
 **First review (Alexey, Codex): build A with changes** —
 `.scratch/ALEXEY-plan025-review.md`. **Revised by Christian in `b4983f3`** (2026-09-14):
 six findings adopted with probes, one rejected with evidence; he also found SIGINT
-truncating a mid-write file, which today's `pull` shares. **Alexey is re-reviewing the
-revision now** → `.scratch/ALEXEY-plan025-rereview.md`. Do not build until that
-verdict says so, and do not push while his Codex run is live (BUG-110).
+truncating a mid-write file, which today's `pull` shares. **Re-review (Alexey, 2026-09-14): build with
+these changes** → `.scratch/ALEXEY-plan025-rereview.md` — 5 of 7 original findings
+resolved, the added write-shield and cache-race designs sound. Christian is folding in
+the two technical changes (scrub undeclared ambient `GIT_*`/`AGENT_*` in direct harness
+runs; case #23 covers group TERM as well as INT). **The third change is the founder's
+and BLOCKS implementation:** record T ("matches latest") or P ("matches recorded
+version") first — the code differs under each.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

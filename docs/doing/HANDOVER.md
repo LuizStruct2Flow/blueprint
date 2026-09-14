@@ -127,7 +127,11 @@ ignore-before-redirect ordering has no red witness (M23c); (S3) the mutant catal
 the wrong cases. **All four fixed locally, reproducer-first** (`83dfcd7`/`6c024f1` the
 refresh runs as one process; `3c4fe46`/`4683167` exec bit inside the shield; `b27eadd`
 redirect ordering pinned structurally; `b9473ed` catalogue corrected, #24 narrowed).
-**Alexey is confirming the fixes; push after his verdict.** **Christian's report of where the plan met the code** (verify in review): four
+**Fix confirmation (Alexey, 2026-09-14):** exec-bit, redirect ordering and catalogue
+RESOLVED, 126/126 focused tests; **the spawn race is PARTLY** — the behavioural half of #20b
+was green before the fix too, so push only after a witness that goes red on the pre-fix
+launch, or a proof that the residual is only bash's fork-to-exec window. Christian is on
+it. (Alexey's review file was not written; his verdict is `.scratch/alexey-025-fix-last.md`.) **Christian's report of where the plan met the code** (verify in review): four
 listed mutants do not redden their case (M1→#1h instead, M22b→#11/#20, **M23c reddens
 nothing**, **M24 leaves #24 green**); killing the refresh subshell orphaned the fetch
 (fixed with `pkill -P`, #20 now time-bounded); a damaged cache usually self-heals, exit 5

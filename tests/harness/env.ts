@@ -127,6 +127,17 @@ const ENV_KIND = {
   // inherited into a fixture that was never told about it.
   BP_CODE_ROOT: 'path',
   BP_STATE_ROOT: 'path',
+  // TASK-025 H1 — the documented per-shell override of where `drift` and `pull`
+  // read the blueprint, and the CLI's own internal global. An ambient value makes
+  // a fixture compare against the operator's real checkout. It is UNPREFIXED, so
+  // it reaches FORBIDDEN_ENV through UNPREFIXED_FORBIDDEN below rather than by
+  // namespace; declaring it alone scrubbed nothing, because the filter kept only
+  // GIT_/AGENT_/BP_ names. 'path': a scenario may set one inside its workspace.
+  BLUEPRINT_ROOT: 'path',
+  // TASK-025 — the fetch budget in seconds, handed to `timeout`. Names nothing on
+  // disk and activates nothing else, so 'opaque'; scrubbed so an operator's value
+  // cannot change what a timing case measures.
+  BP_FETCH_TIMEOUT: 'opaque',
   // blueprint coordination state (BUG-046 / BUG-030)
   AGENT_SIGNAL_FILE: 'path',
   AGENT_STATE_HOME: 'path',
@@ -226,6 +237,11 @@ const ENV_KIND = {
   // and BUG-047, which were each one forgotten line.
   HOME: 'scenario-path',
   TMPDIR: 'scenario-path',
+  // TASK-025 H2 — the blueprint cache lives under ${XDG_CACHE_HOME:-$HOME/.cache}.
+  // A per-scenario HOME does not cover it: an operator's ambient XDG_CACHE_HOME
+  // would put every fixture's cache in their real cache directory. So the
+  // scenario owns it the same way it owns HOME.
+  XDG_CACHE_HOME: 'scenario-path',
   // Declared safe to inherit as well as to set: git's author/committer identity
   // carries no path, redirects nothing, and is what tests/bootstrap-* and
   // tests/template-source legitimately pass.
@@ -247,26 +263,62 @@ type EnvKind =
 export type ForbiddenVar = keyof typeof ENV_KIND
 
 /**
- * Everything the scrub removes: every declared GIT_* / AGENT_* / BP_* variable
- * that is not 'inert'.
+ * Declared hazards OUTSIDE the GIT_/AGENT_/BP_ namespaces that must be scrubbed
+ * rather than replaced (TASK-025 H1). Deliberately a short explicit list, not a
+ * kind-based filter: a kind filter would drop AGENT_FEED_TAG ('scenario-token')
+ * out of FORBIDDEN_ENV, which is a behaviour change nobody asked for.
  *
- * THE NAMESPACE FILTER IS LOAD-BEARING, not decoration. This list is also what
- * assertProcessEnvClean requires the TEST process not to be carrying, and the
- * test process always carries HOME — so a scenario-path name in here would
- * refuse every scenario on every machine. Those two are REPLACED per scenario
- * rather than removed (there is no such thing as a child with no home
- * directory), which is a different mechanism, checked in a different place.
+ * scripts/run-ts-suites.sh unsets these by name after its prefix loop, and
+ * tests/ts-bridge #1c imports this list to prove the two agree.
+ */
+export const UNPREFIXED_FORBIDDEN = ['BLUEPRINT_ROOT'] as const
+
+/**
+ * Every DECLARED variable the scrub removes: each GIT_* / AGENT_* / BP_* name
+ * that is not 'inert', plus UNPREFIXED_FORBIDDEN.
  *
- * It also keeps the invariant scripts/run-ts-suites.sh depends on: every name
- * here is GIT_*, AGENT_* or BP_*, so its prefix-based scrub covers the whole
- * list without restating it, and tests/ts-bridge #1c can cross-check that from
- * this file rather than from a second copy. BP_ joined the two with BUG-066 —
- * .githooks/pre-push exports BP_CODE_ROOT, and both scrubs had to learn it
- * together or the cross-check would report them disagreeing.
+ * THE NAMESPACE FILTER IS LOAD-BEARING, not decoration. This list feeds
+ * assertProcessEnvClean, and the test process always carries HOME — so a
+ * scenario-path name in here would refuse every scenario on every machine.
+ * HOME, TMPDIR and XDG_CACHE_HOME are REPLACED per scenario rather than removed,
+ * which is a different mechanism, checked in a different place.
+ *
+ * It is not the whole scrub. isForbiddenAmbient below adds every UNDECLARED
+ * GIT_* / AGENT_* name, which is what makes a direct vitest run remove what the
+ * gate's runner removes (TASK-025 H5).
  */
 export const FORBIDDEN_ENV = (Object.keys(ENV_KIND) as ForbiddenVar[]).filter(
-  (k) => ENV_KIND[k] !== 'inert' && /^(GIT|AGENT|BP)_/.test(k),
+  (k) =>
+    ENV_KIND[k] !== 'inert' &&
+    (/^(GIT|AGENT|BP)_/.test(k) ||
+      (UNPREFIXED_FORBIDDEN as readonly string[]).includes(k)),
 ) as readonly ForbiddenVar[]
+
+/**
+ * Must an AMBIENT value of `k` be kept away from a fixture? (TASK-025 H5)
+ *
+ * True for every declared hazard (FORBIDDEN_ENV) and for every UNDECLARED
+ * GIT_* / AGENT_* name; false for declared 'inert' names such as GIT_AUTHOR_NAME,
+ * which stay.
+ *
+ * WHY THE UNDECLARED ARM. overrideKind already REFUSES an undeclared GIT_* / AGENT_*
+ * name as an explicit override, but nothing removed one arriving AMBIENT. So
+ * GIT_EXEC_PATH, GIT_ASKPASS, GIT_ALLOW_PROTOCOL, GIT_SSH_COMMAND and every git
+ * variable nobody has classified yet reached fixtures in a direct `vitest run`,
+ * while scripts/run-ts-suites.sh unset the whole prefix population — two run
+ * modes, two environments.
+ *
+ * BP_* IS DELIBERATELY NOT IN THAT ARM, for overrideKind's own reason (BUG-066):
+ * it is where ordinary tunables live. That is the one population the bridge
+ * scrubs more of than a direct run, and tests/ts-bridge #1c states it.
+ */
+export function isForbiddenAmbient(k: string): boolean {
+  if ((FORBIDDEN_ENV as readonly string[]).includes(k)) return true
+  return (
+    /^(GIT|AGENT)_/.test(k) &&
+    (ENV_KIND as Record<string, EnvKind>)[k] !== 'inert'
+  )
+}
 
 /**
  * The kind that governs an override of `key`.
@@ -531,24 +583,13 @@ export function fixtureEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
 
-  for (const key of FORBIDDEN_ENV) {
+  // ONE scrub (TASK-025 H5): declared hazards plus every undeclared GIT_*/AGENT_*
+  // name. The GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> pairs have no fixed names;
+  // they used to need their own prefix loop, and are now simply undeclared GIT_
+  // names — so the next switch git invents is covered the same way.
+  for (const key of Object.keys(env).filter(isForbiddenAmbient)) {
     delete env[key]
   }
-
-  // The pair variables have no fixed names, so the scrub is by PREFIX: git
-  // reads GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> for any n. They are inert
-  // without one of the two switches above, and both are denied — but a prefix
-  // covers the next switch git invents before anyone here has heard of it,
-  // which a name list cannot.
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('GIT_CONFIG')) delete env[key]
-  }
-
-  // The pair variables have no fixed names, so the scrub is by PREFIX: git
-  // reads GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> for any n. They are inert
-  // without one of the two switches above, and both are denied — but a prefix
-  // covers the next switch git invents before anyone here has heard of it,
-  // which a name list cannot.
 
   for (const [key, value] of Object.entries(overrides)) {
     assertOverrideAllowed(
@@ -576,14 +617,19 @@ export function fixtureEnv(
  * detects is how BUG-046 survived in four suites at once.
  */
 export function assertProcessEnvClean(): void {
-  const carried = FORBIDDEN_ENV.filter((k) => process.env[k] !== undefined)
+  // The same predicate fixtureEnv scrubs by (TASK-025 H5): a spec spawning
+  // through child_process directly inherits an undeclared GIT_* name just as
+  // well as a declared one.
+  const carried = Object.keys(process.env).filter(isForbiddenAmbient)
   if (carried.length > 0) {
     throw new Error(
       `The test process is carrying variables that must never reach a fixture: ` +
         `${carried.join(', ')}. This is the BUG-046/BUG-047 class. The harness ` +
         `scrubs child environments, but a spec calling child_process directly ` +
         `would inherit these — which is why specs must spawn through the ` +
-        `harness (docs/waiting-acceptance/TASK-018-CONVENTIONS.md).`,
+        `harness (docs/waiting-acceptance/TASK-018-CONVENTIONS.md). Unset them, ` +
+        `run through scripts/run-ts-suites.sh (which does), or — only if one ` +
+        `truly redirects nothing — declare it 'inert' in tests/harness/env.ts.`,
     )
   }
 }

@@ -125,13 +125,20 @@
  *       message saying the suite was NEVER reported. Survives the shell suite.
  *   M7  remove the `| floor` from the duration jq (durations render 0.0s)
  *       Red: #1e.
+ *   M8  (TASK-025) delete `unset BLUEPRINT_ROOT` after the prefix loop
+ *       Red: #1/#1c.
+ *   M9  (TASK-025) narrow the loop to unset only the FORBIDDEN_ENV names
+ *       Red: #1/#1c, on GIT_ALLOW_PROTOCOL — the undeclared population a
+ *       direct run now scrubs by rule (tests/harness/env.ts isForbiddenAmbient).
+ *   On the parent of TASK-025's reproducer commit the whole file is red: the
+ *   imports it needs (UNPREFIXED_FORBIDDEN, isForbiddenAmbient) do not exist.
  */
 
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { FORBIDDEN_ENV } from '../harness/env.js'
+import { FORBIDDEN_ENV, UNPREFIXED_FORBIDDEN, isForbiddenAmbient } from '../harness/env.js'
 
 /**
  * A RENDERED STAGE LINE for `demo`, not merely the word "demo".
@@ -149,6 +156,24 @@ import { FORBIDDEN_ENV } from '../harness/env.js'
  * stage from a complaint about a missing one.
  */
 const STAGE_LINE = /[✓✗]\s+demo\s/
+
+/**
+ * Every variable the driver exports into the bridge, as a hook would. #1c judges
+ * each of these by the harness's rule, so this list is shared by the driver and
+ * the assertion rather than written twice.
+ */
+const DRIVER_EXPORTS = [
+  'GIT_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_CONFIG_GLOBAL',
+  'AGENT_FEED_TAG',
+  'AGENT_SIGNAL_FILE',
+  'AGENT_STATE_HOME',
+  'BLUEPRINT_ROOT',
+  'GIT_ALLOW_PROTOCOL',
+  'AGENT_TASK025_DECOY',
+  'GIT_AUTHOR_NAME',
+] as const
 
 describe('BUG-055 — the vitest bridge scrubs git’s environment and reports its own failures', () => {
   it('#0 the fixture declares a suite that owns a spec', async () => {
@@ -199,23 +224,37 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
         'the runner inherited these — the harness refuses every scenario while any is set',
       ).toEqual([])
 
-      // #1c — the scrub must cover the harness's ENTIRE forbidden set, not a
-      // remembered subset. IMPORTED rather than parsed: BUG-063 was a `sed` range
-      // that stopped matching after a legal refactor, so the check began passing
-      // over nothing and then failed as "could not read", taking the push with it.
+      // #1c — the bridge removes AT LEAST what a direct run removes. It compares
+      // the harness's RULE (isForbiddenAmbient, TASK-025 H5), not its declared
+      // list: a direct run also scrubs every UNDECLARED GIT_*/AGENT_* name, and a
+      // check over declared names only would pass a bridge that let
+      // GIT_ALLOW_PROTOCOL through. IMPORTED rather than parsed: BUG-063 was a
+      // `sed` range that stopped matching after a legal refactor.
       expect(FORBIDDEN_ENV.length, 'the harness declares no forbidden names — #1c would be vacuous').toBeGreaterThan(
         0,
       )
-      for (const name of FORBIDDEN_ENV) {
-        expect(seen?.names ?? [], `${name} reached the runner`).not.toContain(name)
+      const judged = [...new Set([...DRIVER_EXPORTS, ...FORBIDDEN_ENV])]
+      expect(
+        judged.filter((n) => isForbiddenAmbient(n) && !(FORBIDDEN_ENV as readonly string[]).includes(n)),
+        'the driver plants no UNDECLARED forbidden name — the undeclared arm would go unjudged',
+      ).not.toEqual([])
+      for (const name of judged) {
+        if (isForbiddenAmbient(name)) {
+          expect(seen?.names ?? [], `${name} reached the runner, and a direct run would have removed it`).not.toContain(
+            name,
+          )
+        }
       }
-      // And every name in that set IS in the namespace the bridge scrubs by
-      // prefix. The bridge deliberately does not restate the list (a second copy
-      // drifts); this is what makes the prefix sufficient rather than assumed.
-      for (const name of FORBIDDEN_ENV) {
-        expect(name, `${name} is outside the GIT_*/AGENT_*/BP_* prefixes the bridge scrubs`).toMatch(
-          /^(GIT|AGENT|BP)_/,
-        )
+      // And everything the rule forbids is either in a prefix the bridge scrubs
+      // or in the one short list it unsets by name. That is what makes the
+      // bridge's two lines sufficient rather than assumed. The only names the
+      // bridge removes BEYOND the rule are declared-inert ones and BP_* tunables.
+      for (const name of judged.filter(isForbiddenAmbient)) {
+        const byName = (UNPREFIXED_FORBIDDEN as readonly string[]).includes(name)
+        expect(
+          byName || /^(GIT|AGENT|BP)_/.test(name),
+          `${name} is forbidden but neither prefixed nor in UNPREFIXED_FORBIDDEN, so the bridge cannot remove it`,
+        ).toBe(true)
       }
     })
   })
@@ -384,9 +423,12 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
       // environment: the bridge unsets every GIT_*/AGENT_* name before invoking
       // the runner, which is the behaviour under test, so a variable is exactly
       // the wrong channel for telling the stub where to write.
+      // Records every prefixed name AND every UNPREFIXED_FORBIDDEN name, the
+      // latter imported so a new unprefixed hazard is recorded without an edit here.
+      const recorded = `(GIT|AGENT|BP)_[A-Za-z0-9_]*|${UNPREFIXED_FORBIDDEN.join('|')}`
       await shims.add(
         'npx',
-        `env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
+        `env | sed -nE 's/^(${recorded})=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
           `printf 'ran\\n' >> ${JSON.stringify(seenPath)}\n` +
           `echo "stub npx: pretending to be vitest"\n` +
           `for a in "$@"; do\n` +
@@ -424,18 +466,29 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
       // points inside the workspace, so nothing can escape even if the scrub
       // fails, and AGENT_FEED_TAG keeps this scenario's escape token so a leak
       // stays attributable (BUG-062).
+      // TASK-025 adds four: BLUEPRINT_ROOT (the unprefixed hazard), an
+      // undeclared GIT_ALLOW_PROTOCOL and AGENT_TASK025_DECOY (the population a
+      // direct run now scrubs by rule), and the declared-inert GIT_AUTHOR_NAME.
+      // None can redirect git inside the driver.
+      const values: Record<(typeof DRIVER_EXPORTS)[number], string> = {
+        GIT_DIR: join(dir, '.git-decoy'),
+        GIT_INDEX_FILE: join(dir, '.git-decoy/index'),
+        GIT_CONFIG_GLOBAL: join(dir, '.gitconfig-decoy'),
+        AGENT_FEED_TAG: `${s.escapeToken}-GATE`,
+        AGENT_SIGNAL_FILE: join(dir, 'decoy-signal.md'),
+        AGENT_STATE_HOME: join(dir, 'decoy-state'),
+        BLUEPRINT_ROOT: join(dir, 'decoy-blueprint'),
+        GIT_ALLOW_PROTOCOL: 'decoy',
+        AGENT_TASK025_DECOY: s.escapeToken,
+        GIT_AUTHOR_NAME: 'decoy',
+      }
       const driver = await s.fs.write(
         'run-bridge.sh',
         `cd ${JSON.stringify(dir)}\n` +
           `PATH=${JSON.stringify(shims.path())}\n` +
           `export PATH\n` +
-          `GIT_DIR=${JSON.stringify(join(dir, '.git-decoy'))}\n` +
-          `GIT_INDEX_FILE=${JSON.stringify(join(dir, '.git-decoy/index'))}\n` +
-          `GIT_CONFIG_GLOBAL=${JSON.stringify(join(dir, '.gitconfig-decoy'))}\n` +
-          `AGENT_FEED_TAG=${JSON.stringify(`${s.escapeToken}-GATE`)}\n` +
-          `AGENT_SIGNAL_FILE=${JSON.stringify(join(dir, 'decoy-signal.md'))}\n` +
-          `AGENT_STATE_HOME=${JSON.stringify(join(dir, 'decoy-state'))}\n` +
-          `export GIT_DIR GIT_INDEX_FILE GIT_CONFIG_GLOBAL AGENT_FEED_TAG AGENT_SIGNAL_FILE AGENT_STATE_HOME\n` +
+          DRIVER_EXPORTS.map((k) => `${k}=${JSON.stringify(values[k])}\n`).join('') +
+          `export ${DRIVER_EXPORTS.join(' ')}\n` +
           `set -e\n` +
           `. ./scripts/lib/pipeline.sh\n` +
           `pipe_init 'ts-bridge fixture' >/dev/null 2>&1 || true\n` +

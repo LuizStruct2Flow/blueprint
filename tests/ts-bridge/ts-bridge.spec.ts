@@ -139,6 +139,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { FORBIDDEN_ENV, UNPREFIXED_FORBIDDEN, isForbiddenAmbient } from '../harness/env.js'
+import { parseDocument } from 'yaml'
 
 /**
  * A RENDERED STAGE LINE for `demo`, not merely the word "demo".
@@ -362,6 +363,66 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
   })
 })
 
+interface WorkflowStep {
+  name?: string
+  run?: string
+  'working-directory'?: string
+}
+
+describe('BUG-117 — CI starts vitest under the same scrub as the gate', () => {
+  it('#3 every workflow step that runs vitest hands it no GIT_*, AGENT_*, BP_* or unprefixed forbidden name', async () => {
+    await scenario('tsbridge-3', async (s) => {
+      // THE GATE AND CI ARE TWO EXECUTION MODES OF ONE SUITE SET. The harness
+      // refuses a test process carrying any undeclared GIT_* / AGENT_* name
+      // (H5), and the gate satisfies that through this bridge. CI ran
+      // `npx vitest run` directly, so it inherited the runner's environment —
+      // GitHub-hosted runners export AGENT_TOOLSDIRECTORY — and 697 of 770 tests
+      // were refused. Every case above tests the BRIDGE; none tested the other
+      // mode, and tests/manifest #5 reads the workflow as text.
+      //
+      // So the workflow's own vitest steps are EXECUTED, exactly as GitHub runs
+      // a `run:` block, against the recording stub. The decoys are undeclared
+      // names in all three prefixes plus the unprefixed hazard: a fix that named
+      // one runner variable would still hand the stub the rest.
+      const wf = parseDocument(
+        await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
+      ).toJS() as { jobs?: Record<string, { steps?: WorkflowStep[] }> }
+      const steps = Object.values(wf.jobs ?? {})
+        .flatMap((job) => job.steps ?? [])
+        .filter((step) => typeof step.run === 'string' && /\bvitest\s+run\b/.test(step.run))
+      expect(steps.length, 'no workflow step runs vitest — this case would assert nothing').toBeGreaterThan(0)
+
+      const f = await fixture(s)
+      for (const [i, step] of steps.entries()) {
+        await f.npx(0)
+        const script = await s.fs.write(`ci-step-${i}.sh`, step.run ?? '')
+        const cwd = join(f.dir, step['working-directory'] ?? '.')
+        // GitHub's own invocation of a `run:` block on a Linux runner.
+        const driver = await s.fs.write(
+          `ci-driver-${i}.sh`,
+          `cd ${JSON.stringify(cwd)}\n` +
+            `PATH=${JSON.stringify(f.shimPath)}\n` +
+            `AGENT_TOOLSDIRECTORY=${JSON.stringify(join(f.dir, 'decoy-toolcache'))}\n` +
+            `AGENT_BUG117_DECOY=${JSON.stringify(s.escapeToken)}\n` +
+            `GIT_BUG117_DECOY=decoy\n` +
+            `BP_BUG117_DECOY=decoy\n` +
+            `BLUEPRINT_ROOT=${JSON.stringify(join(f.dir, 'decoy-blueprint'))}\n` +
+            `export PATH AGENT_TOOLSDIRECTORY AGENT_BUG117_DECOY GIT_BUG117_DECOY BP_BUG117_DECOY BLUEPRINT_ROOT\n` +
+            `exec bash --noprofile --norc -eo pipefail ${JSON.stringify(script)}\n`,
+        )
+        const r = await s.run('sh', [driver], { cwd: f.dir, timeoutMs: 120_000 })
+
+        const seen = await f.seenEnv()
+        expect(seen, `step "${step.name}" never started vitest at all\n${r.output}`).not.toBeNull()
+        expect(
+          seen?.names ?? [],
+          `step "${step.name}" hands vitest the runner's environment — the harness refuses every scenario while any of these is set`,
+        ).toEqual([])
+      }
+    })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // The fixture: a project the bridge will accept.
 //
@@ -376,6 +437,8 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
 
 interface BridgeFixture {
   readonly dir: string
+  /** PATH with the stub `npx` first. */
+  readonly shimPath: string
   /** A stub `npx` that records the environment it was handed, then exits `code`. */
   npx(code: number): Promise<void>
   /** The GIT_ / AGENT_ prefixed names the stub saw, or null if it never ran. */
@@ -417,6 +480,7 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
 
   return {
     dir,
+    shimPath: shims.path(),
 
     async npx(code: number): Promise<void> {
       // The recording path is HARD-CODED rather than passed through the

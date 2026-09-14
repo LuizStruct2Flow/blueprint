@@ -1,26 +1,29 @@
 # PLAN — TASK-025: `drift` and `pull` read the blueprint by its address
 
-**Status:** PLAN, **revision 3**. Alexey's re-review of revision 2 (Codex)
-returned *"build with these changes"*, and both technical changes are folded in
-(§R2). **Implementation is BLOCKED until the founder records contract T or P
-(§2.1).** The two contracts produce different code and different tests, so the
-implementer cannot start from an open choice. **No code is authorised by this
-document.** Author: Christian (Senior Architect). Revisions 1–3 all 2026-09-14.
+**Status:** PLAN, **revision 4**. Alexey's re-review of revision 2 (Codex)
+returned *"build with these changes"*, and both technical changes are in (§R2).
+The founder decided the four open questions on 2026-09-14 (§R3), and revision 4
+writes them in. **Implementation is unblocked**, in the commit order of §10.
+Author: Christian (Senior Architect). Revisions 1–4 all 2026-09-14.
 
 **Two options were on the table; the review chose A with changes.**
 
 - **Option A: the git remote.** §1–§10.
-- **Option B: the blueprint as an npm package.** §11. Revision 2 corrects two of
-  its arguments per review finding 4. The recommendation is still A (§11.9).
+- **Option B: the blueprint as an npm package.** §11, kept as the record of why
+  it was not chosen (§11.9).
 
 **Founder decision, 2026-09-14:** *"what if we keep track of the repository
 address of the blueprint? It doesn't matter where it is physically."*
 
 **Scope:** `cmd_drift`, `cmd_pull`, `read_blueprint_source`,
-`_bp_resolve_blueprint_root` and `pull_file` in `scripts/blueprint`, plus the
-test harness (`tests/harness/env.ts`, `tests/harness/index.ts`,
-`scripts/run-ts-suites.sh`) and the fixtures of the suites that drive them.
-`a2bp`, `prs`, `files` and `help` are untouched.
+`_bp_resolve_blueprint_root` and `pull_file` in `scripts/blueprint`;
+`bp_config_load` in `scripts/lib/request-config.sh` (one new optional field,
+§7.4); `scripts/new-project.sh`; `scripts/install-toolchain.sh` (the
+per-machine `blueprint` command, §8.1); one job in
+`.github/workflows/security.yml` (§7.4); the test harness
+(`tests/harness/env.ts`, `tests/harness/index.ts`, `scripts/run-ts-suites.sh`)
+and the fixtures of the suites that drive them. The behaviour of `a2bp`, `prs`,
+`files` and `help` is untouched; §9.2 #31 pins that a2bp's PR base does not move.
 
 ---
 
@@ -35,9 +38,9 @@ used. The design changes are in the sections named.
 | 1 | The signal trap cleans up but does not terminate; a killed pull goes on writing | **Adopted.** The EXIT handler and the INT/TERM handler are now separate. On INT or TERM it cleans up, clears its own trap and re-raises the signal. Measured across 3 stages × 2 signals × 2 execution shapes: every run ended by the signal (status 130 or 143), left no scratch and made no write, including under the CLI's own `set -euo pipefail`. **The review undercounted one thing:** a Ctrl-C reaches the whole process group, and it killed a writer mid-write and **truncated the project file** (6 of 40 lines). Writes now run with INT and TERM ignored, and the parent stops after the write completes (40 of 40 lines, no later write). That defect exists in today's `pull` too. | §1.4, §9.2 #20–#23 |
 | 2 | "No cache" overrides an explicit founder requirement | **Adopted.** The backlog row does require it, and revision 1 turned it into a re-open trigger without saying so. There is now a persistent bare cache, refreshed on every run. A failed refresh exits 5 and nothing is read from the cache. Measured locally: warm refresh 5–7 ms, per-run tree built from the cache 27 ms with 120 KiB of scratch, 16 concurrent refreshes × 5 rounds with 0 failures. Two creation designs were measured: plain concurrent `git init` failed **3 of 160** runs, and init-beside-then-rename failed **0 of 160**. The second is adopted. Corruption: a truncated pack healed itself on refresh, with a byte-identical tree. A missing tree object left the refresh **reporting success**, and only building the tree failed (status 128). So building the tree is the corruption check, and its failure is 5. | §1, §3, §4, §9.2 #5, #24–#27 |
 | 3 | Adding `BLUEPRINT_ROOT` to `ENV_KIND` does not scrub it | **Adopted.** Confirmed by reading the code: `FORBIDDEN_ENV` keeps only `GIT_`/`AGENT_`/`BP_` names (`env.ts:267`), and `run-ts-suites.sh:177` scrubs by the same prefixes. The scrub list gains an explicit unprefixed-names list. The bridge unsets the same names, and ts-bridge #1c pins that the two agree. There are two harness witnesses: an ambient value is absent, and an explicit override inside the workspace is kept while one outside it is refused. **The review missed two more names of the same class,** both added: `XDG_CACHE_HOME`, which the new cache reads, and `GIT_SSH_COMMAND` / `GIT_SSH`, which are undeclared, so an ambient value reaches fixtures and bypasses the ssh shim in a direct vitest run. | §9.1 |
-| 4 | B's "must wait for Stage B" and "no offline wake" are framing, not constraints | **Adopted in part, measured.** (a) A payload built by CI from `git archive`, under one `files` entry, does avoid a third copy of the managed list. **But npm silently dropped 11 of 151 shipped files, including `CLAUDE.md` and `docs/DoD.md`.** The payload carries the blueprint's `.gitignore`, whose privacy block lists tracked files, and npm treats that as ignore rules. An empty `.npmignore` fixes it (150 of 151). The last file is `.gitignore`, which npm never packs. So the claim holds, with two traps it did not name. (b) The offline point depends on the product contract, which is now an explicit founder question. Under the "pinned" contract, **A with this cache answers offline too**, so offline is no longer a reason to pick B. | §2.1, §11.2, §11.9 |
+| 4 | B's "must wait for Stage B" and "no offline wake" are framing, not constraints | **Adopted in part, measured.** (a) A payload built by CI from `git archive`, under one `files` entry, does avoid a third copy of the managed list. **But npm silently dropped 11 of 151 shipped files, including `CLAUDE.md` and `docs/DoD.md`.** The payload carries the blueprint's `.gitignore`, whose privacy block lists tracked files, and npm treats that as ignore rules. An empty `.npmignore` fixes it (150 of 151). The last file is `.gitignore`, which npm never packs. So the claim holds, with two traps it did not name. (b) The offline point depended on the product contract. The founder chose "latest tip" (§2.1), under which neither A nor B can say "newest" offline, so offline is not a reason to pick B. | §2.1, §11.2, §11.9 |
 | 5 | Missing tests: missing branch, no timeout provider, scratch not creatable, INT and signals mid-compare / mid-write, concurrency, corruption | **Adopted.** Measured: a reachable remote with a missing branch fails with status 128 and `couldn't find remote ref`, which the CLI reports separately from a transport failure. Staleness records that no contained way exists to hide `timeout` (`staleness.spec.ts:179`). This plan adds one: a PATH made of symlinks to every executable on the current PATH except the hidden names. Every ssh case is pinned by scrubbing `GIT_SSH_COMMAND`/`GIT_SSH` (finding 3), not by relying on PATH order. | §9.2 #16–#27 |
-| 6 | A `released` branch needs the tested SHA and an ancestry check | **Adopted as conditions.** It stays a founder option, not a default. If chosen: CI pushes `$GITHUB_SHA` (never the moving `main`) without force, after every job in `security.yml`, on `push` events only. An older job then loses the non-fast-forward race by design. Before any project switches branch, migration checks that its `bootstrap_sha` is an ancestor of `released`. | §7.4 |
+| 6 | A `released` branch needs the tested SHA and an ancestry check | **Adopted, and the founder adopted the branch itself (§R3).** CI pushes `$GITHUB_SHA` (never the moving `main`) without force, after every other job in `security.yml`, on `push` events only. An older job loses the non-fast-forward race by design. Before a project switches to `released`, migration checks that its `bootstrap_sha` is an ancestor of `released`. | §7.4 |
 | 7 | BUG-110: prove the fetched root is exactly the tree | **Adopted as a test, measured.** With an ancestor `.git` present, as an empty directory or as a `gitdir:` file, the tree's top level was exactly the tree in both cases. Discovery from the scratch parent failed in both. The cache is only ever addressed with `--git-dir`, so it runs no discovery at all. **Declined:** a `GIT_CEILING_DIRECTORIES` guard on top. Nothing it would stop was reproduced, and the test pins the property. | §1.3, §9.2 #19 |
 
 **Also found, out of scope, flagged to the orchestrator:** `a2bp` installs the
@@ -53,8 +56,33 @@ Alexey found findings 1, 2 and 5–9 and 11 resolved. The three that were not:
 | # | Finding (short) | Answer | Where |
 |---|---|---|---|
 | 3, 10 | Direct vitest runs still inherit **undeclared** ambient `GIT_*` / `AGENT_*` names; the bridge unsets the whole prefix population, so the two run modes differ | **Adopted. Checked against the code, and it holds.** `fixtureEnv` deletes `FORBIDDEN_ENV` (`env.ts:534`), which is built from *declared* names only (`:267`), then any `GIT_CONFIG*` (`:543`). `assertProcessEnvClean` checks `FORBIDDEN_ENV` only (`:579`). `overrideKind` refuses an undeclared name as an explicit **override** (`:289`) but nothing removes it as an **ambient** value. `run-ts-suites.sh:177` unsets every `GIT_`/`AGENT_`/`BP_` name. No other path covers the gap. So `GIT_EXEC_PATH`, `GIT_ASKPASS`, `GIT_ALLOW_PROTOCOL` and every future git name reach fixtures in a direct run. New rule H5: undeclared ambient `GIT_*`/`AGENT_*` are scrubbed by `fixtureEnv` and refused by `assertProcessEnvClean`; declared `inert` names are kept. ts-bridge #1c compares that rule, not the declared list. H3's two declarations become unnecessary and are dropped, and its witness moves under H5 | §9.1 H5 |
-| 4 | T versus P is still open, and the implementation does **not** survive both answers unchanged | **Adopted.** Revision 2's sentence saying it did is withdrawn. Implementation is blocked until the founder records T or P. §2.2 lists exactly what differs under P | §2.1, §2.2, §10 |
+| 4 | T versus P is still open, and the implementation does **not** survive both answers unchanged | **Adopted.** Revision 2's sentence saying it did is withdrawn. The founder has since chosen T (§R3), and the plan is written for T only | §2.1, §2.2 |
 | 8 | Case #23 pins group INT only; the measured contract covers group TERM too | **Adopted.** #23 now sends group INT and group TERM, as two runs | §9.2 #23 |
+
+## R3. Founder decisions (revision 4)
+
+Recorded 2026-09-14. Each one is written into the section named. The TASK-025
+backlog row carries the same four.
+
+| # | Question | Decision | Where |
+|---|---|---|---|
+| 1 | What does `drift` mean? | **T:** *"matches the newest blueprint on its branch"*. Contract P (pinned) was considered and not chosen | §2.1, §2.2 |
+| 2 | A `released` branch? | **Adopt it.** CI fast-forwards it to the tested `$GITHUB_SHA` after all required jobs pass, on push events only, never with force. Migration checks ancestry before switching a project | §7.2, §7.4, §9.2 #30–#33 |
+| 3 | A leftover `blueprint_source` field? | **Warn on every run, with no cut-off date** | §5, §9.2 #29 |
+| 4 | Does the toolchain installer write the per-machine `blueprint` command? | **Yes** | §8.1, §9.2 #34–#38 |
+
+Two things the decisions required that the questions did not name. Both are
+design choices made in this revision:
+
+- **`blueprint_branch` cannot become `released`.** `a2bp` uses that field as the
+  base of every pull request it opens (`gh pr create --base "$BP_CFG_BRANCH"`,
+  `scripts/blueprint:1698`). Setting it to `released` would file requests
+  against the branch CI owns. So derived projects fetch `released` through a new
+  optional field, `blueprint_release_branch`, and `blueprint_branch = main`
+  keeps its one meaning: where requests go (§7.4).
+- **`security.yml` is a managed file** (`.gitattributes` comment at `:171`), so
+  it ships to every derived project. The release job is therefore guarded to run
+  only in the blueprint's own repository (§7.4).
 
 ---
 
@@ -278,20 +306,20 @@ route. The tree keeps one oracle for both paths.
 
 ## 2. Which commit is "the blueprint"
 
-**Under contract T (§2.1).** §1 and §3–§10 are written in T's terms. If the
-founder picks P, §2.2 replaces the parts it names before any code is written.
-Under T, "the blueprint" is the tip of
-`blueprint_branch` on `blueprint_remote`, as fetched by this run into its own
-ref. `CURRENT_SHA` is that SHA, and the tree's `HEAD` equals it.
+"The blueprint" is the tip of the read branch on `blueprint_remote`, as fetched
+by this run into its own ref (§2.1). The read branch is
+`blueprint_release_branch` when set, else `blueprint_branch` (§7.4).
+`CURRENT_SHA` is that SHA, and the tree's `HEAD` equals it.
 
 - **`drift`** lists `BOOTSTRAP_SHA..CURRENT_SHA` from the tree, whose history
   comes through alternates. All three projects' bootstrap SHAs exist on the
   remote.
 - **`bootstrap_sha` absent from the fetched history** (recorded from an unpushed
-  or rewritten commit, §0.2 #4). `git cat-file -e "$BOOTSTRAP_SHA^{commit}"`
+  or rewritten commit, §0.2 #4, or from one `released` has not reached yet, §7.4). `git cat-file -e "$BOOTSTRAP_SHA^{commit}"`
   fails, and drift prints one explicit line: *"bootstrap_sha `<x>` is not in
-  `<remote>` `<branch>` history. It was recorded from a commit that was never
-  pushed or was rewritten, so commits since sync are unknown."* Exit 0, since
+  `<remote>` `<branch>` history. It was recorded from a commit that is not on
+  that branch (never pushed, rewritten, or not yet released), so commits since
+  sync are unknown."* Exit 0, since
   the file comparison is still valid. **If the commit is present but `rev-list`
   fails, that is a damaged cache, and it exits 5** rather than printing "unknown"
   (today's `2>/dev/null || echo "?"` makes the two look the same).
@@ -302,124 +330,43 @@ ref. `CURRENT_SHA` is that SHA, and the tree's `HEAD` equals it.
 - **Header:**
 
   ```
-  blueprint:  git@github.com:LuizStruct2Flow/blueprint.git  (main)
+  blueprint:  git@github.com:LuizStruct2Flow/blueprint.git  (released)
   fetched:    <full sha>  at 2026-09-14T15:02:11Z
   ```
 
-### 2.1 The product contract — OPEN FOUNDER QUESTION, not decided here
+  The branch in parentheses is the read branch, so a project that has not yet
+  switched to `released` shows `(main)`, visibly.
 
-Revision 1 presented "compare against the latest tip" as if it were technically
-forced. **It is not; it is a product choice** (§R #4). Two readings of "is this
-project in sync with the blueprint?":
+### 2.1 The product contract: T (decided)
 
-- **T — latest tip.** *"The project matches the newest blueprint on
-  `blueprint_branch`."* This plan as written.
-- **P — pinned.** *"The project matches the blueprint version it recorded
-  (`bootstrap_sha`). Whether a newer one exists is a separate line."*
+**Founder decision, 2026-09-14:** `drift` means *"the project matches the newest
+blueprint on its branch."* Revision 1 had presented this as technically forced.
+It is not: it is the product choice, and it is now made.
 
-| | **T (latest tip)** | **P (pinned)** |
-|---|---|---|
-| What drift compares against | the fetched tip | the tree at `bootstrap_sha` |
-| Right after a full `pull` | clean until the blueprint moves | clean until the project edits a file |
-| Offline, pin already in the cache | **5**, nothing compared | **0**: conformity to the pin is reported, plus *"newer blueprint: unknown (could not reach `<remote>`)"*. It is never worded as "in sync with the latest" |
-| Offline, pin not in the cache | 5 | 5 |
-| Refresh failure | always 5 | 5 only if the pin is missing from the cache; otherwise availability is "unknown" |
-| `pull` with no paths | moves to the tip (unchanged) | moves the pin to the tip (unchanged) |
-| After a **partial** pull | pulled files match, the rest show drift | **pulled files show as drift against the old pin** (the project is ahead of it). Needs its own wording, or BUG-016's rule reopens |
-| `bootstrap_sha` absent from history | the explicit line, exit 0 | **cannot compare at all: 5** |
-| Wake protocol, CLAUDE.md | four cases (§3) | a fifth: *"in sync with pin X; newer: N commits / unknown"* |
-| Cache design (§1) | as written | unchanged. The refresh is still attempted every run; it only changes what a failure means |
-| Tests that change | — | see §2.2 |
-| Option B | B's offline advantage stands | **gone**: A with the cache answers the same narrower question offline |
+What follows from it, all already written into §1 and §3–§10:
 
-The backlog row's wording (*"an offline wake must say could not reach the
-blueprint rather than report clean"*) reads naturally as T, and both columns
-satisfy it. That is why this is recorded as a question and not inferred.
+- `drift` and `pull` compare against the tip this run fetched, and nothing else.
+- Right after a full `pull`, a project is clean until the blueprint moves.
+- Offline, or with any refresh failure, the answer is **5**: nothing is
+  compared. The one offline path is the explicit `BLUEPRINT_ROOT` override,
+  labelled as such (§4, §5).
+- A partial pull needs no special wording: pulled files match the tip, the rest
+  show drift.
+- The wake protocol has four cases (§3).
 
-**Implementation is blocked until the founder records T or P.** Revision 2 said
-the implementation survives either answer. The re-review showed it does not
-(§R2 #4): P changes exit statuses, report text and partial-pull reporting. It
-changes twelve existing cases and adds two (§2.2). What is shared is the cache, the per-run tree mechanism, the
-handlers, the shielded writes and the harness changes (§9.1). The answer is
-recorded here, quoted and dated, and in the TASK-025 backlog row, before the
-reproducer commit (§10) starts.
+### 2.2 Considered and not chosen: P (pinned)
 
-### 2.2 What changes if the founder picks P
+P read `drift` as *"the project matches the blueprint version it recorded
+(`bootstrap_sha`), with whether a newer one exists on a separate line."* Its one
+advantage was an offline answer: conformity to the pin, plus "newer: unknown".
 
-Nothing below applies under T. Under P, each item replaces what §1–§10 say.
-
-**What is compared.** `drift` builds its tree at `bootstrap_sha` (the pin), using
-the same cache, `clone --shared` and `checkout --detach` as §1.3. The refresh
-still runs every run, into its own ref, and is used only for the
-"newer blueprint" line. The pin is **never** read from the bare cache directly:
-building its tree is the validation (review finding 9). `pull` is **unchanged**:
-it previews and applies the fetched tip, so any refresh failure is 5 for `pull`
-under both contracts.
-
-**Refresh-failure status (`drift` only).**
-
-| Cause | T | P |
-|---|---|---|
-| unreachable, timed out, branch missing, no timeout provider | 5 | **0** if the pin's tree builds from the cache, with `newer blueprint: unknown (<cause>)`. **5** if the pin is not in the cache. With no timeout provider, no fetch is attempted |
-| scratch not creatable, cache not creatable, pin's tree fails to build (damaged) | 5 | 5 |
-| refresh succeeded, `bootstrap_sha` not in the remote's history | 0 + the explicit line (§2) | **5**: nothing can be compared |
-| `bootstrap_sha` missing or not a SHA | not needed for the comparison | **4**: *"no bootstrap_sha, so the pinned contract has nothing to compare against. Run a full pull."* |
-
-**Report wording.**
-
-```
-blueprint:  git@github.com:LuizStruct2Flow/blueprint.git  (main)
-pinned:     <bootstrap_sha>
-fetched:    <tip sha> at 2026-09-14T15:02:11Z      | fetched: FAILED (<cause>)
-newer blueprint: N commits since the pin  | up to date  | unknown (could not reach <remote>)
-```
-
-- The clean line becomes `✓ All blueprint-managed files match the pinned
-  blueprint <short>.` No wording under P says "latest", "HEAD" or "in sync"
-  without naming the pin.
-- "Commits since sync" is replaced by the `newer blueprint` count, taken from
-  this run's own ref only.
-- CLAUDE.md §"Wake-time drift check" gets five cases instead of four:
-  (1) matches the pin and up to date; (2) drifted from the pin; (3) matches the
-  pin, newer blueprint available, so offer a pull; (4) matches the pin, newer
-  unknown, so tell the founder availability was not checked; (5) status 5, the
-  check did not run. Case 1's quoted text changes from "match the blueprint
-  HEAD" in the same commit.
-
-**Partial pull.** `bootstrap_sha` still moves only on a full pull (BUG-016). A
-partially pulled file then differs from the pin, so under P:
-
-- **Refresh succeeded.** A file that differs from the pin is compared a second
-  time, against a tree at the fetched tip (built only when such a file exists,
-  about 27 ms). If it matches the tip, it is reported as
-  `^ <file>  ahead of the pin, matches <branch> tip <short>` and does **not**
-  count as drift. Both comparisons go through `bp_prospective_for` (BUG-113's
-  single comparison), with `BLUEPRINT_ROOT` bound to each tree in turn.
-- **Refresh failed.** A partial pull cannot be told from a local edit, so the
-  file is reported as drift:
-  `~ <file>  (differs from the pin; tip unknown, may be a partial pull)`.
-
-**Cases that change** (§9.2). Under P:
-
-| # | Change |
-|---|---|
-| 1 | header asserts the `pinned:`, `fetched:` and `newer blueprint:` lines |
-| 3 | splits. **3a**, pin cached → 0 and `unknown`, no "up to date". **3b**, cold cache → 5. Mutant for 3a: print "up to date" after a failed refresh |
-| 4 | splits the same way; the time bound is unchanged |
-| 5 | run 2's file report is unchanged (the pin did not move), and it shows `newer blueprint: 1 commit`. Mutant: compare against the tip |
-| 13 | the unpushed local commits appear in no count and no report |
-| 14 | pin absent from remote history → **5** (was 0) |
-| 16 | pin cached → 0 and `unknown (no branch '<b>' on that remote)`; cold → 5 |
-| 17 | pin cached → 0 and `unknown`, with no fetch attempted; cold → 5, no cache created |
-| 24 | mutant (b) is re-aimed: A's `newer blueprint` count must come from A's own ref, not C's |
-| 25 | failed refresh with a warm cache → **0** and `unknown` (was 5). Mutant: take the count from the newest cached `bp-run` ref |
-| 27 | (a) deletes the **pin's** root tree object → 5 |
-| 10 | each relocation shape's fixture needs its pin committed at that layout |
-| new 29 | partial pull: ahead-of-pin line when the tip is reachable; drift with the "may be a partial pull" note when it is not. Mutant: compare against the pin only |
-| new 30 | missing `bootstrap_sha` → 4 |
-
-Unchanged under P: #2, #6–#9, #9b (runs against the pin's tree), #11, #12, #15,
-#18–#23, #26, #28, #28b, and every `pull` case.
+It was not chosen because the wake-time question is *"is there blueprint work
+to bring in?"*, which only the tip answers. P also cost more than it returned:
+a partially pulled file shows as drift against the old pin, which needs its own
+"ahead of the pin" wording or BUG-016's rule reopens; a `bootstrap_sha` absent
+from history becomes a hard failure instead of a note; the wake protocol gains a
+fifth case; and fourteen cases change. The offline need it served is met by the
+`BLUEPRINT_ROOT` override, which says exactly what it compared against.
 
 ---
 
@@ -435,7 +382,7 @@ fails it would quietly bring back the local-folder answer this task deletes
 |---|---|---|
 | **0** | report produced against this run's freshly fetched tip (drifted or not, unchanged); or in the blueprint itself (unchanged) | pulled, or nothing to pull (unchanged) |
 | **1** | `die`: no `.blueprint-source`, expansion failure (unchanged) | same |
-| **4** | config refused by `bp_config_load`: version 1 without override, placeholder or empty remote, invalid branch, version too new | same |
+| **4** | config refused by `bp_config_load`: version 1 without override, placeholder or empty remote, invalid `blueprint_branch` or `blueprint_release_branch`, version too new | same |
 | **5** | **could not read the blueprint**: remote unreachable; **branch missing on a reachable remote** (its own message); timed out; no timeout provider; scratch not creatable; cache not creatable; **cache damaged** (tree build or history read failed) | same, and **nothing is written** |
 | **7** | — | refused, no TTY without `--yes` (unchanged) |
 | **130 / 143** | interrupted by INT / TERM: cleaned up, then died of the signal | same; nothing written after the signal |
@@ -477,7 +424,7 @@ time, not the cache's age, so there is no "cached N minutes ago" state to show.
 |---|---|
 | **The blueprint itself** | Unchanged. `_bp_is_blueprint_itself` returns before any config is read. Pinned by `tests/drift-in-blueprint` |
 | **`BLUEPRINT_ROOT` override** | **Kept, the only local path.** Used for previewing an unpushed blueprint change, working offline, and **recovery** (below). Per shell, never committed |
-| **`blueprint_source` field** | **Ignored.** While present, drift prints one dim line: *"blueprint_source is no longer read (TASK-025). Remove it from .blueprint-source."* |
+| **`blueprint_source` field** | **Ignored, and warned about on every run, with no cut-off date** (founder decision). While the field is present, every `drift` and `pull` run in the project prints exactly one line to stderr, before anything else it prints, on the address path and the override path alike:<br>`warning: .blueprint-source still has blueprint_source, which is no longer read. The blueprint is read from blueprint_remote (TASK-025). Delete the blueprint_source line.`<br>It is not dimmed, not suppressed after a first run, and changes no exit status or stdout. The blueprint itself never prints it, since it returns before reading any config. Pinned by §9.2 #29 |
 
 **Recovery property (§9.2 #12).** The override path does not source the network
 libraries (`request.sh`, `request-config.sh`). A project that pulled the new CLI
@@ -506,76 +453,183 @@ mutants A, B, C, D and F re-applied.
 
 | Project state | New behaviour |
 |---|---|
-| v2, real `blueprint_remote` (all three today) | reads the remote; `blueprint_source` is ignored and nagged |
+| v2, real `blueprint_remote` (all three today) | reads the remote (the read branch, §7.4); a leftover `blueprint_source` is ignored and warned about (§5) |
 | v2, `blueprint_remote = FILL-ME-IN` (fresh bootstrap) | **4**, `bp_config_load`'s message, plus *"or export BLUEPRINT_ROOT=<checkout>"* |
 | v1 | **4**, `bp_config_load`'s message, plus the same hint. The remote is never inferred from a checkout's `origin` |
 | any version, `BLUEPRINT_ROOT` exported | local override, labelled |
 
 Validation is `bp_config_load`, reused as it is. `scripts/new-project.sh` stops
 writing `blueprint_source`, deletes `_relative_path`, and keeps the `FILL-ME-IN`
-placeholder. `read_blueprint_source`'s unregistered-project message stops
-suggesting `blueprint_source`.
+placeholder. It writes `blueprint_release_branch = released` (§7.4).
+`read_blueprint_source`'s unregistered-project message stops suggesting
+`blueprint_source`.
 
 ### 7.2 Order of operations
 
 1. ~~PR #66 decided.~~ **Done:** TASK-026 implemented it.
-2. **TASK-025 lands in the blueprint and is pushed.** Projects read what is
-   published, so an unpushed TASK-025 is invisible to them by design.
-3. **Each project pulls the new CLI with its current CLI,** through the
+2. **TASK-025 lands on `main` and is pushed** (§10's four commits). Projects
+   read what is published, so an unpushed TASK-025 is invisible to them by
+   design.
+3. **Wait for `released` to exist.** The first green `security` run on that
+   push creates it (§7.4). Check with
+   `git ls-remote <remote> refs/heads/released`: it must print the last TASK-025
+   commit or a later one. No project switches before this.
+4. **Each project pulls the new CLI with its current CLI,** through the
    still-unchanged wrapper. The pull list is **derived, not hand-counted**
    (review): `scripts/blueprint`, plus every `scripts/lib/*.sh` it sources,
    transitively. Collect the list with `grep -o 'lib/[a-z-]*\.sh'` over the CLI
    and each lib found, until nothing new appears. It is a partial pull, so
    `bootstrap_sha` is left alone (BUG-016).
-4. **Verify before changing anything else:** in the project, `bash
-   scripts/blueprint drift` must print a header naming the remote and exit 0 or
-   show drift, never 1.
-5. **Delete `blueprint_source`** from `.blueprint-source`, in the same project
-   commit as step 3.
-6. **Only then replace the wrapper on each machine** (§8.1). Until step 4 passes
-   in every project, the old wrapper is the recovery path and must stay.
-7. **Only then Stage B.**
+5. **Verify before changing anything else:** in the project,
+   `bash scripts/blueprint drift` prints a header naming the remote with
+   `(main)` and exits 0 or shows drift, never 1. It also prints the §5 warning,
+   because `blueprint_source` is still there.
+6. **Check ancestry, then switch.** In a blueprint checkout, `git fetch origin`,
+   then `git merge-base --is-ancestor <the project's bootstrap_sha> origin/released`.
+   - **Passes:** in the project, add `blueprint_release_branch = released` and
+     delete `blueprint_source`, in the same project commit as step 4.
+   - **Fails, and `git merge-base --is-ancestor <sha> origin/main` passes:**
+     `released` has not caught up with the commit this project synced to. Wait
+     for CI and repeat the check.
+   - **Fails against both:** the SHA was never pushed or was rewritten
+     (§0.2 #4). Switch anyway. Drift then prints §2's "not on that branch"
+     line until the next full pull records a `released` SHA. Tell the founder;
+     do not run the full pull unasked.
+7. **Verify again:** drift's header shows `(released)`, it exits 0 or shows
+   drift, and the §5 warning is gone.
+8. **Only then replace the per-machine command, on each machine** (§8.1):
+   `rm ~/.local/bin/blueprint`, then `bash scripts/install-toolchain.sh`. Until
+   step 7 passes in every project, the old wrapper is the recovery path and
+   stays. The installer never removes it by itself, so running the installer
+   earlier, for its other tools, is harmless.
+9. **Only then Stage B** (§8.2).
 
 ### 7.3 Per project
 
-- **linkedin-watcher-agent.** Local CLI present. Steps 3–5 as written.
+- **linkedin-watcher-agent.** Local CLI present. Steps 4–7 as written.
 - **struct2flow-www.** Local CLI present; its absolute `blueprint_source` goes at
-  step 5. Its local copy carries PR #66's U1/U6 edits, and step 3 replaces them
+  step 6. Its local copy carries PR #66's U1/U6 edits, and step 4 replaces them
   with TASK-026's implementation, with the diff shown.
-- **storm2flow.** No local CLI and no `scripts/lib/`. Step 3's derived closure is
-  the whole lib set. `bootstrap_sha` stays reserved for its slice S8. **Stage B
-  waits for it.**
+- **storm2flow.** No local CLI and no `scripts/lib/`. Step 4's derived closure is
+  the whole lib set, and after it the project has the local CLI that the §8.1
+  command needs. `bootstrap_sha` stays reserved for its slice S8, so if step 6
+  lands in its third branch, the "not on that branch" line stays until S8.
+  **Stage B waits for it.**
 
-### 7.4 If the founder adopts a `released` branch (§12 Q2), the conditions
+### 7.4 The `released` branch
 
-- **CI job**, in `security.yml`, `on: push` to `main` only, `needs:` every other
-  job (`secret-scan`, `sast`, `sca`, `commit-subjects`, `shell-tests`,
-  `ts-tests`): `git push origin "$GITHUB_SHA:refs/heads/released"` **without
-  force**. It pushes the immutable tested SHA, never the moving `main`. A slower,
-  older run is refused as non-fast-forward, which is correct: a newer green
-  commit is already there. Permissions `contents: write` on that job only.
-- **Migration, per project, before changing `blueprint_branch`:**
-  `git merge-base --is-ancestor <bootstrap_sha> origin/released` must succeed.
-  If it fails, the project was synced to a `main` commit that `released` has not
-  reached, so wait for CI to catch up rather than switching. Otherwise
-  `BOOTSTRAP_SHA..released` would print an empty or misleading history.
-- **Test:** a fixture remote where `released` lags `main`, and a project whose
-  `bootstrap_sha` is on `main` only. The migration check refuses it, and after
-  `released` fast-forwards past it, the check passes.
+**Adopted (founder, 2026-09-14).** `released` is the newest `main` commit on
+which every other CI job passed. Derived projects read it. `main` stays the
+trunk the owner pushes to and `a2bp` files against.
+
+**The CI job,** added to `.github/workflows/security.yml`:
+
+```yaml
+  release:
+    name: release (fast-forward released to the tested commit)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.repository == 'LuizStruct2Flow/blueprint'
+    needs: [secret-scan, sast, sca, commit-subjects, shell-tests, ts-tests]
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@<the SHA the other jobs pin> # v6
+        with:
+          fetch-depth: 0
+      - name: Fast-forward released
+        run: |
+          if git push origin "$GITHUB_SHA:refs/heads/released"; then exit 0; fi
+          git fetch origin released
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/released; then
+            echo "released already contains $GITHUB_SHA: a newer green run got there first"
+            exit 0
+          fi
+          echo "::error::released is not an ancestor of $GITHUB_SHA and was not moved"
+          exit 1
+```
+
+- **The tested SHA.** It pushes `$GITHUB_SHA`, the commit every `needs:` job
+  tested, never `main` by name, which may have moved during the run.
+- **After all required jobs.** `needs:` lists every other job in the file. A
+  failed or skipped dependency skips the release. §9.2 #33 derives the job list
+  from the file, so a job added later but left out of `needs:` turns it red.
+- **Push events only.** The `if` excludes `pull_request`, `schedule` and
+  `workflow_dispatch`, and `on.push` is `main` only.
+- **Never force.** No `--force`, no `-f`, no `+` refspec. The server refuses a
+  non-fast-forward. If `released` already contains the SHA, because an older run
+  finished after a newer one, the job is green. Any other refusal is red: it
+  means `released` diverged from `main`, which only a hand push can cause.
+- **The blueprint's repository only.** `security.yml` is managed and ships to
+  every derived project. There the repository condition is false and the job
+  shows as skipped. The name is the blueprint's own address, which every
+  project's `.blueprint-source` already records, so it is not contamination. A
+  fork of the blueprint edits that one line.
+- **`contents: write` on this job only.** Every other job keeps `read`.
+- **Creation.** The first green run creates `released`; a push to a missing ref
+  needs no force. Nobody pushes `released` by hand. That is a convention, not an
+  enforced rule, for the same one-identity reason CLAUDE.md gives for `a2bp`.
+  A push made with `GITHUB_TOKEN` starts no workflow, and nothing triggers on
+  `released` anyway.
+
+**Which branch derived projects fetch: `released`, through a new optional field.**
+
+```
+config_version           = 2
+blueprint_remote         = git@github.com:LuizStruct2Flow/blueprint.git
+blueprint_branch         = main
+blueprint_release_branch = released
+```
+
+- **`drift` and `pull` read `blueprint_release_branch` when it is set, else
+  `blueprint_branch`.** The fallback keeps a project mid-migration, and every
+  existing fixture, working, and the header names the branch it read (§2).
+- **`a2bp` keeps `blueprint_branch`** as its fetch base and pull request base,
+  unchanged.
+- **`bp_config_load`** validates the new field with the same
+  `git check-ref-format --branch` check and emits `BP_CFG_READ_BRANCH`: the
+  field, or `BP_CFG_BRANCH` when it is absent. The config version stays 2. The
+  field is optional, and a CLI that predates it does not read the remote at all.
+- **`scripts/new-project.sh` writes `blueprint_release_branch = released`.** A
+  fresh bootstrap made between a push and its green CI run may record a
+  `bootstrap_sha` that `released` does not contain yet. Drift then shows §2's
+  "not yet released" line, exit 0, until the next full pull.
+- **Rejected: pointing `blueprint_branch` itself at `released`.** It is a2bp's
+  pull request base (`scripts/blueprint:1698`), so requests would be filed
+  against the branch CI owns, where `security.yml`'s `pull_request` trigger does
+  not even run.
+
+**The migration ancestry check** is §7.2 step 6: a one-time procedure run in a
+blueprint checkout, not CLI code. What a project sees if it is switched too
+early is CLI behaviour, and §9.2 #32 pins it.
+
+**Cases:** §9.2 #30 (the read branch and its fallback), #31 (a2bp's base does
+not move), #32 (switched before `released` caught up), #33 (the job's shape).
 
 ---
 
-## 8. The wrapper and Stage B
+## 8. The per-machine command and Stage B
 
-### 8.1 The wrapper
+### 8.1 The per-machine `blueprint` command, written by the installer
 
-Unchanged from revision 1. TASK-025 does not by itself remove the Stage B
-hazard, but it makes a wrapper possible that names no checkout:
+**Founder decision, 2026-09-14:** `scripts/install-toolchain.sh` writes it.
+
+**Today.** `~/.local/bin/blueprint` is hand-written and `exec`s a hard-coded
+checkout path (§0.1). README §"One-time setup" tells readers to put the
+blueprint's `scripts/` on `PATH` or to symlink the CLI, which is the same thing
+in two more shapes. All three point into a checkout. That is the hazard
+`docs/doing/HANDOVER.md` §2 records for TASK-021 Stage B: the move breaks
+`blueprint` for every project on the machine, and no commit can fix a file
+outside git.
+
+**What the installer writes:** `$HOME/.local/bin/blueprint` (the installer's
+existing `$BIN_DIR`), mode 0755, on Linux and macOS alike. Exact content:
 
 ```bash
 #!/usr/bin/env bash
-# Run THIS project's own blueprint CLI. The blueprint is read by its address
-# (TASK-025), so no checkout path belongs in this file.
+# struct2flow-blueprint-command v1: written by scripts/install-toolchain.sh (TASK-025).
+# Runs THIS project's own blueprint CLI. The blueprint is read by its address,
+# so no checkout path belongs in this file. Edit the installer, not this copy.
 for c in ./scripts/blueprint ./scaffolding/scripts/blueprint; do
   [ -x "$c" ] && exec "$c" "$@"
 done
@@ -584,16 +638,55 @@ echo "  or fetch the CLI once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/sc
 exit 1
 ```
 
-It lives outside git, so it ships as README §"One-time setup" text. Whether
-`install-toolchain.sh` writes it is a founder question (§12). Cost:
-`blueprint files` and `help` then work only from a project root.
+- **Why this closes the Stage B hazard.** It names no checkout. It runs the CLI
+  of the project in the current directory, which the address path makes
+  self-sufficient. It tries `./scaffolding/scripts/blueprint` second, so Stage
+  B's layout works too. Inside the blueprint it runs the blueprint's own CLI,
+  which `drift` already recognises (§5).
+- **Where in the installer.** A function `install_blueprint_command`, run in
+  install mode **before** the OS branch, so a missing Homebrew or `curl` cannot
+  skip it. The existing `mkdir -p "$BIN_DIR"` and "not on PATH" warning move
+  above the OS branch with it and serve both OSes.
+- **What it does to an existing file.** The marker is the line prefix
+  `# struct2flow-blueprint-command`.
+
+| Existing `$BIN_DIR/blueprint` | Action | Output |
+|---|---|---|
+| absent | write to a temp file in `$BIN_DIR`, `chmod 0755`, `mv` into place | `✓ blueprint command installed (<path>)` |
+| a regular file, byte-identical to the text above | nothing; not rewritten | `✓ blueprint command already present` |
+| a regular file carrying the marker, with a different body | replaced the same way | `✓ blueprint command updated (<path>)` |
+| anything else: no marker (today's hand-written wrapper), or a symlink wherever it points | **left untouched**, and not counted as a failure | `⚠ <path> was not written by this installer, so it is left alone.`<br>`  If it runs a checkout's scripts/blueprint, TASK-021 Stage B will break it.`<br>`  Once every project has the address-reading CLI: rm <path>, then re-run this script.` |
+
+- **After writing,** if `command -v blueprint` resolves somewhere other than
+  `$BIN_DIR/blueprint`, it prints
+  `⚠ blueprint resolves to <other> first on PATH, not <path>.` That is the
+  README's old `PATH` instruction: the same hazard in another shape.
+- **Never overwriting an unmarked file is what keeps §7.2 safe.** The founder's
+  current wrapper is the recovery path until step 7 passes in every project,
+  and a machine may run the installer for its other tools before then.
+  Replacing it is a deliberate `rm` at step 8. A symlink is never followed:
+  writing through one into a checkout would overwrite that checkout's CLI.
+- **`check` mode** prints one line: `✓ blueprint command (<path>)`,
+  `✗ blueprint command MISSING (run: bash scripts/install-toolchain.sh)`, or the
+  `⚠` line above. It does not add to the missing count: nothing in the gate
+  calls `blueprint`, and install does not fail on it either, so check and
+  install still report the same set.
+- **README §"One-time setup"** replaces the `PATH` and symlink instructions with
+  "run `bash scripts/install-toolchain.sh`; it writes the `blueprint` command",
+  and says the command runs the project's own CLI. The command's text lives
+  only in the installer.
+- **Cost, stated:** `blueprint` works only from a project root, `files` and
+  `help` included. From a subdirectory it exits 1 with the message above.
+- **Cases:** §9.2 #34–#38.
 
 ### 8.2 Stage B
 
-Gate: **all three projects have completed §7.2 steps 3–5, and every machine has
-the §8.1 wrapper.** Checkable: each project's drift header names a remote, and
-`type -a blueprint` shows no path into the blueprint. It becomes a precondition
-in `PLAN-TASK-021-RESTRUCTURE.md` in the implementation commit.
+Gate: **all three projects have completed §7.2 steps 4–7, and every machine has
+completed step 8.** Checkable: each project's drift header names the remote with
+`(released)`, and `type -a blueprint` lists the installer's command first and
+nothing that resolves into a blueprint checkout. §10 commit 4 adds this as a
+precondition to `PLAN-TASK-021-RESTRUCTURE.md`, which is the hazard
+`HANDOVER.md` §2 says that plan does not contain yet.
 
 ### 8.3 TASK-026 composes
 
@@ -770,6 +863,16 @@ for the process to exit.
 | 26 | **Interrupted refresh leftovers.** The cache is pre-seeded with what a SIGKILL leaves (§0.4): a `tmp_pack_*` file, a dead `refs/bp-run/<nonce>` at an **older** commit, and that ref's `.lock` → next run 0 at the current tip | pick "the newest `bp-run` ref" instead of the run's own |
 | 27 | **Damaged cache.** (a) the tip's root tree object deleted (§0.4) → **5** naming the cache path and `rm -rf` remedy; (b) a truncated pack → 0 with a byte-correct report (git heals it, measured) | `checkout … \|\| true`, or fall back to the previous tree; for (b), treating any `error:` on stderr as corruption |
 | 28 | **Concurrent first runs:** 8 parallel `drift` from no cache → all 0, one cache dir, no `.bp-cache-init.*` debris. A smoke case (0/160 measured), not mutant-deterministic; its deterministic partner is **#28b**: a stray `.bp-cache-init.X` directory already inside a valid cache (a lost race's leftover) → 0 and the stray is gone | plain `git init` over an existing path (its `config.lock` fails); skip the nested-temp removal |
+| 29 | **A leftover `blueprint_source` warns on every run.** The field is present and points at a decoy directory. Two `drift` runs and one `pull --yes`: each prints §5's line exactly once on stderr, and exit status and stdout are identical to the same runs without the field. Under `BLUEPRINT_ROOT` the line still prints. Field absent: `blueprint_source` appears on no stream | warn only on a first run (a stamp file under the cache); warn only in `drift`; refuse with 4; skip the warning on the override path |
+| 30 | **The read branch.** A fixture remote where `main` is one commit ahead of `released`, and that commit changes a managed file. With `blueprint_release_branch = released`: the header says `(released)`, and the report and the SHA `pull --yes` records are `released`'s tip. Field absent: `(main)` and `main`'s tip. Field `bad..name` → 4, naming the field | read `blueprint_branch` regardless of the field; skip the field's validation |
+| 31 | **a2bp's base does not move.** The same fixture with both fields set: `a2bp --dry-run <file>` prints `branch:   main` and resolves its base from `main`'s tip | `bp_config_load` emits the release branch as `BP_CFG_BRANCH` |
+| 32 | **Switched before `released` caught up.** `bootstrap_sha` is the `main`-only commit and the field is `released` → 0, §2's "not on that branch (… not yet released)" line, no commit list. Fast-forward `released` in the fixture remote and run again → 0, the normal commits-since-sync list, no such line | restore `2>/dev/null \|\| echo "?"`; read history from `blueprint_branch` |
+| 33 | **The release job's shape,** read from `.github/workflows/security.yml` with the harness's existing `yaml` package: one job pushes exactly `"$GITHUB_SHA:refs/heads/released"`; no `--force`, `-f` or `+` refspec appears in it; its `if` requires `github.event_name == 'push'` and the repository; its `needs` equals the set of every other job id in the file, derived rather than listed; it alone has `contents: write`; its refusal path checks `merge-base --is-ancestor` before exiting 0 | drop a job from `needs`; add `--force`; push `main:released`; drop the push-event condition; grant `contents: write` to the whole workflow |
+| 34 | **The installer writes the command.** Scenario `HOME` with no `.local/bin/blueprint`; `PATH` is `s.pathWithout(['curl', 'brew'])` (H4), so the installer stops at its own `curl` check on Linux or `brew` check on macOS, before any download can start. After `install-toolchain.sh`: the file exists, mode 0755, byte-equal to §8.1's text, and does not contain the blueprint fixture's path. From a fixture project whose `scripts/blueprint` is a stub recording its arguments, `blueprint drift` through `PATH` runs the stub with `drift` | write `exec "$ROOT/scripts/blueprint"`; install the command after the OS branch (the early exit then skips it, on either OS) |
+| 35 | **Layouts.** Only `scaffolding/scripts/blueprint` present → it runs. Neither present → 1, with §8.1's message on stderr | drop the `scaffolding/` candidate; `exit 0` when no CLI is found |
+| 36 | **Idempotent, and self-updating.** In #34's environment, run the installer, set the command's mtime to the epoch, run it again: the mtime is unchanged. Replace the body with an older body that carries the marker, run it a third time: the text is §8.1's again | rewrite unconditionally (the mtime moves); treat a marker file as foreign (the old body survives) |
+| 37 | **Never overwrites what it did not write.** In #34's environment. (a) Today's shape, `exec <workspace>/bp/scripts/blueprint "$@"`, as a regular file → byte-identical afterwards, and the `⚠` lines with the `rm` remedy are printed; `check` prints the `⚠` line too. (b) A symlink to `<workspace>/bp/scripts/blueprint` → the link and its target are both byte-identical | overwrite any file without the marker; write through the path with `cat >` (the target is overwritten) |
+| 38 | **Shadowed on `PATH`.** In #34's environment, with `PATH` holding a directory that contains another `blueprint` and then `$BIN_DIR` (on `PATH` already, so the installer's own prepend does not apply) → the "resolves to … first on PATH" warning names that other file | drop the check |
 
 ### 9.3 Existing suites that migrate their fixtures
 
@@ -777,45 +880,72 @@ for the process to exit.
 |---|---|
 | `blueprint-relocation` | §9.2 #10 |
 | `suite-sync` | retarget to `blueprint_remote`; re-run its #1c mutant |
-| `bootstrap-contents` | asserts `blueprint_source` is **absent** |
+| `bootstrap-contents` | asserts `blueprint_source` is **absent** and `blueprint_release_branch = released` is present |
 | `pull-behaviour`, `marker-merge`, `drift-in-blueprint`, `bootstrap-gate` | retarget |
 | `staleness` D#1–D#5 | now the override path: set `BLUEPRINT_ROOT` (permitted by H1) |
-| `a2bp-e2e`, `a2bp-inputs`, `a2bp-contamination` | a2bp never reads the field; leave as they are and confirm green |
+| `a2bp-e2e`, `a2bp-inputs`, `a2bp-contamination` | a2bp reads neither `blueprint_source` nor the release field; leave as they are and confirm green (#31 pins the base) |
+| `manifest` | the `release` job invokes no suite; confirm green against the new `security.yml` |
 | `harness`, `ts-bridge` | H1, H2 and H5 witnesses (W1–W4) and #1c (§9.1) |
 
 ---
 
-## 10. Implementation shape (for review, not authorised)
+## 10. Implementation order
 
-**Blocked until the founder records T or P (§2.1).** Neither commit below starts
-before that. Under P, §2.2's changes are made to this section and §9.2 first.
-
-Two-commit reproducer pattern (DoD §3):
+Four commits, in this order, all pushed before §7.2 step 3. Commits 1 and 2 are
+the reproducer pattern (DoD §3) for the defect this task removes (§0.2 #4).
+Commits 3 and 4 add behaviour rather than fix a defect, so their cases land in
+the same commit as the code.
 
 1. **`TASK#25: minimal reproducer (failing)`** — H1, H2 and H5 with witnesses
    W1–W4, the H2 witness and ts-bridge #1c, plus §9.2 #1, #2, #3, #13. They fail
    on the parent: ambient `BLUEPRINT_ROOT`, `XDG_CACHE_HOME`, `GIT_SSH_COMMAND`
-   and `GIT_ALLOW_PROTOCOL` all reach fixtures in a direct run today; the CLI reads `blueprint_source`; on #3 it falls back to its
-   own checkout and exits 0; and it reports unpushed commits.
+   and `GIT_ALLOW_PROTOCOL` all reach fixtures in a direct run today; the CLI
+   reads `blueprint_source`; on #3 it falls back to its own checkout and exits
+   0; and it reports unpushed commits.
 2. **`TASK#25: drift and pull read the blueprint by its address`** — the CLI
-   change (§1–§4), H4, the remaining cases, the §9.3 migrations, and the
-   same-commit ripples: the `scripts/blueprint` header; `README.md` §"The sync
-   model"; CLAUDE.md §"Wake-time drift check" (fourth case) and `templates/` if
-   it mirrors it; `scripts/new-project.sh`; the `staleness.sh` header;
-   `docs/way-of-working.md` sync slides; `PLAN-TASK-021-RESTRUCTURE.md` (§8.2).
+   change (§1–§5, including the §5 warning), H4, cases #4–#12, #14–#28b and #29,
+   the §9.3 migrations, and the same-commit ripples: the `scripts/blueprint`
+   header; `README.md` §"The sync model"; CLAUDE.md §"Wake-time drift check"
+   (fourth case) and `templates/` if it mirrors it; `scripts/new-project.sh`
+   stops writing `blueprint_source`; the `staleness.sh` header;
+   `docs/way-of-working.md` sync slides.
+3. **`TASK#25: projects read the released branch, which CI fast-forwards to the tested commit`**
+   — the `release` job and `blueprint_release_branch` (§7.4): its validation in
+   `bp_config_load`, its use on the read path and in the header, and
+   `new-project.sh` writing it. Cases #30–#33 and the `bootstrap-contents`
+   assertion. Ripples: CLAUDE.md §"Back-propagating" config block,
+   `README.md` §"The sync model", and the `docs/way-of-working.md` sync slide
+   gain the field.
+4. **`TASK#25: the toolchain installer writes the per-machine blueprint command`**
+   — `install_blueprint_command` and its `check` line (§8.1), cases #34–#38,
+   README §"One-time setup", and §8.2's precondition added to
+   `PLAN-TASK-021-RESTRUCTURE.md`.
 
-**Expected diff in `scripts/blueprint`:**
+**Why this order.** Commit 2 needs commit 1's harness scrub to be testable.
+Commit 3 builds on commit 2's read path: a read branch means nothing before
+there is an address to read it from. Commit 4 is last because the command it
+writes is safe only once a project can carry a self-sufficient CLI, which
+commit 2 provides, and it must be published before any machine reaches §7.2
+step 8.
+
+**Expected diff in `scripts/blueprint`** (commits 2 and 3):
 - `_bp_fetch_blueprint`: cache, refresh, tree, error text, about 70 lines
 - the two handlers and `_bp_shielded_write`: about 15 lines
 - `_bp_resolve_blueprint_root` shrinks to "override, or nothing"
-- `read_blueprint_source` gains the address/override branch
+- `read_blueprint_source` gains the address/override branch and the §5 warning
 - `pull_file`'s writes go through `_bp_shielded_write`
-- the drift header, pull banner and bootstrap-history message change
+- the drift header (with the read branch), pull banner and bootstrap-history
+  message change
 
-**Rollback:** revert the two commits. Projects that already pulled the new CLI
-recover through `BLUEPRINT_ROOT=<checkout> blueprint pull scripts/blueprint`
-(§5, #12). Caches under `~/.cache/struct2flow/` are inert without the new CLI
-and can be deleted.
+**Rollback:** revert the four commits, newest first. Projects that already
+pulled the new CLI recover through
+`BLUEPRINT_ROOT=<checkout> blueprint pull scripts/blueprint` (§5, #12). Caches
+under `~/.cache/struct2flow/` are inert without the new CLI and can be deleted.
+`released` is harmless once nothing reads it, and can be deleted by hand. **If
+commits 2–3 are reverted after a machine has done §7.2 step 8, restore the
+hand-written wrapper there,** because a CLI from before TASK-025 finds the
+blueprint from its own location, and the installer's command would hand it the
+project's copy.
 
 ---
 
@@ -854,10 +984,9 @@ Projects add it as a devDependency, pinned by the lockfile. `drift`/`pull` set
   2. `.gitignore` cannot ship through npm. It is not managed, but bootstrap
      seeds it, so a tarball bootstrap needs a rename-on-publish, restore-on-
      bootstrap step.
-- **"B does not remove the network from an honest wake": contract-dependent**
-  (§2.1). Under T it holds. Under P, "matches pinned X; newer: unknown" is a
-  complete offline answer, **and A with the cache gives exactly the same
-  answer**. So under either contract, offline is not a differentiator.
+- **"B does not remove the network from an honest wake": it holds under
+  contract T** (§2.1, decided). "Matches the newest blueprint" needs the network
+  under A and B alike, so offline is not a differentiator.
 
 **Still standing from revision 1:**
 - the wake command becomes `npx blueprint`, and the allowlist and CLAUDE.md
@@ -873,7 +1002,7 @@ Projects add it as a devDependency, pinned by the lockfile. `drift`/`pull` set
 Unchanged from revision 1 (release semantics, costs, storm2flow manifest
 placement, registry, tests under B), except as follows:
 
-- §11.3's green-CI branch for A now carries the conditions in §7.4.
+- §11.3's green-CI branch is adopted for A, under the conditions in §7.4.
 - §11.4's "sequenced after Stage B" is softened. The payload approach removes
   that dependency, and the costs remain: every `npm ci` needs the registry, a
   new publish credential, storm2flow's manifest decision, and the two npm traps
@@ -884,16 +1013,16 @@ placement, registry, tests under B), except as follows:
 | | **A: git remote + cache** | **B: npm package** |
 |---|---|---|
 | Network at wake | one warm fetch (WAN 1.51 s measured, rev 1; local 5–7 ms) | none for conformity to the installed version; `npm view` for availability |
-| Offline wake | T: **5**. P: conformity to the cached pin + "newer: unknown" | conformity to the installed version + "newer: unknown" |
+| Offline wake | **5**; the labelled `BLUEPRINT_ROOT` override compares against a local checkout | conformity to the installed version + "newer: unknown", which does not answer contract T |
 | Cache and integrity | persistent bare cache, git object hashes, per-run ref; corruption → 5 | npm cache; lockfile `integrity` |
-| What pins "the blueprint" | T: branch tip. P: `bootstrap_sha` | installed version; `bootstrap_sha` removed |
-| CLI invocation | project-local `scripts/blueprint` via a cwd wrapper | `npx blueprint`; needs `npm ci` first |
+| What "the blueprint" is | the tip of `released` | installed version; `bootstrap_sha` removed |
+| CLI invocation | project-local `scripts/blueprint` via the installer's command (§8.1) | `npx blueprint`; needs `npm ci` first |
 | CI impact | none | every `npm ci` needs the registry |
 | New credentials | none | a publish token; install tokens if private |
 | "What ships" boundary | unchanged | payload from `git archive` + mandatory `.npmignore`; `.gitignore` needs special handling |
 | `cmd_drift` change | resolver, cache, tree, handlers, header | lib-root resolution, expansion rewrite, version-vs-latest, `bootstrap_sha` removal |
 | Sequencing vs TASK-021 | before Stage B, and unblocks it | no longer forced after Stage B; does not unblock it (the wrapper does) |
-| Reversibility | revert two commits; the override is the recovery path | unpublish/deprecate, edit three projects, restore allowlist and wake command |
+| Reversibility | revert four commits; the override is the recovery path | unpublish/deprecate, edit three projects, restore allowlist and wake command |
 
 ### 11.9 Recommendation (the author's)
 
@@ -902,9 +1031,9 @@ placement, registry, tests under B), except as follows:
 1. **A unblocks Stage B, and B does not.** The wrapper in §8.1 needs a
    project-local CLI that can read the blueprint without a checkout, which is
    A.
-2. **Offline answers no longer separate them** (§11.2). Whichever contract the
-   founder picks, A with the cache gives the same offline answer B would.
-3. **B's green-CI gate is available to A** under §7.4's conditions.
+2. **Offline answers do not separate them** (§11.2). Under contract T neither
+   can say "newest" offline.
+3. **B's green-CI gate is available to A, and A adopts it** (§7.4).
 4. **B puts the blueprint on every `npm ci`, CI included**, and adds two
    silent-drop traps (§11.2) that A does not have.
 5. **Being wrong costs more one way than the other.** If B wins later, the
@@ -918,23 +1047,15 @@ reason beyond gating fan-out.
 
 ---
 
-## 12. Open questions
+## 12. Settled questions
 
-**For the founder** (this plan does not decide them):
+The founder's four are recorded in §R3. The two the re-review was asked are
+settled here, so no alternative remains in the plan:
 
-1. **The contract, T or P** (§2.1). **Blocking.** Implementation does not start
-   until it is answered: P changes statuses, wording, partial-pull reporting and
-   fourteen cases (§2.2).
-2. **A `released` branch** under §7.4's conditions, or stay on `main`?
-3. **The `blueprint_source` nag** (§5): one dim line per run until removed, or
-   refuse (4) after a date?
-4. **The wrapper** (§8.1): should `install-toolchain.sh` own it?
-
-**For the re-review:**
-
-5. **`BP_FETCH_TIMEOUT` default 30 s.** Under the cache, a warm refresh is one
-   round trip, and only a cold first run transfers the pack. Should the default
-   be lower for warm runs, or is one budget simpler and enough?
-6. **§9.2 #28 is a smoke case,** with #28b as its deterministic partner. Is
-   that pairing acceptable under R6, or should the concurrent-creation race get
-   a seam of its own?
+- **`BP_FETCH_TIMEOUT` is one budget, 30 s.** A warm refresh is one round trip
+  and finishes far inside it (§0.3, §0.4). Only a cold first run transfers the
+  pack. A split budget adds a cold-or-warm decision to get wrong, for no
+  measured gain. Revisit if a warm wake is ever seen near the budget.
+- **#28 stays a smoke case paired with #28b.** The race lives in where `mv`
+  places the loser's directory, and #28b reproduces that deterministically by
+  pre-seeding what a lost race leaves. A seam inside `mv` would test the seam.

@@ -50,9 +50,10 @@ bp_placeholder_upper() {
 #
 # The pre-existing entries are suffix-anchored, so they were immune to that by
 # accident rather than by design. Do not add a leading-component rule without
-# checking every call site: `blueprint`'s substituted_blueprint_copy /
-# substitute_placeholders, new-project.sh's bootstrap walk, and a2bp's staging
-# loop.
+# checking every call site: `blueprint`'s substituted_blueprint_copy (which
+# drift, pull's selection, preview and write all reach through
+# bp_prospective_for since BUG-113), new-project.sh's bootstrap walk, and a2bp's
+# staging loop.
 #
 # BUG-028. The files that IMPLEMENT or DOCUMENT the substitution carry the
 # placeholder tokens as CODE AND PROSE, not as template slots — this file's own

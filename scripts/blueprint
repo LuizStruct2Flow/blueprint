@@ -425,10 +425,6 @@ marker_aware_merge() {
   ' "$proj_file" > "$out_file"
 }
 
-# pull_file BP_FILE PROJ_FILE
-# Decides between marker-aware merge and whole-file copy. Backs up the
-# project file as PROJ_FILE.bp-bak when falling back due to a marker
-# mismatch (so the project owner can recover the local content).
 # Substitute the blueprint template placeholders with the project's
 # name. The blueprint stores template tokens like `{{PROJECT_NAME}}`
 # / `{{PROJECT_NAME_UPPER}}` so the same managed file can serve every
@@ -542,103 +538,123 @@ substituted_blueprint_copy() {
   echo "$tmp"
 }
 
-# Substitute placeholders in a file in-place. Called after every pull
-# `cp` so the project file lands as a real, usable file instead of
-# leaking the literal `{{PROJECT_NAME}}` token.
-substitute_placeholders() {
-  local f="$1"
-  if ! _should_substitute "$f"; then return 0; fi
-  local proj_name
-  # ${PWD##*/}, not $(basename ...) — command substitution strips trailing
-  # newlines, so a directory legally named with one was silently seen as a
-  # different project (A-07 R6-F1). Parameter expansion preserves the bytes;
-  # bp_validate_project_name then refuses what sync cannot represent.
-  proj_name=${PWD##*/}
-  if grep -q '{{PROJECT_NAME' "$f" 2>/dev/null; then
-    # A-07 R5-F1: one shared literal primitive, never an interpolated sed.
-    # The project name is data; a name containing `&` or `\` was previously
-    # mangled here (and differently again in a2bp's verifier).
-    bp_substitute_in_place "$f" "$proj_name"
-  fi
-}
+# --- BUG-113: ONE prospective-pull result ------------------------------------
+#
+# drift, pull's file selection, pull's preview and pull's write all used to make
+# their own comparison, and three of the four compared WHOLE files — while the
+# merge keeps everything outside the managed regions. So a project's own guards
+# after the end marker read as drift, got the file selected, and were previewed
+# as deleted by a pull that then kept them. Fixing drift alone (PR #66's U6) left
+# drift saying clean while pull still selected the file and previewed damage.
+#
+# The fix is that there is ONE answer and everything reads it:
+#
+# bp_prospective_pull BP_CMP PROJ OUT
+#   BP_CMP  the blueprint's copy, ALREADY placeholder-substituted
+#   PROJ    the project's file (may be absent)
+#   OUT     receives exactly the bytes `pull` would land in PROJ
+#
+#   Sets BP_PP_MODE (new | copy | merge | backup-copy | refuse) and BP_PP_WHY.
+#   Returns 0 with OUT written, or 1 when pull must refuse the file — nothing may
+#   then be written anywhere. Never call it inside `$( )`: the two globals would
+#   vanish with the subshell.
+#
+#   drift       drifted  ⇔ OUT differs from PROJ; refused files listed apart
+#   selection   the same predicate
+#   preview     diff PROJ OUT — the change pull will actually make
+#   pull        writes OUT
+#
+# BUG-034's refusal lives here too, so a file drift reports as refused is the file
+# pull refuses. It knows nothing about WHERE the blueprint is: bp_prospective_for
+# resolves that, so reading the blueprint from somewhere else (TASK-025) changes
+# BLUEPRINT_ROOT and nothing in this function.
+bp_prospective_pull() {
+  local bp="$1" proj="$2" out="$3" bs ps=""
+  BP_PP_MODE=""
+  BP_PP_WHY=""
 
-pull_file() {
-  local bp="$1"
-  local f="$2"
-
-  # BUG-034 — refuse, before writing anything, a file whose markers are out of
-  # order or unbalanced on EITHER side. Merging one is how pull rearranged a
-  # project file while reporting its content preserved; copying over one would
-  # discard the very half the markers were placed to protect.
-  local bs ps=""
   bs=$(bp_marker_structure "$bp")
-  [ -f "$f" ] && ps=$(bp_marker_structure "$f")
+  [ -f "$proj" ] && ps=$(bp_marker_structure "$proj")
   case "$bs" in
     bad*)
-      echo "  ${C_RED}    refuse: the blueprint copy's markers are invalid — ${bs#bad }. Nothing written.${C_RESET}"
+      BP_PP_MODE=refuse
+      BP_PP_WHY="the blueprint copy's markers are invalid — ${bs#bad }"
       return 1 ;;
   esac
   case "$ps" in
     bad*)
-      echo "  ${C_RED}    refuse: this project's markers are invalid — ${ps#bad }. Nothing written.${C_RESET}"
-      echo "  ${C_DIM}    fix the markers in $f by hand, then pull again${C_RESET}"
+      BP_PP_MODE=refuse
+      BP_PP_WHY="this project's markers are invalid — ${ps#bad } (fix them by hand, then pull again)"
       return 1 ;;
   esac
 
-  # New file in project → whole-file copy (no merging possible).
-  if [ ! -f "$f" ]; then
-    cp "$bp" "$f"
-    substitute_placeholders "$f"
+  if [ ! -f "$proj" ]; then
+    BP_PP_MODE=new
+    cp "$bp" "$out"
     return 0
   fi
 
-  local bp_has=0 proj_has=0
-  # BUG-112: the marker LINE rule, not a substring — see BP_MARKER_BEGIN_ERE.
-  grep -qE "$BP_MARKER_BEGIN_ERE" "$bp" 2>/dev/null && bp_has=1
-  grep -qE "$BP_MARKER_BEGIN_ERE" "$f"  2>/dev/null && proj_has=1
+  case "$bs:$ps" in
+    none:none)
+      BP_PP_MODE=copy
+      cp "$bp" "$out" ;;
+    none:ok*)
+      BP_PP_MODE=refuse
+      BP_PP_WHY="this project has markers but the blueprint copy has none — a pull would strip them"
+      return 1 ;;
+    ok*:none)
+      BP_PP_MODE=backup-copy
+      BP_PP_WHY="blueprint uses markers, project doesn't"
+      cp "$bp" "$out" ;;
+    *)
+      if [ "$bs" = "$ps" ] && marker_aware_merge "$bp" "$proj" "$out"; then
+        BP_PP_MODE=merge
+      else
+        BP_PP_MODE=backup-copy
+        BP_PP_WHY="marker structure mismatch (${bs#ok } region(s) upstream, ${ps#ok } here)"
+        cp "$bp" "$out"
+      fi ;;
+  esac
+}
 
-  if [ "$bp_has" -eq 1 ] && [ "$proj_has" -eq 1 ]; then
-    local tmp
-    tmp=$(mktemp)
-    if marker_aware_merge "$bp" "$f" "$tmp"; then
-      mv "$tmp" "$f"
-      _bp_sync_exec_bit "$bp" "$f"
-      substitute_placeholders "$f"
-      echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}"
-      return 0
-    else
-      rm -f "$tmp"
-      echo "  ${C_YELLOW}    warn: marker structure mismatch — backing up + whole-file copy${C_RESET}"
+# bp_prospective_for PATH OUT — bp_prospective_pull for the managed file at the
+# project-relative PATH. The blueprint copy is resolved and placeholder-
+# substituted HERE and nowhere else. Same globals and return status.
+bp_prospective_for() {
+  local f="$1" out="$2" bp cmp rc=0
+  bp=$(bp_blueprint_path "$f")
+  cmp=$(substituted_blueprint_copy "$f")
+  bp_prospective_pull "$cmp" "$f" "$out" || rc=$?
+  if [ "$cmp" != "$bp" ]; then rm -f "$cmp"; fi
+  return "$rc"
+}
+
+# pull_file PATH OUT — land the result bp_prospective_for just computed for PATH
+# into OUT, with BP_PP_MODE/BP_PP_WHY still set by that computation. So what is
+# written is byte-for-byte what drift judged and the preview showed.
+pull_file() {
+  local f="$1" out="$2" bp
+  bp=$(bp_blueprint_path "$f")
+
+  case "$BP_PP_MODE" in
+    refuse)
+      echo "  ${C_RED}    refuse: ${BP_PP_WHY}. Nothing written.${C_RESET}"
+      return 1 ;;
+    new)
+      # cp first so a new file takes the blueprint's mode, as it always did.
+      cp "$bp" "$f" ;;
+    backup-copy)
+      echo "  ${C_YELLOW}    warn: ${BP_PP_WHY} — backing up + whole-file copy${C_RESET}"
       cp "$f" "$f.bp-bak"
-      cp "$bp" "$f"
-      _bp_sync_exec_bit "$bp" "$f"
-      substitute_placeholders "$f"
-      echo "  ${C_DIM}    backup at $f.bp-bak — reconcile manually${C_RESET}"
-      return 0
-    fi
-  fi
+      echo "  ${C_DIM}    backup at $f.bp-bak — reconcile manually${C_RESET}" ;;
+    merge)
+      echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}" ;;
+  esac
 
-  if [ "$bp_has" -eq 1 ] && [ "$proj_has" -eq 0 ]; then
-    echo "  ${C_YELLOW}    warn: blueprint uses markers, project doesn't — backing up + whole-file copy${C_RESET}"
-    cp "$f" "$f.bp-bak"
-    cp "$bp" "$f"
-    _bp_sync_exec_bit "$bp" "$f"
-    substitute_placeholders "$f"
-    echo "  ${C_DIM}    backup at $f.bp-bak — add markers in the project to preserve content next pull${C_RESET}"
-    return 0
-  fi
-
-  if [ "$bp_has" -eq 0 ] && [ "$proj_has" -eq 1 ]; then
-    echo "  ${C_RED}    refuse: project has markers but blueprint doesn't — pull would strip them${C_RESET}"
-    echo "  ${C_DIM}    either the blueprint version is stale (run a2bp from another project),${C_RESET}"
-    echo "  ${C_DIM}    or remove markers locally if they're no longer wanted. Skipping this file.${C_RESET}"
-    return 1
-  fi
-
-  # Neither has markers — legacy whole-file copy.
-  cp "$bp" "$f"
+  # `cat >`, not `mv`: the destination keeps its own inode and mode, and only the
+  # executable bit is mirrored from the blueprint (BUG-008).
+  cat "$out" > "$f"
   _bp_sync_exec_bit "$bp" "$f"
-  substitute_placeholders "$f"
 }
 
 # Where is the blueprint checkout on THIS machine?
@@ -1141,7 +1157,9 @@ cmd_drift() {
   DRIFTED=()
   MISSING_BLUEPRINT=()
   MISSING_PROJECT=()
+  REFUSED=()
 
+  local drift_out
   for f in "${MANAGED_FILES[@]}"; do
     bp=$(bp_blueprint_path "$f")
     if [ ! -f "$bp" ]; then
@@ -1152,20 +1170,29 @@ cmd_drift() {
       MISSING_PROJECT+=("$f")
       continue
     fi
-    # Substitute placeholders on the blueprint side before comparing,
-    # otherwise every templated file looks "drifted" forever after
-    # the first substitute-on-pull.
-    local bp_cmp
-    bp_cmp=$(substituted_blueprint_copy "$f")
-    if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
+    # BUG-113 — judged by what `pull` would write, not by the blueprint's whole
+    # file: the project's own lines outside the managed regions are not drift.
+    # Placeholder substitution happens inside bp_prospective_for.
+    drift_out=$(mktemp)
+    if ! bp_prospective_for "$f" "$drift_out"; then
+      REFUSED+=("$f — $BP_PP_WHY")
+    elif ! diff -q "$drift_out" "$f" >/dev/null 2>&1; then
       DRIFTED+=("$f")
     fi
-    [ "$bp_cmp" != "$bp" ] && rm -f "$bp_cmp"
+    rm -f "$drift_out"
   done
 
-  if [ ${#DRIFTED[@]} -eq 0 ] && [ ${#MISSING_BLUEPRINT[@]} -eq 0 ] && [ ${#MISSING_PROJECT[@]} -eq 0 ]; then
+  if [ ${#DRIFTED[@]} -eq 0 ] && [ ${#MISSING_BLUEPRINT[@]} -eq 0 ] && [ ${#MISSING_PROJECT[@]} -eq 0 ] && [ ${#REFUSED[@]} -eq 0 ]; then
     echo "${C_GREEN}✓ All blueprint-managed files match the blueprint HEAD.${C_RESET}"
     return 0
+  fi
+
+  # A refused file is neither clean nor merely drifted: `pull` will not touch it
+  # until a human repairs its markers, so it is named on its own (BUG-034).
+  if [ ${#REFUSED[@]} -gt 0 ]; then
+    echo "${C_RED}Cannot sync — pull refuses these until their markers are fixed: ${#REFUSED[@]}${C_RESET}"
+    for f in "${REFUSED[@]}"; do echo "  ${C_RED}✗${C_RESET} $f"; done
+    echo
   fi
 
   if [ ${#DRIFTED[@]} -gt 0 ]; then
@@ -1213,19 +1240,18 @@ cmd_pull() {
 
   # Default: every drifted or missing file
   if [ ${#files[@]} -eq 0 ]; then
+    local sel_out
     for f in "${MANAGED_FILES[@]}"; do
       bp=$(bp_blueprint_path "$f")
       if [ ! -f "$bp" ]; then continue; fi
-      if [ ! -f "$f" ]; then
-        files+=("$f")
-        continue
-      fi
-      local bp_cmp
-      bp_cmp=$(substituted_blueprint_copy "$f")
-      if ! diff -q "$bp_cmp" "$f" >/dev/null 2>&1; then
+      # BUG-113 — drift's predicate exactly, so a file drift calls clean is never
+      # selected here. A REFUSED file is selected, so its refusal is reported
+      # instead of the file silently being left out.
+      sel_out=$(mktemp)
+      if ! bp_prospective_for "$f" "$sel_out" || ! diff -q "$sel_out" "$f" >/dev/null 2>&1; then
         files+=("$f")
       fi
-      [ "$bp_cmp" != "$bp" ] && rm -f "$bp_cmp"
+      rm -f "$sel_out"
     done
   fi
 
@@ -1235,35 +1261,37 @@ cmd_pull() {
   fi
 
   echo "${C_BOLD}Pulling from $BLUEPRINT_ROOT${C_RESET}"
-  local pulled=0
+  local pulled=0 pull_out=""
   for f in "${files[@]}"; do
     bp=$(bp_blueprint_path "$f")
     if [ ! -f "$bp" ]; then
       echo "  ${C_RED}skip${C_RESET}  $f  (not in blueprint)"
       continue
     fi
-    # Compare against the substituted blueprint copy so templated
-    # files that have already been substituted in the project don't
-    # show as "different" forever.
-    local bp_cmp_pull
-    bp_cmp_pull=$(substituted_blueprint_copy "$f")
-    if [ -f "$f" ] && diff -q "$bp_cmp_pull" "$f" >/dev/null 2>&1; then
-      [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
+    # BUG-113 — ONE prospective result per file, computed once and used for the
+    # "same?" check, the preview AND the write. The preview used to diff against
+    # the blueprint's whole file, so a merge that keeps the project's own lines
+    # was shown deleting them.
+    rm -f "$pull_out"
+    pull_out=$(mktemp)
+    if bp_prospective_for "$f" "$pull_out" && [ -f "$f" ] && diff -q "$pull_out" "$f" >/dev/null 2>&1; then
       echo "  ${C_DIM}same${C_RESET}  $f"
       continue
     fi
     echo
     echo "${C_BOLD}── $f${C_RESET}"
+    if [ "$BP_PP_MODE" = refuse ]; then
+      # Nothing to preview and nothing to ask: pull_file reports the refusal.
+      pull_file "$f" "$pull_out" || refused_guard=1
+      continue
+    fi
     if [ ! -f "$f" ]; then
       echo "  ${C_BLUE}new file${C_RESET} (blueprint adds it; project doesn't have it yet)"
     else
-      # Diff against the substituted blueprint copy so the user sees
-      # what would actually land in their tree, not noise from the
-      # placeholder tokens.
-      diff -u "$f" "$bp_cmp_pull" | head -60 || true
+      # The diff pull will actually make: the project's file → the result.
+      diff -u "$f" "$pull_out" | head -60 || true
       echo "  ${C_DIM}(diff truncated at 60 lines — open the file to see all)${C_RESET}"
     fi
-    [ "$bp_cmp_pull" != "$bp" ] && rm -f "$bp_cmp_pull"
     if [ "$auto_yes" -eq 0 ]; then
       # BUG-018 — degrade, do not die. An unguarded prompt in a
       # non-interactive context (CI, a spawned agent, a piped run) either dies
@@ -1320,7 +1348,7 @@ cmd_pull() {
       esac
     fi
     mkdir -p "$(dirname "$f")"
-    if pull_file "$bp" "$f"; then
+    if pull_file "$f" "$pull_out"; then
       echo "  ${C_GREEN}pulled${C_RESET} $f"
       pulled=$((pulled+1))
     else
@@ -1329,6 +1357,7 @@ cmd_pull() {
       refused_guard=1
     fi
   done
+  rm -f "$pull_out"
 
   echo
   if [ $pulled -gt 0 ]; then

@@ -78,6 +78,16 @@
  *      inverted file also leaves a region open, so M2's arm still refuses it;
  *      #5b exists because nothing else could see this mutant.
  *   M4 a refused pull exits 0                          → red #5 #5b #6
+ *   With BUG-113 fixed, each mutant alone:
+ *   M5 marker detection reverts to a substring          → red #3 #4
+ *   M6 the trailing-punctuation arm removed, so the SHIPPED hook line
+ *      (`# BLUEPRINT:BEGIN — …`) stops matching         → red #7 #8 #9. The
+ *      BUG-113 fixtures use that shape on purpose; they are what stops the
+ *      marker rule being tightened past every derived project's real hook.
+ *   M7 drift compares the blueprint's whole file again   → red #7 only
+ *   M8 pull's selection does the same                   → red #8 only
+ *   M9 pull's preview diffs the blueprint's whole file  → red #9 only
+ *   M10 drift folds a refused file into "drifted"        → red #10 only
  */
 
 import { describe, it, expect } from 'vitest'

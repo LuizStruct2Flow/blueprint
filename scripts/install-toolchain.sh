@@ -55,14 +55,18 @@ GITLEAKS_VERSION="8.28.0"
 OSV_SCANNER_VERSION="2.2.2"
 HELM_VERSION="3.19.0"
 
-# FLOORS, not pins — a distinction worth keeping straight. The versions above
-# say "install exactly this"; these say "anything at or above this can run the
-# test harness". They must track `engines.node` in the harness manifest —
-# tests/package.json, which is where npm enforces the same constraint at install
-# time. TASK-020 moved it off the repo root so it cannot collide with a derived
-# project's own package.json. Modern vitest needs Node 18+; npm 8+ is the floor
-# for a lockfileVersion 2/3 `npm ci`.
-NODE_MIN_MAJOR="18"
+# REQUIREMENTS, not pins — a distinction worth keeping straight. The versions
+# above say "install exactly this"; these say "anything this accepts can run the
+# test harness".
+#
+# Node's requirement is NOT restated here: it is READ from `engines.node` in the
+# harness manifest, tests/package.json, which is where npm enforces it at install
+# time (TASK-020 moved that manifest off the repo root). A copy here drifted —
+# it said 18 while the manifest said `^20.19.0 || >=22.12.0`, a SECURITY floor
+# (see its _engineNote), so `check` passed Node 20.0 and the harness then could
+# not install. Upstream finding U3. npm 8+ is the floor for a lockfileVersion
+# 2/3 `npm ci`, and nothing else declares it, so it stays a constant.
+HARNESS_MANIFEST="$ROOT/tests/package.json"
 NPM_MIN_MAJOR="8"
 
 # Tools the pre-push gate actually probes for (`command -v` in .githooks/pre-push).
@@ -143,11 +147,72 @@ have_gnu_diff() {
 #
 # Checked by CAPABILITY, exactly like have_gnu_diff and for the same reason:
 # `have node` is TRUE for a v12 that cannot run vitest at all, so presence
-# answers a question nobody asked. Ask the engine whether it is new enough, by
-# running it.
-have_node() {
-  node -e "process.exit(parseInt(process.versions.node, 10) >= $NODE_MIN_MAJOR ? 0 : 1)" \
-    >/dev/null 2>&1
+# answers a question nobody asked. Ask the engine whether it satisfies the
+# harness manifest's range, by running it.
+#
+# The WHOLE range, not its major: `^20.19.0 || >=22.12.0` rejects 20.0 and 22.0,
+# which a major-only comparison passes. Node parses its own package.json, so this
+# needs nothing the harness does not already need — no jq, no semver package
+# (node_modules does not exist yet when `check` runs). The evaluator covers the
+# comparator forms an `engines.node` range uses (^ ~ >= > <= < = and bare, full
+# or partial versions, joined by spaces and ||). Anything else — a hyphen range,
+# a prerelease tag — is reported as uninterpretable rather than guessed at.
+#
+# Exit: 0 satisfied, 3 outside the range, anything else cannot tell (manifest
+# missing, unreadable, or an unknown form). It prints ONE line: the range, or the
+# reason it could not be evaluated. A missing manifest is never replaced by a
+# default floor — a default is the restated copy this replaced.
+NODE_RANGE_JS='
+try {
+  const file = process.argv[1]
+  let range
+  try {
+    range = JSON.parse(require("fs").readFileSync(file, "utf8")).engines.node
+  } catch (e) {
+    throw new Error("cannot read engines.node from " + file + ": " + e.message)
+  }
+  if (typeof range !== "string") throw new Error(file + " declares no engines.node")
+  const have = process.versions.node.split(".").map(Number)
+  const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+  const satisfies = (c) => {
+    const m = /^(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(c)
+    if (!m) throw new Error("cannot interpret engines.node \"" + range + "\" in " + file)
+    const [M, n, p] = [m[2], m[3] || 0, m[4] || 0].map(Number)
+    const lo = cmp(have, [M, n, p])
+    // Exclusive upper bound of a partial version: "20" is 20.x, "20.1" is 20.1.x.
+    const hi = cmp(have, m[3] === undefined ? [M + 1, 0, 0] : m[4] === undefined ? [M, n + 1, 0] : [M, n, p + 1])
+    switch (m[1]) {
+      case ">=": return lo >= 0
+      case ">": return hi >= 0
+      case "<": return lo < 0
+      case "<=": return hi < 0
+      // Node has no 0.x major in any live range, so ^ is always "same major".
+      case "^": return lo >= 0 && cmp(have, [M + 1, 0, 0]) < 0
+      case "~": return lo >= 0 && cmp(have, m[3] === undefined ? [M + 1, 0, 0] : [M, n + 1, 0]) < 0
+      default: return lo >= 0 && hi < 0
+    }
+  }
+  const ok = range.split("||").some((alt) => {
+    const cs = alt.replace(/(\^|~|>=|<=|>|<|=)\s+/g, "$1").trim().split(/\s+/)
+    return cs[0] === "" || cs[0] === "*" || cs.every(satisfies)
+  })
+  console.log(range)
+  process.exit(ok ? 0 : 3)
+} catch (e) {
+  console.log(e.message)
+  process.exit(4)
+}'
+
+# node_check — sets NODE_RC (0 satisfied, 3 outside the range, 4 cannot tell,
+# 127 not installed) and NODE_WHY (the range, or why it could not be evaluated).
+node_check() {
+  NODE_WHY=""
+  if ! have node; then NODE_RC=127; return; fi
+  NODE_WHY="$(node -e "$NODE_RANGE_JS" "$HARNESS_MANIFEST" 2>&1)"
+  NODE_RC=$?
+  case "$NODE_RC" in 0|3) ;; *) NODE_RC=4 ;; esac
+  NODE_WHY="${NODE_WHY%%$'\n'*}"
+  [ -n "$NODE_WHY" ] || NODE_WHY="node could not evaluate $HARNESS_MANIFEST"
 }
 
 # `npm ci` is what the gate uses to materialise node_modules reproducibly, and
@@ -169,18 +234,18 @@ have_npm() {
 # not others, which is a worse failure than the one it fixes — and vendoring a
 # tarball is out for the reason stated in the header: nothing in this file
 # verifies a checksum.
-NODE_INSTALL_HINT="install Node ${NODE_MIN_MAJOR}+ via your version manager (nvm/fnm/asdf/volta) or the installer at nodejs.org — pin it in .nvmrc and engines.node"
+NODE_INSTALL_HINT="install a Node satisfying engines.node in tests/package.json via your version manager (nvm/fnm/asdf/volta) or the installer at nodejs.org — pin it in .nvmrc and engines.node"
 
 # One implementation, called from both OS branches, so macOS and Linux cannot
 # drift into requiring different things.
 require_node() {
-  if have_node; then
-    note "✓ node $(node --version 2>/dev/null) already present"
-  elif have node; then
-    fail_tool node "$(node --version 2>&1 | head -1) is below the ${NODE_MIN_MAJOR}+ floor — $NODE_INSTALL_HINT"
-  else
-    fail_tool node "not installed — $NODE_INSTALL_HINT"
-  fi
+  node_check
+  case "$NODE_RC" in
+    0)   note "✓ node $(node --version 2>/dev/null) already present" ;;
+    3)   fail_tool node "$(node --version 2>&1 | head -1) does not satisfy engines.node \"$NODE_WHY\" — $NODE_INSTALL_HINT" ;;
+    127) fail_tool node "not installed — $NODE_INSTALL_HINT" ;;
+    *)   fail_tool node "cannot tell whether this Node can run the harness — $NODE_WHY" ;;
+  esac
 
   if have_npm; then
     note "✓ npm $(npm --version 2>/dev/null) already present"
@@ -223,23 +288,34 @@ if [ "$MODE" = "check" ]; then
   # install path requires — a check narrower than the install is how a machine
   # reports itself ready and is not (see the INFRA_TOOLS note above; `aws` is in
   # that list for exactly this reason).
-  if have_node; then
-    note "✓ node $(node --version 2>/dev/null)  ($(command -v node))"
-  elif have node; then
-    note "✗ node  TOO OLD — $(node --version 2>&1 | head -1), the harness needs ${NODE_MIN_MAJOR}+"
-    note "        $NODE_INSTALL_HINT"
-    missing=$((missing + 1))
-  else
-    note "✗ node  MISSING — the test harness cannot run, and the gate would pass over every suite it owns"
-    note "        $NODE_INSTALL_HINT"
-    missing=$((missing + 1))
-  fi
+  node_check
+  case "$NODE_RC" in
+    0)
+      note "✓ node $(node --version 2>/dev/null)  ($(command -v node))"
+      ;;
+    3)
+      note "✗ node  UNSUPPORTED — $(node --version 2>&1 | head -1) does not satisfy engines.node \"$NODE_WHY\""
+      note "        $NODE_INSTALL_HINT"
+      missing=$((missing + 1))
+      ;;
+    127)
+      note "✗ node  MISSING — the test harness cannot run, and the gate would pass over every suite it owns"
+      note "        $NODE_INSTALL_HINT"
+      missing=$((missing + 1))
+      ;;
+    *)
+      # Not a pass: with the requirement unreadable, no Node can be declared fit.
+      note "✗ node  UNVERIFIED — $NODE_WHY"
+      note "        without the harness's declared range, no Node can be declared able to run it"
+      missing=$((missing + 1))
+      ;;
+  esac
 
   if have_npm; then
     note "✓ npm $(npm --version 2>/dev/null)  ($(command -v npm))"
   else
     note "✗ npm  MISSING or older than ${NPM_MIN_MAJOR} — 'npm ci' cannot materialise the harness"
-    note "        it ships with Node ${NODE_MIN_MAJOR}+; $NODE_INSTALL_HINT"
+    note "        it ships with Node; $NODE_INSTALL_HINT"
     missing=$((missing + 1))
   fi
 

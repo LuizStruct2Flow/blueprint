@@ -29,9 +29,10 @@
  * and fail a gate that has nothing to fix.
  *
  * MUTATION RECORD (R6) — observed, not predicted.
- *   Parent commit (no fix): #1 red naming the three; #2 red, the three absent.
- *   Mutant: delete `scripts/wait-mic.sh` from MANAGED_FILES.
- *     Red: #1 (names wait-mic.sh), #2 (wait-mic.sh absent after pull).
+ *   The reproducer commit's tree (the three entries absent): #1 red, naming
+ *     exactly no-chain-guard.sh, session-resume.sh and wait-mic.sh; #2 red,
+ *     the same three absent after `pull --yes` reported 37 files pulled.
+ *   With the three entries: #1 #2 green.
  */
 
 import { describe, it, expect } from 'vitest'

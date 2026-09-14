@@ -280,7 +280,8 @@ independent checking in one session. Re-measure a number before repeating it.
   delete `bug/110-approval-result-ask` (remote and local).
 - **Jesko's recommendations on #67–#70 (Codex, 2026-09-14)** →
   `.scratch/JESKO-pr67-70-review.md` — **awaiting the founder's decision**; none blocks
-  TASK-025 commit 3:
+  TASK-025 commit 3. **Tracked as backlog rows TASK-027 (#67), TASK-028 (#68), TASK-029
+  (#69), TASK-030 (#70)** — promote a row to `doing/` when the founder decides it:
   - **#67** accept with changes, folded into TASK-025 commit 4 (reproduced: `install-toolchain
     check` accepts Node 20.0 against `^20.19.0 || >=22.12.0`; fix the custom semver's `^0.x`
     and record observed mutant red sets).

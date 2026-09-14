@@ -64,19 +64,24 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
-**First: TASK-025 — `drift` and `pull` read the blueprint by its repository
-address**, not by a folder on disk (founder decision 2026-09-14). Every project
-already records `blueprint_remote`; only `a2bp` used it. This goes **before**
-Stage B because it removes the wrapper hazard below instead of working around it.
-Plan-first: `docs/doing/PLAN-TASK-025.md` is being written, then goes to Codex
-review before any code.
+**First: TASK-026 — implement PR #66** (the `a2bp` request from struct2flow-www),
+all six changes, **in the blueprint** rather than merged as-is (founder decision
+2026-09-14, after Jesko's cross-provider review). Being built. The row carries the
+specification; two changes differ from what the PR says — the missing managed
+scripts hurt *existing* projects that `pull`, not fresh bootstraps, and `drift`'s
+managed-region comparison must be ONE helper shared with `pull`'s selection and
+preview, refusing inverted markers. Close the PR with a comment linking the commits.
 
-**In parallel: PR #66**, an `a2bp` request from struct2flow-www, four independent
-changes bundled — three scripts missing from `MANAGED_FILES`, marker tokens in
-`CLAUDE.md` prose that `pull` matches as a substring, a gate skip-reason hint,
-and `drift` comparing marker files on managed regions only. Under Codex review.
-Its `drift` change touches the same function TASK-025 does. **It is a request:
-the founder decides**, per change.
+**Then: TASK-025 — `drift` and `pull` read the blueprint by its repository
+address.** Founder chose **option A, git fetch, now**; the npm package (option B)
+is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md` — a throwaway
+clone per run, no cache, exit 5 and nothing compared when the remote is
+unreachable. Under Codex review before any code. It builds on TASK-026's shared
+comparison, so it waits for it.
+
+**Live now, and a reason to push promptly:** unpushed commits in this checkout show
+up in every derived project's `drift` as "commits since last sync", so a `pull`
+there could record a commit that exists on one machine only. TASK-025 removes this.
 
 **Then: TASK-021 Stage B** — the `scaffolding/` + `forge/` move.
 

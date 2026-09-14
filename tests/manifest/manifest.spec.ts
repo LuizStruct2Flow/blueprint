@@ -95,7 +95,7 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
       // NON-VACUITY OF THE FIXTURE ITSELF. Every check passes trivially over a
       // tree with no suites in it, which is the exact failure mode this whole
       // suite exists to refuse — so the baseline has to be seen doing work.
-      expect(checks.map((c) => c.id)).toEqual(['#1', '#1b', '#2b', '#2c', '#4', '#5', '#7', '#7b'])
+      expect(checks.map((c) => c.id)).toEqual(['#1', '#1b', '#2b', '#2c', '#4', '#5', '#5b', '#7', '#7b'])
       expect(why(checks, 'nothing')).toBe('(#nothing did not fail)')
     })
   })
@@ -392,6 +392,41 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     })
   })
 
+  it('#5b a workflow GitHub cannot PARSE runs nothing, while #5 still finds every suite in its text (BUG-115)', async () => {
+    await scenario('manifest-5b-parse', async (s) => {
+      // The exact defect: an unquoted `run:` value containing `: `. GitHub
+      // rejected the whole file and ran zero jobs on every push for four days,
+      // and #5 stayed green because the text still said `npx vitest run`.
+      // So #5 must stay green here too. That is the blind spot being shown.
+      const checks = await inspectFixture(s, 'bp', (files) => {
+        const wf = (files.get('.github/workflows/security.yml') ?? '').trimEnd()
+        files.set(
+          '.github/workflows/security.yml',
+          `${wf}\n      - run: echo "Restore it with: blueprint pull tests/"\n`,
+        )
+      })
+
+      expect(red(checks)).toEqual(['#5b'])
+      expect(why(checks, '#5b')).toContain('.github/workflows/security.yml does not parse')
+    })
+  })
+
+  it('#5b valid YAML that is not a runnable Actions shape is caught too: the class, not the one character', async () => {
+    await scenario('manifest-5b-shape', async (s) => {
+      const checks = await inspectFixture(s, 'bp', (files) => {
+        const wf = files.get('.github/workflows/security.yml') ?? ''
+        files.set(
+          '.github/workflows/security.yml',
+          wf.replace('on: push\n', '').replace('  ts-tests:\n    runs-on: ubuntu-latest\n', '  ts-tests:\n'),
+        )
+      })
+
+      expect(red(checks)).toEqual(['#5b'])
+      expect(why(checks, '#5b')).toContain('has no `on:` trigger')
+      expect(why(checks, '#5b')).toContain('job ts-tests has no runs-on')
+    })
+  })
+
   it('#7 a derivation finding almost no suites fails, because every check above would pass over it', async () => {
     await scenario('manifest-7', async (s) => {
       const checks = await inspectFixture(s, 'bp', (files) => {
@@ -524,8 +559,8 @@ describe('BUG-005 — THE REAL TREE', () => {
       })
       const expected =
         inBlueprint.code === 0
-          ? ['#1', '#1b', '#2b', '#2c', '#4', '#5', '#7', '#7b']
-          : ['#1', '#1b', '#4', '#5', '#7', '#7b']
+          ? ['#1', '#1b', '#2b', '#2c', '#4', '#5', '#5b', '#7', '#7b']
+          : ['#1', '#1b', '#4', '#5', '#5b', '#7', '#7b']
       expect(checks.map((c) => c.id), report).toEqual(expected)
 
       // And #2b's own precondition is reachable rather than merely assumed: an

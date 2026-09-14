@@ -99,6 +99,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { parseDocument } from 'yaml'
 
 /** One check's verdict. `ok: false` carries the message the operator reads. */
 export interface CheckResult {
@@ -150,6 +151,44 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * BUG-115 — why a workflow's problems, not just its text.
+ *
+ * #5 reads a workflow as text, and text GitHub cannot parse still names every
+ * suite. So it passed for three days while GitHub ran zero jobs on every push.
+ * This parses the file the way GitHub does and checks the minimum Actions
+ * shape. It returns one message per problem, or nothing when the file is sound.
+ */
+export function workflowProblems(text: string): string[] {
+  const doc = parseDocument(text)
+  if (doc.errors.length > 0) return doc.errors.map((e) => `does not parse: ${e.message}`)
+  const isMap = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v)
+  const w: unknown = doc.toJS()
+  if (!isMap(w)) return ['is not a mapping']
+  const p: string[] = []
+  if (!('on' in w)) p.push('has no `on:` trigger')
+  if (!isMap(w.jobs) || Object.keys(w.jobs).length === 0) return [...p, 'has no `jobs:`']
+  for (const [id, job] of Object.entries(w.jobs)) {
+    if (!isMap(job)) {
+      p.push(`job ${id} is not a mapping`)
+      continue
+    }
+    if ('uses' in job) continue // a reusable-workflow call has no steps of its own
+    if (!('runs-on' in job)) p.push(`job ${id} has no runs-on`)
+    if (!Array.isArray(job.steps) || job.steps.length === 0) {
+      p.push(`job ${id} has no steps`)
+      continue
+    }
+    job.steps.forEach((st: unknown, i: number) => {
+      if (!isMap(st) || 'run' in st === 'uses' in st) {
+        p.push(`job ${id} step ${i + 1} needs exactly one of run/uses`)
+      }
+    })
+  }
+  return p
 }
 
 /**
@@ -672,6 +711,38 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
       missing.length > 0
         ? bad('#5', `#5 suites absent from the workflow: ${missing.join(' ')}`)
         : ok('#5', '#5 every suite runs in the workflow, runner kind by runner kind'),
+    )
+  }
+
+  // =========================================================================
+  // 5b. EVERY WORKFLOW IS ONE GITHUB CAN RUN (BUG-115).
+  //     #5 proves the workflow NAMES every suite. That is worth nothing if
+  //     GitHub rejects the file, because a rejected file runs zero jobs and
+  //     the text still names every suite.
+  // =========================================================================
+  let workflows: string[] = []
+  try {
+    workflows = (await readdir(join(root, '.github/workflows'))).filter((f) => /\.ya?ml$/.test(f))
+    workflows.sort((a, b) => a.localeCompare(b))
+  } catch (err) {
+    // No workflows directory means no CI to check, the same way #5 does not apply.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+  }
+  if (workflows.length > 0) {
+    const broken: string[] = []
+    for (const f of workflows) {
+      const rel = `.github/workflows/${f}`
+      for (const msg of workflowProblems(await readOr(join(root, rel)))) broken.push(`${rel} ${msg}`)
+    }
+    checks.push(
+      broken.length > 0
+        ? bad(
+            '#5b',
+            `#5b GitHub would run NO jobs from these workflows:\n        ${broken.join('\n        ')}\n` +
+              '        #5 reads the workflow as text and cannot see this. The pre-push gate\n' +
+              '        cannot see CI either: it prints "watching CI" and exits 0.',
+          )
+        : ok('#5b', `#5b every workflow (${workflows.length}) parses into a runnable Actions shape`),
     )
   }
 

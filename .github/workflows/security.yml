@@ -253,4 +253,8 @@ jobs:
       # suite that ran and passed.
       - name: No TypeScript harness in this project
         if: hashFiles('tests/package.json') == ''
-        run: echo "::notice::No tests/package.json in this checkout, so the TypeScript suites did not run. Since TASK-018 phase 2 the harness ships to every project, so this is unexpected — either the harness was removed deliberately, or this checkout predates the toolchain shipping. Restore it with: blueprint pull tests/"
+        # A block scalar, not a plain one: an unquoted value may not contain
+        # `: `, and "Restore it with: blueprint" once made GitHub reject this
+        # whole file and run zero jobs for four days (BUG-115).
+        run: |
+          echo "::notice::No tests/package.json in this checkout, so the TypeScript suites did not run. Since TASK-018 phase 2 the harness ships to every project, so this is unexpected — either the harness was removed deliberately, or this checkout predates the toolchain shipping. Restore it with: blueprint pull tests/"

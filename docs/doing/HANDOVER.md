@@ -95,8 +95,16 @@ a newer-exists line") — plan §2.2 lists what changes under P. Build nothing b
 **Founder decisions recorded 2026-09-14:** **T** — `drift` means "matches the newest
 blueprint" (unblocks implementation); adopt the `released` branch — yes; a leftover
 `blueprint_source` field — warn on every run (no cut-off date); the toolchain installer
-writes the per-machine `blueprint` command — yes. Christian is writing them into the
-plan; implementation starts after the TASK-026 settings commit is pushed.
+writes the per-machine `blueprint` command — yes. **All four are in plan revision 4
+(`6caced7`) and the backlog row (`6f24650`).** Consequences found against the code:
+projects read `released` through a NEW optional field `blueprint_release_branch`
+(`blueprint_branch` stays `main`, because `a2bp` uses it as every PR's base); the
+release job in the shipped `security.yml` names `LuizStruct2Flow/blueprint`; migration
+is 9 steps and no project switches before the first green run creates `released`.
+Implementation order: (1) reproducer + harness scrubs, (2) drift/pull by address,
+(3) `released` job + field + bootstrap, (4) installer writes the command. **The parts
+new in revision 4 (release job, field, installer command) get a Codex review before
+commit 3**; commits 1–2 do not wait for it.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

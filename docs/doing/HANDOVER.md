@@ -69,11 +69,12 @@ bash scripts/session-resume.sh
 comparison it built is `bp_prospective_pull` / `bp_prospective_for` in
 `scripts/blueprint`; TASK-025 swaps only the latter.
 
-**Derived projects may pull now** (this checkout matches GitHub again) — with care:
-struct2flow-www freely; storm2flow file by file (its `settings.json` is ~5 months old);
-**linkedin-watcher-agent not yet** — its five open a2bp requests (§5) are its own edits
-to managed files that a pull would offer to overwrite, and the pull removes its
-`agent-exchange` permissions, which it uses (move them to its `settings.local.json` first).
+**Derived projects and pulling:** struct2flow-www may pull freely; storm2flow file by
+file (its `settings.json` is ~5 months old). **linkedin-watcher-agent already pulled,
+deliberately** (its TASK#7, file by file, re-applying its own change; it took the
+blueprint's `security.yml`). It does not use `agent-exchange` (only a historical doc
+mentions it), so losing those permissions cost nothing. Pull only while this checkout
+has no unpushed commits (`git log origin/main..main` empty).
 
 **Now: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)
@@ -229,10 +230,14 @@ independent checking in one session. Re-measure a number before repeating it.
   `/tmp/.git` BUG-110 — re-implement on main under a new number, reproducer first; the
   settings edit itself must be the founder's (agents are refused). Then close #64 and
   delete `bug/110-approval-result-ask` (remote and local).
-- **Five untriaged a2bp requests from linkedin-watcher-agent, filed 2026-09-14:**
-  #65 (`security.yml` — may duplicate BUG-115), #67 (toolchain installer), #68 (harness
-  and state-root, 10 files), #69 (`scripts/blueprint` + suite-sync), #70 (codex signal
-  watcher). Treat like #66: cross-provider review first, then a founder decision.
+- **Five a2bp requests from linkedin-watcher-agent, filed 2026-09-14.** **#65
+  (`security.yml`) is superseded:** after linkedin's TASK#7 pull its workflow is
+  byte-identical to the blueprint's, which fixed the same parse defect as BUG-115 —
+  close it with that note and delete its branch (founder's call). **#67 (toolchain
+  installer), #68 (harness and state-dir, 10 files), #69 (`scripts/blueprint` +
+  suite-sync), #70 (codex signal watcher) still differ** from `origin/main` and are
+  untriaged. Treat like #66: cross-provider review first, then a founder decision. #67
+  and #69 touch files TASK-025 is changing — decide them before commit 3.
 
 - **TASK-023** — `tests/manifest` #9 (the control proving itself independent of
   the toolchain) could not be ported; `tests/ts-bridge/test.sh` is held back until

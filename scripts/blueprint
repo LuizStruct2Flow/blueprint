@@ -661,7 +661,7 @@ pull_file() {
 #
 # `blueprint_source` is an absolute host path, which makes it the one field in
 # `.blueprint-source` that cannot be correct on two machines at once. storm2flow
-# carried `/Users/luizscheidegger/...` and every command died on the Linux box;
+# carried `/Users/luizscheidegger/...` and every command died on the Linux box; # a2bp-allow: historical BUG-007 incident record quoting the path that broke, not a live host path
 # writing the Linux path would have broken the Mac instead. Picking a machine to
 # break is not a fix, so the value is now RESOLVED rather than read (BUG-007):
 #

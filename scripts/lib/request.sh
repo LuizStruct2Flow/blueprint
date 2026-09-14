@@ -152,11 +152,18 @@ bp_request_hermetic() {
 # helpers, proxies) because silently breaking authenticated remotes is not
 # acceptable. It still refuses the variables that would redirect which
 # repository, index or object store is being operated on, or inject config.
+#
+# The list is also DATA, for a caller that must start transport as ONE external
+# process. A function run in the background forks a subshell first, so `$!`
+# names that subshell rather than the transport, and the transport cannot be
+# signalled by pid (TASK-025, the sync refresh). One list, used both ways.
+BP_REQUEST_TRANSPORT_UNSET=(
+  -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE
+  -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES
+  -u GIT_CONFIG -u GIT_CONFIG_COUNT
+)
 bp_request_transport_env() {
-  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
-      -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-      -u GIT_CONFIG -u GIT_CONFIG_COUNT \
-      "$@"
+  env "${BP_REQUEST_TRANSPORT_UNSET[@]}" "$@"
 }
 
 # --- bp_base_path BARE BASE PROJECT_RELATIVE --------------------------------

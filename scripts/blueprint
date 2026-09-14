@@ -727,18 +727,21 @@ _bp_on_signal() {
 # Idempotent, and if-form throughout because of `set -e`. It deletes only this
 # run's ref and never the cache: another run may be reading through it.
 #
-# The refresh is a shell FUNCTION run in the background, so BP_SYNC_CHILD is a
-# subshell and the fetch is that subshell's child. Killing only the subshell
-# orphaned a fetch that went on until its budget ran out, still able to write
-# into the cache after this cleanup had run (measured: the interrupted run's
-# output stayed open for the full 30 s). So the signal goes to the subshell's
-# CHILDREN — `timeout`, which forwards it to its own process group, git and ssh
-# with it — and the subshell is then waited for, so nothing outlives the run.
-# `# ponytail:` without pkill the wait still holds; it just lasts until the fetch
-# ends by itself, which the budget bounds.
+# BP_SYNC_CHILD IS the fetch process: the refresh is started as one external
+# command, so `$!` is the process that becomes `timeout` (see the launch). TERM
+# to it is forwarded by `timeout` to its own process group, git and ssh with it,
+# and the wait means nothing outlives the run.
+#
+# It used to be a shell function in the background. `$!` was then a subshell,
+# and cleanup found the fetch by parent with `pkill -P` — a snapshot, so a signal
+# before the subshell forked `timeout` found nothing and the fetch started after
+# cleanup, holding the run for the whole budget (Alexey, S1; tests #20b).
+# `# ponytail:` a TERM landing between bash's fork and its exec of `env` can be
+# lost with bash's own signal reset; the wait then lasts until the budget ends
+# the fetch. No command runs in that window, so nothing outside bash can close it.
 _bp_sync_cleanup() {
   if [ -n "$BP_SYNC_CHILD" ]; then
-    pkill -TERM -P "$BP_SYNC_CHILD" 2>/dev/null || true
+    kill -TERM "$BP_SYNC_CHILD" 2>/dev/null || true
     wait "$BP_SYNC_CHILD" 2>/dev/null || true
   fi
   if [ -n "$BP_SYNC_REF" ]; then
@@ -862,9 +865,13 @@ _bp_fetch_blueprint() {
   #
   # In the BACKGROUND, with `wait`: a trapped signal interrupts `wait` at once,
   # while a foreground fetch would hold the handler until the fetch returned.
+  #
+  # ONE EXTERNAL COMMAND, not bp_request_transport_env: a function in the
+  # background runs in a forked subshell, and `$!` would name the subshell
+  # rather than the fetch (#20b). The same unset list, as data.
   BP_SYNC_REF="refs/bp-run/${BP_SYNC_SCRATCH##*/}"
   err="$BP_SYNC_SCRATCH/fetch.err"
-  bp_request_transport_env "$tcmd" "$BP_FETCH_TIMEOUT" \
+  env "${BP_REQUEST_TRANSPORT_UNSET[@]}" "$tcmd" "$BP_FETCH_TIMEOUT" \
     git -c gc.auto=0 -c maintenance.auto=false --git-dir="$BP_SYNC_CACHE" \
     fetch -q --no-tags "$BP_SYNC_REMOTE" "+refs/heads/$BP_SYNC_BRANCH:$BP_SYNC_REF" 2>"$err" &
   BP_SYNC_CHILD=$!

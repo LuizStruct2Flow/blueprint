@@ -182,6 +182,15 @@ MANAGED_FILES=(
   "scripts/codex-feed-filter.sh"
   "scripts/log-activity.sh"
   "scripts/team-kickoff.sh"
+  # BUG-114 — named by managed files and shipped suites, so they must be MANAGED
+  # and not merely shipped. `.claude/settings.json` runs no-chain-guard.sh as a
+  # PreToolUse hook; the harness and suites drive session-resume.sh and
+  # wait-mic.sh. A fresh bootstrap always had them (it is `git archive HEAD`);
+  # an EXISTING project never did, because pull delivers this list and nothing
+  # else. tests/managed-references derives the set, so the next one is caught.
+  "scripts/no-chain-guard.sh"
+  "scripts/session-resume.sh"
+  "scripts/wait-mic.sh"
   "scripts/new-project.sh"
   "scripts/blueprint"
   "scripts/build-deck.sh"

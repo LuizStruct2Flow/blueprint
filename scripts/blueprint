@@ -45,15 +45,33 @@ set -euo pipefail
 # is one of the two paths that arm the pre-push gate (A-22), and it arms it
 # before it needs any substitution — exiting here would leave a checkout
 # silently ungated, which is the exact defect A-22 closed. So substitution
-# fails loudly at the point of use, and everything that does not substitute
-# still works.
-_bp_placeholders="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/placeholders.sh"
+# fails loudly at the point of use, and `drift` refuses to report (non-zero)
+# once it has armed what it can.
+#
+# U7 — THE CLI'S REAL DIRECTORY, RESOLVED ONCE, and every lib/ path derives from
+# it. The header documents installing by symlink, and dirname of a symlink is
+# the link's directory, which has no lib/. Six sites resolved it that way: a
+# symlinked CLI ran without its helpers, compared files unsubstituted (false
+# drift), never armed the gate, and exited 0. A plain `readlink` loop rather
+# than `readlink -f`, which macOS lacked before 12.3.
+_bp_self="${BASH_SOURCE[0]}"
+while [ -L "$_bp_self" ]; do
+  _bp_link="$(readlink "$_bp_self")"
+  case "$_bp_link" in
+    /*) _bp_self="$_bp_link" ;;
+    *)  _bp_self="$(dirname "$_bp_self")/$_bp_link" ;;
+  esac
+done
+_bp_script_dir="$(cd "$(dirname "$_bp_self")" && pwd -P)"
+
+_bp_placeholders="$_bp_script_dir/lib/placeholders.sh"
 if [ -r "$_bp_placeholders" ]; then
   # shellcheck source=scripts/lib/placeholders.sh
   . "$_bp_placeholders"
 else
   bp_substitute_stream()   { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
   bp_substitute_in_place() { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
+  bp_should_substitute()   { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
 fi
 
 # --- Canonical list of blueprint-managed files ---
@@ -161,6 +179,14 @@ MANAGED_FILES=(
   # and dispatch against finished work. A settle window shrinks that race; only
   # one indivisible write removes it.
   "scripts/signal-set.sh"
+  # U1 — each ships with a suite under the managed tests/ directory, so the
+  # suite arrives on every pull while the script it tests never did. A suite is
+  # only worth running if the thing under test is deliverable too: stale copies
+  # failed ten assertions in a derived project. no-chain-guard.sh is also a live
+  # PreToolUse hook in the managed .claude/settings.json.
+  "scripts/session-resume.sh"
+  "scripts/wait-mic.sh"
+  "scripts/no-chain-guard.sh"
   # Reverse-substitution + contamination scan for the project→blueprint
   # direction (A-07). MUST ship: cmd_a2bp refuses to run without it, so a
   # derived project missing this file cannot back-propagate at all — which is
@@ -563,7 +589,7 @@ pull_file() {
 #
 # `blueprint_source` is an absolute host path, which makes it the one field in
 # `.blueprint-source` that cannot be correct on two machines at once. storm2flow
-# carried `/Users/luizscheidegger/...` and every command died on the Linux box;
+# carried `/Users/luizscheidegger/...` and every command died on the Linux box;  a2bp-allow: incident record, not a live path
 # writing the Linux path would have broken the Mac instead. Picking a machine to
 # break is not a fix, so the value is now RESOLVED rather than read (BUG-007):
 #
@@ -577,7 +603,7 @@ pull_file() {
 # announced, never silent — a silently-substituted comparison base would make
 # every drift report untrustworthy.
 _bp_resolve_blueprint_root() {
-  local from_file="$1" cli_root self
+  local from_file="$1" cli_root
 
   if [ -n "${BLUEPRINT_ROOT:-}" ] && [ -d "$BLUEPRINT_ROOT" ]; then
     printf '%s' "$BLUEPRINT_ROOT"; return 0
@@ -586,14 +612,8 @@ _bp_resolve_blueprint_root() {
     printf '%s' "$from_file"; return 0
   fi
 
-  # Resolve through a symlink: CLAUDE.md documents `ln -s .../scripts/blueprint`
-  # as an install method, and dirname of the symlink is /usr/local/bin.
-  self="${BASH_SOURCE[0]}"
-  if command -v readlink >/dev/null 2>&1; then
-    local resolved
-    resolved=$(readlink -f "$self" 2>/dev/null) && [ -n "$resolved" ] && self="$resolved"
-  fi
-  cli_root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P) || return 1
+  # Through a symlink too: _bp_script_dir is already resolved (U7).
+  cli_root=$(cd "$_bp_script_dir/.." 2>/dev/null && pwd -P) || return 1
 
   # TASK-021 — after the restructure this CLI lives at
   # <root>/scaffolding/scripts/blueprint, so one `..` lands on `scaffolding/`
@@ -630,7 +650,7 @@ _bp_resolve_blueprint_root() {
 # That is silent and it is severe: `core.hooksPath` is set, so the gate LOOKS
 # armed, but git skips a non-executable hook without a word. The project is
 # ungated while every indicator says otherwise — BUG-004's failure mode arriving
-# through a different door. Found in linkedin-watcher-agent on 2026-07-30, where
+# through a different door. Found in linkedin-watcher-agent on 2026-07-30, where  a2bp-allow: incident record naming the project it happened in
 # the feed's own arming check was the only thing that noticed.
 #
 # Only the exec bit is mirrored, not the whole mode: the blueprint is the source
@@ -841,11 +861,11 @@ cmd_files() {
 report_staleness() {
   local root="$1" out status blocker offer remote count verified branch
 
-  local lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/staleness.sh"
-  if [ ! -r "$lib" ]; then
-    echo "  ${C_DIM}remote staleness: unknown (scripts/lib/staleness.sh missing)${C_RESET}"
-    return 0
-  fi
+  local lib="$_bp_script_dir/lib/staleness.sh"
+  # U7 — never a soft "unknown" beside an otherwise plausible report: a missing
+  # helper means this CLI is not the one it thinks it is. cmd_drift refuses
+  # earlier; this keeps the function honest on its own.
+  [ -r "$lib" ] || die "scripts/lib/staleness.sh is missing — cannot report staleness"
   # shellcheck source=scripts/lib/staleness.sh
   . "$lib"
 
@@ -945,7 +965,7 @@ report_staleness() {
 # path. So the signal was trivially true everywhere, and
 # `bash scripts/blueprint drift` — the fallback CLAUDE.md documents, and what a
 # fresh clone and every spawned persona use — reported "This IS the blueprint"
-# and exited 0 having compared nothing. linkedin-watcher-agent sat 18 commits
+# and exited 0 having compared nothing. linkedin-watcher-agent sat 18 commits  a2bp-allow: incident record naming the project it happened in
 # behind for a morning while drift called it clean.
 #
 # The signal is now an explicit marker file that CANNOT reach a derived project:
@@ -973,7 +993,7 @@ report_staleness() {
 # no command and no environment variable, so nothing can redirect it.
 _bp_project_root() {
   local _lib _root
-  _lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/state-dir.sh"
+  _lib="$_bp_script_dir/lib/state-dir.sh"
   if [ -r "$_lib" ]; then
     # Sourced and called inside the command substitution's subshell, so
     # BP_CODE_ROOT never leaks into the CLI's own environment.
@@ -1003,16 +1023,32 @@ cmd_drift() {
   # check (CLAUDE.md §"Wake-time drift check"), and spawned personas are told
   # NOT to start the feed — so in a derived project this is the only path that
   # covers them. Same arm_gate as the feed: one mechanism, two callers.
-  _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
+  _bp_lib="$_bp_script_dir/lib/gate.sh"
   # shellcheck source=scripts/lib/gate.sh
   # BUG-077: _bp_project_root, never `git rev-parse` — arm_gate writes
   # repo-local config, so an environment-redirectable root arms the wrong repo.
   _bp_proj="$(_bp_project_root)"
-  [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$_bp_proj"
+  if [ -r "$_bp_lib" ]; then
+    . "$_bp_lib"
+    arm_gate "$_bp_proj"
+  else
+    # U7 — arming must never vanish silently (A-22). Say so, then refuse below.
+    echo "  ${C_RED}⚠ gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed${C_RESET}"
+  fi
   # BUG-032 — the push keepalive rides the same two wake paths, for the same
   # reason: it is repo-local config, so a clone starts without it.
   command -v arm_push_keepalive >/dev/null 2>&1 \
     && arm_push_keepalive "$_bp_proj"
+
+  # U7 — a drift report built without its helpers is an unearned green: without
+  # placeholders.sh every templated file compares unsubstituted and reads as
+  # drifted, and the exit status was 0. Refuse AFTER arming, so a missing
+  # substitution helper never costs the gate.
+  local _bp_need
+  for _bp_need in gate.sh placeholders.sh staleness.sh; do
+    [ -r "$_bp_script_dir/lib/$_bp_need" ] ||
+      die "scripts/lib/$_bp_need is missing beside $_bp_script_dir/blueprint — refusing to report drift without it"
+  done
 
   # BUG-007: the wake ritual runs `blueprint drift` in EVERY struct2flow repo,
   # and this one has no `.blueprint-source` because it is the source. It used to
@@ -1254,7 +1290,7 @@ cmd_pull() {
     # every later `drift` report "0 commits since sync" while the project was
     # still behind on every other managed file. The lie was durable: nothing
     # else recomputes that number, so the project looked current until someone
-    # diffed by hand. linkedin-watcher-agent sat 18 commits behind this way.
+    # diffed by hand. linkedin-watcher-agent sat 18 commits behind this way.  a2bp-allow: incident record naming the project it happened in
     #
     # Only a FULL pull earns the update. A partial pull says so instead, which
     # is information the operator can act on rather than a silent omission.
@@ -1296,7 +1332,7 @@ cmd_pull() {
 # Plan: docs/doing/PLAN-A2BP-PR.md.
 cmd_a2bp() {
   local libdir
-  libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+  libdir="$_bp_script_dir/lib"
 
   # Every one of these is REQUIRED, not best-effort. A missing helper must never
   # degrade to a weaker path — that is BUG-003's lesson (a guard that cannot run
@@ -1621,7 +1657,7 @@ cmd_a2bp() {
 # What is currently asked of the blueprint owner.
 cmd_prs() {
   local libdir
-  libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+  libdir="$_bp_script_dir/lib"
   [ -r "$libdir/request-config.sh" ] || die "scripts/lib/request-config.sh is missing"
   # shellcheck source=scripts/lib/request-config.sh
   . "$libdir/request-config.sh"

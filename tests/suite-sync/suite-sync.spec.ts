@@ -767,3 +767,72 @@ describe('BUG-029 R2-S2 — the substitution predicate reads the FILE path, not 
     })
   })
 })
+
+/**
+ * TASK-005 — the thing under test must be DELIVERABLE, and the CLI that delivers
+ * it must run the same way however it was installed.
+ *
+ * U1: a suite is its files plus its invocation, and neither is worth anything if
+ * the script it exercises never reaches the project. Three scripts shipped with
+ * suites while absent from MANAGED_FILES, so no pull could update them and their
+ * stale copies failed ten assertions downstream.
+ *
+ * U7: CLAUDE.md documents installing the CLI by symlink. Every `lib/` load
+ * resolved from the LINK's directory, so a symlinked CLI ran without its helpers,
+ * compared unsubstituted files (false drift), never armed the gate, and exited 0.
+ */
+describe('TASK-005 — managed scripts are deliverable, and a symlinked CLI is the same CLI', () => {
+  it('#U1 every script that ships with a suite is in `blueprint files`', async () => {
+    await scenario('suite-sync-u1', async (s) => {
+      const r = await s.run(CLI, ['files'], { cwd: s.workspace.root })
+      expect(r.code, r.output).toBe(0)
+      const listed = r.stdout.split('\n').map((l) => l.trim())
+      for (const script of ['scripts/session-resume.sh', 'scripts/wait-mic.sh', 'scripts/no-chain-guard.sh']) {
+        expect(listed, `${script} ships with a suite but no pull can deliver it`).toContain(script)
+      }
+    })
+  })
+
+  it('#U7 drift through an out-of-tree symlink reports exactly what the direct CLI reports', async () => {
+    await scenario('suite-sync-u7', async (s) => {
+      const bp = await fixtureBlueprint(s, 'u7')
+      const p = await newProject(s, 'u7', 'proj', bp)
+      const bin = await s.workspace.dir('u7', 'bin')
+      const link = join(bin, 'blueprint')
+      const ln = await s.run('ln', ['-s', CLI, link], { cwd: bin })
+      expect(ln.code, ln.output).toBe(0)
+
+      const direct = await drift(s, p)
+      // NON-VACUITY: the fixture must make a missing substitution visible, or
+      // "same output" would hold for a CLI that compared nothing.
+      expect(direct.stdout, 'the direct CLI printed no gate line — nothing to compare').toContain('gate:')
+      expect(marked(direct.output, '~'), 'fixture broken: CLAUDE.md already drifted').not.toContain('CLAUDE.md')
+
+      // The first run armed the push keepalive; unset it so the second run's
+      // arming output is comparable rather than silently "already armed".
+      await git(s, p, ['config', '--unset', 'core.sshCommand'])
+
+      const linked = await s.run(link, ['drift'], { cwd: p })
+      expect(linked.stdout, `the symlinked CLI never reported the gate (A-22)\n${linked.output}`).toContain('gate:')
+      expect(linked.stdout, `the symlinked CLI's drift report differs\n${linked.output}`).toBe(direct.stdout)
+      expect(linked.code, linked.output).toBe(direct.code)
+    })
+  })
+
+  it('#U7b drift with its helpers missing fails non-zero instead of reporting', async () => {
+    await scenario('suite-sync-u7b', async (s) => {
+      const bp = await fixtureBlueprint(s, 'u7b')
+      const p = await newProject(s, 'u7b', 'proj', bp)
+      const lonely = await s.workspace.dir('u7b', 'lonely')
+      const cli = join(lonely, 'blueprint')
+      await s.fs.copyIn(CLI, cli)
+      await s.fs.chmod(cli, 0o755)
+
+      const r = await s.run(cli, ['drift'], { cwd: p })
+
+      expect(r.code, `drift ran without scripts/lib/ and exited 0 — a report nobody should trust\n${r.output}`).not.toBe(0)
+      expect(r.output, 'the refusal did not name the missing helper').toMatch(/scripts\/lib\/\S+\.sh is missing/)
+      expect(r.output, 'the gate was not armed and nothing said so (A-22)').toMatch(/gate.*NOT armed/)
+    })
+  })
+})

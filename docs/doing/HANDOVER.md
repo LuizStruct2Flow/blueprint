@@ -112,8 +112,11 @@ revision 4's release job wrongly failed an old-run rerun (`origin/released` vs
 the one change: `--replace-blueprint-command` must validate the new command from the
 invoking migrated project, not from the installer's own checkout. Folded in as
 revision 6 (`12b59b5`: records the invoking directory, adds `--project=<dir>`, #37b keeps
-installer checkout and project apart). **The plan is buildable.** Commits 1–2: Christian
-is building them now. **Commit 3 waits only for** linkedin's #67/#69 to be decided (they
+installer checkout and project apart). **The plan is buildable.** **Commit 1 landed locally
+(`6ed93b1`, the failing reproducer); commit 2 is in progress** — Christian's uncommitted
+edits span `scripts/blueprint`, `scripts/lib/staleness.sh`, `scripts/new-project.sh`, the
+three sync docs and a dozen suites. Do not push, and do not run the gate, until commit 2
+is committed. **Commit 3 waits only for** linkedin's #67/#69 to be decided (they
 touch the same files).
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
@@ -167,6 +170,14 @@ hangs off that root.
 ---
 
 ## 3. LIVE HAZARDS
+
+- **Mutation runs rewrite the LIVE `scripts/blueprint`, and every project on this machine
+  executes that file.** `~/.local/bin/blueprint` execs this checkout's CLI, so while a
+  mutant is applied, `blueprint drift` / `pull` / `a2bp` in linkedin-watcher-agent,
+  storm2flow or struct2flow-www run a deliberately broken sync tool. Observed 2026-09-14
+  (TASK-025 commit 2's mutant sets). Until TASK-025 commit 4 replaces the wrapper: run
+  mutants against a copy (a worktree outside any git tree), or tell the founder not to
+  sync other projects while they run.
 
 - **Do not change this checkout's git config while a push gate runs.** The harness
   canary snapshots the real `.git/config` (plus the baton, its journal and the feed) and

@@ -107,8 +107,12 @@ reach projects already on `released`; the release job's cases never run it. **Re
 (`cb18a17`, Philipp) adopts all four**, with measurements in its §R4 table, and found two
 more: a SIGINT to the installer alone was absorbed and the command swap went ahead, and
 revision 4's release job wrongly failed an old-run rerun (`origin/released` vs
-`FETCH_HEAD`). **Alexey is re-reviewing revision 5.** Commits 1–2 are unaffected and
-Christian is building them now; commit 3 does not start before that verdict.
+`FETCH_HEAD`). **Re-review of revision 5 (Alexey): build with one change** →
+`.scratch/ALEXEY-plan025-rev5-review.md` — all four findings resolved (probes re-run);
+the one change: `--replace-blueprint-command` must validate the new command from the
+invoking migrated project, not from the installer's own checkout. Philipp is folding it
+in. Commits 1–2 are unaffected and Christian is building them now. **Before commit 3:**
+that amendment committed, and linkedin's #67/#69 decided (they touch the same files).
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

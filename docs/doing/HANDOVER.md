@@ -290,7 +290,9 @@ independent checking in one session. Re-measure a number before repeating it.
   `.scratch/JESKO-pr67-70-review.md` — **awaiting the founder's decision**; none blocks
   TASK-025 commit 3. **Tracked as backlog rows TASK-027 (#67), TASK-028 (#68), TASK-029
   (#69), TASK-030 (#70).** **Founder ACCEPTED all four recommendations, 2026-09-15.** Order:
-  BUG-117 first (main red); then TASK-030 applied as-is; TASK-028 ported after BUG-117 (same
+  BUG-117 first (main red); then TASK-030 applied as-is (**committed locally as `b87491a`,
+  2026-09-15, watcher-liveness 20/20; held until BUG-117 lands, then push, move the row
+  to waiting-acceptance, close #70 with `.scratch/pr70-close-comment.md`, delete its branch**); TASK-028 ported after BUG-117 (same
   harness area); TASK-027 and TASK-029 built inside TASK-025 commit 4; each PR closed with a
   comment linking its commits, branch deleted by hand. PR #64 → BUG-118 after CI is green:
   - **#67** accept with changes, folded into TASK-025 commit 4 (reproduced: `install-toolchain

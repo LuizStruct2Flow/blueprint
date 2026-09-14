@@ -59,15 +59,25 @@
  * deleted with the suite still green. That is R6's own case — a guard seen only
  * not-firing proves nothing — and it is one arm away from BUG-034.
  *
- * WHAT NEITHER IMPLEMENTATION COVERS — recorded, not fixed here. A file whose
- * `BLUEPRINT:END` precedes its `BLUEPRINT:BEGIN` has counts 1 and 1, passes
- * every arm of the guard, and reaches an awk that tracks the region backwards.
- * That is BUG-034, open and parked in docs/backlog/BUGS.md. It is in this
- * suite's perturbation population and BOTH implementations pass it. No case
- * below asserts it, deliberately: a spec that asserted the correct behaviour
- * would be red on `main`, and one that asserted the current behaviour would pin
- * the defect. The row is the right home for it until it is fixed, and the fix
- * arrives with its own reproducer (the row says so).
+ * BUG-034 IS FIXED BY TASK-026, and arrives with its reproducer as this
+ * paragraph used to promise. A file whose END precedes its BEGIN had counts 1
+ * and 1, passed every arm of the old guard, and reached an awk that tracked the
+ * region backwards while pull reported the project's content preserved. Now
+ * `bp_marker_structure` validates ORDER and balance before anything is written,
+ * and a file that fails on either side is refused: exit 4, nothing written, no
+ * backup. The merge is reached only on well-formed pairs, the precondition under
+ * which its region tracking is correct.
+ *
+ * TASK-026 MUTATION RECORD (R6) — observed, not predicted. Each mutant applied to
+ * scripts/blueprint alone, the suite run, the file restored. BUG-113's cases are
+ * left out of the BUG-034 red sets: they were red for their own unfixed reason.
+ *   BUG-112 reproducer's parent (substring detection)  → red #3 #4
+ *   M1 the structure scan never reports `bad`          → red #5 #5b #6
+ *   M2 an unclosed region is not detected              → red #6
+ *   M3 the ORDER check removed (a stray END is ignored) → red #5b ONLY. #5's
+ *      inverted file also leaves a region open, so M2's arm still refuses it;
+ *      #5b exists because nothing else could see this mutant.
+ *   M4 a refused pull exits 0                          → red #5 #5b #6
  */
 
 import { describe, it, expect } from 'vitest'
@@ -317,6 +327,25 @@ describe('BUG-034 — markers out of order are refused, never merged', () => {
       expect(r.output).toMatch(/refuse/)
       expect(r.output).not.toMatch(/preserved/)
       expect(await readFile(join(proj, HOOK), 'utf8')).toBe(inverted)
+      expect(await s.fs.exists(join(proj, `${HOOK}.bp-bak`)), r.output).toBe(false)
+    })
+  })
+
+  it('BUG-034 #5b an END with no open region is refused even when a later region closes', async () => {
+    await scenario('marker-merge-5b', async (s) => {
+      // #5's inverted file also ends with a region left open, so a scan that
+      // ignored a stray END would still refuse it — for the wrong reason. This
+      // one closes, 1 BEGIN / 2 END, and ORDER is the only thing that sees it: a
+      // scan skipping the stray END calls it one well-formed region and merges.
+      const stray =
+        '#!/bin/sh\n# BLUEPRINT:END\necho FOOTER-TO-KEEP\n# BLUEPRINT:BEGIN\necho stale\n# BLUEPRINT:END\n'
+      const { proj } = await pair(s, 's', HOOK, region('echo managed-v2'), stray)
+
+      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+
+      expect(r.code, r.output).not.toBe(0)
+      expect(r.output).toMatch(/refuse/)
+      expect(await readFile(join(proj, HOOK), 'utf8')).toBe(stray)
       expect(await s.fs.exists(join(proj, `${HOOK}.bp-bak`)), r.output).toBe(false)
     })
   })

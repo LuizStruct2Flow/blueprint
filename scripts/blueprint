@@ -337,6 +337,32 @@ BP_MARKER_TAIL='([[:space:]]*$|[[:space:]]*-->|[[:space:]]+[^[:alnum:][:space:]_
 BP_MARKER_BEGIN_ERE="${BP_MARKER_LEAD}BEGIN${BP_MARKER_TAIL}"
 BP_MARKER_END_ERE="${BP_MARKER_LEAD}END${BP_MARKER_TAIL}"
 
+# --- BUG-034: marker STRUCTURE is validated before anything is written --------
+#
+# bp_marker_structure FILE — prints exactly one of:
+#   none       no marker lines at all
+#   ok N       N well-formed BEGIN…END regions, in order, none nested
+#   bad WHY    an END with no open region, a BEGIN inside an open region, or a
+#              region that is never closed
+#
+# Counts alone cannot see ORDER. A file whose END precedes its BEGIN has counts
+# 1 and 1, passed every arm of the old guard, and reached an awk that tracked the
+# region backwards — while pull printed that the project's content was preserved
+# and exited 0. The merge below is correct exactly when both inputs are `ok`, so
+# this scan is its precondition, and a `bad` file is refused rather than merged.
+bp_marker_structure() {
+  awk -v rb="$BP_MARKER_BEGIN_ERE" -v re="$BP_MARKER_END_ERE" '
+    $0 ~ rb { if (open) { why = "BEGIN at line " NR " inside an open region"; exit } open = 1; n++; next }
+    $0 ~ re { if (!open) { why = "END at line " NR " with no open region"; exit } open = 0; next }
+    END {
+      if (why == "" && open) why = "a region opened and never closed"
+      if (why != "") print "bad " why
+      else if (n == 0) print "none"
+      else print "ok " n
+    }
+  ' "$1"
+}
+
 # marker_aware_merge BP_FILE PROJ_FILE OUT_FILE
 # Returns 0 on success, 1 on structural mismatch.
 marker_aware_merge() {
@@ -539,6 +565,25 @@ substitute_placeholders() {
 pull_file() {
   local bp="$1"
   local f="$2"
+
+  # BUG-034 — refuse, before writing anything, a file whose markers are out of
+  # order or unbalanced on EITHER side. Merging one is how pull rearranged a
+  # project file while reporting its content preserved; copying over one would
+  # discard the very half the markers were placed to protect.
+  local bs ps=""
+  bs=$(bp_marker_structure "$bp")
+  [ -f "$f" ] && ps=$(bp_marker_structure "$f")
+  case "$bs" in
+    bad*)
+      echo "  ${C_RED}    refuse: the blueprint copy's markers are invalid — ${bs#bad }. Nothing written.${C_RESET}"
+      return 1 ;;
+  esac
+  case "$ps" in
+    bad*)
+      echo "  ${C_RED}    refuse: this project's markers are invalid — ${ps#bad }. Nothing written.${C_RESET}"
+      echo "  ${C_DIM}    fix the markers in $f by hand, then pull again${C_RESET}"
+      return 1 ;;
+  esac
 
   # New file in project → whole-file copy (no merging possible).
   if [ ! -f "$f" ]; then
@@ -1280,6 +1325,8 @@ cmd_pull() {
       pulled=$((pulled+1))
     else
       echo "  ${C_RED}skipped${C_RESET} $f (see warning above)"
+      # BUG-034 — pull_file declines only when a guard refused the file.
+      refused_guard=1
     fi
   done
 
@@ -1315,6 +1362,12 @@ cmd_pull() {
   # useless to a caller.
   if [ "${refused_no_tty:-0}" -eq 1 ]; then
     return 7
+  fi
+  # BUG-034 — a file a guard REFUSED is not a file that was synced. `4` is the
+  # status a2bp already gives "a guard refused; nothing done", so a script
+  # reading either command reads the same meaning.
+  if [ "${refused_guard:-0}" -eq 1 ]; then
+    return 4
   fi
 }
 

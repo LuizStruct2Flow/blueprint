@@ -244,10 +244,19 @@ jobs:
       # must fail one clearly-named job rather than taking 40 shell suites down
       # with it. It also keeps the shell suites runnable on a runner with no
       # Node at all, which is the same property tests/manifest #9 asserts.
+      # BUG-117 — THROUGH THE GATE'S OWN SCRUB. The harness refuses a test process
+      # carrying any undeclared GIT_* / AGENT_* name, and a runner exports some
+      # (AGENT_TOOLSDIRECTORY refused 697 of 770 tests). `ts_scrubbed` is the
+      # function the pre-push gate's vitest stage uses, so the two execution modes
+      # cannot diverge again by one of them growing its own list. Sourced from the
+      # repository root, which is why this step has no working-directory.
+      # tests/ts-bridge #3 executes this block to prove it.
       - name: Blueprint TypeScript regression suites
         if: hashFiles('tests/package.json') != ''
-        working-directory: tests
-        run: npx vitest run
+        run: |
+          . scripts/run-ts-suites.sh
+          cd tests
+          ts_scrubbed npx vitest run
       # An absence has to say so. Without this the derived project sees a green
       # job with three skipped steps and no reason, which reads identically to a
       # suite that ran and passed.

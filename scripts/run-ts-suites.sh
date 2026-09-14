@@ -69,6 +69,33 @@ ts_declared_suites(){
   fi
 }
 
+# ts_scrubbed CMD... — run CMD in a subshell with the population the TypeScript
+# harness refuses removed: every GIT_*, AGENT_* and BP_* name, and BLUEPRINT_ROOT.
+#
+# BUG-117 — THIS IS THE ONE SCRUB, and both execution modes go through it: the
+# gate's stage below, and the ts-tests step in .github/workflows/security.yml,
+# which sources this file. That step used to run `npx vitest run` directly, so it
+# inherited the runner's environment — GitHub-hosted runners export
+# AGENT_TOOLSDIRECTORY — and the harness refused 697 of 770 tests on CI while the
+# gate stayed green. A second copy of the unset population in the workflow would
+# have been a second scrub to drift; tests/ts-bridge #3 executes the workflow's
+# own step to prove it reaches this one.
+#
+# By PREFIX rather than by list, for the reason the stage's comment gives: the
+# harness forbids every undeclared GIT_* / AGENT_* name (isForbiddenAmbient), and
+# restating that here would be a copy that drifts. BLUEPRINT_ROOT is the one
+# declared hazard outside the prefixes; tests/ts-bridge #1c imports
+# UNPREFIXED_FORBIDDEN to pin that the two agree.
+ts_scrubbed(){
+  (
+    for _v in $(env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\1/p'); do
+      unset "$_v"
+    done
+    unset BLUEPRINT_ROOT
+    exec "$@"
+  )
+}
+
 # ts_suites_stage [ROOT] — the whole thing.
 ts_suites_stage(){
   _ts_root="${1:-$(pwd)}"
@@ -178,16 +205,13 @@ ts_suites_stage(){
     # BP_CODE_ROOT, so without it every spec's fixture children inherit the real
     # checkout's roots and a `${BP_CODE_ROOT:-.}` default silently reads the
     # real tree. Same argument the block above makes about GIT_ and AGENT_.
-    for _v in $(env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\1/p'); do
-      unset "$_v"
-    done
-    unset BLUEPRINT_ROOT
+    # The scrub itself is ts_scrubbed, above — shared with CI (BUG-117).
     # TWO reporters, deliberately. `json` feeds pipe_stage_report below;
     # `default` is the only thing that tells a human WHICH assertion failed.
     # With json alone the captured output is a path to a file this function
     # deletes seconds later — BUG-055 fixed the silence and left the
     # uselessness, which cost three ~200s re-runs to notice.
-    npx vitest run --reporter=default --reporter=json --outputFile="$_ts_json"
+    ts_scrubbed npx vitest run --reporter=default --reporter=json --outputFile="$_ts_json"
   ) >"$_ts_out" 2>&1
   then
     _ts_rc=0

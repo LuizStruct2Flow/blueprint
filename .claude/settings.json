@@ -162,9 +162,6 @@
       "Bash(sh .githooks/pre-push*)",
       "Write(//Users/**/**)",
       "Write(/home/**/**)",
-      "Read(../../agent-exchange/**)",
-      "Edit(../../agent-exchange/**)",
-      "Write(../../agent-exchange/**)",
       "Monitor",
       "Skill(update-config)",
       "Skill(update-config:*)",
@@ -212,7 +209,6 @@
       "Bash(git push *:*)"
     ],
     "additionalDirectories": [
-      "../../agent-exchange",
       "../blueprint"
     ]
   },

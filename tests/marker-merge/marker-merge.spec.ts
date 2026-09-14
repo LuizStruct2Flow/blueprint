@@ -363,3 +363,69 @@ describe('BUG-034 — markers out of order are refused, never merged', () => {
     })
   })
 })
+
+/** drift's per-file lines for one list marker. Colour is off with no tty. */
+function listed(output: string, mark: '~' | '+' | '!' | '✗'): string[] {
+  return output
+    .split('\n')
+    .filter((l) => l.trimStart().startsWith(mark + ' '))
+    .map((l) => l.trim().slice(mark.length + 1).split(' — ')[0].trim())
+}
+
+describe("BUG-113 — drift, pull's selection and pull's preview give ONE answer for a marker file", () => {
+  it('BUG-113 #7 drift does not report project-owned lines after the end marker', async () => {
+    await scenario('marker-merge-7', async (s) => {
+      const same = await pair(s, 'd', HOOK, region('echo managed'), region('echo managed', 'echo PROJECT-FOOTER\n'))
+      const clean = await s.run(CLI, ['drift'], { cwd: same.proj })
+      expect(clean.code, clean.output).toBe(0)
+      expect(listed(clean.output, '~'), clean.output).not.toContain(HOOK)
+
+      // NON-VACUITY: the same file with a changed REGION is still reported, so
+      // the case above is drift judging the file, not drift skipping it.
+      const moved = await pair(s, 'e', HOOK, region('echo managed-v2'), region('echo managed-v1', 'echo PROJECT-FOOTER\n'))
+      const drifted = await s.run(CLI, ['drift'], { cwd: moved.proj })
+      expect(listed(drifted.output, '~'), drifted.output).toContain(HOOK)
+    })
+  })
+
+  it('BUG-113 #8 a pull whose only difference is project-owned selects nothing', async () => {
+    await scenario('marker-merge-8', async (s) => {
+      const text = region('echo managed', 'echo PROJECT-FOOTER\n')
+      const { proj } = await pair(s, 'n', HOOK, region('echo managed'), text)
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.output).toContain('Nothing to pull')
+      expect(await readFile(join(proj, HOOK), 'utf8')).toBe(text)
+    })
+  })
+
+  it('BUG-113 #9 the preview shows the region change and never the project footer as deleted', async () => {
+    await scenario('marker-merge-9', async (s) => {
+      const { proj } = await pair(s, 'v', HOOK, region('echo managed-v2'), region('echo managed-v1', 'echo PROJECT-FOOTER\n'))
+
+      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.output).toContain('+echo managed-v2')
+      // The defect previewed the footer as removed while the merge kept it — a
+      // preview of damage that does not happen trains people to ignore previews.
+      expect(r.output).not.toContain('-echo PROJECT-FOOTER')
+      expect(await readFile(join(proj, HOOK), 'utf8')).toBe(region('echo managed-v2', 'echo PROJECT-FOOTER\n'))
+    })
+  })
+
+  it('BUG-113 #10 drift names a file pull would refuse — it is neither clean nor merely drifted', async () => {
+    await scenario('marker-merge-10', async (s) => {
+      const inverted = '#!/bin/sh\n# BLUEPRINT:END\necho FOOTER\n# BLUEPRINT:BEGIN\necho stale\n'
+      const { proj } = await pair(s, 'r', HOOK, region('echo managed'), inverted)
+
+      const r = await s.run(CLI, ['drift'], { cwd: proj })
+
+      expect(r.output).not.toContain('All blueprint-managed files match')
+      expect(listed(r.output, '✗'), r.output).toContain(HOOK)
+      expect(listed(r.output, '~'), r.output).not.toContain(HOOK)
+    })
+  })
+})

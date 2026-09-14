@@ -98,9 +98,14 @@ projects read `released` through a NEW optional field `blueprint_release_branch`
 release job in the shipped `security.yml` names `LuizStruct2Flow/blueprint`; migration
 is 9 steps and no project switches before the first green run creates `released`.
 Implementation order: (1) reproducer + harness scrubs, (2) drift/pull by address,
-(3) `released` job + field + bootstrap, (4) installer writes the command. **The parts
-new in revision 4 (release job, field, installer command) get a Codex review before
-commit 3**; commits 1–2 do not wait for it.
+(3) `released` job + field + bootstrap, (4) installer writes the command. **Review of the
+revision-4 additions (Alexey, 2026-09-14): revise again** →
+`.scratch/ALEXEY-plan025-rev4-review.md` — installer ownership is forgeable by a marker
+line; migration step 8 deletes the working command before installing; rollback cannot
+reach projects already on `released`; the release job's cases never run it. Philipp is
+writing revision 5 for commits 3–4, migration and rollback only. **Commits 1–2 are
+unaffected and Christian is building them now.** Commit 3 does not start before
+revision 5 is reviewed.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

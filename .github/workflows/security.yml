@@ -253,4 +253,13 @@ jobs:
       # suite that ran and passed.
       - name: No TypeScript harness in this project
         if: hashFiles('tests/package.json') == ''
-        run: echo "::notice::No tests/package.json in this checkout, so the TypeScript suites did not run. Since TASK-018 phase 2 the harness ships to every project, so this is unexpected — either the harness was removed deliberately, or this checkout predates the toolchain shipping. Restore it with: blueprint pull tests/"
+        # A BLOCK SCALAR, AND IT IS LOAD-BEARING. As a plain `run: echo "…"`
+        # scalar this line contains ": " — in `Restore it with: blueprint pull
+        # tests/` — which YAML reads as a nested mapping inside a compact one.
+        # The file then does not parse AT ALL, so GitHub loads no jobs and the
+        # whole security pipeline is absent rather than red. Arrived verbatim
+        # from the blueprint; both PyYAML and prettier reject it. Upstream
+        # defect, a2bp candidate — and a managed file, so the next pull brings
+        # the broken form back.
+        run: |
+          echo "::notice::No tests/package.json in this checkout, so the TypeScript suites did not run. Since TASK-018 phase 2 the harness ships to every project, so this is unexpected — either the harness was removed deliberately, or this checkout predates the toolchain shipping. Restore it with: blueprint pull tests/"

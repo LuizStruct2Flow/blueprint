@@ -71,10 +71,13 @@ specification; two changes differ from what the PR says — the missing managed
 scripts hurt *existing* projects that `pull`, not fresh bootstraps, and `drift`'s
 managed-region comparison must be ONE helper shared with `pull`'s selection and
 preview, refusing inverted markers. Close the PR with a comment linking the commits.
-Committed locally, not yet pushed (2026-09-14): BUG-114 (the three managed scripts),
-BUG-112 (a marker is a whole line), BUG-034's reproducer. Still to do: BUG-034's fix,
-the skip-reason hint, the shared drift/pull region helper, the annotation, the
-settings move. Check `git log` before redoing any of it.
+**Five of six pushed 2026-09-14** (BUG-114, BUG-112, BUG-034, BUG-113, the skip hint,
+the annotation). **Only (6) remains, and it is blocked on the founder:** removing the
+`agent-exchange` entries from `.claude/settings.json` is refused to agents as
+self-modification, twice. The `settings.local.json` half is already in place (untracked).
+Once the founder edits `settings.json`, commit it as `TASK#26:`, put its SHA into
+`.scratch/t026/pr66-close-comment.md`, and close PR #66 with that comment. The shared
+comparison is `bp_prospective_pull` / `bp_prospective_for` in `scripts/blueprint`.
 
 **Then: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)
@@ -89,7 +92,8 @@ unrevised:
   - its `BLUEPRINT_ROOT` scrub fix does not reach the real scrub boundary;
   - its test list misses branch-missing, interrupts at every stage, concurrency
     and cache corruption.
-Revise the plan, then build. It also waits for TASK-026's shared comparison.
+Revise the plan, then build. **Christian is revising it now (2026-09-14)** against the
+landed shared comparison.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 A assumes) or "matches the version this project pinned" (which would favour the
 package option)?

@@ -310,6 +310,33 @@ die() {
 #     BEGIN/END) → fall back to whole-file copy with `.bp-bak` and a
 #     warning.
 
+# --- BUG-112: a marker is a LINE, not a substring anywhere in the file --------
+#
+# Detection used to be `grep 'BLUEPRINT:BEGIN'`, which matches prose and code as
+# readily as a marker. CLAUDE.md mentioned the tokens in a sentence, and this
+# very file greps for them, so both were classified marker-bearing and every pull
+# of them took the whole-file fallback with a `.bp-bak`. On the day such a file's
+# counts happened to balance, the awk below would have "merged" it — for this
+# CLI, into itself. Rewording the prose fixes one file; the next sentence that
+# names a marker is the same trap, so the RULE is what changes.
+#
+# A marker line is: optional indent, a comment leader (`#`, `//`, `<!--`), the
+# token, and then end of line, a closing `-->`, or whitespace followed by
+# punctuation. The last arm is load-bearing: the shipped hook's marker is
+# `# BLUEPRINT:BEGIN — blueprint-managed. …`, and every derived project carries
+# that exact line, so a rule that stopped matching it would turn their merge into
+# a whole-file copy. What no longer matches: a backticked mention in prose, a
+# `grep` for the token, and a comment sentence that begins with the word
+# (`# BLUEPRINT:END is the project's.`).
+#
+# ONE definition. The classification in pull_file and the region tracking in the
+# awk read the same two expressions; a merge that recognised a line the
+# classifier did not (or the reverse) is how regions get misaligned.
+BP_MARKER_LEAD='^[[:space:]]*(#|//|<!--)[[:space:]]*BLUEPRINT:'
+BP_MARKER_TAIL='([[:space:]]*$|[[:space:]]*-->|[[:space:]]+[^[:alnum:][:space:]_])'
+BP_MARKER_BEGIN_ERE="${BP_MARKER_LEAD}BEGIN${BP_MARKER_TAIL}"
+BP_MARKER_END_ERE="${BP_MARKER_LEAD}END${BP_MARKER_TAIL}"
+
 # marker_aware_merge BP_FILE PROJ_FILE OUT_FILE
 # Returns 0 on success, 1 on structural mismatch.
 marker_aware_merge() {
@@ -318,10 +345,10 @@ marker_aware_merge() {
   local out_file="$3"
 
   local bp_begin proj_begin bp_end proj_end
-  bp_begin=$(grep -c 'BLUEPRINT:BEGIN' "$bp_file" 2>/dev/null || true)
-  bp_end=$(grep -c 'BLUEPRINT:END' "$bp_file" 2>/dev/null || true)
-  proj_begin=$(grep -c 'BLUEPRINT:BEGIN' "$proj_file" 2>/dev/null || true)
-  proj_end=$(grep -c 'BLUEPRINT:END' "$proj_file" 2>/dev/null || true)
+  bp_begin=$(grep -cE "$BP_MARKER_BEGIN_ERE" "$bp_file" 2>/dev/null || true)
+  bp_end=$(grep -cE "$BP_MARKER_END_ERE" "$bp_file" 2>/dev/null || true)
+  proj_begin=$(grep -cE "$BP_MARKER_BEGIN_ERE" "$proj_file" 2>/dev/null || true)
+  proj_end=$(grep -cE "$BP_MARKER_END_ERE" "$proj_file" 2>/dev/null || true)
 
   [ -z "$bp_begin" ] && bp_begin=0
   [ -z "$bp_end" ] && bp_end=0
@@ -332,18 +359,18 @@ marker_aware_merge() {
     return 1
   fi
 
-  awk -v bp_file="$bp_file" '
+  awk -v bp_file="$bp_file" -v rb="$BP_MARKER_BEGIN_ERE" -v re="$BP_MARKER_END_ERE" '
     function read_bp_inside_regions(   line, region_idx, capture) {
       region_idx = 0
       capture = 0
       while ((getline line < bp_file) > 0) {
-        if (line ~ /BLUEPRINT:BEGIN/) {
+        if (line ~ rb) {
           capture = 1
           region_idx++
           bp_inside[region_idx] = ""
           continue
         }
-        if (line ~ /BLUEPRINT:END/) {
+        if (line ~ re) {
           capture = 0
           continue
         }
@@ -355,14 +382,14 @@ marker_aware_merge() {
       bp_n_regions = region_idx
     }
     BEGIN { read_bp_inside_regions() ; cur_region = 0 ; in_inside = 0 }
-    /BLUEPRINT:BEGIN/ {
+    $0 ~ rb {
       print
       cur_region++
       printf "%s", bp_inside[cur_region]
       in_inside = 1
       next
     }
-    /BLUEPRINT:END/ {
+    $0 ~ re {
       print
       in_inside = 0
       next
@@ -521,8 +548,9 @@ pull_file() {
   fi
 
   local bp_has=0 proj_has=0
-  grep -q 'BLUEPRINT:BEGIN' "$bp" 2>/dev/null && bp_has=1
-  grep -q 'BLUEPRINT:BEGIN' "$f"  2>/dev/null && proj_has=1
+  # BUG-112: the marker LINE rule, not a substring — see BP_MARKER_BEGIN_ERE.
+  grep -qE "$BP_MARKER_BEGIN_ERE" "$bp" 2>/dev/null && bp_has=1
+  grep -qE "$BP_MARKER_BEGIN_ERE" "$f"  2>/dev/null && proj_has=1
 
   if [ "$bp_has" -eq 1 ] && [ "$proj_has" -eq 1 ]; then
     local tmp

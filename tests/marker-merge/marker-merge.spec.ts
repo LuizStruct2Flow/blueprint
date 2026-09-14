@@ -290,3 +290,47 @@ describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file',
     })
   })
 })
+
+const HOOK = '.githooks/pre-push-project'
+
+/**
+ * A marker file in the exact shape the blueprint SHIPS: the BEGIN line carries
+ * trailing text after an em dash. The shipped form rather than a bare
+ * `# BLUEPRINT:BEGIN`, deliberately — a marker rule tightened past it would stop
+ * recognising every derived project's real hook, and only a fixture in this
+ * shape can see that.
+ */
+const region = (body: string, tail = '') =>
+  `#!/bin/sh\n# BLUEPRINT:BEGIN — blueprint-managed. Put YOUR guards below the end marker.\n${body}\n# BLUEPRINT:END\n${tail}`
+
+describe('BUG-034 — markers out of order are refused, never merged', () => {
+  it('BUG-034 #5 inverted project markers: pull refuses, writes nothing, and exits non-zero', async () => {
+    await scenario('marker-merge-5', async (s) => {
+      const inverted = '#!/bin/sh\n# BLUEPRINT:END\necho FOOTER-TO-KEEP\n# BLUEPRINT:BEGIN\necho stale\n'
+      const { proj } = await pair(s, 'i', HOOK, region('echo managed-v2'), inverted)
+
+      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+
+      // The defect printed "project outside-marker content preserved" and exited
+      // 0 over a file it had rearranged. A refusal must be visible to a script.
+      expect(r.code, r.output).not.toBe(0)
+      expect(r.output).toMatch(/refuse/)
+      expect(r.output).not.toMatch(/preserved/)
+      expect(await readFile(join(proj, HOOK), 'utf8')).toBe(inverted)
+      expect(await s.fs.exists(join(proj, `${HOOK}.bp-bak`)), r.output).toBe(false)
+    })
+  })
+
+  it('BUG-034 #6 a BEGIN with no END is refused too, not copied over the project', async () => {
+    await scenario('marker-merge-6', async (s) => {
+      const unbalanced = '#!/bin/sh\n# BLUEPRINT:BEGIN\necho stale\necho PROJECT-GUARD\n'
+      const { proj } = await pair(s, 'u', HOOK, region('echo managed-v2'), unbalanced)
+
+      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+
+      expect(r.code, r.output).not.toBe(0)
+      expect(r.output).toMatch(/refuse/)
+      expect(await readFile(join(proj, HOOK), 'utf8')).toBe(unbalanced)
+    })
+  })
+})

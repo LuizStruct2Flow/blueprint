@@ -16,7 +16,42 @@
 
 import { mkdtemp, rm, mkdir, realpath, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+
+/** What scripts/lib/state-dir.sh `bp_state_root` treats as a project root. */
+const PROJECT_MARKERS = ['.git', '.blueprint-root', '.blueprint-source'] as const
+
+/**
+ * Abort if `base` or any ancestor carries a project marker.
+ *
+ * Every workspace is created under `base`, and `bp_state_root` walks UP. A
+ * marker up there — an empty `.git` in the system temp dir was measured doing
+ * this — is where a markerless fixture resolves. The harness bounds that walk
+ * with BP_STATE_ROOT_CEILING, but git discovery and anything else that climbs
+ * would still escape, and the first symptom was an inverted safety assertion
+ * reporting `expected +0 not to be +0`. So the cause is the failure.
+ */
+async function refuseProjectMarkerAbove(base: string): Promise<void> {
+  for (let dir = base; ; dir = dirname(dir)) {
+    for (const marker of PROJECT_MARKERS) {
+      const found = join(dir, marker)
+      const exists = await stat(found).then(
+        () => true,
+        () => false,
+      )
+      if (exists) {
+        throw new Error(
+          `Project marker above every scenario workspace: ${found}. Fixtures ` +
+            `are created under ${base}, and bp_state_root walks UP for this ` +
+            `marker, so a tree that should resolve nothing would resolve ` +
+            `${dir} — and an assertion that it fails loudly inverts instead. ` +
+            `Remove the stray marker, or point TMPDIR outside any project.`,
+        )
+      }
+    }
+    if (dirname(dir) === dir) return
+  }
+}
 
 export interface Workspace {
   /** Physical (symlink-resolved) absolute path to this scenario's root. */
@@ -44,6 +79,7 @@ export async function createWorkspace(label = 'bp'): Promise<Workspace> {
   // still work, but resolving first means every derived path is physical by
   // construction rather than by remembering to convert.
   const base = await realpath(tmpdir())
+  await refuseProjectMarkerAbove(base)
   const root = await mkdtemp(join(base, `${safeLabel}-`))
 
   let disposed = false

@@ -105,8 +105,8 @@ export function startWatcher(
   options: { cwd?: string; env?: Record<string, string | undefined> } = {},
 ): Watcher {
   const child: ChildProcess = s.background(command, args, {
+    ...options,
     cwd: options.cwd ?? s.workspace.root,
-    env: options.env,
   })
 
   let output = ''

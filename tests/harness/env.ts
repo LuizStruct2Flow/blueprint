@@ -127,6 +127,10 @@ const ENV_KIND = {
   // inherited into a fixture that was never told about it.
   BP_CODE_ROOT: 'path',
   BP_STATE_ROOT: 'path',
+  // The ceiling on bp_state_root's upward walk. scenarioEnv sets it to the
+  // workspace root; 'path' so an ambient value is scrubbed and an override
+  // cannot move the ceiling outside the workspace.
+  BP_STATE_ROOT_CEILING: 'path',
   // blueprint coordination state (BUG-046 / BUG-030)
   AGENT_SIGNAL_FILE: 'path',
   AGENT_STATE_HOME: 'path',

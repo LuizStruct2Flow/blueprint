@@ -128,6 +128,11 @@ function scenarioEnv(s: {
     // workspace, or it contributes to the $TMPDIR debris that a2bp-e2e:309
     // scans and that BUG-049 measured at 133 MB.
     TMPDIR: join(s.workspaceRoot, 'tmp'),
+    // The upward walk in scripts/lib/state-dir.sh stops at the workspace. A
+    // project marker above it — a stray empty .git in the system temp dir, once
+    // — otherwise becomes the "project root" of every markerless fixture.
+    // workspace.ts also refuses to create a workspace under such a marker.
+    BP_STATE_ROOT_CEILING: s.workspaceRoot,
     AGENT_STATE_HOME: s.stateHome,
     AGENT_SIGNAL_FILE: s.signalFile,
     AGENT_FEED_LOG: s.feedLog,
@@ -245,8 +250,8 @@ export async function scenario(
 
     runScript(relPath, args = [], options = {}) {
       return registry.run('bash', [join(REPO_ROOT, relPath), ...args], {
+        ...options,
         cwd: options.cwd ?? workspace.root,
-        timeoutMs: options.timeoutMs,
         env: { ...baseEnv, ...(options.env ?? {}) },
       })
     },

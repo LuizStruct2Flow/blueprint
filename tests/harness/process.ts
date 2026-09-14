@@ -184,6 +184,13 @@ export class ProcessRegistry {
       })
 
       if (timedOut) {
+        // `close` means the LEADER is reaped and the pipes are shut — not that
+        // the group is gone. A killed `sh -c 'sleep …'` leaves `sleep` orphaned
+        // until init reaps it, and returning inside that window hands teardown a
+        // "survivor" this timeout already killed. Wait on the same fact
+        // `disposeAll` decides survivors by. Past the bound it stays registered,
+        // so teardown still reports it.
+        if (child.pid !== undefined) await waitGroupGone(child.pid, KILL_GRACE_MS)
         throw new Error(
           `Timed out after ${timeoutMs}ms: ${command} ${args.join(' ')}\n` +
             `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`,

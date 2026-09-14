@@ -72,7 +72,13 @@ async function runHook(
   s: Scenario,
   name: string,
   layout: Layout,
-): Promise<{ code: number | null; output: string; found: string; codeRoot: string }> {
+): Promise<{
+  code: number | null
+  output: string
+  found: string
+  codeRoot: string
+  childRoot: string
+}> {
   const root = await s.workspace.dir(name)
 
   // The file UNDER TEST is the working tree's, not HEAD's: a spec that read

@@ -41,6 +41,8 @@
  *      → #C1 goes red: a stale call site resolves instead of failing.
  *   4. Drop `|| exit 9` from any consumer's init line.
  *      → #E goes red: that consumer derives an artefact path at `/`.
+ *   5. Drop the `BP_STATE_ROOT_CEILING` comparison from `bp_state_root`.
+ *      → #A7 goes red: the walk climbs past the ceiling into a marker above it.
  *
  * DISSOLVED CASE — `#F no fixture constructor builds a project-shaped tree
  * without one` (removed 2026-09-11, TASK-018). Its mutation recipe was "remove
@@ -159,6 +161,29 @@ describe('TASK-021 #A — the state root terminates at the enclosing project roo
       expect(r.stderr).toContain('cannot locate the project root')
       // and it names what it searched, so the fix is obvious from the message
       expect(r.stderr).toContain(deep)
+    })
+  })
+
+  it('#A7 a marker ABOVE the ceiling is never reached — a stray one cannot invert #A6', async () => {
+    // #A6 once failed deterministically because an empty `.git` appeared in the
+    // system temp dir, one level above every workspace: the walk climbed out,
+    // resolved it, and exited 0. The harness now hands every child its workspace
+    // root as BP_STATE_ROOT_CEILING; here the ceiling sits one level below a
+    // planted marker, so the escape is provable without touching the real $TMPDIR.
+    await scenario('state-root-a7', async (s) => {
+      await s.fs.mkdirp('outer')
+      await s.fs.write('outer/.git', '')
+      const ceiling = await s.fs.mkdirp('outer/ws')
+      const deep = await s.fs.mkdirp('outer/ws/bare/a/b')
+      const r = await sh(
+        s,
+        `BP_STATE_ROOT_CEILING="${ceiling}"; BP_CODE_ROOT="${deep}"; bp_state_root`,
+        deep,
+      )
+      expect(r.stdout.trim()).toBe('')
+      expect(r.code).not.toBe(0)
+      expect(r.stderr).toContain('cannot locate the project root')
+      expect(r.stderr).toContain(ceiling)
     })
   })
 })

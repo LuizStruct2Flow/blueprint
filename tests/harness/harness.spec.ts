@@ -787,6 +787,39 @@ describe('harness — workspace teardown (BUG-049)', () => {
   })
 })
 
+describe('harness — a project marker above the workspace (stray $TMPDIR/.git)', () => {
+  it('every child is handed its workspace root as the state-root ceiling', async () => {
+    // bp_state_root walks UP. Without a ceiling, a marker anywhere above the
+    // workspace is where a markerless fixture resolves — so the boundary has to
+    // come from where the path comes from, not from each fixture remembering it.
+    await scenario('state-root-ceiling', async (s) => {
+      const r = await s.run('sh', ['-c', 'printf %s "$BP_STATE_ROOT_CEILING"'], {
+        cwd: s.workspace.root,
+      })
+      expect(r.stdout).toBe(s.workspace.root)
+    })
+  })
+
+  it('a marker in or above $TMPDIR ABORTS workspace creation, naming the path', async () => {
+    // The incident: an empty .git in the system temp dir made state-root #A6
+    // report `expected +0 not to be +0` — a message naming neither the temp dir
+    // nor the marker, so diagnosis started from innocent commits. The cause must
+    // be the failure, not an inverted assertion downstream of it.
+    await scenario('stray-marker', async (s) => {
+      const base = await s.fs.mkdirp('fake-tmp')
+      await s.fs.write('fake-tmp/.git', '')
+      const saved = process.env.TMPDIR
+      process.env.TMPDIR = base
+      try {
+        await expect(createWorkspace('stray')).rejects.toThrow(join(base, '.git'))
+      } finally {
+        if (saved === undefined) delete process.env.TMPDIR
+        else process.env.TMPDIR = saved
+      }
+    })
+  })
+})
+
 describe('harness — filesystem writes cannot escape (Andreas, Codex)', () => {
   it('BUG-058 REFUSES a write through an in-workspace symlink to the outside', async () => {
     await scenario('fs-escape-symlink', async (s) => {
@@ -921,6 +954,64 @@ describe('harness — process ownership', () => {
         await expect(r).rejects.toThrow(/Timed out/)
       }),
     ).resolves.toBeUndefined()
+  })
+
+  it('a timed-out run returns only once the group it killed is GONE, not merely signalled', async () => {
+    // The case above flaked once inside the full batch and never standalone.
+    // `sh -c 'sleep 30'` is two processes on dash: SIGKILL reaches both, Node
+    // reaps `sh`, but `sleep` is orphaned and waits for init to reap it. `run()`
+    // used to throw as soon as `sh` closed, so under load teardown sampled the
+    // group while that zombie was still in it and reported a "survivor" the
+    // harness had itself already killed.
+    //
+    // Init's reaping latency cannot be controlled, so this makes the window
+    // CERTAIN instead of likely: a helper forks the `sleep` into the run's
+    // group, leaves the group itself (so SIGKILL does not reach it), and reaps
+    // its child only 500 ms after it dies. Its stdio is /dev/null, so it cannot
+    // hold `close` back the way a pipe holder would.
+    await scenario('harness-slow-reap', async (s) => {
+      await s.fs.write(
+        'slow-reaper.pl',
+        [
+          'my $dead = 0',
+          '$SIG{CHLD} = sub { $dead = 1 }',
+          'my $pgid = getpgrp()',
+          'my $z = fork()',
+          'die "fork: $!" unless defined $z',
+          'if ($z == 0) { exec "sleep", "30" or die "exec: $!" }',
+          'setpgrp(0, 0) or die "setpgrp: $!"',
+          'open(my $fh, ">", "ready.tmp") or die',
+          'print $fh "$pgid\\n"',
+          'close $fh',
+          'rename "ready.tmp", "ready" or die',
+          'sleep 1 until $dead',
+          'select(undef, undef, undef, 0.5)',
+          'waitpid($z, 0)',
+          '',
+        ].join(';\n'),
+      )
+      await expect(
+        s.run(
+          'sh',
+          [
+            '-c',
+            'perl slow-reaper.pl </dev/null >/dev/null 2>&1 & ' +
+              'while [ ! -e ready ]; do sleep 0.01; done; exec sleep 30',
+          ],
+          { cwd: s.workspace.root, timeoutMs: 1_000 },
+        ),
+      ).rejects.toThrow(/Timed out/)
+
+      const pgid = Number((await s.fs.read('ready')).trim())
+      expect(pgid).toBeGreaterThan(1)
+      let code: string | undefined
+      try {
+        process.kill(-pgid, 0)
+      } catch (err) {
+        code = (err as NodeJS.ErrnoException).code
+      }
+      expect(code, `group ${pgid} still had a member when run() returned`).toBe('ESRCH')
+    })
   })
 
   it('a timed-out process does not survive', async () => {

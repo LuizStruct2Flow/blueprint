@@ -115,6 +115,21 @@
 # legitimately mean "the directory git handed me" — the pre-push hook and the
 # libs it sources — set it explicitly to `$(pwd)`, which is a claim about git's
 # hook contract rather than an accident of where someone was standing.
+#
+# BP_STATE_ROOT_CEILING — OPTIONAL, and the contract is exact:
+#   unset  the walk runs to `/`. Production never sets it; behaviour is unchanged.
+#   set    a PHYSICAL directory, no trailing slash, that the walk examines LAST.
+#          If no terminator is found at or below it, the walk fails loudly
+#          instead of climbing past it. (Unlike GIT_CEILING_DIRECTORIES, the
+#          ceiling itself IS examined.) A ceiling that is not an ancestor of
+#          BP_CODE_ROOT is never reached and so has no effect.
+#
+# It exists for the test harness, which sets it to every scenario's workspace
+# root. Without it a marker ABOVE the workspace — an empty `.git` that appeared
+# in the system temp dir, measured — is where a markerless fixture resolves, and
+# the case asserting "a markerless tree fails loudly" passes its precondition
+# and inverts. The bound falls out of where the fixture path comes from, rather
+# than being something each fixture must remember.
 bp_state_root() {
   if [ -z "${BP_CODE_ROOT:-}" ]; then
     echo "bp_state_root: BP_CODE_ROOT is unset. Set it from this script's own" >&2
@@ -126,8 +141,12 @@ bp_state_root() {
   while [ ! -f "$_bsr_d/.blueprint-root" ] &&
         [ ! -f "$_bsr_d/.blueprint-source" ] &&
         [ ! -e "$_bsr_d/.git" ]; do
-    if [ "$_bsr_d" = "/" ]; then
-      echo "FATAL: no .git, .blueprint-root or .blueprint-source at or above '$BP_CODE_ROOT' — cannot locate the project root" >&2
+    if [ "$_bsr_d" = "/" ] || [ "$_bsr_d" = "${BP_STATE_ROOT_CEILING:-}" ]; then
+      _bsr_c=""
+      if [ -n "${BP_STATE_ROOT_CEILING:-}" ]; then
+        _bsr_c=" up to the ceiling BP_STATE_ROOT_CEILING='$BP_STATE_ROOT_CEILING'"
+      fi
+      echo "FATAL: no .git, .blueprint-root or .blueprint-source at or above '$BP_CODE_ROOT'$_bsr_c — cannot locate the project root" >&2
       return 9
     fi
     _bsr_d="$(cd -P "$_bsr_d/.." 2>/dev/null && pwd)" || return 9

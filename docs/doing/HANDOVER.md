@@ -82,21 +82,18 @@ comparison is `bp_prospective_pull` / `bp_prospective_for` in `scripts/blueprint
 **Then: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)
 is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md`.
-**Reviewed by Alexey (Codex): build A with changes** —
-`.scratch/ALEXEY-plan025-review.md`. The plan as written must NOT be implemented
-unrevised:
-  - its signal trap cleans up but does not STOP a killed run — measured, a TERM
-    during `pull`'s write let the script write to the project and exit 0;
-  - it dropped the cache the backlog row asked for — reinstate a persistent cache,
-    refreshed every run, failing with exit 5 rather than answering from stale data;
-  - its `BLUEPRINT_ROOT` scrub fix does not reach the real scrub boundary;
-  - its test list misses branch-missing, interrupts at every stage, concurrency
-    and cache corruption.
-Revise the plan, then build. **Christian is revising it now (2026-09-14)** against the
-landed shared comparison.
+**First review (Alexey, Codex): build A with changes** —
+`.scratch/ALEXEY-plan025-review.md`. **Revised by Christian in `b4983f3`** (2026-09-14):
+six findings adopted with probes, one rejected with evidence; he also found SIGINT
+truncating a mid-write file, which today's `pull` shares. **Alexey is re-reviewing the
+revision now** → `.scratch/ALEXEY-plan025-rereview.md`. Do not build until that
+verdict says so, and do not push while his Codex run is live (BUG-110).
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
-A assumes) or "matches the version this project pinned" (which would favour the
-package option)?
+the plan is written for) or "matches the version this project recorded"? Also: adopt a
+`released` branch; retire `blueprint_source` by warning or by date; should the
+toolchain installer write the per-machine `blueprint` command.
+**BUG-116 (parked) waits on this task:** `a2bp` has the same non-stopping trap and
+pushes after it — adopt TASK-025's handler, reproducer first.
 
 **Live now, and a reason to push promptly:** unpushed commits in this checkout show
 up in every derived project's `drift` as "commits since last sync", so a `pull`
@@ -146,9 +143,10 @@ hangs off that root.
 
 - **CI did not run from 2026-09-10 21:06 UTC to 2026-09-14 (BUG-115).** An unquoted
   colon in a `run:` line (from `44bcdf7`) made `security.yml` invalid YAML, so every run
-  had zero jobs while every push printed green. Fixed in `d27e1db`; `tests/manifest`
-  #5b now parses every workflow. **Four days of changes have never run on a GitHub
-  runner** — the first run after the fix may fail on real checks. Watch it.
+  had zero jobs while every push printed green. Fixed in `d27e1db`, pushed as
+  `b76702d`; the run on that head started jobs again. `tests/manifest` #5b now parses
+  every workflow. **Check that run's conclusion** — four days of changes had never run
+  on a GitHub runner, and a red there is a real failure, not the parse error.
 
 - **Do not push while a Codex review is running (BUG-110).** An empty
   `/tmp/.git` appeared during one and vanished again on its own. While it exists,

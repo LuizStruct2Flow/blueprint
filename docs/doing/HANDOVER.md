@@ -150,6 +150,14 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **Do not change this checkout's git config while a push gate runs.** The harness
+  canary snapshots the real `.git/config` (plus the baton, its journal and the feed) and
+  fails any scenario that sees it change. `git branch -D` on a branch with an upstream
+  deletes its `[branch]` section, so it rewrites the file: on 2026-09-14 that turned
+  `bootstrap-gate` #2/#3 red mid-push with nothing wrong in the change. Same for
+  `git config`, `git remote`, `git branch --set-upstream-to`. Commits and `gh api` calls
+  are safe; do branch clean-ups between pushes.
+
 
 - **Do not push while a Codex review is running (BUG-110).** An empty
   `/tmp/.git` appeared during one and vanished again on its own. While it exists,

@@ -985,6 +985,45 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
+  it('#23c group INT and TERM while the executable bit is set: the pulled file ends with the blueprint\'s mode', async () => {
+    await scenario('sync-by-address-23c', async (s) => {
+      // BUG-008 makes the executable bit part of what a pull lands, so the bit
+      // must be written under the same shield as the bytes. It used to be set by
+      // a `chmod` AFTER the shielded write, where a group signal killed it and
+      // left the completed file at its old mode (Alexey, S1). The `chmod` shim
+      // blocks on this file only, so the signal lands exactly there.
+      const tool = 'scripts/signal-set.sh'
+      const bytes = '#!/bin/sh\necho v2\n'
+      const remote = await blueprintRemote(s, 'published')
+      await s.fs.write(join(remote.dir, tool), bytes, { mode: 0o755 })
+      const head = await commitAll(s, remote.dir, 'an executable managed file')
+
+      for (const sig of SIGNALS) {
+        const tag = sig.toLowerCase()
+        const blocker = await seam(s, `chmod-${tag}`, 'chmod', `[ "$1" = +x ] && [ "$2" = ${tool} ]`)
+        const proj = await project(s, remote.dir, head, 'published', { tag })
+        await s.fs.write(join(proj, tool), '#!/bin/sh\necho v1\n', { mode: 0o644 })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const config = await readFile(join(proj, '.blueprint-source'), 'utf8')
+
+        const { child, done } = start(s, cli, proj, ['pull', '--yes'], { PATH: blocker.path })
+        await reached(blocker)
+        process.kill(-(child.pid ?? 0), sig)
+        release(blocker)
+        const d = await done
+
+        expect(diedOf(d, sig), `group ${sig} did not end the run\n${show(d)}`).toBe(true)
+        expect(await readFile(join(proj, tool), 'utf8'), `group ${sig}: bytes`).toBe(bytes)
+        const { mode } = await stat(join(proj, tool))
+        expect(
+          (mode & 0o111) !== 0,
+          `group ${sig}: the pulled file kept its old mode ${(mode & 0o777).toString(8)}`,
+        ).toBe(true)
+        expect(await readFile(join(proj, '.blueprint-source'), 'utf8'), `group ${sig}: a later write ran`).toBe(config)
+      }
+    })
+  })
+
   it('#24 concurrent runs share one cache, and each answers from its OWN tip', async () => {
     await scenario('sync-by-address-24', async (s) => {
       const remote = await blueprintRemote(s, 'v0')

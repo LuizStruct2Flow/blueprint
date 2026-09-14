@@ -74,10 +74,21 @@ preview, refusing inverted markers. Close the PR with a comment linking the comm
 
 **Then: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)
-is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md` — a throwaway
-clone per run, no cache, exit 5 and nothing compared when the remote is
-unreachable. Under Codex review before any code. It builds on TASK-026's shared
-comparison, so it waits for it.
+is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md`.
+**Reviewed by Alexey (Codex): build A with changes** —
+`.scratch/ALEXEY-plan025-review.md`. The plan as written must NOT be implemented
+unrevised:
+  - its signal trap cleans up but does not STOP a killed run — measured, a TERM
+    during `pull`'s write let the script write to the project and exit 0;
+  - it dropped the cache the backlog row asked for — reinstate a persistent cache,
+    refreshed every run, failing with exit 5 rather than answering from stale data;
+  - its `BLUEPRINT_ROOT` scrub fix does not reach the real scrub boundary;
+  - its test list misses branch-missing, interrupts at every stage, concurrency
+    and cache corruption.
+Revise the plan, then build. It also waits for TASK-026's shared comparison.
+**Open for the founder:** does `drift` mean "matches the latest blueprint" (what
+A assumes) or "matches the version this project pinned" (which would favour the
+package option)?
 
 **Live now, and a reason to push promptly:** unpushed commits in this checkout show
 up in every derived project's `drift` as "commits since last sync", so a `pull`

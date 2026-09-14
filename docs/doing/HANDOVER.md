@@ -62,7 +62,23 @@ bash scripts/session-resume.sh
 
 ---
 
-## 2. NEXT: TASK-021 STAGE B — the `scaffolding/` + `forge/` move
+## 2. IN FLIGHT, IN ORDER
+
+**First: TASK-025 — `drift` and `pull` read the blueprint by its repository
+address**, not by a folder on disk (founder decision 2026-09-14). Every project
+already records `blueprint_remote`; only `a2bp` used it. This goes **before**
+Stage B because it removes the wrapper hazard below instead of working around it.
+Plan-first: `docs/doing/PLAN-TASK-025.md` is being written, then goes to Codex
+review before any code.
+
+**In parallel: PR #66**, an `a2bp` request from struct2flow-www, four independent
+changes bundled — three scripts missing from `MANAGED_FILES`, marker tokens in
+`CLAUDE.md` prose that `pull` matches as a substring, a gate skip-reason hint,
+and `drift` comparing marker files on managed regions only. Under Codex review.
+Its `drift` change touches the same function TASK-025 does. **It is a request:
+the founder decides**, per change.
+
+**Then: TASK-021 Stage B** — the `scaffolding/` + `forge/` move.
 
 TASK-018 (the TypeScript test migration) is **finished and accepted**. 35 shell
 suites were retired; **one survives on purpose**: `tests/ts-bridge/test.sh`, the

@@ -275,6 +275,19 @@ independent checking in one session. Re-measure a number before repeating it.
   `/tmp/.git` BUG-110 — re-implement on main under a new number, reproducer first; the
   settings edit itself must be the founder's (agents are refused). Then close #64 and
   delete `bug/110-approval-result-ask` (remote and local).
+- **Jesko's recommendations on #67–#70 (Codex, 2026-09-14)** →
+  `.scratch/JESKO-pr67-70-review.md` — **awaiting the founder's decision**; none blocks
+  TASK-025 commit 3:
+  - **#67** accept with changes, folded into TASK-025 commit 4 (reproduced: `install-toolchain
+    check` accepts Node 20.0 against `^20.19.0 || >=22.12.0`; fix the custom semver's `^0.x`
+    and record observed mutant red sets).
+  - **#68** accept with changes: port onto the current H5 harness, reproducer-first for the
+    marker-above-workspace inversion, the timeout returning before its group is gone, and
+    the option-loss/`childRoot` type mismatch; the workspace preflight makes the harness
+    refuse to run while `/tmp/.git` exists — document that.
+  - **#69** implement differently: U1 already done by TASK-026; carry U7's two behavioural
+    assertions into TASK-025 commit 4 instead of porting the symlink rewrite.
+  - **#70** accept as-is (applies cleanly; test-only).
 - **Five a2bp requests from linkedin-watcher-agent, filed 2026-09-14.** **#65
   (`security.yml`) is superseded:** after linkedin's TASK#7 pull its workflow is
   byte-identical to the blueprint's, which fixed the same parse defect as BUG-115 —

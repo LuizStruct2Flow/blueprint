@@ -71,6 +71,10 @@ specification; two changes differ from what the PR says — the missing managed
 scripts hurt *existing* projects that `pull`, not fresh bootstraps, and `drift`'s
 managed-region comparison must be ONE helper shared with `pull`'s selection and
 preview, refusing inverted markers. Close the PR with a comment linking the commits.
+Committed locally, not yet pushed (2026-09-14): BUG-114 (the three managed scripts),
+BUG-112 (a marker is a whole line), BUG-034's reproducer. Still to do: BUG-034's fix,
+the skip-reason hint, the shared drift/pull region helper, the annotation, the
+settings move. Check `git log` before redoing any of it.
 
 **Then: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)

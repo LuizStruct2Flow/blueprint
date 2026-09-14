@@ -260,6 +260,11 @@ independent checking in one session. Re-measure a number before repeating it.
   when its PR merges.** A closed-unmerged PR's branch is NOT auto-deleted — delete it by
   hand (`gh api -X DELETE repos/LuizStruct2Flow/blueprint/git/refs/heads/<branch>`, which
   triggers no pre-push hook). Leftover merged branches were removed the same day.
+- **Founder decisions 2026-09-14:** close #65 (done, superseded by BUG-115); send #67–#70
+  to Jesko (Codex) for a recommendation each → `.scratch/JESKO-pr67-70-review.md`; rebuild
+  #64 on main (brief `.scratch/brief-vitali-pr64-rebuild.md`) — **started only after the
+  TASK-025 push**, because its failing reproducer on HEAD would turn every push red until
+  the founder makes the settings edit.
 - **PR #64 (open since 2026-09-12) — a live security gap.** `.claude/settings.json` still
   auto-allows `aws codepipeline put-approval-result`, so an agent can approve a production
   deployment unprompted; the PR moves it to `ask`. Its `BUG#110` collides with the

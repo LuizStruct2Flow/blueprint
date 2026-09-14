@@ -203,7 +203,11 @@ hangs off that root.
   `scripts/run-ts-suites.sh`'s scrub — 697/770 refused in 11 s. The local gate is green and
   cannot see it. Christian fixes it reproducer-first (brief
   `.scratch/brief-christian-bug117-ci-env.md`): CI must run through the same scrub as the
-  gate, not name one runner variable. **Nothing else lands until CI is green again.**
+  gate, not name one runner variable. **Fixed locally 2026-09-15** — `2ce1f39` reproducer
+  (ts-bridge #3 executes every vitest step of `security.yml` with decoy `AGENT_`/`GIT_`/`BP_`
+  names), `3036646` fix (one `ts_scrubbed` function in `scripts/run-ts-suites.sh`, called by
+  the gate and sourced by the CI step). **Push, then confirm the CI run is green before
+  anything else lands.**
 
 - **Mutation runs rewrite the LIVE `scripts/blueprint`, and every project on this machine
   executes that file.** `~/.local/bin/blueprint` execs this checkout's CLI, so while a

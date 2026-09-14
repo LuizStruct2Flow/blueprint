@@ -921,6 +921,39 @@ describe('harness — workspace teardown (BUG-049)', () => {
   })
 })
 
+describe('harness — a project marker above the workspace (BUG-110)', () => {
+  it('BUG-110 every child is handed its workspace root as the state-root ceiling', async () => {
+    // bp_state_root walks UP. Without a ceiling, a marker anywhere above the
+    // workspace is where a markerless fixture resolves — so the boundary has to
+    // come from where the path comes from, not from each fixture remembering it.
+    await scenario('state-root-ceiling', async (s) => {
+      const r = await s.run('sh', ['-c', 'printf %s "$BP_STATE_ROOT_CEILING"'], {
+        cwd: s.workspace.root,
+      })
+      expect(r.stdout).toBe(s.workspace.root)
+    })
+  })
+
+  it('BUG-110 a marker in or above $TMPDIR ABORTS workspace creation, naming the path', async () => {
+    // The incident: an empty .git in the system temp dir made state-root #A6
+    // report `expected +0 not to be +0` — a message naming neither the temp dir
+    // nor the marker, so diagnosis started from innocent commits. The cause must
+    // be the failure, not an inverted assertion downstream of it.
+    await scenario('stray-marker', async (s) => {
+      const base = await s.fs.mkdirp('fake-tmp')
+      await s.fs.write('fake-tmp/.git', '')
+      const saved = process.env.TMPDIR
+      process.env.TMPDIR = base
+      try {
+        await expect(createWorkspace('stray')).rejects.toThrow(join(base, '.git'))
+      } finally {
+        if (saved === undefined) delete process.env.TMPDIR
+        else process.env.TMPDIR = saved
+      }
+    })
+  })
+})
+
 describe('harness — filesystem writes cannot escape (Andreas, Codex)', () => {
   it('BUG-058 REFUSES a write through an in-workspace symlink to the outside', async () => {
     await scenario('fs-escape-symlink', async (s) => {

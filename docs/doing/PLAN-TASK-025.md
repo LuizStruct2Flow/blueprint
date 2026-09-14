@@ -1,10 +1,14 @@
 # PLAN — TASK-025: `drift` and `pull` read the blueprint by its address
 
-**Status:** PLAN, **revision 4**. Alexey's re-review of revision 2 (Codex)
+**Status:** PLAN, **revision 5**. Alexey's re-review of revision 2 (Codex)
 returned *"build with these changes"*, and both technical changes are in (§R2).
 The founder decided the four open questions on 2026-09-14 (§R3), and revision 4
-writes them in. **Implementation is unblocked**, in the commit order of §10.
-Author: Christian (Senior Architect). Revisions 1–4 all 2026-09-14.
+writes them in. Alexey's review of revision 4's additions returned *"revise
+again"* with four findings, all on commits 3 and 4, the migration and the
+rollback; revision 5 answers them (§R4). **Commits 1 and 2 are unchanged by
+revision 5** and remain unblocked, in the commit order of §10.
+Author: Christian (Senior Architect), revisions 1–4; Philipp (Infrastructure),
+revision 5. All 2026-09-14.
 
 **Two options were on the table; the review chose A with changes.**
 
@@ -67,9 +71,9 @@ backlog row carries the same four.
 | # | Question | Decision | Where |
 |---|---|---|---|
 | 1 | What does `drift` mean? | **T:** *"matches the newest blueprint on its branch"*. Contract P (pinned) was considered and not chosen | §2.1, §2.2 |
-| 2 | A `released` branch? | **Adopt it.** CI fast-forwards it to the tested `$GITHUB_SHA` after all required jobs pass, on push events only, never with force. Migration checks ancestry before switching a project | §7.2, §7.4, §9.2 #30–#33 |
+| 2 | A `released` branch? | **Adopt it.** CI fast-forwards it to the tested `$GITHUB_SHA` after all required jobs pass, on push events only, never with force. Migration checks ancestry before switching a project | §7.2, §7.4, §9.2 #30–#33b, #39 |
 | 3 | A leftover `blueprint_source` field? | **Warn on every run, with no cut-off date** | §5, §9.2 #29 |
-| 4 | Does the toolchain installer write the per-machine `blueprint` command? | **Yes** | §8.1, §9.2 #34–#38 |
+| 4 | Does the toolchain installer write the per-machine `blueprint` command? | **Yes** | §8.1, §9.2 #34–#38, #37b |
 
 Two things the decisions required that the questions did not name. Both are
 design choices made in this revision:
@@ -83,6 +87,24 @@ design choices made in this revision:
 - **`security.yml` is a managed file** (`.gitattributes` comment at `:171`), so
   it ships to every derived project. The release job is therefore guarded to run
   only in the blueprint's own repository (§7.4).
+
+## R4. Response to the review of revision 4 (revision 5)
+
+Alexey reviewed revision 4's additions and returned *"revise again"* with four
+findings. All four are adopted. Evidence is from probes under
+`.scratch/philipp-025/`, run against local bare remotes and scratch directories
+only, with no network. **Nothing commits 1 and 2 depend on changed.** Every edit
+is in commit 3 (the release job), commit 4 (the installer command), the
+migration, or the rollback. One harness question was checked: #33b passes
+`GITHUB_SHA` to a child. `overrideKind` gives an undeclared unprefixed name no
+kind (`tests/harness/env.ts:341`), so no declaration is needed.
+
+| # | Finding (short) | Answer | Where |
+|---|---|---|---|
+| 1 | A marker prefix does not prove the installer wrote a file; no marked-but-foreign case | **Adopted.** Ownership is now byte-exact equality (`cmp -s`) with a body from a closed set: every body the installer has released, carried verbatim. At commit 4 the set is one body, v1, which is also the current body. The marker line stays as a note to readers and proves nothing. A marked file with any other body is foreign, exactly like an unmarked one: left byte-identical, with the `⚠` lines. Measured: v1 plus one hand-edited line is refused, the exact body is accepted, and a symlink to the exact body is refused. Revision 4's "marked, different body → replaced" row is deleted, and so is #36's old-body run. No earlier released body exists, so that code would have nothing to act on. It returns with v2, which adds v1 to the set with its case | §8.1, §9.2 #36, #37 (c) |
+| 2 | Step 8's `rm`, then install, leaves no command on any failure | **Adopted.** Step 8 is one installer operation, `--replace-blueprint-command`. It prepares the body beside the target, validates it by running it, copies the old command into a fresh backup directory, and then swaps with one `mv`. Measured with each step made to fail (validation, `chmod`, the backup `cp`, `mv`): every run exited 1, the old command was byte-identical and still ran, and no temp file remained. A symlink target was replaced as a link, and the file it pointed at was untouched. **One thing the review did not name was measured:** an INT sent to the installer process alone, while it waited on a child before the rename, **did not stop it**. Bash treats a child that survives the signal as having handled it, so the script carried on and completed the swap. The group signal a terminal sends did stop it (130/143). §1.4's handler shape (clean up, clear the trap, re-raise) closes the gap: all four shapes, INT and TERM each sent to the group and to the installer alone, ended 130/143 with the old command identical. The success path is unchanged | §7.2 step 8, §8.1, §9.2 #37b |
+| 3 | Reverting commit 3 removes the job before `released` carries the rollback | **Adopted, after reproducing it.** Bare-remote scenario: four fixture commits, the third adding the job. Reverting all four in one commit left `released` at the fourth, because the workflow at the rollback SHA had no job, and a migrated project kept reading the unreverted CLI. The new order reverts all four **but keeps `security.yml`**, so the job at the rollback SHA fast-forwards `released` to it (measured: `released` = rollback, old CLI). Projects then pull through their own address path, and only after that is the job removed, in a second publication, after which `released` stayed at the rollback SHA (measured). A reviewed, explicit, non-force fast-forward is the fallback if the rollback commit cannot go green | §10 Rollback, §9.2 #39 |
+| 4 | #30–#33 inspect YAML and never run the release commands | **Adopted, and it found a defect in revision 4's block.** The block ran as a `shell: bash` step runs (`bash --noprofile --norc -eo pipefail`) against a bare remote, in four states and two checkout shapes. Revision 4 fetched `released` and then tested `origin/released`, which exists only if the checkout configured a fetch refspec. Without one, **the legitimate old-run rerun exited 1**. With the check reading `FETCH_HEAD`, all 8 runs were right: missing → created at the tested SHA (0); newer descendant published → 0, not moved; diverged → 1, not moved; older ancestor → advanced (0). Measured red: `--force` moves a newer ref back and moves a diverged one; `is-ancestor` replaced by `true` exits 0 when diverged; pushing `origin/main` creates the ref at `main`'s tip instead of the tested SHA. The step now declares `shell: bash`, so the case runs the block the way the workflow declares | §7.4, §9.2 #33, #33b |
 
 ---
 
@@ -497,11 +519,18 @@ placeholder. It writes `blueprint_release_branch = released` (§7.4).
      do not run the full pull unasked.
 7. **Verify again:** drift's header shows `(released)`, it exits 0 or shows
    drift, and the §5 warning is gone.
-8. **Only then replace the per-machine command, on each machine** (§8.1):
-   `rm ~/.local/bin/blueprint`, then `bash scripts/install-toolchain.sh`. Until
+8. **Only then replace the per-machine command, on each machine** (§8.1). From
+   a project that has passed step 7, or from the blueprint, run
+   `bash scripts/install-toolchain.sh --replace-blueprint-command`. That single
+   operation prepares and validates the new command beside the old one, copies
+   the old one into a backup directory, and only then exposes the new one with
+   one rename. On every failure before the rename, the old command is left
+   byte-identical and still runs. It prints the one-rename command that restores
+   the old one, which the rollback uses (§10). **No manual `rm`, ever:** deleting
+   first is the per-machine outage this order exists to avoid (§R4 #2). Until
    step 7 passes in every project, the old wrapper is the recovery path and
-   stays. The installer never removes it by itself, so running the installer
-   earlier, for its other tools, is harmless.
+   stays. A plain install never replaces a file it did not write, so running the
+   installer earlier, for its other tools, is harmless.
 9. **Only then Stage B** (§8.2).
 
 ### 7.3 Per project
@@ -538,14 +567,15 @@ trunk the owner pushes to and `a2bp` files against.
         with:
           fetch-depth: 0
       - name: Fast-forward released
+        shell: bash
         run: |
           if git push origin "$GITHUB_SHA:refs/heads/released"; then exit 0; fi
-          git fetch origin released
-          if git merge-base --is-ancestor "$GITHUB_SHA" origin/released; then
+          git fetch origin refs/heads/released
+          if git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
             echo "released already contains $GITHUB_SHA: a newer green run got there first"
             exit 0
           fi
-          echo "::error::released is not an ancestor of $GITHUB_SHA and was not moved"
+          echo "::error::released does not contain $GITHUB_SHA and was not moved"
           exit 1
 ```
 
@@ -558,13 +588,24 @@ trunk the owner pushes to and `a2bp` files against.
   `workflow_dispatch`, and `on.push` is `main` only.
 - **Never force.** No `--force`, no `-f`, no `+` refspec. The server refuses a
   non-fast-forward. If `released` already contains the SHA, because an older run
-  finished after a newer one, the job is green. Any other refusal is red: it
-  means `released` diverged from `main`, which only a hand push can cause.
+  finished after a newer one, the job is green. Any other refusal is red and
+  leaves the ref where it was: `released` diverged from `main`, which only a
+  hand push can cause, or the push failed for another reason.
 - **The blueprint's repository only.** `security.yml` is managed and ships to
   every derived project. There the repository condition is false and the job
   shows as skipped. The name is the blueprint's own address, which every
   project's `.blueprint-source` already records, so it is not contamination. A
   fork of the blueprint edits that one line.
+- **The refusal path reads `FETCH_HEAD`, not `origin/released`** (revision 5). A
+  remote-tracking ref moves only if the checkout configured a fetch refspec,
+  and that is the checkout action's choice, not this file's. Measured without
+  one, revision 4's `origin/released` form **failed the legitimate old-run
+  rerun** (§R4 #4). `FETCH_HEAD` is written by the fetch itself, with or without
+  a refspec.
+- **`shell: bash` is declared,** so the step runs as
+  `bash --noprofile --norc -eo pipefail`, which is GitHub's documented
+  invocation for that shell. §9.2 #33b runs the extracted block exactly that
+  way, and #33 pins the declaration.
 - **`contents: write` on this job only.** Every other job keeps `read`.
 - **Creation.** The first green run creates `released`; a push to a missing ref
   needs no force. Nobody pushes `released` by hand. That is a convention, not an
@@ -604,7 +645,9 @@ blueprint checkout, not CLI code. What a project sees if it is switched too
 early is CLI behaviour, and §9.2 #32 pins it.
 
 **Cases:** §9.2 #30 (the read branch and its fallback), #31 (a2bp's base does
-not move), #32 (switched before `released` caught up), #33 (the job's shape).
+not move), #32 (switched before `released` caught up), #33 (the job's declared
+shape), #33b (the block, run against a bare remote in every state), #39 (the
+rollback reaches migrated projects).
 
 ---
 
@@ -646,26 +689,67 @@ exit 1
 - **Where in the installer.** A function `install_blueprint_command`, run in
   install mode **before** the OS branch, so a missing Homebrew or `curl` cannot
   skip it. The existing `mkdir -p "$BIN_DIR"` and "not on PATH" warning move
-  above the OS branch with it and serve both OSes.
-- **What it does to an existing file.** The marker is the line prefix
-  `# struct2flow-blueprint-command`.
+  above the OS branch with it and serve both OSes. `--replace-blueprint-command`
+  joins the argument `case` (`:82`), and the usage line names it.
+- **Ownership is byte-exact membership in a closed set** (revision 5, §R4 #1).
+  The installer carries, verbatim, every body it has ever released. A file is
+  the installer's only if it is a regular file, not a symlink, whose bytes equal
+  one of them (`cmp -s`). At commit 4 the set is one body, v1, the text above.
+  **The `# struct2flow-blueprint-command` line proves nothing:** anyone can copy
+  it, so it is a note to readers only. A byte-identical file is safe to replace
+  by construction, because replacing it loses nothing anyone wrote. When a v2
+  body ships, v1 stays in the set, and "identical to an earlier body → replaced"
+  becomes a row, with its case in #36. It is not written now: there is no
+  earlier body for it to act on. The symlink test comes before every read or
+  write of the path.
 
 | Existing `$BIN_DIR/blueprint` | Action | Output |
 |---|---|---|
 | absent | write to a temp file in `$BIN_DIR`, `chmod 0755`, `mv` into place | `✓ blueprint command installed (<path>)` |
-| a regular file, byte-identical to the text above | nothing; not rewritten | `✓ blueprint command already present` |
-| a regular file carrying the marker, with a different body | replaced the same way | `✓ blueprint command updated (<path>)` |
-| anything else: no marker (today's hand-written wrapper), or a symlink wherever it points | **left untouched**, and not counted as a failure | `⚠ <path> was not written by this installer, so it is left alone.`<br>`  If it runs a checkout's scripts/blueprint, TASK-021 Stage B will break it.`<br>`  Once every project has the address-reading CLI: rm <path>, then re-run this script.` |
+| a regular file, byte-identical to the current body | nothing; not rewritten | `✓ blueprint command already present` |
+| anything else: a symlink wherever it points, today's hand-written wrapper, or a file carrying the marker with any other body | **left untouched**, and not counted as a failure | `⚠ <path> was not written by this installer, so it is left alone.`<br>`  If it runs a checkout's scripts/blueprint, TASK-021 Stage B will break it.`<br>`  Once every project has the address-reading CLI, replace it with:`<br>`  bash scripts/install-toolchain.sh --replace-blueprint-command` |
+
+- **`--replace-blueprint-command`: the approved replacement of a foreign file**
+  (§7.2 step 8). It is a mode of its own: it installs no other tool, and exits.
+  Typing the flag is the operator's approval. On a target that already holds the
+  current body, it does nothing and prints `already present`. Otherwise it runs
+  these steps in order, and every failure exits 1 with the target untouched and
+  the temp file removed:
+  1. **Prepare:** `mktemp "$BIN_DIR/.blueprint.new.XXXXXX"`, write the body,
+     `chmod 0755`.
+  2. **Validate:** run the temp file as `help`, with the installer's `$ROOT` as
+     its working directory. That proves it is executable, its shebang resolves,
+     and it reaches a CLI that runs. It fails, for example, from a project that
+     has not done §7.2 step 4.
+  3. **Back up:** if a target exists, `mktemp -d "$BIN_DIR/.blueprint-replaced.XXXXXX"`,
+     then `cp -pP` the target into it. `-P` copies a symlink as a link. The
+     destination is a new name inside a fresh directory, so nothing is written
+     through an existing path.
+  4. **Swap:** `mv -f` the temp file onto the target. It is one rename within one
+     directory, so `blueprint` is always either the old command or the validated
+     new one. A symlink target is replaced as a link, and the file it pointed at
+     is untouched (measured).
+  5. **Report:** `✓ blueprint command replaced (<path>)`, then
+     `  previous command kept; restore it with: mv <backup>/blueprint <path>`.
+     The installer never deletes a backup.
+  - **Signals.** Steps 1–4 run under §1.4's handler shape: EXIT removes the temp
+    file, and INT and TERM clean up, clear the trap and re-raise. It is needed,
+    not decorative. Without it, an INT sent to the installer alone while it
+    waited on a child was absorbed, and **the swap completed** (§R4 #2). A
+    SIGKILL before step 4 can leave a `.blueprint.new.*` file and a backup
+    directory. Both are dot-names that nothing reads. `# ponytail:` no pruning
+    of either; add it if a real `$BIN_DIR` is seen to collect them.
 
 - **After writing,** if `command -v blueprint` resolves somewhere other than
   `$BIN_DIR/blueprint`, it prints
   `⚠ blueprint resolves to <other> first on PATH, not <path>.` That is the
   README's old `PATH` instruction: the same hazard in another shape.
-- **Never overwriting an unmarked file is what keeps §7.2 safe.** The founder's
-  current wrapper is the recovery path until step 7 passes in every project,
-  and a machine may run the installer for its other tools before then.
-  Replacing it is a deliberate `rm` at step 8. A symlink is never followed:
-  writing through one into a checkout would overwrite that checkout's CLI.
+- **Never replacing a foreign file without the flag is what keeps §7.2 safe.**
+  The founder's current wrapper is the recovery path until step 7 passes in
+  every project, and a machine may run the installer for its other tools before
+  then. Replacing it is the deliberate flag at step 8, never an `rm`. A symlink
+  is never followed: writing through one into a checkout would overwrite that
+  checkout's CLI.
 - **`check` mode** prints one line: `✓ blueprint command (<path>)`,
   `✗ blueprint command MISSING (run: bash scripts/install-toolchain.sh)`, or the
   `⚠` line above. It does not add to the missing count: nothing in the gate
@@ -677,7 +761,7 @@ exit 1
   only in the installer.
 - **Cost, stated:** `blueprint` works only from a project root, `files` and
   `help` included. From a subdirectory it exits 1 with the message above.
-- **Cases:** §9.2 #34–#38.
+- **Cases:** §9.2 #34–#38 and #37b.
 
 ### 8.2 Stage B
 
@@ -867,12 +951,15 @@ for the process to exit.
 | 30 | **The read branch.** A fixture remote where `main` is one commit ahead of `released`, and that commit changes a managed file. With `blueprint_release_branch = released`: the header says `(released)`, and the report and the SHA `pull --yes` records are `released`'s tip. Field absent: `(main)` and `main`'s tip. Field `bad..name` → 4, naming the field | read `blueprint_branch` regardless of the field; skip the field's validation |
 | 31 | **a2bp's base does not move.** The same fixture with both fields set: `a2bp --dry-run <file>` prints `branch:   main` and resolves its base from `main`'s tip | `bp_config_load` emits the release branch as `BP_CFG_BRANCH` |
 | 32 | **Switched before `released` caught up.** `bootstrap_sha` is the `main`-only commit and the field is `released` → 0, §2's "not on that branch (… not yet released)" line, no commit list. Fast-forward `released` in the fixture remote and run again → 0, the normal commits-since-sync list, no such line | restore `2>/dev/null \|\| echo "?"`; read history from `blueprint_branch` |
-| 33 | **The release job's shape,** read from `.github/workflows/security.yml` with the harness's existing `yaml` package: one job pushes exactly `"$GITHUB_SHA:refs/heads/released"`; no `--force`, `-f` or `+` refspec appears in it; its `if` requires `github.event_name == 'push'` and the repository; its `needs` equals the set of every other job id in the file, derived rather than listed; it alone has `contents: write`; its refusal path checks `merge-base --is-ancestor` before exiting 0 | drop a job from `needs`; add `--force`; push `main:released`; drop the push-event condition; grant `contents: write` to the whole workflow |
+| 33 | **The release job's declared shape,** read from `.github/workflows/security.yml` with the harness's existing `yaml` package: its step declares `shell: bash`; its `if` requires `github.event_name == 'push'` and the repository; its `needs` equals the set of every other job id in the file, derived rather than listed; it alone has `contents: write`. What the block **does** is #33b's, not this case's | drop a job from `needs`; drop the push-event condition; grant `contents: write` to the whole workflow; drop `shell: bash` |
+| 33b | **The release block, run** (§R4 #4). The step's `run` string is taken from #33's parsed workflow, so it is the bytes CI runs, written into the workspace and run as `bash --noprofile --norc -eo pipefail <file>` with `GITHUB_SHA` set. The work repository's `origin` is a bare fixture remote holding `C1 ← C2 ← C3` on `main` and `X` branching from `C1`. It is built twice: once with `git remote add` (a fetch refspec) and once with only `remote.origin.url` (none). Every state asserts the exit status **and** the bare remote's final `refs/heads/released`: (a) missing, SHA `C2` → 0, `C2`; (b) `C3` present, SHA `C2`, an older run re-run after a newer one published → 0, still `C3`; (c) `X` present, SHA `C3`, diverged → non-zero, still `X`; (d) `C1` present, SHA `C3` → 0, `C3`. The remote is a workspace path, so no network | `--force` on the push ((b) moves back to `C2`, (c) moves to `C3`); `merge-base --is-ancestor` replaced by `true` ((c) exits 0); push `refs/remotes/origin/main` ((a) lands on `C3`); revision 4's `origin/released` ((b) exits 1 without a refspec). All four mutants measured red |
 | 34 | **The installer writes the command.** Scenario `HOME` with no `.local/bin/blueprint`; `PATH` is `s.pathWithout(['curl', 'brew'])` (H4), so the installer stops at its own `curl` check on Linux or `brew` check on macOS, before any download can start. After `install-toolchain.sh`: the file exists, mode 0755, byte-equal to §8.1's text, and does not contain the blueprint fixture's path. From a fixture project whose `scripts/blueprint` is a stub recording its arguments, `blueprint drift` through `PATH` runs the stub with `drift` | write `exec "$ROOT/scripts/blueprint"`; install the command after the OS branch (the early exit then skips it, on either OS) |
 | 35 | **Layouts.** Only `scaffolding/scripts/blueprint` present → it runs. Neither present → 1, with §8.1's message on stderr | drop the `scaffolding/` candidate; `exit 0` when no CLI is found |
-| 36 | **Idempotent, and self-updating.** In #34's environment, run the installer, set the command's mtime to the epoch, run it again: the mtime is unchanged. Replace the body with an older body that carries the marker, run it a third time: the text is §8.1's again | rewrite unconditionally (the mtime moves); treat a marker file as foreign (the old body survives) |
-| 37 | **Never overwrites what it did not write.** In #34's environment. (a) Today's shape, `exec <workspace>/bp/scripts/blueprint "$@"`, as a regular file → byte-identical afterwards, and the `⚠` lines with the `rm` remedy are printed; `check` prints the `⚠` line too. (b) A symlink to `<workspace>/bp/scripts/blueprint` → the link and its target are both byte-identical | overwrite any file without the marker; write through the path with `cat >` (the target is overwritten) |
+| 36 | **Idempotent.** In #34's environment, run the installer, set the command's mtime to the epoch, run it again: the mtime is unchanged. (The "earlier released body → replaced" run joins this case when a v2 body ships, §8.1) | rewrite unconditionally (the mtime moves) |
+| 37 | **Never overwrites what it did not write.** In #34's environment, with a plain install. (a) Today's shape, `exec <workspace>/bp/scripts/blueprint "$@"`, as a regular file → byte-identical afterwards, and the `⚠` lines with the `--replace-blueprint-command` remedy are printed; `check` prints the `⚠` line too. (b) A symlink to `<workspace>/bp/scripts/blueprint` → the link and its target are both byte-identical. (c) **Marked but unknown:** §8.1's exact body plus one hand-edited line, as a regular file → byte-identical afterwards, and the same `⚠` lines; `check` prints the `⚠` line | overwrite any file without the marker; write through the path with `cat >` (the target is overwritten); treat any file carrying the marker as the installer's ((c) is overwritten) |
+| 37b | **The approved replacement, and every failure before the swap** (§R4 #2). In #34's environment. The target is today's hand-written wrapper, running a stub checkout CLI that prints `OLD`, and the installer's root has a stub `scripts/blueprint` that prints `NEW`. (a) `--replace-blueprint-command` → 0: the target is §8.1's body and, run from the project, prints `NEW`; exactly one `.blueprint-replaced.*/blueprint` exists, byte-identical to the old wrapper; no `.blueprint.new.*` remains. (b) The same with a symlink target → the target is the body, the backup is a symlink with the old link text, and the file it pointed at is byte-identical. (c) **Injected failures**, one per run, each a `PATH` shim that exits 1: `chmod`, the backup's `cp`, `mv`; plus validation failing (the installer's root has no `scripts/blueprint`) → each run exits non-zero, the target is byte-identical and still prints `OLD`, and no `.blueprint.new.*` remains. (d) **Interrupted before the swap:** a `cp` shim that writes `reached` and blocks on a FIFO (§9.2's seam pattern). INT and TERM are each sent once to the installer's process group and once to the installer alone, four runs → each died of that signal (130 or 143), the target is byte-identical and still prints `OLD`, and no `.blueprint.new.*` remains | `rm` the target before preparing (every (c) and (d) run leaves no command); write the body straight onto the target (a failed `chmod` leaves it replaced and not executable); swap before validating (the validation-failure run replaces it); drop the signal handler (the INT-to-installer-alone run completes the swap: measured, §R4 #2) |
 | 38 | **Shadowed on `PATH`.** In #34's environment, with `PATH` holding a directory that contains another `blueprint` and then `$BIN_DIR` (on `PATH` already, so the installer's own prepend does not apply) → the "resolves to … first on PATH" warning names that other file | drop the check |
+| 39 | **The rollback reaches migrated projects** (§10 Rollback, §R4 #3). A bare fixture remote: base commit `B`; then `Ta`, which changes a managed file F; then `Tb`, which adds the `release` job (taken from the working tree's `security.yml`) to a workflow that lacked it. "CI" is the harness: after each push, if the workflow **at the pushed SHA** has the `release` job, it runs #33b's extracted block at that SHA, which is how GitHub chooses the workflow. A project with `blueprint_release_branch = released` runs the real CLI with `BLUEPRINT_ROOT` scrubbed. §10's rollback commands run verbatim in a clone. After step 1 (revert, keep the workflow, push): the project's `drift` header shows the rollback SHA, F is reported against `B`'s content, and `pull --yes F` writes `B`'s content. After step 5 (remove the job, push): `refs/heads/released` is still the rollback SHA, and the project's header is unchanged | omit `git checkout HEAD -- .github/workflows/security.yml` from step 1: `released` stays at `Tb`, and the project goes on reading `Ta`'s F (measured, §R4 #3) |
 
 ### 9.3 Existing suites that migrate their fixtures
 
@@ -912,13 +999,14 @@ the same commit as the code.
 3. **`TASK#25: projects read the released branch, which CI fast-forwards to the tested commit`**
    — the `release` job and `blueprint_release_branch` (§7.4): its validation in
    `bp_config_load`, its use on the read path and in the header, and
-   `new-project.sh` writing it. Cases #30–#33 and the `bootstrap-contents`
-   assertion. Ripples: CLAUDE.md §"Back-propagating" config block,
+   `new-project.sh` writing it. Cases #30–#33b and #39, and the
+   `bootstrap-contents` assertion. Ripples: CLAUDE.md §"Back-propagating" config block,
    `README.md` §"The sync model", and the `docs/way-of-working.md` sync slide
    gain the field.
 4. **`TASK#25: the toolchain installer writes the per-machine blueprint command`**
-   — `install_blueprint_command` and its `check` line (§8.1), cases #34–#38,
-   README §"One-time setup", and §8.2's precondition added to
+   — `install_blueprint_command`, its closed-set ownership check, the
+   `--replace-blueprint-command` mode and the `check` line (§8.1), cases #34–#38
+   and #37b, README §"One-time setup", and §8.2's precondition added to
    `PLAN-TASK-021-RESTRUCTURE.md`.
 
 **Why this order.** Commit 2 needs commit 1's harness scrub to be testable.
@@ -937,15 +1025,46 @@ step 8.
 - the drift header (with the read branch), pull banner and bootstrap-history
   message change
 
-**Rollback:** revert the four commits, newest first. Projects that already
-pulled the new CLI recover through
-`BLUEPRINT_ROOT=<checkout> blueprint pull scripts/blueprint` (§5, #12). Caches
-under `~/.cache/struct2flow/` are inert without the new CLI and can be deleted.
-`released` is harmless once nothing reads it, and can be deleted by hand. **If
-commits 2–3 are reverted after a machine has done §7.2 step 8, restore the
-hand-written wrapper there,** because a CLI from before TASK-025 finds the
-blueprint from its own location, and the installer's command would hand it the
-project's copy.
+**Rollback** (revision 5, §R4 #3). A migrated project reads `released` and
+nothing else. So the rollback is published **through** the release job, and the
+job is removed last. Reverting all four commits at once removes the job in the
+same commit. That commit's run then has no job, and `released` stays on the
+unreverted tree (reproduced). Pinned by §9.2 #39.
+
+1. **Publish the rollback, keeping the job.** In a blueprint checkout at `main`:
+   `git revert --no-commit <c4> <c3> <c2> <c1>`, then
+   `git checkout HEAD -- .github/workflows/security.yml`, then one commit,
+   `TASK#25: roll back TASK-025, keeping the release job so released carries the rollback`,
+   pushed. The pre-push gate runs on it like any other push. Its green run
+   fast-forwards `released` to it, since it descends from every SHA `released`
+   has held.
+2. **Wait** until `git ls-remote <remote> refs/heads/released` prints that SHA.
+   If the rollback commit cannot go green, the fallback is a reviewed, explicit
+   fast-forward: the owner runs the gate at that SHA, then
+   `git push origin <rollback sha>:refs/heads/released`, without force, which
+   the server refuses unless it is a fast-forward. This is the one hand push of
+   `released` this plan allows.
+3. **Each migrated project pulls through its own address path:**
+   `blueprint pull scripts/blueprint` plus the lib closure, derived as in §7.2
+   step 4 but from the rollback tree. It is a partial pull, so `bootstrap_sha`
+   stays (BUG-016). No `BLUEPRINT_ROOT`, and no restored wrapper, is involved.
+4. **On each machine that did §7.2 step 8,** once every project on it has done
+   step 3, restore the previous command with the one rename the installer
+   printed: `mv ~/.local/bin/.blueprint-replaced.<X>/blueprint ~/.local/bin/blueprint`.
+   Also `git pull` the checkout that wrapper names. Until then, do not run
+   `blueprint` in a rolled-back project on that machine: a CLI from before
+   TASK-025 finds the blueprint from its own location, and the installer's
+   command would hand it the project's copy.
+5. **Only then remove the job:** `git checkout <c1>~1 -- .github/workflows/security.yml`,
+   one commit, pushed. Its run has no `release` job, so `released` stays at the
+   rollback SHA, whose tree is the rolled-back one. A leftover
+   `blueprint_release_branch` line is inert for the old CLI, since
+   `bp_config_field` greps only the key it is asked for
+   (`scripts/lib/request-config.sh:24`), so it can be deleted at leisure.
+   Delete `released` by hand once no project carries the field.
+
+Caches under `~/.cache/struct2flow/` are inert without the new CLI and can be
+deleted.
 
 ---
 

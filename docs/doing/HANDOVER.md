@@ -124,7 +124,10 @@ these fixes** → `.scratch/ALEXEY-025-impl-review.md` — cache, history, `BLUE
 H5 and BUG-110 PASS; to fix: (S1) the refresh subshell can spawn its fetch after cleanup
 looked for it; (S1) the exec-bit `chmod` runs outside the write shield; (S2) the
 ignore-before-redirect ordering has no red witness (M23c); (S3) the mutant catalogue names
-the wrong cases. Christian is fixing them. **Do not push commits 1–2 before those land.** **Christian's report of where the plan met the code** (verify in review): four
+the wrong cases. **All four fixed locally, reproducer-first** (`83dfcd7`/`6c024f1` the
+refresh runs as one process; `3c4fe46`/`4683167` exec bit inside the shield; `b27eadd`
+redirect ordering pinned structurally; `b9473ed` catalogue corrected, #24 narrowed).
+**Alexey is confirming the fixes; push after his verdict.** **Christian's report of where the plan met the code** (verify in review): four
 listed mutants do not redden their case (M1→#1h instead, M22b→#11/#20, **M23c reddens
 nothing**, **M24 leaves #24 green**); killing the refresh subshell orphaned the fetch
 (fixed with `pkill -P`, #20 now time-bounded); a damaged cache usually self-heals, exit 5

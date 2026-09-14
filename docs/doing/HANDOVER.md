@@ -120,6 +120,12 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **Do not push while a Codex review is running (BUG-110).** An empty
+  `/tmp/.git` appeared during one and vanished again on its own. While it exists,
+  every test workspace under `/tmp` resolves its project root to `/tmp`, and
+  `state-root` #A6 turns the gate red on a change that did nothing wrong.
+  Attribution to the Codex sandbox is likely, not proven. If a push goes red on
+  #A6, check `ls -ld /tmp/.git` before debugging anything else.
 - **`fileParallelism` is still `false`** in `tests/vitest.config.ts`: two suites
   pass partly *because* the run is serial. Measure before flipping.
 - **Flakes in the nested gate (BUG-065, parked).** If you retry a red gate, say

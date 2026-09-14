@@ -144,11 +144,11 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
-- **CI has not run since about 2026-09-11 (found 2026-09-14).** GitHub cannot parse
-  `.github/workflows/security.yml`: every run since has zero jobs and "a workflow file
-  issue". A green local push says nothing about CI, and the push still exits 0.
-  Philipp (Infrastructure-1) is fixing it reproducer-first. Until his commit lands,
-  hold pushes that don't need to go out, and check `gh run list` after the next one.
+- **CI did not run from 2026-09-10 21:06 UTC to 2026-09-14 (BUG-115).** An unquoted
+  colon in a `run:` line (from `44bcdf7`) made `security.yml` invalid YAML, so every run
+  had zero jobs while every push printed green. Fixed in `d27e1db`; `tests/manifest`
+  #5b now parses every workflow. **Four days of changes have never run on a GitHub
+  runner** — the first run after the fix may fail on real checks. Watch it.
 
 - **Do not push while a Codex review is running (BUG-110).** An empty
   `/tmp/.git` appeared during one and vanished again on its own. While it exists,

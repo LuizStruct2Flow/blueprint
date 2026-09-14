@@ -217,3 +217,76 @@ describe('BP-7 — `blueprint pull` replaces the marker region and keeps the pro
     })
   })
 })
+
+/**
+ * A blueprint and a derived project, each holding ONE managed file at `path`.
+ * The project also carries the fixture suite, so a default `pull` has nothing
+ * else to deliver and "nothing to pull" means what it says.
+ */
+async function pair(s: Scenario, tag: string, path: string, bpText: string, projText: string) {
+  const bp = await s.workspace.dir(tag, 'bp')
+  await s.fs.write(join(bp, path), bpText)
+  await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+  await initRepo(s, bp)
+
+  const proj = await s.workspace.dir(tag, 'proj')
+  await s.fs.write(join(proj, path), projText)
+  await s.fs.write(join(proj, 'tests/fixture/test.sh'), 'echo fixture\n')
+  const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+  await s.fs.write(
+    join(proj, '.blueprint-source'),
+    [
+      'config_version   = 2',
+      `blueprint_source = ${bp}`,
+      `bootstrap_sha    = ${sha}`,
+      'bootstrap_date   = 2026-01-01',
+      '',
+    ].join('\n'),
+  )
+  await initRepo(s, proj)
+  return { bp, proj }
+}
+
+/** The whole-file fallback's fingerprints. None may appear on a clean pull. */
+const FALLBACK = /marker structure mismatch|backing up|backup at/
+
+describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file', () => {
+  it('BUG-112 #3 prose that names the markers does not make a file marker-bearing', async () => {
+    await scenario('marker-merge-3', async (s) => {
+      // CLAUDE.md carried exactly this: one BEGIN and two END mentions in prose,
+      // so every pull of it took the whole-file fallback and left a .bp-bak.
+      const prose = (v: string) =>
+        '# Guide\n' +
+        'Between `BLUEPRINT:BEGIN` and `BLUEPRINT:END` the blueprint owns it.\n' +
+        "Everything after `BLUEPRINT:END` is the project's.\n" +
+        `${v}\n`
+      const { proj } = await pair(s, 'p', 'CLAUDE.md', prose('v2'), prose('v1'))
+
+      const r = await s.run(CLI, ['pull', 'CLAUDE.md', '--yes'], { cwd: proj })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.output).not.toMatch(FALLBACK)
+      expect(await s.fs.exists(join(proj, 'CLAUDE.md.bp-bak')), r.output).toBe(false)
+      expect(await readFile(join(proj, 'CLAUDE.md'), 'utf8')).toBe(prose('v2'))
+    })
+  })
+
+  it('BUG-112 #4 code that SEARCHES for the markers is not a marker — the CLI pulls itself cleanly', async () => {
+    await scenario('marker-merge-4', async (s) => {
+      // scripts/blueprint is a managed file whose own code greps for the tokens
+      // and one of whose comments starts with one. Under substring detection
+      // every pull of the CLI took the fallback — and on the day its counts
+      // happened to balance, the awk would have "merged" the CLI into itself.
+      const cli = await readFile(CLI, 'utf8')
+      expect(cli, 'the fixture is vacuous: the CLI no longer mentions the markers').toContain('BLUEPRINT:BEGIN')
+      const { proj } = await pair(s, 'c', 'scripts/blueprint', cli, cli + '# an older local copy\n')
+
+      const r = await s.run(CLI, ['pull', 'scripts/blueprint', '--yes'], { cwd: proj })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.output).not.toMatch(FALLBACK)
+      expect(await s.fs.exists(join(proj, 'scripts/blueprint.bp-bak')), r.output).toBe(false)
+      expect(await readFile(join(proj, 'scripts/blueprint'), 'utf8')).toBe(cli)
+    })
+  })
+})

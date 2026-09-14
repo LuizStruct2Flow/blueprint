@@ -87,11 +87,11 @@ is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md`.
 six findings adopted with probes, one rejected with evidence; he also found SIGINT
 truncating a mid-write file, which today's `pull` shares. **Re-review (Alexey, 2026-09-14): build with
 these changes** → `.scratch/ALEXEY-plan025-rereview.md` — 5 of 7 original findings
-resolved, the added write-shield and cache-race designs sound. Christian is folding in
-the two technical changes (scrub undeclared ambient `GIT_*`/`AGENT_*` in direct harness
-runs; case #23 covers group TERM as well as INT). **The third change is the founder's
-and BLOCKS implementation:** record T ("matches latest") or P ("matches recorded
-version") first — the code differs under each.
+resolved, the added write-shield and cache-race designs sound. Both technical changes
+are in revision 3 (`90fa82a`: H5 scrubs undeclared `GIT_*`/`AGENT_*` in direct runs;
+case #23 runs group INT and group TERM). **The only blocker left is the founder's:**
+record T ("matches the newest blueprint") or P ("matches the version last pulled, plus
+a newer-exists line") — plan §2.2 lists what changes under P. Build nothing before that.
 **Open for the founder:** does `drift` mean "matches the latest blueprint" (what
 the plan is written for) or "matches the version this project recorded"? Also: adopt a
 `released` branch; retire `blueprint_source` by warning or by date; should the

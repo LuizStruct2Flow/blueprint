@@ -90,19 +90,19 @@ INFRA_TOOLS="cdk terraform helm aws"
 
 MODE="install"
 WITH_INFRA=no
-PROJECT_DIR=""
+BP_PROJECT_DIR=""
 for arg in "$@"; do
   case "$arg" in
     check)   MODE="check" ;;
     --infra) WITH_INFRA=yes ;;
     --replace-blueprint-command) MODE="replace-command" ;;
     # One `=` token, because this loop reads one argument at a time.
-    --project=*) PROJECT_DIR="${arg#--project=}" ;;
+    --project=*) BP_PROJECT_DIR="${arg#--project=}" ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "usage: $0 [check] [--infra] | --replace-blueprint-command [--project=<dir>]" >&2; exit 2 ;;
   esac
 done
-if [ -n "$PROJECT_DIR" ] && [ "$MODE" != "replace-command" ]; then
+if [ -n "$BP_PROJECT_DIR" ] && [ "$MODE" != "replace-command" ]; then
   echo "usage: --project=<dir> is accepted only with --replace-blueprint-command" >&2
   exit 2
 fi
@@ -394,7 +394,7 @@ if [ "$MODE" = "replace-command" ]; then
   # verifies: .blueprint-source sets blueprint_release_branch and no longer has
   # blueprint_source. The blueprint itself has no .blueprint-source, so running
   # there without --project is refused rather than validated against its own CLI.
-  BC_PROJECT="${PROJECT_DIR:-$CALLER_DIR}"
+  BC_PROJECT="${BP_PROJECT_DIR:-$CALLER_DIR}"
   BC_CONFIG="$BC_PROJECT/.blueprint-source"
   if [ -L "$BC_CONFIG" ] || [ ! -f "$BC_CONFIG" ] \
      || ! grep -q '^[[:space:]]*blueprint_release_branch[[:space:]]*=[[:space:]]*[^[:space:]]' "$BC_CONFIG" \

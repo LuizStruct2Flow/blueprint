@@ -86,19 +86,20 @@ export interface BaseSource {
 }
 
 /**
- * The real sources. process.env is read at call time and IS the operator's:
- * scenario() hands its HOME, TMPDIR and XDG_CACHE_HOME to children only and
- * never writes them into process.env.
+ * The real sources, captured ONCE, when this module loads and before any spec
+ * or scenario runs. scenario() hands its own HOME, TMPDIR and XDG_CACHE_HOME to
+ * children only, but specs change process.env on purpose: TASK-025 H2 sets an
+ * ambient XDG_CACHE_HOME to prove a scenario replaces it. Read at call time,
+ * that value became the base, and with TMPDIR unset H2 died on
+ * `mkdir /somewhere`. A spec that needs a different base injects a BaseSource.
  */
-function realBaseSource(): BaseSource {
-  return {
-    env: {
-      TMPDIR: process.env.TMPDIR,
-      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
-      HOME: process.env.HOME,
-    },
-    systemTmp: tmpdir(),
-  }
+const LOADED_BASE_SOURCE: BaseSource = {
+  env: {
+    TMPDIR: process.env.TMPDIR,
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+    HOME: homedir(),
+  },
+  systemTmp: tmpdir(),
 }
 
 /**
@@ -150,7 +151,7 @@ export interface Workspace {
  */
 export async function createWorkspace(
   label = 'bp',
-  source: BaseSource = realBaseSource(),
+  source: BaseSource = LOADED_BASE_SOURCE,
 ): Promise<Workspace> {
   const safeLabel = label.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 40)
 

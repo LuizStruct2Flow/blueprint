@@ -1067,22 +1067,20 @@ const REMEDY =
   'remove the stray marker, or point TMPDIR at a directory with no marker above it'
 
 /**
- * Create a workspace with TMPDIR pointed at `tmp`, and return the refusal's
+ * Create a workspace with an explicit TMPDIR of `tmp`, and return the refusal's
  * message, or '' if it was NOT refused. A workspace that is wrongly created is
- * disposed here; it lies inside the calling scenario's workspace either way.
+ * disposed here.
+ *
+ * TMPDIR is injected through the seam, not set in process.env: the harness
+ * reads its base from the environment it loaded with (BUG-121).
  */
 async function refusalUnder(tmp: string): Promise<string> {
-  const saved = process.env.TMPDIR
-  process.env.TMPDIR = tmp
   try {
-    const ws = await createWorkspace('stray')
+    const ws = await createWorkspace('stray', { env: { TMPDIR: tmp }, systemTmp: tmp })
     await ws.dispose()
     return ''
   } catch (err) {
     return (err as Error).message
-  } finally {
-    if (saved === undefined) delete process.env.TMPDIR
-    else process.env.TMPDIR = saved
   }
 }
 

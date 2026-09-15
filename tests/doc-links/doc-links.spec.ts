@@ -69,8 +69,12 @@ async function scanTree(
   name: string,
   files: Record<string, string>,
   project: Record<string, string> = {},
+  untracked: Record<string, string> = {},
 ): Promise<ReturnType<typeof scanDocLinks>> {
-  const root = await s.workspace.dir(name, 'docs')
+  // A GIT REPOSITORY, because a link must resolve in a fresh clone (BUG-125):
+  // what is on this disk but not tracked is not something a reader receives.
+  const repo = await s.gitRepo(name)
+  await s.workspace.dir(name, 'docs')
   for (const [rel, content] of Object.entries(files)) {
     await s.fs.write(join(name, 'docs', rel), content)
   }
@@ -78,7 +82,12 @@ async function scanTree(
   for (const [rel, content] of Object.entries(project)) {
     await s.fs.write(join(name, rel), content)
   }
-  return scanDocLinks(root)
+  await repo.git(['add', '--', '.'])
+  // Present on disk, never added: `untracked` is relative to the project root.
+  for (const [rel, content] of Object.entries(untracked)) {
+    await s.fs.write(join(name, rel), content)
+  }
+  return scanDocLinks(join(repo.dir, 'docs'), s.run)
 }
 
 /** Enough resolving links to clear the non-vacuity floor, plus a real target. */
@@ -320,6 +329,59 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
 
         expect(scan.broken).toHaveLength(1)
         expect(scan.broken[0]).toContain('/security.html')
+      })
+    })
+  })
+
+  describe('BUG-125 — a link resolves only to what a fresh clone of the repository contains', () => {
+    // storm2flow's docs held `../../../../blueprint/docs/DoD.md`. It passed on
+    // any machine with a sibling blueprint checkout, and is dead everywhere else.
+
+    it('#3 a link that climbs OUT of the repository is reported, though its target exists on this disk', async () => {
+      await scenario('doc-links-escape', async (s) => {
+        await s.fs.write('outside.md', '# not in the repository\n')
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[dod](../../outside.md)\n' })
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('../../outside.md')
+      })
+    })
+
+    it('#3 a file inside the repository that git does not track does not satisfy a link', async () => {
+      await scenario('doc-links-untracked', async (s) => {
+        // A gitignored per-machine file (AGENT_ROSTER.md, .env, .scratch/) is
+        // on this disk and in no clone, the same class one directory closer.
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[notes](../local-notes.md)\n' }, {}, {
+          'local-notes.md': '# never added\n',
+        })
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('../local-notes.md')
+      })
+    })
+
+    it('#3 a declared web root outside the repository resolves nothing', async () => {
+      await scenario('doc-links-webroot-escape', async (s) => {
+        await s.fs.write('site/security.html', '<html></html>\n')
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[security](/security.html)\n' }, {
+          'project_config_paths.md': '- BP_WEB_ROOT: `../site`\n',
+        })
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('/security.html')
+      })
+    })
+
+    it('#3 a site-absolute target cannot climb out through the web root', async () => {
+      await scenario('doc-links-webpath-escape', async (s) => {
+        await s.fs.write('outside.md', '# not in the repository\n')
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[x](/../../outside.md)\n' }, {
+          'project_config_paths.md': '- BP_WEB_ROOT: `site`\n',
+          'site/index.html': '<html></html>\n',
+        })
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('/../../outside.md')
       })
     })
   })

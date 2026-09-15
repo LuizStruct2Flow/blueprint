@@ -483,6 +483,12 @@ numbers, so it never counts. Put project tests in their own declared roots
 undeclared; for any other pipeline they skip with a visible `SKIP-NOTE`, because
 a check of an inert workflow file certifies CI that never runs (TASK-044).
 
+**Links to served pages.** doc-links resolves a site-absolute link like
+`/security.html` only through `BP_WEB_ROOT` (a directory inside the repo the
+page must exist under) or `BP_WEB_PATHS` (exact paths allowed with no file),
+both in `project_config_paths.md`. An undeclared one is reported, and so is any
+link that leaves the repository (TASK-045, BUG-125).
+
 **Tooling consequences:**
 
 - `vitest.config.ts` `include`: both `src/**/*.test.ts` (co-located

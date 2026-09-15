@@ -294,7 +294,8 @@ all eight concerns below, plus the agent infra, live in one git repo.
   A project's own permission rules live in a pull-safe `.claude/settings.project.json`
   that pull merges in, and the blueprint's ask/deny always win.
   A project declares its CI; a check written for GitHub Actions skips out loud
-  on any other pipeline, never silently.
+  on any other pipeline, never silently. Links to its own served pages resolve
+  through a declared web root, never through whatever the local disk holds.
 - **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
   improvement lands in a project, it travels back to the blueprint
   so *every other project* inherits it next time they pull. It also carries a

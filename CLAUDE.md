@@ -175,6 +175,15 @@ invocation in this hook (BUG-029). It used to be three; the third was a row in
 `tests/SUITES.md`, and that table is deleted — a second description of a test is
 a copy that drifts.
 
+**The managed region typechecks `tests/` immediately before the vitest batch
+(TASK-031).** vitest strips types without checking them, so a green suite set
+says nothing about types. The stage runs `ts_typecheck` from
+`scripts/run-ts-suites.sh`: the pinned `tests/node_modules/.bin/tsc --noEmit -p
+tests`, started through `ts_scrubbed`, the same environment scrub the vitest
+batch uses. CI's ts-tests job runs the same function, not a copy of the command.
+A project without `tests/package.json` skips the stage with that reason; one
+whose compiler is not installed is blocked and told to run `npm ci`.
+
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
 sets it at bootstrap, but a clone never runs bootstrap. This file previously

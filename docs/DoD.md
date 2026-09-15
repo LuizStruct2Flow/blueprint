@@ -318,6 +318,16 @@ struct2flow convention — the project's exact targets are wired in
 6. Project-specific guards (loaded from
    `.githooks/pre-push-project` if it exists — placeholder guards,
    placeholder-injection checks, asset invariants, release-notes guard, etc.)
+   The file's blueprint-managed region, between its `BLUEPRINT:BEGIN` and
+   `BLUEPRINT:END` markers, runs the blueprint's own stages, and its last two
+   run in this order:
+   - **TypeScript typecheck of `tests/`** (TASK-031): `ts_typecheck` from
+     `scripts/run-ts-suites.sh`, which runs the pinned
+     `tests/node_modules/.bin/tsc --noEmit -p tests` through `ts_scrubbed`,
+     the same environment scrub the vitest batch uses. CI's ts-tests job runs
+     the same function. A project without `tests/package.json` skips it with
+     that reason; a compiler that is not installed blocks the push.
+   - **The vitest batch**, one stage per suite.
 
 **Lint warnings are ratcheted** — fix any new warnings before pushing;
 never loosen `--max-warnings` without explicit justification.

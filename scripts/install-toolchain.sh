@@ -649,8 +649,8 @@ else
   # require_node's comment for why a distro/vendored Node is the wrong answer.
   require_node
 
-  # Fetch to a temp file, verify the pin, then install. Never pipe a download
-  # into a shell, and never install a file we have not checksummed.
+  # Fetch the pinned-version URL to a temp file, then install. Never pipe a
+  # download into a shell. Checksums are NOT verified yet, as the header states.
   fetch() {
     _url="$1"; _out="$2"
     curl -fsSL --proto '=https' --tlsv1.2 --retry 3 "$_url" -o "$_out"

@@ -202,7 +202,12 @@ hangs off that root.
   (`554b86a`..`68d212c`): BUG-110 closed by its long-planned preflight (the harness now
   refuses a workspace under a stray marker — loudly; remedy: remove it or point `TMPDIR`
   elsewhere), BUG-111 closed (`run()` waits for the killed group), BUG-119 new (`childRoot`
-  type + option spreads), `exactOptionalPropertyTypes` on. **Jesko (Codex) is reviewing it.**
+  type + option spreads), `exactOptionalPropertyTypes` on. **Jesko's review (2026-09-15): push after these fixes** →
+  `.scratch/JESKO-task028-review.md` — BUG-110 shell fix, BUG-111, BUG-119 and H5 verified;
+  (1) the preflight witness only plants the marker AT `TMPDIR`, so a base-only check passes
+  it — Philipp is adding below-`TMPDIR` cases for all three markers; (2) the five suites
+  could not run inside his sandbox (its own `/tmp/.git`) — being re-run with `TMPDIR` outside
+  `/tmp`.
   **Gap found: no gate stage or CI job runs `tsc`** — row it once Christian's uncommitted
   backlog edit is in. **While a Codex run is live, run suites with
   `TMPDIR=/home/luiz/.cache/bp-harness-tmp`.** Still in flight:

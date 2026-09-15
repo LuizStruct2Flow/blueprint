@@ -205,8 +205,15 @@ hangs off that root.
   commits are lifecycle docs. **Christian is fixing it now** (brief
   `.scratch/brief-christian-bug120.md`). Do not retry the push before his fix; if you ever
   retry a red push on #20c, cite BUG-120. **In parallel:** Philipp on TASK-031 (typecheck
-  stage), Vitali on BUG-118 (PR #64 rebuild; stops at the reproducer for the founder's
-  `.claude/settings.json` edit).
+  stage), Vitali on BUG-118 (PR #64 rebuild) — **reproducer committed as `6adfb8a`,
+  3/3 red; waiting on the founder's edit to `.claude/settings.json`**: move
+  `"Bash(aws codepipeline put-approval-result *)"` from `permissions.allow` to
+  `permissions.ask`. Then commit that file as `BUG#118:`, and after the push close PR #64 and
+  delete `bug/110-approval-result-ask` on the remote (`gh api`) and locally — the local
+  delete rewrites `.git/config`, so never while a gate runs. Note: the new
+  `tests/permission-policy` spec ships to derived projects, so a project that pulls `tests/`
+  without `.claude/settings.json` goes red until it takes both. PR #64's BUG-095 test commit
+  was not folded in and still needs its own item.
 
 - **CI GREEN AGAIN on `4bbcac7` (run 34904164240, 2026-09-15); BUG-117 is in
   waiting-acceptance.** **Philipp — TASK-028 DONE locally (2026-09-15), 7 commits, unpushed**

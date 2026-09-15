@@ -106,6 +106,14 @@ They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
     - P2: a new unshipped file is relocated under `scaffolding/`.
     - P2: inputs test #9 is not an independent witness.
     - **TASK-037 must not be pushed before Vitali's fixes land.**
+    - P1, P2, P3 and P5 are fixed in `f1b1f93`..`1facf18`. Those commits were **rebuilt with the
+      founder's OK on 2026-09-15**: the original `31fd1d2` test held a literal fake private key
+      that the push gate's gitleaks scan would block. The permission classifier refused the
+      rebuild for the agent, and the founder chose rebuilding over an ignore entry. The old SHAs
+      `31fd1d2`..`c214123` no longer exist.
+    - P4 (unshipped new files placed under `scaffolding/`) and the e2e header comment are still
+      being finished by Vitali.
+    - Alexey's re-check waits for Codex, after 2026-09-16 02:10.
 - **TASK-038 (removes `CHANGES.md` from the lifecycle): promoted `f59af4d`, Christian is building
   it.** The founder waived the cross-provider review for this item only, so it needs no Codex
   review and goes out in the same push.

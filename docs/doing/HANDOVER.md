@@ -86,12 +86,23 @@ They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
   - Philipp: `0c47b5b`..`6b3dc95`. a2bp now proposes unshipped and new files. It newly refuses
     `.git` paths, gitignored paths, paths outside a work tree, and root `project_config_*.md`;
     that last one is Philipp's call, keeping CLAUDE.md's "never back-propagated" rule.
-- **Held for DoD §1b rule 4, the cross-provider review.** Codex's usage limit resets at 21:08.
-  Dispatch then:
-  - Alexey: `.scratch/brief-alexey-task037-review.md`
-  - Alex: `.scratch/brief-alex-task034-036-review.md`
-  - Jesko: `.scratch/brief-jesko-bug121-recheck.md`
-  - Codex dispatches must pass `TMPDIR=/dev/shm` (no `~/.cache` write in its sandbox).
+- **Cross-provider reviews dispatched 21:10.** Codex dispatches must pass `TMPDIR=/dev/shm` (no
+  `~/.cache` write in its sandbox).
+  - **Jesko (BUG-121 re-check):** `.scratch/JESKO-bug121-recheck.md`, push after one fix. chmod,
+    realpath and mkdtemp re-resolve the path after lstat, so an untrusted parent chain lets
+    another user swap it. **Philipp is adding an ancestor trust check.**
+  - **Alex (TASK-034..036):** `.scratch/ALEX-task034-036-review.md`. **Fixed by Christian** in
+    `5c4c5ba` (deck bullet for the link rule) and `3c13c6a` (roster example, publishing guide).
+    The TASK-034 finding was declined; the reason is in its row (`cd4c373`).
+  - **Alexey (TASK-037):** `.scratch/ALEXEY-task037-review.md`, push after fixes. **Vitali is
+    fixing:**
+    - P1: secret files are now proposable. A tracked `.env` and an untracked private key both
+      passed a dry run. Fix: reuse the A-03 secret scanner over every input before transport.
+    - P1: the root `project_config_*.md` refusal is case-sensitive.
+    - P2: a new path can collide with a base path by case.
+    - P2: a new unshipped file is relocated under `scaffolding/`.
+    - P2: inputs test #9 is not an independent witness.
+    - **TASK-037 must not be pushed before Vitali's fixes land.**
 - **TASK-038 (removes `CHANGES.md` from the lifecycle): promoted `f59af4d`, Christian is building
   it.** The founder waived the cross-provider review for this item only, so it needs no Codex
   review and goes out in the same push.

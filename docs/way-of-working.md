@@ -490,7 +490,9 @@ The shared `.githooks/pre-push` hook **blocks the push** if any step fails:
 2. Lint (`--max-warnings` ratcheted; never loosen)
 3. **Prettier `--check`** — fails on any unformatted file
 4. Tests + **coverage gate** (project's threshold)
-5. Project-specific guards (placeholder, asset, release-notes…)
+5. Project-specific guards (placeholder, asset, release-notes…), after the
+   blueprint-managed stages, which end with a **typecheck** of `tests/` (pinned
+   `tsc`, the same scrub and the same function as CI) and then the vitest batch
 
 Same hook, every project. No "I'll skip pre-push just this once."
 

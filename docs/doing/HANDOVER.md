@@ -197,12 +197,16 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
-- **`sync-by-address` #20c can go red under gate load (BUG-120, parked, fix next).** On
-  2026-09-15 a docs-only push failed it — "a fetch started AFTER the run was signalled" —
-  with the code byte-identical to a commit that had passed the gate, CI and 816/816. It is a
-  real race in TASK-025's signal handling, not a broken change. **If you retry a red push on
-  #20c, cite BUG-120 in what you report** — a quietly retried red is how merging over red
-  starts.
+- **PUSHES ARE BLOCKED: `sync-by-address` #20c is red on 2 of 2 gate runs (BUG-120).** On
+  2026-09-15 two consecutive docs-only pushes (08:00, 08:21) failed it — "a fetch started
+  AFTER the run was signalled" — with the code byte-identical to `d984a45`, which had passed
+  its own gate, CI and 816/816. A real race in TASK-025's signal handling that the gate's
+  load now exposes reliably. GitHub `main` (`d984a45`) is CI-green; the unpushed local
+  commits are lifecycle docs. **Christian is fixing it now** (brief
+  `.scratch/brief-christian-bug120.md`). Do not retry the push before his fix; if you ever
+  retry a red push on #20c, cite BUG-120. **In parallel:** Philipp on TASK-031 (typecheck
+  stage), Vitali on BUG-118 (PR #64 rebuild; stops at the reproducer for the founder's
+  `.claude/settings.json` edit).
 
 - **CI GREEN AGAIN on `4bbcac7` (run 34904164240, 2026-09-15); BUG-117 is in
   waiting-acceptance.** **Philipp — TASK-028 DONE locally (2026-09-15), 7 commits, unpushed**

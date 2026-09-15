@@ -111,10 +111,15 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
 - **Vitali done.** TASK-039: `e7e1d68`, `e25f4a7`. TASK-041: `d6fa8ca`, plus the root configs by
   Eto in `bf8d37c`. His report of a `tsc` error in `permission-policy.spec.ts` was a mid-work
   state; `tsc` is clean at `bf8d37c`.
-- **Christian (TASK-040, TASK-043) still running.** After he reports, apply in CLAUDE.md:
-  - Philipp's settings paragraph (`.scratch/pending-t042-owned-docs.md`)
-  - a one-line note in §"Test directory layout": in a derived project, tests count for the DoD
-    bug gate only under `BP_TEST_ROOTS`, and the top-level `tests/` is the blueprint's
+- **Christian done.** TASK-040: `9acffae`, `3682b53`. TASK-043: `981f045`, `9a1d0ae`.
+  - A project with both `infra/` and `infrastructure/` gets only `infra/` checked (a ponytail
+    comment in the hook).
+  - Claude Code skips a missing `@`-import silently (checked in its installed source).
+  - **The imports add ~976 lines / 43.5 KB to always-on context** here (CLAUDE.md is 1276),
+    ~947 lines in a fresh project. That matters for TASK-024.
+- **All cross-owned doc text is applied:**
+  - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
+  - README and deck import lines: `0fcfe40` (TASK-043)
 - **Codex reviews after 02:10**, briefs ready:
   - `.scratch/brief-alexey-fr-code-review.md` (BUG-122, TASK-042, TASK-039)
   - `.scratch/brief-alex-fr-docs-review.md` (TASK-040, 041, 043)

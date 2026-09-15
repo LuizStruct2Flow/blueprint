@@ -483,7 +483,71 @@ describe('a2bp validates its destination and its inputs before anything leaves',
       await s.fs.write('proj/docs/NEW.md', 'new\n')
       const r = await call(s, 'bp_inputs_validate', [proj, managed, 'docs/NEW.md'])
       expect(r.code, 'an unmanaged file was accepted with the ignore check unanswered').not.toBe(0)
-      expect(r.output, 'refused without saying the ignore check could not run').toContain('git work tree')
+      expect(r.output, 'refused without saying the ignore check could not run').toContain('cannot tell whether')
+    })
+  })
+
+  it('#19 TASK-037: a TRACKED file the project ignores is refused as gitignored', async () => {
+    await scenario('a2bp-inputs-19', async (s) => {
+      // Without --no-index, check-ignore answers from the index, and a
+      // force-tracked file is never reported as ignored however the pattern reads.
+      const { proj, managed } = await repoProject(s)
+      const add = await s.run('git', ['-C', proj, 'add', '-f', 'secrets/key.md'], {
+        cwd: s.workspace.root,
+      })
+      expect(add.code, add.output).toBe(0)
+      const r = await call(s, 'bp_inputs_validate', [proj, managed, 'secrets/key.md'])
+      expect(r.code, 'a tracked, ignored file was accepted').not.toBe(0)
+      expect(r.output).toContain('gitignored')
+    })
+  })
+
+  it('#20 TASK-037: files named like secrets are refused, managed or not, in any case', async () => {
+    await scenario('a2bp-inputs-20', async (s) => {
+      const { proj } = await repoProject(s)
+      const names = [
+        '.env.local',
+        'certs/server.pem',
+        'deploy.KEY',
+        'id_rsa',
+        'keys/id_ed25519.pub',
+        'store.p12',
+        'store.PFX',
+      ]
+      for (const n of names) await s.fs.write(`rproj/${n}`, 'x\n')
+      // One of them managed: shipping a path does not make its content safe.
+      const managed = await s.fs.write('managed-secret', 'docs/DoD.md\nid_rsa\n')
+
+      const problems: string[] = []
+      for (const n of names) {
+        const r = await call(s, 'bp_inputs_validate', [proj, managed, n])
+        if (r.code === 0) problems.push(`${n} was accepted`)
+        else if (!r.output.includes('named like a secret')) problems.push(`${n} refused, but not as a secret`)
+      }
+      expect(problems).toEqual([])
+    })
+  })
+
+  it('#21 TASK-037: a path under a symlinked directory is refused as a symlink, managed or not', async () => {
+    await scenario('a2bp-inputs-21', async (s) => {
+      // The review found the unmanaged case refused only by accident, with "not a
+      // git work tree", and the managed case followed the link.
+      const { proj } = await repoProject(s)
+      const outside = await s.workspace.dir('outside')
+      await s.fs.write('outside/k.md', 'bytes from elsewhere\n')
+      for (const link of ['linked', 'mlinked']) {
+        const ln = await s.run('ln', ['-s', outside, join(proj, link)], { cwd: s.workspace.root })
+        expect(ln.code, ln.output).toBe(0)
+      }
+      const managed = await s.fs.write('managed-link', 'mlinked/k.md\n')
+
+      const problems: string[] = []
+      for (const p of ['linked/k.md', 'mlinked/k.md']) {
+        const r = await call(s, 'bp_inputs_validate', [proj, managed, p])
+        if (r.code === 0) problems.push(`${p} was accepted`)
+        else if (!r.output.includes('symlink')) problems.push(`${p} refused, but not as a symlink: ${r.output}`)
+      }
+      expect(problems).toEqual([])
     })
   })
 

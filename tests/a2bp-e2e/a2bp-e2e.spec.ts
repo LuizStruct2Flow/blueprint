@@ -651,4 +651,128 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
       expect(await e.allRefs(), 'repository metadata or a secret reached the remote').toEqual(before)
     })
   })
+
+  // ===========================================================================
+  // TASK-037 review (Alexey P1) — secrets are refused BEFORE ANY REMOTE CONTACT.
+  //
+  // Review after upload cannot undo a disclosure, so "nothing was pushed" is not
+  // the property: a fetch already tells the remote a request is coming, and a
+  // later bug between fetch and push would carry the bytes out. These cases
+  // record every git transport verb and assert there were none.
+  //
+  // gitleaks is a SHIM here, like tests/pre-push-secrets: the CI job running
+  // this suite has no gitleaks, and a real one would make the verdict depend on
+  // the host. The shim reports a finding for a private-key header.
+  // ===========================================================================
+
+  // Split so this source file holds no private-key block for gitleaks (and so
+  // the pre-push gate) to find. The string written at runtime is contiguous.
+  const KEY =
+    '-----BEGIN RSA PRIVATE' + ' KEY-----\n' +
+    'MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gunVTLw7onLRnrq0\n' +
+    '-----END RSA PRIVATE' + ' KEY-----\n'
+
+  /**
+   * Run the CLI with shims in front of `basePath` (default: the gh-free PATH).
+   * `contacted` lists every fetch / ls-remote / push git was asked for.
+   */
+  let recSeq = 0
+  async function recorded(
+    s: Scenario,
+    e: E2E,
+    args: string[],
+    shims: Record<string, string>,
+    basePath: string = e.noGhPath,
+  ): Promise<{ r: RunResult; contacted: string[] }> {
+    const which = await s.run('sh', ['-c', 'command -v git'], {
+      cwd: s.workspace.root,
+      env: { PATH: basePath },
+    })
+    expect(which.code, 'could not resolve git on the base PATH').toBe(0)
+    const n = recSeq++
+    const log = s.workspace.path(`contact-${n}.log`)
+    await s.fs.write(`contact-${n}.log`, '')
+    const dir = await s.shimDir(`rec-${n}`)
+    await dir.add(
+      'git',
+      [
+        `for a in "$@"; do`,
+        `  case "$a" in fetch|ls-remote|push) echo "$a" >> "${log}" ;; esac`,
+        `done`,
+        `exec "${which.stdout.trim()}" "$@"`,
+      ].join('\n'),
+    )
+    for (const [name, body] of Object.entries(shims)) await dir.add(name, body)
+    const r = await s.run(CLI, args, { cwd: e.proj, env: { PATH: `${dir.dir}:${basePath}` } })
+    const contacted = (await s.fs.read(`contact-${n}.log`)).split('\n').filter(Boolean)
+    return { r, contacted }
+  }
+
+  /** A gitleaks that finds a leak in any file carrying a private-key header. */
+  const FINDING_GITLEAKS = [
+    `for a in "$@"; do f="$a"; done`,
+    `if grep -q 'PRIVATE KEY' "$f"; then echo "Finding: REDACTED"; exit 1; fi`,
+    `exit 0`,
+  ].join('\n')
+
+  it('#17 TASK-037: a tracked ignored .env, an unignored private key and a managed file carrying a secret exit 4 before any remote contact', async () => {
+    await scenario('a2bp-e2e-17', async (s) => {
+      const e = await setup(s)
+      // Force-tracked: `git check-ignore` without --no-index answers from the
+      // index, so a tracked file the project ignores reads as "not ignored".
+      await s.fs.write('acme-flow/.gitignore', '.env\n')
+      await s.fs.write('acme-flow/.env', 'TOKEN=abc123\n')
+      const add = await s.run('git', ['-C', e.proj, 'add', '-f', '.gitignore', '.env'], {
+        cwd: s.workspace.root,
+      })
+      expect(add.code, add.output).toBe(0)
+      const commit = await s.run('git', ['-C', e.proj, 'commit', '-q', '-m', 'tracked env'], {
+        cwd: s.workspace.root,
+      })
+      expect(commit.code, commit.output).toBe(0)
+      // Untracked and unignored: nothing about git status marks these.
+      await s.fs.write('acme-flow/secret.key', KEY)
+      await s.fs.write('acme-flow/notes/deploy.txt', `# deploy\n${KEY}`)
+      // Managed: shipped content is scanned too.
+      await s.fs.write('acme-flow/docs/DoD.md', `# DoD\nIMPROVED dod\n${KEY}`)
+
+      const problems: string[] = []
+      for (const [f, reason] of [
+        ['.env', /gitignored|named like a secret/],
+        ['secret.key', /named like a secret/],
+        ['notes/deploy.txt', /gitleaks found a secret/],
+        ['docs/DoD.md', /gitleaks found a secret/],
+      ] as const) {
+        const { r, contacted } = await recorded(s, e, ['a2bp', '--dry-run', f], {
+          gitleaks: FINDING_GITLEAKS,
+        })
+        if (r.code !== RC.BLOCKED) problems.push(`${f}: exit ${r.code}, expected 4`)
+        if (!reason.test(r.output)) problems.push(`${f}: refused without the reason ${reason}`)
+        if (contacted.length > 0) problems.push(`${f}: the remote was contacted (${contacted.join(',')})`)
+      }
+      expect(problems).toEqual([])
+    })
+  })
+
+  it('#18 TASK-037: an absent gitleaks is skipped out loud, as the pre-push gate does; a failing one blocks before contact', async () => {
+    await scenario('a2bp-e2e-18', async (s) => {
+      const e = await setup(s)
+
+      // Absent: the pre-push gate skips the secret scan with a named reason
+      // rather than blocking a machine without the tool. a2bp matches it, and
+      // must SAY so: a silent skip reads as a clean scan.
+      const without = await s.pathWithout(['gh', 'gitleaks'])
+      const absent = await recorded(s, e, ['a2bp', '--dry-run', 'docs/DoD.md'], {}, without)
+      expect(absent.r.code, `a missing gitleaks blocked the request\n${absent.r.output}`).toBe(RC.OK)
+      expect(absent.r.output, 'the secret scan was skipped silently').toContain('gitleaks not installed')
+
+      // Failing: exit >= 2 is a tool failure, not a clean scan (BUG-003).
+      const failing = await recorded(s, e, ['a2bp', '--dry-run', 'docs/DoD.md'], {
+        gitleaks: 'echo boom >&2\nexit 2',
+      })
+      expect(failing.r.code, `a failing gitleaks passed as clean\n${failing.r.output}`).toBe(RC.BLOCKED)
+      expect(failing.r.output).toContain('could not complete')
+      expect(failing.contacted, 'the remote was contacted after a failed scan').toEqual([])
+    })
+  })
 })

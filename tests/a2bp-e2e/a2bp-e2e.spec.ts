@@ -12,7 +12,10 @@
  *
  * TWO DELIBERATE STRENGTHENINGS OVER THE SHELL SUITE, both about isolation:
  *
- *   1. EVERY CASE RUNS WITH gh GENUINELY ABSENT. The shell suite built a
+ *   1. gh IS GENUINELY ABSENT UNLESS A CASE PUTS A STUB IN FRONT. (TASK-037's
+ *      cases from #13 on use a recording gh stub, or a git stub, placed before
+ *      the gh-free PATH, so the PR step is reached locally. Those stubs never
+ *      touch the network.) The shell suite built a
  *      gh-free PATH for case #1 and then ran #3–#11 with the AMBIENT one. On a
  *      host with `gh` installed (this one) those cases therefore invoked the real
  *      `gh` binary — which rejects the fixture's path-shaped slug on argument
@@ -714,6 +717,39 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     `if grep -q 'PRIVATE KEY' "$f"; then echo "Finding: REDACTED"; exit 1; fi`,
     `exit 0`,
   ].join('\n')
+
+  it('#19 TASK-037: against a scaffolding/ base, an unshipped new file stays at the root and a managed one moves under scaffolding/', async () => {
+    await scenario('a2bp-e2e-19', async (s) => {
+      // bp_base_path places a creation under scaffolding/ once the base has one
+      // (TASK-021). That is right for a file projects receive and wrong for a
+      // blueprint-only one, which was silently relocated (Alexey, P4).
+      const e = await setup(s)
+      await s.fs.write('bp-work/scaffolding/keep', '')
+      for (const args of [
+        ['add', 'scaffolding/keep'],
+        ['commit', '-q', '-m', 'scaffolding'],
+        ['push', '-q', 'origin', 'main'],
+      ]) {
+        const g = await s.run('git', ['-C', e.bpWork, ...args], { cwd: s.workspace.root })
+        expect(g.code, g.output).toBe(0)
+      }
+
+      await s.fs.write('acme-flow/docs/NEW.md', '# New\n')
+      // Managed (in MANAGED_FILES) and absent from this base: a creation that ships.
+      await s.fs.write('acme-flow/docs/OBSERVABILITY.md', '# Observability\n')
+
+      for (const f of ['docs/NEW.md', 'docs/OBSERVABILITY.md']) {
+        const { r } = await withGh(s, e, ['a2bp', f])
+        expect(r.code, `${f} did not file a request\n${r.output}`).toBe(RC.PENDING)
+      }
+      const changes: string[] = []
+      for (const ref of await e.requestRefs()) {
+        const d = await e.git(['diff', '--name-status', 'main', ref])
+        changes.push(...d.stdout.split('\n').filter(Boolean))
+      }
+      expect(changes.sort()).toEqual(['A\tdocs/NEW.md', 'A\tscaffolding/docs/OBSERVABILITY.md'])
+    })
+  })
 
   it('#17 TASK-037: a tracked ignored .env, an unignored private key and a managed file carrying a secret exit 4 before any remote contact', async () => {
     await scenario('a2bp-e2e-17', async (s) => {

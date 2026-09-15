@@ -147,6 +147,18 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     - `logs/.subagent-map` is removed.
     - Each helper still gets two finish lines, because Claude Code fires the stop hook twice.
       That behaviour predates the fix and is left alone.
+  - **Christian finished TASK-044, TASK-045 and BUG-125** (`d3b9a25`..`3a07a46`, 177 tests
+    green). Eto applied his doc text: `88ebe90` (TASK-044) plus the TASK-045 CLAUDE.md and deck
+    commit.
+    - `BP_CI`, `BP_WEB_ROOT` and `BP_WEB_PATHS` are declared in `project_config_paths.md`, read
+      by `tests/helpers/project-config.ts`.
+    - Skips print `SKIP-NOTE:`, which the gate surfaces through a one-line change in
+      `scripts/run-ts-suites.sh`.
+    - BUG-125 first accepted tracked files only (`f4fe83d`). That broke every fresh bootstrap,
+      because managed docs link gitignored privacy-block files (`CLAUDE.md`, `AGENTS.md`, …).
+      So `3a07a46` checks "inside the repo and exists" instead.
+    - **Open, founder's call:** a doc linking a gitignored file passes locally and is dead in a
+      clone. Closing that means deciding whether derived projects track those files.
   - **BUG-126 [SEC], promoted 2026-09-16.** The pre-push `_st_semgrep` stage never reads
     semgrep's `.errors`, so a `PartialParsing` run (exit 0, `results: []`) is called clean. CI's
     `semgrep scan --error` likely has the same hole. Reported by Sylvia from Jesko's review of

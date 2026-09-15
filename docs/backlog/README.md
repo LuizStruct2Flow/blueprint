@@ -46,6 +46,7 @@ Multi-file plans get their own folder (`BUG-XXX-<slug>/`, `FEATURE-NN-<NAME>/`,
 |---|---|
 | `BACKLOG.md` | Parked feature / polish / reliability / strategy rows. One row per item; columns suggest category + re-open trigger. |
 | `BUGS.md` | Parked bugs that keep a bug identity but aren't active. Each row carries the reproduction or trigger that re-opens it. |
+| `feature-requests.md` | Blueprint only. Requests filed from derived projects that are not yet a file change (a file change goes through `blueprint a2bp`). Identified by `FR-<project>-<slug>` codes, not item numbers; the owner assigns a number on promotion. |
 | `PLAN-*.md` | Full plans for parked work, with root-cause analysis, fix approach, tests needed, rollback strategy — same format as `doing/PLAN-*.md`, just frozen. |
 | `<MULTI-FILE-EPIC>/` | Folder for a parked epic with multiple artefacts (plan + mockups + Codex review + research notes). Whole folder travels into `doing/` when promoted. |
 

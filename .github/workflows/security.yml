@@ -192,6 +192,8 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0 # tests/managed-references #3 reads a pre-TASK-025 project from history
       # Pinned to the floor engines.node declares. That floor is a SECURITY
       # requirement, not a preference: vitest 4.1.11 is the first release clear
       # of GHSA-82fw-gwwq-j7x9 (CVSS 5.9, which osv-scanner blocks), and it

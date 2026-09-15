@@ -200,8 +200,12 @@ hangs off that root.
 - **BUG-121 fixed locally, unpushed (Philipp, 2026-09-15):** `4dde3f7`..`4be9518`. Scenario
   workspaces now default to `${XDG_CACHE_HOME:-$HOME/.cache}/bp-harness-tmp`, resolved once
   at load; an explicit non-empty `TMPDIR` still wins; the BUG-110 preflight is kept. Full
-  suite 841/841 with `TMPDIR` unset and set. **Jesko (Codex) is reviewing it.** Until it is
-  pushed, the workaround below still applies. History:
+  suite 841/841 with `TMPDIR` unset and set. **Jesko (Codex) reviewed it: push after one fix**
+  (`.scratch/JESKO-bug121-review.md`). An EXISTING default base is not made private: this
+  machine's is 0775. Philipp is making the harness tighten it to 0700, or refuse it if it is
+  a symlink, not a directory, or owned by someone else. Until that is pushed, the workaround
+  below still applies. Codex sandboxes cannot write `~/.cache` (EROFS), so a Codex reviewer
+  running the harness needs `TMPDIR=/dev/shm`. History:
 - **ANY Codex run on this machine can turn the push gate red (BUG-121, fix next).** Scenario
   workspaces default to `/tmp`, and since TASK-028 the harness refuses every scenario while an
   empty `/tmp/.git` exists. Codex sandboxes create that folder for a few minutes, including

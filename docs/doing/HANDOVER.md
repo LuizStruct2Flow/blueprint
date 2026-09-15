@@ -147,6 +147,12 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     - `logs/.subagent-map` is removed.
     - Each helper still gets two finish lines, because Claude Code fires the stop hook twice.
       That behaviour predates the fix and is left alone.
+  - **BUG-126 [SEC], promoted 2026-09-16.** The pre-push `_st_semgrep` stage never reads
+    semgrep's `.errors`, so a `PartialParsing` run (exit 0, `results: []`) is called clean. CI's
+    `semgrep scan --error` likely has the same hole. Reported by Sylvia from Jesko's review of
+    storm2flow's CodeBuild copy. Started without asking, under the security concern's
+    capability 4. **Philipp is fixing it** (`.scratch/brief-fr-f.md`); it is included in the late
+    Codex brief.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

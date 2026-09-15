@@ -25,9 +25,9 @@ There was an `INDEX.md` carrying a second copy of the membership; it drifted to
 in step — which is the wrong repair for two records of one fact. One record
 cannot disagree with itself.
 
-## How acceptance works on this project
+## How acceptance works
 
-Acceptance for agent-protocol and repo-infrastructure work is **delegated to
-QA-2** (founder decision 2026-07-29). Scope, conditions, and the stated
-independence limitation are in `project_config_dod.md` §"Acceptance authority".
-User-surface work is explicitly excluded and still needs the founder's eye.
+**Final acceptance is the founder's.** An agent may propose a QA pass by an
+agent from the other provider, and run it once agreed, but that verdict becomes
+acceptance only when the founder explicitly delegates that item. There is no
+standing delegation for any class of work.

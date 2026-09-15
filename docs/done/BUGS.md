@@ -3,12 +3,16 @@
 The source of truth for **what has actually been delivered** — not what has been
 merged. A row lands here only on an explicit acceptance signal.
 
-> **Acceptance authority for this class of work is delegated to QA-2** (founder
-> decision 2026-07-29, scope and limits in `project_config_dod.md` §"Acceptance
-> authority"). These are agent-protocol and repo-infrastructure defects whose
-> delivered behaviour is validated by running commands and reading exit codes,
-> not by a human clicking. Verdicts carry executed evidence; the 2026-07-29
-> pass rejected A-22 by reproducing the gap live.
+> **Final acceptance is the founder's** (`project_config_dod.md` §"Acceptance
+> authority"). An agent may propose a QA pass by an agent from the other
+> provider, and run it once agreed; its verdict becomes acceptance only when the
+> founder explicitly delegates that item. There is no standing delegation for any
+> class of work.
+>
+> *History:* the 2026-07-29 delegation covered that day's QA pass only — BUG-001,
+> BUG-002, BUG-003, A-01/A-12/A-14, A-05/A-27, A-03, A-07 and A-09 accepted,
+> A-22 rejected by reproducing the gap live
+> ([ACCEPTANCE-JESKO-2026-07-29.md](ACCEPTANCE-JESKO-2026-07-29.md)).
 
 | # | Bug | Severity | Status | Plan |
 |---|---|---|---|---|

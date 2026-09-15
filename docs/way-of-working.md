@@ -291,6 +291,8 @@ all eight concerns below, plus the agent infra, live in one git repo.
   hold — and an unreachable blueprint is a loud exit 5, never a quiet "all clear".
   Projects read **`released`**: the newest commit on which the blueprint's whole
   CI passed, fast-forwarded by a CI job, so a broken `main` never fans out.
+  A project's own permission rules live in a pull-safe `.claude/settings.project.json`
+  that pull merges in, and the blueprint's ask/deny always win.
 - **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
   improvement lands in a project, it travels back to the blueprint
   so *every other project* inherits it next time they pull. It also carries a

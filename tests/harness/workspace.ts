@@ -63,6 +63,36 @@ async function refuseProjectMarkerAbove(base: string): Promise<void> {
   }
 }
 
+/**
+ * What the workspace base is derived from (BUG-121). A seam, so a spec can plant
+ * a marker in a stand-in for the shared temp dir instead of in the real /tmp.
+ */
+export interface BaseSource {
+  /** Read from the REAL environment, never from a scenario's. */
+  readonly env: {
+    readonly TMPDIR?: string | undefined
+    readonly XDG_CACHE_HOME?: string | undefined
+    readonly HOME?: string | undefined
+  }
+  /** The shared temp dir the OS falls back to when TMPDIR is unset. */
+  readonly systemTmp: string
+}
+
+function realBaseSource(): BaseSource {
+  return {
+    env: {
+      TMPDIR: process.env.TMPDIR,
+      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+      HOME: process.env.HOME,
+    },
+    systemTmp: tmpdir(),
+  }
+}
+
+async function workspaceBase(source: BaseSource): Promise<string> {
+  return source.env.TMPDIR || source.systemTmp
+}
+
 export interface Workspace {
   /** Physical (symlink-resolved) absolute path to this scenario's root. */
   readonly root: string
@@ -81,14 +111,17 @@ export interface Workspace {
  * the teardown assertion — names the scenario that produced it rather than
  * leaving an anonymous `tmp.XXXX` for someone to bisect.
  */
-export async function createWorkspace(label = 'bp'): Promise<Workspace> {
+export async function createWorkspace(
+  label = 'bp',
+  source: BaseSource = realBaseSource(),
+): Promise<Workspace> {
   const safeLabel = label.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 40)
 
-  // realpath the system temp dir FIRST. On macOS tmpdir() is /var/folders/...
+  // realpath the base FIRST. On macOS tmpdir() is /var/folders/...
   // and mkdtemp inherits that symlinked prefix; resolving afterwards would
   // still work, but resolving first means every derived path is physical by
   // construction rather than by remembering to convert.
-  const base = await realpath(tmpdir())
+  const base = await realpath(await workspaceBase(source))
   await refuseProjectMarkerAbove(base)
   const root = await mkdtemp(join(base, `${safeLabel}-`))
 

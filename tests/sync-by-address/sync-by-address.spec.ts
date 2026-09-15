@@ -1083,6 +1083,78 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
+  it('#20d BUG-120: a TERM that reaches the held refresh child with its release is not lost — no fetch, no wait for the budget', async () => {
+    await scenario('sync-by-address-20d', async (s) => {
+      // THE LOST TERM. #20c's sequence, with the run's processes pinned to one
+      // CPU. The test signals the run and releases the child's FIFO at once; on
+      // one CPU both land before the child runs again. Its open then SUCCEEDS,
+      // bash's own handler only RECORDS the TERM cleanup sent, and the exec into
+      // `env` discards the record: the fetch starts after cleanup signalled it,
+      // and cleanup's `wait` sits out the whole budget (BUG-120). Measured red
+      // 40/40 on an unmodified copy of the tree before the fix.
+      //
+      // No stop-based seam reaches this: on SIGCONT the pending TERM interrupts
+      // the open (EINTR) and bash dies of it. Pinning is what orders it. Where
+      // `taskset` is absent the same assertion runs unpinned, rather than being
+      // skipped; there it catches the loss only when the machine is busy.
+      const pin = (await s.run('sh', ['-c', 'command -v taskset || true'], { cwd: s.workspace.root })).stdout.trim()
+      const real = (await s.run('sh', ['-c', 'command -v mktemp'], { cwd: s.workspace.root })).stdout.trim()
+      expect(real, 'no real mktemp to hand over to').not.toBe('')
+      const tmp = s.workspace.path('tmp')
+
+      for (const tag of ['r1', 'r2', 'r3']) {
+        const never = await seam(s, `never-${tag}`, 'ssh')
+        const proj = await project(s, BLACKHOLE, 'no-sha', 'OLD', { tag })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const held = join(tmp, `blueprint-sync.HELD${tag}`)
+        const fifo = join(held, 'fetch.err')
+        const shims = await s.shimDir(`mktemp-held-${tag}`)
+        await shims.add(
+          'mktemp',
+          `case "$*" in\n` +
+            `  *blueprint-sync.XXXXXXXX*) mkdir '${held}' && mkfifo '${fifo}' && printf '%s\\n' '${held}' ;;\n` +
+            `  *) exec '${real}' "$@" ;;\n` +
+            `esac`,
+        )
+        const env = { PATH: `${shims.dir}:${never.path}`, BP_FETCH_TIMEOUT: '3' }
+        const child: ChildProcess = pin
+          ? s.background(pin, ['-c', '0', 'bash', cli, 'drift'], { cwd: proj, env })
+          : s.background('bash', [cli, 'drift'], { cwd: proj, env })
+        let out = ''
+        child.stdout?.on('data', (b: Buffer) => (out += b.toString('utf8')))
+        child.stderr?.on('data', (b: Buffer) => (out += b.toString('utf8')))
+        const done = new Promise<Done>((resolve, reject) => {
+          child.on('error', reject)
+          child.on('close', (code, signal) => resolve({ code, signal, stdout: out, stderr: '' }))
+        })
+        const pid = child.pid ?? 0
+
+        await vi.waitFor(
+          async () => {
+            if (!existsSync(fifo)) throw new Error('the refresh scratch is not created yet')
+            if (!(await childNames(s, pid)).includes('bash')) throw new Error('no refresh child yet')
+          },
+          { timeout: 60_000, interval: 10 },
+        )
+
+        const signalled = Date.now()
+        child.kill('SIGINT')
+        const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+        const d = await done
+        const ending = Date.now() - signalled
+        closeSync(reader)
+        release(never)
+
+        expect(diedOf(d, 'SIGINT'), `${tag}: ${show(d)}`).toBe(true)
+        expect(existsSync(never.marker), `${tag}: a fetch started after cleanup signalled the refresh child (BUG-120)`).toBe(
+          false,
+        )
+        expect(ending, `${tag}: the run sat out the fetch budget — cleanup's TERM was lost (BUG-120)`).toBeLessThan(2_000)
+        await expectNothingLeft(s, `${tag}: a TERM with the release`)
+      }
+    })
+  })
+
   it('#21 INT and TERM during the compare: died of the signal, no scratch, no ref, no write', async () => {
     await scenario('sync-by-address-21', async (s) => {
       const remote = await blueprintRemote(s, 'published')

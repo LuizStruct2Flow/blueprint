@@ -319,8 +319,15 @@ struct2flow convention — the project's exact targets are wired in
    `.githooks/pre-push-project` if it exists — placeholder guards,
    placeholder-injection checks, asset invariants, release-notes guard, etc.)
    The file's blueprint-managed region, between its `BLUEPRINT:BEGIN` and
-   `BLUEPRINT:END` markers, runs the blueprint's own stages, and its last two
+   `BLUEPRINT:END` markers, runs the blueprint's own stages, and its last three
    run in this order:
+   - **ShellCheck** (TASK-033): `sh_lint` from `scripts/run-ts-suites.sh` runs
+     `shellcheck --severity=warning` over every file git tracks under
+     `scripts/` and `.githooks/` that is shell by extension or shebang, through
+     the same scrub. CI's ts-tests job runs the same function. ShellCheck is
+     required: a missing one blocks the push and names
+     `bash scripts/install-toolchain.sh`. A finding is fixed, or disabled inline
+     with a reason; the severity is never lowered.
    - **TypeScript typecheck of `tests/`** (TASK-031): `ts_typecheck` from
      `scripts/run-ts-suites.sh`, which runs the pinned
      `tests/node_modules/.bin/tsc --noEmit -p tests` through `ts_scrubbed`,

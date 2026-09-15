@@ -182,6 +182,7 @@ bp_state_root() {
 # two projects derive DIFFERENT state dirs — the assertion A-09 exists to
 # protect. It is named differently so the call-site sweep can forbid it in
 # production without also forbidding the ordinary API.
+# shellcheck disable=SC2120 # reads "$#" only to refuse any argument, so no caller passes one (tests/state-root #C1)
 agent_state_dir() {
   if [ "$#" -ne 0 ]; then
     echo "agent_state_dir: takes no arguments (got $#: '$*'). The state root is" >&2
@@ -232,6 +233,7 @@ agent_state_dir_for() {
 #
 # agent_signal_file [repo_root]
 #   Honors $AGENT_SIGNAL_FILE if set, else `<state dir>/signal.md`.
+# shellcheck disable=SC2120 # reads "$#" only to refuse any argument, so no caller passes one (tests/state-root #C1)
 agent_signal_file() {
   [ "$#" -eq 0 ] || { echo "agent_signal_file: takes no arguments (got $#: '$*') — use agent_signal_file_for <dir>" >&2; return 2; }
   if [ -n "${AGENT_SIGNAL_FILE:-}" ]; then printf '%s\n' "$AGENT_SIGNAL_FILE"; return 0; fi

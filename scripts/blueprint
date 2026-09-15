@@ -1221,7 +1221,8 @@ cmd_files() {
 report_staleness() {
   local root="$1" out status blocker offer remote count verified branch
 
-  local lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/staleness.sh"
+  local lib
+  lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/staleness.sh"
   if [ ! -r "$lib" ]; then
     echo "  ${C_DIM}remote staleness: unknown (scripts/lib/staleness.sh missing)${C_RESET}"
     return 0
@@ -1358,7 +1359,9 @@ _bp_project_root() {
     # Sourced and called inside the command substitution's subshell, so
     # BP_CODE_ROOT never leaks into the CLI's own environment.
     _root="$(
+      # shellcheck source=scripts/lib/state-dir.sh
       . "$_lib"
+      # shellcheck disable=SC2034 # read by bp_state_root, defined in the state-dir.sh sourced above
       BP_CODE_ROOT="$PWD"
       bp_state_root 2>/dev/null
     )"
@@ -1384,7 +1387,6 @@ cmd_drift() {
   # NOT to start the feed — so in a derived project this is the only path that
   # covers them. Same arm_gate as the feed: one mechanism, two callers.
   _bp_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate.sh"
-  # shellcheck source=scripts/lib/gate.sh
   # BUG-077: _bp_project_root, never `git rev-parse` — arm_gate writes
   # repo-local config, so an environment-redirectable root arms the wrong repo.
   _bp_proj="$(_bp_project_root)"
@@ -1395,6 +1397,7 @@ cmd_drift() {
     echo "  ${C_RED}⚠ gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed${C_RESET}"
     die "refusing to report drift without scripts/lib/gate.sh. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/gate.sh"
   fi
+  # shellcheck source=scripts/lib/gate.sh
   . "$_bp_lib"
   arm_gate "$_bp_proj"
   # BUG-032 — the push keepalive rides the same two wake paths, for the same

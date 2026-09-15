@@ -354,7 +354,7 @@ lifecycle_ids(){
 }
 
 echo "LIFECYCLE"
-for state in backlog doing waiting-acceptance done; do
+for state in backlog doing waiting-acceptance "done"; do
   ids="$(lifecycle_ids "$state")"
   count="$(printf '%s' "$ids" | grep -c . || true)"
   list="$(printf '%s' "$ids" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"

@@ -183,7 +183,6 @@ fi
 mkdir -p "$(dirname "$LOG_FILE")"
 
 last_trigger_key=""
-last_dispatched_task=""
 # Settle state: a candidate trigger key and when it was first seen. The signal
 # must hold still for SETTLE_SECONDS before it is dispatched, so a two-edit
 # write (Task then State, or State then Task) fires ONCE on its final content
@@ -242,7 +241,6 @@ trigger_if_needed() {
   fi
 
   last_trigger_key="$key"
-  last_dispatched_task="$task"
   now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   printf '[%s] Holder=%s State=%s Task=%s\n' "$now" "$holder" "$state" "$task" | tee -a "$LOG_FILE"
 

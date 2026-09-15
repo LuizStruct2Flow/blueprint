@@ -68,10 +68,15 @@ async function scanTree(
   s: Scenario,
   name: string,
   files: Record<string, string>,
+  project: Record<string, string> = {},
 ): Promise<ReturnType<typeof scanDocLinks>> {
   const root = await s.workspace.dir(name, 'docs')
   for (const [rel, content] of Object.entries(files)) {
     await s.fs.write(join(name, 'docs', rel), content)
+  }
+  // Files beside docs/, at the project root: project_config_paths.md, a web root.
+  for (const [rel, content] of Object.entries(project)) {
+    await s.fs.write(join(name, rel), content)
   }
   return scanDocLinks(root)
 }
@@ -272,6 +277,50 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
       expect(scan.broken).toHaveLength(1)
       expect(scan.broken[0]).toContain('gone(1')
       expect(scan.broken[0]).not.toContain('gone(1).md')
+    })
+  })
+
+  describe('TASK-045 — a site-absolute link resolves only through what the project declares', () => {
+    // storm2flow's RELEASE-NOTES.md links /security.html and /terms/v1.html:
+    // served pages, not repo files. Resolved against the filesystem root they
+    // are all "broken", so the suite reported 13 correct links.
+    const links = '[security](/security.html)\n[terms](/terms/v1.html#s2)\n'
+
+    it('#2 a declared web root makes /security.html resolve when the file exists under it', async () => {
+      await scenario('doc-links-webroot', async (s) => {
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'RELEASE-NOTES.md': links }, {
+          'project_config_paths.md': '# Paths\n\n- BP_WEB_ROOT: `site/public`\n',
+          'site/public/security.html': '<html></html>\n',
+          'site/public/terms/v1.html': '<html></html>\n',
+        })
+
+        expect(scan.broken).toEqual([])
+        expect(scan.examined).toBe(27)
+      })
+    })
+
+    it('#2 an allowlisted site-absolute path passes, with no file behind it', async () => {
+      await scenario('doc-links-webpaths', async (s) => {
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'RELEASE-NOTES.md': links }, {
+          'project_config_paths.md': '# Paths\n\n- BP_WEB_PATHS: `/security.html /terms/v1.html`\n',
+        })
+
+        expect(scan.broken).toEqual([])
+        expect(scan.examined).toBe(27)
+      })
+    })
+
+    it.each([
+      ['nothing is declared', {}],
+      ['the web root lacks the file', { 'project_config_paths.md': '- BP_WEB_ROOT: `site`\n', 'site/other.html': 'x\n' }],
+      ['the allowlist names another path', { 'project_config_paths.md': '- BP_WEB_PATHS: `/privacy.html`\n' }],
+    ])('#2 an undeclared site-absolute link is still reported when %s', async (_tag, project) => {
+      await scenario('doc-links-web-undeclared', async (s) => {
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'RELEASE-NOTES.md': '[security](/security.html)\n' }, project)
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('/security.html')
+      })
     })
   })
 

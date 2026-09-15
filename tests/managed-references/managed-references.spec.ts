@@ -169,3 +169,84 @@ describe('BUG-114 — every script a managed file names reaches a project that p
     })
   })
 })
+
+/**
+ * TASK-025 — pulling ONLY scripts/blueprint must not strand a project.
+ *
+ * Alexey (Codex) review of 1cc78cf, finding 1. Commit 4 moved the signal
+ * handler into scripts/lib/signals.sh, and commit 3 made request-config.sh emit
+ * the read branch. `pull` copies exactly the paths it is given, so an existing
+ * project that pulled `scripts/blueprint` alone got the new CLI beside its old
+ * libs, and its own CLI then refused every drift and pull. MANAGED_FILES
+ * membership proves a FULL pull delivers the libs, not that a partial one does.
+ *
+ * THE OLD PROJECT IS REAL, not reconstructed: scripts/ as it stood in the last
+ * commit before drift read the blueprint by its address, which is where every
+ * derived project was when TASK-025 began. It is read from history, and the
+ * commit is DERIVED (the parent of the first commit that introduced
+ * _bp_fetch_blueprint) rather than pinned, so a rebase cannot silently turn it
+ * into a new project. CI's ts-tests checkout carries full history for this.
+ */
+describe('TASK-025 — a single-file pull of the CLI brings the libs it needs', () => {
+  it('#3 an old project pulls only scripts/blueprint, then its own CLI runs drift against the remote', async () => {
+    await scenario('managed-references-3', async (s) => {
+      const first = await s.run(
+        'git',
+        ['-C', REPO_ROOT, 'log', '--reverse', '--format=%H', '-S', '_bp_fetch_blueprint', '--', 'scripts/blueprint'],
+        { cwd: s.workspace.root },
+      )
+      const introduced = first.stdout.split('\n')[0] ?? ''
+      expect(
+        introduced,
+        `no commit introduced _bp_fetch_blueprint — is this a shallow clone? (ts-tests needs fetch-depth: 0)\n${first.output}`,
+      ).toMatch(/^[0-9a-f]{40}$/)
+
+      // The remote: this tree's CLI and libs, as a project would fetch them.
+      const bp = await s.workspace.dir('bp')
+      for (const f of (await s.run('git', ['-C', REPO_ROOT, 'ls-files', 'scripts'], { cwd: s.workspace.root })).stdout
+        .split('\n')
+        .filter(Boolean)) {
+        await s.fs.copyIn(join(REPO_ROOT, f), join(bp, f))
+      }
+      await s.fs.write(join(bp, 'docs/DoD.md'), '# DoD\nowner {{PROJECT_NAME}}\n')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await initRepo(s, bp)
+      const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+
+      // The old project: scripts/ from before TASK-025, and its own DoD edit.
+      const proj = await s.workspace.dir('proj')
+      const extracted = await s.run(
+        'bash',
+        ['-c', 'git -C "$1" archive --format=tar "$2^" scripts | tar -x -C "$3"\n', 'old', REPO_ROOT, introduced, proj],
+        { cwd: s.workspace.root },
+      )
+      expect(extracted.code, extracted.output).toBe(0)
+      expect(await s.fs.exists(join(proj, 'scripts/lib/signals.sh')), 'the old project already has signals.sh').toBe(false)
+      await s.fs.write(join(proj, 'docs/DoD.md'), '# DoD\nowner proj\nedited here\n')
+      await s.fs.write(
+        join(proj, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${sha}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, proj)
+
+      // Only the CLI, through the address-reading CLI of this tree.
+      const pulled = await s.run(CLI, ['pull', 'scripts/blueprint', '--yes'], { cwd: proj })
+      expect(pulled.code, pulled.output).toBe(0)
+      expect(await s.fs.read(join(proj, 'docs/DoD.md')), 'a partial pull of the CLI pulled an unrelated file').toBe(
+        '# DoD\nowner proj\nedited here\n',
+      )
+
+      // Then the project's OWN CLI, with nothing fetched separately.
+      const own = await s.run(join(proj, 'scripts/blueprint'), ['drift'], { cwd: proj })
+      expect(own.code, `the project's own CLI refused after pulling scripts/blueprint:\n${pulled.output}\n---\n${own.output}`).toBe(0)
+      expect(own.stdout).toContain(`fetched:    ${sha}`)
+    })
+  })
+})

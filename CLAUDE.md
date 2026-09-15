@@ -1254,6 +1254,16 @@ The canonical list of synced files is the `MANAGED_FILES` array in
 yourself adding a project-specific incident or path to a blueprint-managed
 file, move it to the right `project_config_*.md` before committing.
 
+**`.claude/settings.json` is managed, but a project's own permission rules are
+not lost.** Put them in `.claude/settings.project.json`: it is tracked and
+project-owned, and it holds only `permissions.allow`/`ask`/`deny`/`additionalDirectories`.
+`blueprint pull` lands `settings.json` as the blueprint's file with those lists
+merged in, and `drift` compares that merged result. The blueprint's `ask` and
+`deny` always win: a project `allow` naming one is dropped, so a rule the
+blueprint tightened (BUG-118) cannot be re-allowed from a project. Never
+hand-edit `settings.json` for a project rule — the next pull refuses it until
+the rule moves to the project file (TASK-042).
+
 ### docs/way-of-working.md is the canonical pitch surface
 
 The deck at [`docs/way-of-working.md`](docs/way-of-working.md) is how

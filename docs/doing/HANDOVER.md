@@ -72,8 +72,34 @@ bash scripts/session-resume.sh
 **PUSHED 2026-09-15 (`4267ac8`, gate green): TASK-034..038 and the BUG-121 hardening.** **The
 founder accepted every waiting task the same evening ("all tasks accepted"):** TASK-025..031,
 033 and 034..038 are in `docs/done/BACKLOG.md`, one commit each, and PLAN-TASK-025 moved with
-its row. Bugs were not part of it: 11 bug rows, BUG-121 included, still wait in
-`docs/waiting-acceptance/BUGS.md`. PRs #71–#74 are closed with comments
+its row. **The founder then accepted every waiting bug too** ("I cannot test most of them, but in
+worst case we re-open them"): BUG-034, 077, 110, 111, 113, 115, 117–121 are in `docs/done/BUGS.md`,
+one commit each. Nothing waits for acceptance now.
+
+**Now (2026-09-15 late): storm2flow's six feature requests, promoted and being built.** storm2flow
+pushed them on `fr/storm2flow/2026-09-15` with no PR. Their text is saved in
+`.scratch/fr-storm2flow-2026-09-15.diff` and the branch is deleted. All six are recorded as
+PROMOTED in `docs/backlog/feature-requests.md` (`e3ff859`..`fcc6756`).
+
+**Founder decisions:**
+- MEDIUM+ everywhere for the vulnerability threshold.
+- Project permission rules go in a tracked project file merged in by pull; the blueprint's ask/deny
+  always win.
+- CLAUDE.md imports all five project config files.
+- Start all six now.
+
+**Three Claude agents, split by file ownership** (briefs: `.scratch/brief-fr-{a,b,c}.md`, common
+rules in `.scratch/brief-common-fr.md`):
+- **Vitali: TASK-039, then TASK-041.** Owns `scripts/lib/dod-gate.sh`, `docs/DoD.md` and the
+  paths/security config seeds.
+- **Philipp: BUG-122, then TASK-042.** Owns `scripts/blueprint` pull/drift, the settings merge and
+  `tests/permission-policy`.
+- **Christian: TASK-040, then TASK-043.** Owns `.githooks/pre-push`, `CLAUDE.md` and the
+  `templates/project_config_*` seeds.
+
+Agents report text for files they do not own (deck, README, cross-owned docs) and Eto applies it.
+Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota returns after
+2026-09-16 02:10. PRs #71–#74 are closed with comments
 naming their tasks, and their branches are deleted. The row moves (`92a5cf5`..) and this note are
 local, for the next push. **Still open:**
 - **CI** for `4267ac8`: a Monitor was armed at push time and dies with the session. Check with

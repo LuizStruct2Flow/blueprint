@@ -29,6 +29,7 @@ triaged in the owner's grooming pass, like everything else in `backlog/`.
 | `FR-www-a2bp-feature-requests` | struct2flow-www | 2026-09-14 | Let derived projects raise requests `blueprint a2bp` could not carry, without opening PRs by hand | PROMOTED TASK-037 |
 | `FR-storm2flow-dod-test-roots` | storm2flow | 2026-09-15 | Let a project declare where its regression tests live for the DoD bug-test stage, and stop a blueprint suite vouching for a project bug with the same number | PROMOTED TASK-039 |
 | `FR-storm2flow-refused-pull-sha` | storm2flow | 2026-09-15 | A full pull that refused any file must not advance `bootstrap_sha` | PROMOTED BUG-122 |
+| `FR-storm2flow-prepush-layout` | storm2flow | 2026-09-15 | Drop the bootstrap-time "adjust these paths" instruction from the managed `.githooks/pre-push`, and detect `infrastructure/` as well as `infra/` | PROMOTED TASK-040 |
 
 The two struct2flow-www requests were filed together in pull request #72 on the
 blueprint repository, which holds their original text. The six storm2flow

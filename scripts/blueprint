@@ -91,6 +91,8 @@ fi
 #   - AGENT_SIGNAL.md, HANDOVER.md, BUGS.md, BACKLOG.md, PLAN-*.md, etc.
 #   - backend/, frontend/, infra/, src/, anywhere with project code
 #   - .claude/settings.local.json (host-specific)
+#   - .claude/settings.project.json (the project's own permission rules, merged
+#     into settings.json by pull — TASK-042, BP_SETTINGS_LAYER below)
 #
 # An entry ending in `/` names a DIRECTORY, and stands for every file the
 # blueprint SHIPS under it (bp_expand_managed_dirs below). Sync of a directory
@@ -271,7 +273,8 @@ MANAGED_FILES=(
   ".github/workflows/security.yml"
 
   # .claude/ — generic permission allowlist (host-specific bits live in
-  # .claude/settings.local.json which is gitignored)
+  # .claude/settings.local.json which is gitignored). Pull lands it merged with
+  # the project's tracked .claude/settings.project.json (TASK-042).
   ".claude/settings.json"
 
   # Folder skeleton READMEs — describe the conventions, never project content
@@ -641,14 +644,119 @@ bp_prospective_pull() {
   esac
 }
 
+# --- TASK-042: a project's own permission rules survive pull -----------------
+#
+# `.claude/settings.json` is whole-file managed and JSON carries no markers, so a
+# pull used to replace it and delete every rule a project had added. The
+# project's rules now live in BP_SETTINGS_LAYER, which is tracked, project-owned
+# and never written by pull. What pull lands, and what drift compares against, is
+# the blueprint's settings with the project's permission lists merged in.
+#
+# Merging arrays inside settings.json itself was rejected (founder, 2026-09-15):
+# it cannot tell a project rule from a blueprint rule the blueprint deliberately
+# removed. A separate file can.
+BP_SETTINGS_LAYER=.claude/settings.project.json
+
+# The only shape the project file may have: permission LISTS. Anything else
+# (hooks, env, defaultMode) is refused, never merged and never dropped. Merging a
+# project hook could displace the blueprint's no-chain guard; dropping it would
+# be a rule that looks kept and is not.
+BP_SETTINGS_SHAPE='type == "object"
+  and ((keys - ["$schema", "permissions"]) == [])
+  and ((.permissions // {}) | type == "object"
+       and ((keys - ["allow", "ask", "deny", "additionalDirectories"]) == [])
+       and all(.[]; type == "array" and all(.[]; type == "string")))'
+
+# .[0] the blueprint's settings, .[1] the project file. Every key but
+# `permissions` is the blueprint's. Each list is the blueprint's entries, then
+# the project's additions, de-duplicated. A project `allow` that EXACTLY matches
+# a blueprint `ask` or `deny` is dropped, so BUG-118 cannot be undone from a
+# project file. (Claude Code also evaluates deny, then ask, then allow; the drop
+# keeps the landed file saying what actually happens.)
+BP_SETTINGS_MERGE='def uniq: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
+  (.[0].permissions // {}) as $b | (.[1].permissions // {}) as $p
+  | (($b.ask // []) + ($b.deny // [])) as $tight
+  | .[0] | .permissions = reduce ("allow", "ask", "deny", "additionalDirectories") as $k ($b;
+      if ($b | has($k)) or ($p | has($k)) then
+        .[$k] = (($b[$k] // [])
+                 + (($p[$k] // []) | if $k == "allow" then map(select(. as $e | any($tight[]; . == $e) | not)) else . end)
+                 | uniq)
+      else . end)'
+
+# .[0] the blueprint's settings, .[1] the project's settings.json. The project's
+# permission entries the blueprint does not ship, shaped as a project file, or
+# null when there are none.
+BP_SETTINGS_EXTRA='(.[0].permissions // {}) as $b
+  | [(.[1].permissions // {}) | to_entries[] | select(.value | type == "array")
+     | {key, value: (.value - ($b[.key] // []))} | select(.value != [])]
+  | if . == [] then null else {permissions: from_entries} end'
+
+# _bp_settings_layer BP_JSON OUT — OUT receives the blueprint's settings with the
+# project layer applied. Returns 1 with BP_PP_WHY (and maybe BP_PP_DETAIL) set
+# when pull must refuse settings.json. Never call it inside `$( )`.
+#
+# MIGRATION: no project file, and a settings.json holding entries the blueprint
+# does not ship, is REFUSED rather than extracted. Extraction would have to
+# guess, per entry, "this project's rule" or "a blueprint rule since removed" —
+# the exact ambiguity the separate file exists to remove — and a wrong guess
+# keeps a removed rule forever with nothing saying so. A refusal costs one
+# reviewed file, once: pull prints the entries as a ready project file, and the
+# file's existence (even `{}`) is what ends the check.
+_bp_settings_layer() {
+  local bp="$1" out="$2" proposal
+  if ! command -v jq >/dev/null 2>&1; then
+    BP_PP_WHY="jq is not on PATH, so pull cannot keep this project's permission rules (bash scripts/install-toolchain.sh)"
+    return 1
+  fi
+  if [ -f "$BP_SETTINGS_LAYER" ]; then
+    if ! jq -e "$BP_SETTINGS_SHAPE" "$BP_SETTINGS_LAYER" >/dev/null 2>&1; then
+      BP_PP_WHY="$BP_SETTINGS_LAYER must be a JSON object holding only permissions.allow, ask, deny and additionalDirectories, each a list of strings"
+      return 1
+    fi
+    if ! jq -s "$BP_SETTINGS_MERGE" "$bp" "$BP_SETTINGS_LAYER" >"$out" 2>/dev/null; then
+      BP_PP_WHY="the blueprint's settings.json is not valid JSON, so $BP_SETTINGS_LAYER cannot be merged into it"
+      return 1
+    fi
+    return 0
+  fi
+  if [ -f .claude/settings.json ]; then
+    if ! proposal=$(jq -s "$BP_SETTINGS_EXTRA" "$bp" .claude/settings.json 2>/dev/null); then
+      BP_PP_WHY="this project's settings.json (or the blueprint's) is not valid JSON"
+      return 1
+    fi
+    if [ "$proposal" != null ]; then
+      BP_PP_WHY="it holds permission rules the blueprint does not ship, and there is no $BP_SETTINGS_LAYER to keep them (run 'blueprint pull .claude/settings.json' to see them)"
+      BP_PP_DETAIL="      Save the entries that are this project's own as $BP_SETTINGS_LAYER, then pull again.
+      Delete any the blueprint removed on purpose; if none are yours, write {}.
+$(printf '%s\n' "$proposal" | sed 's/^/        /')"
+      return 1
+    fi
+  fi
+  cp "$bp" "$out"
+}
+
 # bp_prospective_for PATH OUT — bp_prospective_pull for the managed file at the
 # project-relative PATH. The blueprint copy is resolved and placeholder-
-# substituted HERE and nowhere else. Same globals and return status.
+# substituted HERE and nowhere else, and settings.json gets its project layer
+# here too, so drift, selection, preview and write all judge the merged result.
+# Same globals and return status.
 bp_prospective_for() {
-  local f="$1" out="$2" bp cmp rc=0
+  local f="$1" out="$2" bp cmp rc=0 merged
   bp=$(bp_blueprint_path "$f")
   cmp=$(substituted_blueprint_copy "$f")
-  bp_prospective_pull "$cmp" "$f" "$out" || rc=$?
+  BP_PP_DETAIL=""
+  if [ "$f" = .claude/settings.json ]; then
+    merged=$(mktemp)
+    if _bp_settings_layer "$cmp" "$merged"; then
+      bp_prospective_pull "$merged" "$f" "$out" || rc=$?
+    else
+      BP_PP_MODE=refuse
+      rc=1
+    fi
+    rm -f "$merged"
+  else
+    bp_prospective_pull "$cmp" "$f" "$out" || rc=$?
+  fi
   if [ "$cmp" != "$bp" ]; then rm -f "$cmp"; fi
   return "$rc"
 }
@@ -663,6 +771,7 @@ pull_file() {
   case "$BP_PP_MODE" in
     refuse)
       echo "  ${C_RED}    refuse: ${BP_PP_WHY}. Nothing written.${C_RESET}"
+      if [ -n "${BP_PP_DETAIL:-}" ]; then printf '%s\n' "$BP_PP_DETAIL"; fi
       return 1 ;;
     new)
       # No `cp` first any more: it was a second, unshielded write. The mode
@@ -1487,9 +1596,10 @@ cmd_drift() {
   fi
 
   # A refused file is neither clean nor merely drifted: `pull` will not touch it
-  # until a human repairs its markers, so it is named on its own (BUG-034).
+  # until a human repairs it — its markers (BUG-034), or its permission layer
+  # (TASK-042) — so it is named on its own, with the reason.
   if [ ${#REFUSED[@]} -gt 0 ]; then
-    echo "${C_RED}Cannot sync — pull refuses these until their markers are fixed: ${#REFUSED[@]}${C_RESET}"
+    echo "${C_RED}Cannot sync — pull refuses these until they are fixed: ${#REFUSED[@]}${C_RESET}"
     for f in "${REFUSED[@]}"; do echo "  ${C_RED}✗${C_RESET} $f"; done
     echo
   fi

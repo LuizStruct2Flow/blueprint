@@ -354,11 +354,20 @@ it. Current contents:
   `pre-push-project.example`, and `pre-push-project` **between its
   `BLUEPRINT:BEGIN`/`END` markers** (it wires the suites, so it must travel
   with them; the region after `END` stays yours)
-- **`.claude/`:** `settings.json` (host-specific bits live in
+- **`.claude/`:** `settings.json`, landed by pull as the blueprint's file with the
+  project's `.claude/settings.project.json` permission lists merged in (the
+  blueprint's `ask`/`deny` always win; host-specific bits live in
   `settings.local.json`, gitignored)
 - **Folder skeleton READMEs:** every `README.md` under `docs/` and `config/`
 
 **Project-owned (never synced):**
+- `.claude/settings.project.json`: this project's own Claude Code permission
+  rules (`permissions.allow`/`ask`/`deny`/`additionalDirectories` only). Pull
+  merges it into `settings.json` and never writes it. A project `allow` that a
+  blueprint `ask` or `deny` names is dropped. A project whose `settings.json`
+  already carries its own rules gets one refused pull, which prints them as this
+  file, ready to review and save (TASK-042). `.claude/` is gitignored on purpose,
+  so add it with `git add -f`, as for `settings.json`.
 - The five `project_config_*.md` files (`overview`, `paths`, `dod`,
   `security`, `infra`) — these are *templates* seeded once at bootstrap
   and then evolve with the project

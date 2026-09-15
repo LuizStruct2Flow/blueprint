@@ -29,6 +29,22 @@
  * every other invocation through the real node with a preload that overrides
  * `process.version` and `process.versions.node`, so the script's own Node code
  * runs for real and sees the chosen version, however it asks.
+ *
+ * MUTATION RECORD (R6) — OBSERVED, each mutant applied alone to
+ * scripts/install-toolchain.sh on a copy of the tree outside any git tree, this
+ * suite run, the file restored. (The request's own header admitted its sets were
+ * derived by reading; these were run.)
+ *   Pre-fix script (NODE_MIN_MAJOR=18)                    → #1 #2 #3 #4 #5
+ *   A  compare the major only                            → #1 #2 #5
+ *   B  "cannot tell" counts as a pass                     → #3 #4
+ *   C  the range hard-coded instead of read              → #2 #3 #4 #5
+ *   D  the caret as filed ("same major")                 → #5
+ *   E  no up-front check that every comparator is known  → #4
+ *   B FIRST LEFT #4 GREEN, and that is how E exists. The evaluator stopped at the
+ *   first failing comparator, so `20 - 22` on Node 24 failed the bare `20` and
+ *   never reached `-`: #4 passed as "unsupported" rather than as
+ *   "uninterpretable". The evaluator now checks every comparator's form before
+ *   evaluating any, and #4 requires the UNVERIFIED verdict.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -120,6 +136,12 @@ describe('TASK-027 — check derives the Node requirement from tests/package.jso
       const script = await copyWithManifest(s, 'root', engines('20 - 22'))
       const r = await check(s, '24.1.0', script)
       expect(r.line, `an uninterpretable range was accepted:\n${r.output}`).toMatch(/✗ node/)
+      // The VERDICT, not merely a rejection. Node 24 also fails the bare `20`,
+      // and an evaluator that short-circuits on it never parses `-`, so it
+      // rejected this range as "unsupported" without ever finding it
+      // uninterpretable — and a mutant passing every uninterpretable range left
+      // this case green. Observed on the request as filed.
+      expect(r.line, `the range was judged, not refused as uninterpretable:\n${r.output}`).toMatch(/UNVERIFIED/)
       expect(r.output).toContain('20 - 22')
       expect(r.code).toBe(1)
     })

@@ -142,7 +142,7 @@
  * missing → #16b. It also reddens #4, #20, #20b and #20c, whose remotes the
  * mutant's extra ls-remote hangs on or cannot reach.
  *
- * Plan: docs/doing/PLAN-TASK-025.md §9.2.
+ * Plan: docs/done/PLAN-TASK-025.md §9.2.
  */
 
 import { describe, it, expect, vi } from 'vitest'

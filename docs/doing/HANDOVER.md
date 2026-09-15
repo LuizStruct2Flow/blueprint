@@ -157,7 +157,7 @@ has no unpushed commits (`git log origin/main..main` empty).
 
 **Now: TASK-025 — `drift` and `pull` read the blueprint by its repository
 address.** Founder chose **option A, git fetch, now**; the npm package (option B)
-is deferred until after Stage B. Plan: `docs/doing/PLAN-TASK-025.md`.
+is deferred until after Stage B. Plan: `docs/done/PLAN-TASK-025.md`.
 **First review (Alexey, Codex): build A with changes** —
 `.scratch/ALEXEY-plan025-review.md`. **Revised by Christian in `b4983f3`** (2026-09-14):
 six findings adopted with probes, one rejected with evidence; he also found SIGINT

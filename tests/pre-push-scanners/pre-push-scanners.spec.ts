@@ -65,12 +65,20 @@
  *   M11 remove the osv-scanner shim from the fixture (a FIXTURE mutant, not a
  *       hook one — it is the only way to prove the isolation claim #0 makes)
  *       Red: #0.
+ *   M12 `_st_semgrep` stops reading `.errors` (BUG-126 restored)
+ *       Red: BUG-126 #1, #2, #4.
+ *   M13 the shell parse-error policy tolerates every extensionless path
+ *       Red: BUG-126 #4.
+ *   M14 the CI semgrep step goes back to `semgrep scan --error`
+ *       Red: BUG-126 #ci.
  */
 
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { parseDocument } from 'yaml'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { notGithubActions, skipVisibly } from '../helpers/project-config.js'
 
 /**
  * The shim-directory handle, derived from the harness rather than re-declared.
@@ -303,6 +311,115 @@ describe('BUG-003 — scanner failures and scanner findings are distinguished', 
   })
 })
 
+describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () => {
+  // semgrep 1.171.0 over `function broken( {` then `eval("x")` exits 0 with
+  // `results: []` and a PartialParsing entry in `errors`. The gate never read
+  // `errors`, so it approved a file it had not analysed.
+  it('#1 exit 0, zero results and a PartialParsing error blocks, retries once, and names the type and path', async () => {
+    await scenario('scanners-bug126-1', async (s) => {
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['partial'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `a partial scan was approved as clean\n${r.output}`).not.toBe(0)
+      expect(r.output).not.toContain('WARNING+ finding')
+      expect(r.output, 'the block did not name the error type').toContain('PartialParsing')
+      expect(r.output, 'the block did not name the unanalysed path').toContain('src/broken.js')
+      expect(await f.calls('semgrep'), 'expected exactly 1 call + 1 retry').toBe(2)
+    })
+  })
+
+  it('#2 a partial scan that completes on the single-job retry passes', async () => {
+    await scenario('scanners-bug126-2', async (s) => {
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['partial', 'clean'])
+
+      const r = await f.runHook()
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.output).toContain('retrying single-job')
+      expect(await f.calls('semgrep')).toBe(2)
+    })
+  })
+
+  it('#3 parse errors on shell scripts are accepted by the stated policy, visibly and without a retry', async () => {
+    await scenario('scanners-bug126-3', async (s) => {
+      // semgrep's bash parser rejects valid scripts: 18 of this repo's own
+      // shell files, all shellcheck-clean. Blocking on those would block every push.
+      const f = await fixture(s)
+      await shellTargets(s)
+      await f.gitleaks([0])
+      await f.semgrep(['shellparse'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `shell parse errors blocked the gate\n${r.output}`).toBe(0)
+      expect(r.output, 'the accepted errors were accepted silently').toMatch(/2 shell parse error\(s\) accepted/)
+      expect(await f.calls('semgrep')).toBe(1)
+    })
+  })
+
+  it('#4 the shell policy goes by shebang, not by a missing extension: a node script still blocks', async () => {
+    await scenario('scanners-bug126-4', async (s) => {
+      const f = await fixture(s)
+      await shellTargets(s)
+      await f.gitleaks([0])
+      await f.semgrep(['nodeparse'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `a parse error on a node script was accepted\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('scripts/node-tool')
+    })
+  })
+
+  it('#ci the workflow semgrep step applies the same classification', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('scanners-bug126-ci', async (s) => {
+      // `semgrep scan --error` fails on findings only. The step is EXECUTED, as
+      // GitHub runs a `shell: bash` block, over the payloads the hook cases use.
+      const wf = parseDocument(
+        await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
+      ).toJS() as { jobs?: Record<string, { steps?: { run?: string }[] }> }
+      const runs = Object.values(wf.jobs ?? {})
+        .flatMap((job) => job.steps ?? [])
+        .flatMap((step) => (typeof step.run === 'string' && /\bsemgrep\s+scan\b/.test(step.run) ? [step.run] : []))
+      expect(runs.length, 'expected exactly one workflow step running semgrep scan').toBe(1)
+
+      const f = await fixture(s)
+      await shellTargets(s)
+      const script = await s.fs.write('ci-semgrep.sh', runs[0] ?? '')
+      const cases: [SemgrepMode, boolean][] = [
+        ['clean', true],
+        ['shellparse', true],
+        ['partial', false],
+        ['nodeparse', false],
+        ['finding', false],
+        ['oserror', false],
+        ['badschema', false],
+        ['err1json', false],
+      ]
+      for (const [mode, passes] of cases) {
+        await f.shims.add('semgrep', `mode=${mode}\n${SEMGREP_MODES}`)
+        const driver = await s.fs.write(
+          `ci-driver-${mode}.sh`,
+          `cd ${JSON.stringify(f.dir)}\n` +
+            `PATH=${JSON.stringify(f.shims.path())}\nexport PATH\n` +
+            `exec bash --noprofile --norc -eo pipefail ${JSON.stringify(script)}\n`,
+        )
+        const r = await s.run('sh', [driver], { cwd: f.dir, timeoutMs: 60_000 })
+        if (passes) expect(r.code, `CI failed a ${mode} scan\n${r.output}`).toBe(0)
+        else expect(r.code, `CI passed a ${mode} scan\n${r.output}`).not.toBe(0)
+        if (mode === 'partial') expect(r.output, 'CI did not name the unanalysed path').toContain('src/broken.js')
+      }
+    })
+  })
+})
+
 describe('TASK-040 — the IaC stages find infrastructure/ as well as infra/', () => {
   it('#iac-1 a project with infrastructure/cdk.json reaches the CDK synth stage', async () => {
     await scenario('scanners-iac-1', async (s) => {
@@ -346,7 +463,23 @@ interface ScannerFixture {
   runHook(options?: { path?: string }): Promise<{ code: number | null; output: string }>
 }
 
-type SemgrepMode = 'clean' | 'finding' | 'crash2' | 'err1json' | 'badschema' | 'oserror'
+type SemgrepMode =
+  | 'clean'
+  | 'finding'
+  | 'crash2'
+  | 'err1json'
+  | 'badschema'
+  | 'oserror'
+  | 'partial'
+  | 'shellparse'
+  | 'nodeparse'
+
+/** The targets BUG-126's shell policy reads the shebang of. */
+async function shellTargets(s: Scenario): Promise<void> {
+  await s.fs.write('repo/scripts/x.sh', 'echo x\n')
+  await s.fs.write('repo/scripts/tool', '#!/usr/bin/env bash\necho tool\n')
+  await s.fs.write('repo/scripts/node-tool', '#!/usr/bin/env node\nconsole.log(1)\n')
+}
 
 async function fixture(s: Scenario): Promise<ScannerFixture> {
   const repo = await s.gitRepo('repo')
@@ -455,4 +588,7 @@ const SEMGREP_MODES = `case "$mode" in
   err1json)  echo "SEMGREP-CRASH-DIAG (error, exit 1, valid JSON)" >&2; printf '{"version":"1","results":[],"errors":[{"level":"error"}]}\\n'; exit 1 ;;
   badschema) printf '{"version":"1","results":"not-an-array"}\\n'; exit 0 ;;
   oserror)   echo "Traceback (most recent call last):" >&2; echo "PermissionError: settings.yml" >&2; exit 1 ;;
+  partial)   printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":["PartialParsing",[{"path":"src/broken.js","start":{"line":1,"col":1,"offset":0},"end":{"line":2,"col":10,"offset":28}}]],"message":"Syntax error at line src/broken.js:1","path":"src/broken.js"}]}\\n'; exit 0 ;;
+  shellparse) printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":["PartialParsing",[{"path":"scripts/x.sh","start":{"line":1,"col":1,"offset":0},"end":{"line":1,"col":4,"offset":3}}]],"message":"Syntax error at line scripts/x.sh:1","path":"scripts/x.sh"},{"code":3,"level":"warn","type":"Syntax error","message":"Syntax error at line scripts/tool:1","path":"scripts/tool"}]}\\n'; exit 0 ;;
+  nodeparse) printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":"Syntax error","message":"Syntax error at line scripts/node-tool:1","path":"scripts/node-tool"}]}\\n'; exit 0 ;;
 esac`

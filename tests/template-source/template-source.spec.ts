@@ -68,6 +68,23 @@ async function archiveListing(s: Scenario): Promise<string[]> {
   return r.stdout.split('\n').filter(Boolean)
 }
 
+describe('TASK-043 — CLAUDE.md imports exactly the five project configs', () => {
+  it('#import-1 the @-imports in CLAUDE.md are the seeded configs, and the root copies exist', async () => {
+    const doc = await readFile(join(REPO_ROOT, 'CLAUDE.md'), 'utf8')
+    // Claude Code ignores code blocks and code spans when it looks for imports, so this does too.
+    const prose = doc.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+    const imports = [...prose.matchAll(/(?:^|\s)@([^\s\\]+)/g)].map((m) => m[1])
+
+    expect(imports.sort(), 'CLAUDE.md must import the same five files bootstrap seeds').toEqual(
+      [...CONFIGS].sort(),
+    )
+    for (const c of CONFIGS) {
+      // BUG-009: here the root copies are this repo's own config, so the blueprint's sessions import real files.
+      await expect(readFile(join(REPO_ROOT, c), 'utf8'), `root ${c} is missing`).resolves.toBeTruthy()
+    }
+  })
+})
+
 describe("BUG-009 — the seed template and this repo's own config are separate", () => {
   it('#1 templates/ carries all 5 project_config templates', async () => {
     await scenario('template-source-1', async (s) => {

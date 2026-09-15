@@ -198,8 +198,14 @@ hangs off that root.
 ## 3. LIVE HAZARDS
 
 - **CI GREEN AGAIN on `4bbcac7` (run 34904164240, 2026-09-15); BUG-117 is in
-  waiting-acceptance.** In flight now, concurrently: **Philipp — TASK-028** (PR #68 port;
-  owns `tests/harness/*`, `scripts/lib/state-dir.sh`, state-root, code-root, tsconfig) and
+  waiting-acceptance.** **Philipp — TASK-028 DONE locally (2026-09-15), 7 commits, unpushed**
+  (`554b86a`..`68d212c`): BUG-110 closed by its long-planned preflight (the harness now
+  refuses a workspace under a stray marker — loudly; remedy: remove it or point `TMPDIR`
+  elsewhere), BUG-111 closed (`run()` waits for the killed group), BUG-119 new (`childRoot`
+  type + option spreads), `exactOptionalPropertyTypes` on. **Jesko (Codex) is reviewing it.**
+  **Gap found: no gate stage or CI job runs `tsc`** — row it once Christian's uncommitted
+  backlog edit is in. **While a Codex run is live, run suites with
+  `TMPDIR=/home/luiz/.cache/bp-harness-tmp`.** Still in flight:
   **Christian — TASK-025 commits 3–4 with TASK-027 (#67) and TASK-029 (#69) inside commit 4**
   (owns `security.yml`, `scripts/blueprint`, `new-project.sh`, `install-toolchain.sh`).
   **Vitali — BUG-118 (#64) waits until both land**: its reproducer fails until the founder's

@@ -31,6 +31,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { declaration } from '../helpers/project-config.js'
 
 export interface DocLinkScan {
   /** How many relative links were examined. The non-vacuity number. */
@@ -98,8 +99,34 @@ export function relativeLinkTargets(content: string): string[] {
   return targets
 }
 
-/** Scan a docs tree. Returns the count examined and every unresolved target. */
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Scan a docs tree. Returns the count examined and every unresolved target.
+ *
+ * TASK-045 — A SITE-ABSOLUTE TARGET (`/security.html`) names a served page, not
+ * a path on this disk. It resolves only through what the project declares in
+ * project_config_paths.md, which sits beside docs/:
+ *
+ *     - BP_WEB_ROOT: `frontend/public`             a directory the site serves
+ *     - BP_WEB_PATHS: `/security.html /terms/v1.html`   pages served from elsewhere
+ *
+ * With neither, it is reported, so a typo is never accepted by default. It used
+ * to be resolved against the filesystem root, which reported every served page
+ * and would have accepted `/etc`.
+ */
 export async function scanDocLinks(docsDir: string): Promise<DocLinkScan> {
+  const projectRoot = dirname(docsDir)
+  const webRoot = await declaration(projectRoot, 'BP_WEB_ROOT')
+  const webPaths = (await declaration(projectRoot, 'BP_WEB_PATHS'))?.split(/\s+/).filter(Boolean) ?? []
+
   let examined = 0
   const broken: string[] = []
 
@@ -107,10 +134,12 @@ export async function scanDocLinks(docsDir: string): Promise<DocLinkScan> {
     const content = await readFile(file, 'utf8')
     for (const target of relativeLinkTargets(content)) {
       examined++
-      try {
-        await stat(resolve(dirname(file), target))
-      } catch {
-        broken.push(`${file} -> ${target}`)
+      if (!target.startsWith('/')) {
+        if (!(await exists(resolve(dirname(file), target)))) broken.push(`${file} -> ${target}`)
+      } else if (!webPaths.includes(target) && !(webRoot && (await exists(join(projectRoot, webRoot, target))))) {
+        broken.push(
+          `${file} -> ${target} (site-absolute: declare BP_WEB_ROOT or BP_WEB_PATHS in project_config_paths.md)`,
+        )
       }
     }
   }

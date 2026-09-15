@@ -42,6 +42,22 @@ other value names your real pipeline, for example `aws-codepipeline`,
 with the value you wrote. They do not pass. Leaving the line out means
 `github-actions`.
 
+## Served pages linked from docs
+
+> For the doc-links suite. A link starting with `/`, like `/security.html`,
+> names a page your site serves, not a file in `docs/`. It is reported as
+> broken unless one of these two lines accounts for it.
+
+Add either line, or both, as its own list item:
+
+- ``BP_WEB_ROOT: `frontend/public` `` names the repo directory the site serves.
+  A link to `/security.html` resolves when `frontend/public/security.html`
+  exists.
+- ``BP_WEB_PATHS: `/security.html /terms/v1.html` `` lists pages served from
+  somewhere else, separated by spaces. Each must match the link exactly.
+
+Declare neither if your docs link no served pages.
+
 ## Local agent state
 
 > Where the agent dispatchers write logs and artefacts on the founder's

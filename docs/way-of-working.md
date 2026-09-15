@@ -331,6 +331,10 @@ blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement ups
 blueprint files            # list the blueprint-managed files (single source of truth)
 ```
 
+**One command per machine, and it names no checkout.** `bash scripts/install-toolchain.sh`
+writes `blueprint`, which runs the CLI of the project you stand in — so moving the
+blueprint cannot break it, and it never overwrites a command it did not write.
+
 **What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`,
 `scripts/install-toolchain.sh`, every
 recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),

@@ -4,6 +4,8 @@
 #   bash scripts/install-toolchain.sh            install the security-gate tools
 #   bash scripts/install-toolchain.sh --infra    ...plus the IaC set (cdk/terraform/helm)
 #   bash scripts/install-toolchain.sh check      report what is present/missing, install nothing
+#   bash scripts/install-toolchain.sh --replace-blueprint-command [--project=<dir>]
+#                                                replace a hand-written blueprint command
 #
 # THIS SCRIPT IS THE SINGLE SOURCE OF TRUTH for what the gate needs. It replaced
 # the macOS-only `Brewfile` (TASK-017): the per-OS *mechanism* differs, the tool
@@ -45,6 +47,11 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Where the operator ran this from, recorded before anything could `cd`.
+# --replace-blueprint-command validates the new command HERE (or in --project),
+# never in $ROOT: $ROOT always has its own CLI, so a run there proves nothing
+# about the project the command will serve (PLAN-TASK-025 §R5 #5).
+CALLER_DIR="$PWD"
 BIN_DIR="${HOME}/.local/bin"
 
 # --- Pinned versions ---------------------------------------------------------
@@ -83,14 +90,22 @@ INFRA_TOOLS="cdk terraform helm aws"
 
 MODE="install"
 WITH_INFRA=no
+PROJECT_DIR=""
 for arg in "$@"; do
   case "$arg" in
     check)   MODE="check" ;;
     --infra) WITH_INFRA=yes ;;
-    -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "usage: $0 [check] [--infra]" >&2; exit 2 ;;
+    --replace-blueprint-command) MODE="replace-command" ;;
+    # One `=` token, because this loop reads one argument at a time.
+    --project=*) PROJECT_DIR="${arg#--project=}" ;;
+    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "usage: $0 [check] [--infra] | --replace-blueprint-command [--project=<dir>]" >&2; exit 2 ;;
   esac
 done
+if [ -n "$PROJECT_DIR" ] && [ "$MODE" != "replace-command" ]; then
+  echo "usage: --project=<dir> is accepted only with --replace-blueprint-command" >&2
+  exit 2
+fi
 
 note() { echo "  $*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -272,6 +287,173 @@ require_node() {
   fi
 }
 
+# --- TASK-025: the per-machine `blueprint` command ----------------------------
+#
+# ~/.local/bin/blueprint used to be hand-written and `exec` a hard-coded checkout
+# path, so moving the blueprint (TASK-021 Stage B) would break `blueprint` for
+# every project on the machine, and no commit can fix a file outside git. This
+# command names no checkout: it runs the CLI of the project in the current
+# directory, which reads the blueprint by its address. PLAN-TASK-025 §8.1.
+BLUEPRINT_COMMAND_PATH="$BIN_DIR/blueprint"
+
+# The body, VERBATIM. Ownership is byte-exact equality with a body this installer
+# released (§R4 #1): the marker line proves nothing, since anyone can copy it.
+# At v1 the released set is this one body. When a v2 ships, v1 joins the set
+# with its "identical to an earlier body -> replaced" case; that code is not
+# written now, because there is no earlier body for it to act on.
+read -r -d '' BLUEPRINT_COMMAND_BODY <<'BODY'
+#!/usr/bin/env bash
+# struct2flow-blueprint-command v1: written by scripts/install-toolchain.sh (TASK-025).
+# Runs THIS project's own blueprint CLI. The blueprint is read by its address,
+# so no checkout path belongs in this file. Edit the installer, not this copy.
+for c in ./scripts/blueprint ./scaffolding/scripts/blueprint; do
+  [ -x "$c" ] && exec "$c" "$@"
+done
+echo "blueprint: no scripts/blueprint in $PWD. Run from a project root," >&2
+echo "  or fetch the CLI once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/blueprint" >&2
+exit 1
+BODY
+
+# bc_owned PATH — this installer's current body: a REGULAR file, never a symlink
+# (the symlink test comes first), byte-identical to it.
+bc_owned() {
+  [ ! -L "$1" ] && [ -f "$1" ] && printf '%s\n' "$BLUEPRINT_COMMAND_BODY" | cmp -s - "$1"
+}
+
+# bc_foreign PATH — something is there, and it is not ours.
+bc_foreign() {
+  { [ -L "$1" ] || [ -e "$1" ]; } && ! bc_owned "$1"
+}
+
+bc_foreign_warning() {
+  note "⚠ $BLUEPRINT_COMMAND_PATH was not written by this installer, so it is left alone."
+  note "  If it runs a checkout's scripts/blueprint, TASK-021 Stage B will break it."
+  note "  Once every project has the address-reading CLI, replace it with:"
+  note "  bash scripts/install-toolchain.sh --replace-blueprint-command"
+}
+
+# After writing: the README once told people to put a checkout's scripts/ on
+# PATH, which is the same hazard in another shape.
+bc_shadow_check() {
+  hash -r 2>/dev/null || true
+  _bc_first="$(command -v blueprint 2>/dev/null || true)"
+  if [ -n "$_bc_first" ] && [ "$_bc_first" != "$BLUEPRINT_COMMAND_PATH" ]; then
+    note "⚠ blueprint resolves to $_bc_first first on PATH, not $BLUEPRINT_COMMAND_PATH."
+  fi
+}
+
+# Install mode. Never replaces a file it did not write — the operator's current
+# wrapper is the recovery path until every project is migrated (§7.2 step 8).
+install_blueprint_command() {
+  if bc_foreign "$BLUEPRINT_COMMAND_PATH"; then
+    bc_foreign_warning
+  elif bc_owned "$BLUEPRINT_COMMAND_PATH"; then
+    note "✓ blueprint command already present"
+  else
+    _bc_new="$(mktemp "$BIN_DIR/.blueprint.new.XXXXXX" 2>/dev/null)" || _bc_new=""
+    if [ -n "$_bc_new" ] && printf '%s\n' "$BLUEPRINT_COMMAND_BODY" > "$_bc_new" \
+       && chmod 0755 "$_bc_new" && mv -f "$_bc_new" "$BLUEPRINT_COMMAND_PATH"; then
+      note "✓ blueprint command installed ($BLUEPRINT_COMMAND_PATH)"
+    else
+      [ -n "$_bc_new" ] && rm -f "$_bc_new"
+      note "⚠ could not write $BLUEPRINT_COMMAND_PATH"
+    fi
+  fi
+  bc_shadow_check
+}
+
+# --- --replace-blueprint-command: the approved replacement of a foreign file --
+#
+# Typing the flag is the operator's approval. Prepare the body beside the target,
+# validate it IN the project it will serve, back the old command up, and only
+# then swap with one rename, so `blueprint` is always either the old command or
+# the validated new one. Every failure before the swap exits 1 with the target
+# untouched and the temp file removed. The shared terminating handler is not
+# decoration: without it an INT to the installer alone was absorbed and the swap
+# completed (§R4 #2).
+if [ "$MODE" = "replace-command" ]; then
+  if [ ! -r "$ROOT/scripts/lib/signals.sh" ]; then
+    echo "✗ scripts/lib/signals.sh is missing — refusing to replace the command without a signal-safe swap" >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/lib/signals.sh
+  . "$ROOT/scripts/lib/signals.sh"
+  BC_TMP=""
+  bc_cleanup() {
+    if [ -n "$BC_TMP" ]; then rm -f "$BC_TMP"; fi
+    BC_TMP=""
+  }
+  _bp_terminating_traps bc_cleanup
+
+  if bc_owned "$BLUEPRINT_COMMAND_PATH"; then
+    note "✓ blueprint command already present"
+    exit 0
+  fi
+
+  # Which project, and is it one the command can serve? The state §7.2 step 7
+  # verifies: .blueprint-source sets blueprint_release_branch and no longer has
+  # blueprint_source. The blueprint itself has no .blueprint-source, so running
+  # there without --project is refused rather than validated against its own CLI.
+  BC_PROJECT="${PROJECT_DIR:-$CALLER_DIR}"
+  BC_CONFIG="$BC_PROJECT/.blueprint-source"
+  if [ -L "$BC_CONFIG" ] || [ ! -f "$BC_CONFIG" ] \
+     || ! grep -q '^[[:space:]]*blueprint_release_branch[[:space:]]*=[[:space:]]*[^[:space:]]' "$BC_CONFIG" \
+     || grep -q '^[[:space:]]*blueprint_source[[:space:]]*=' "$BC_CONFIG"; then
+    echo "✗ $BC_PROJECT is not a migrated project (§7.2 steps 4–7); run from one, or pass --project=<dir>" >&2
+    exit 1
+  fi
+
+  if ! mkdir -p "$BIN_DIR"; then
+    echo "✗ could not create $BIN_DIR" >&2
+    exit 1
+  fi
+
+  # 1. Prepare.
+  BC_TMP="$(mktemp "$BIN_DIR/.blueprint.new.XXXXXX")" || { BC_TMP=""; echo "✗ could not create a temp file in $BIN_DIR" >&2; exit 1; }
+  if ! printf '%s\n' "$BLUEPRINT_COMMAND_BODY" > "$BC_TMP"; then
+    echo "✗ could not write the new command" >&2
+    exit 1
+  fi
+  if ! chmod 0755 "$BC_TMP"; then
+    echo "✗ could not make the new command executable" >&2
+    exit 1
+  fi
+
+  # 2. Validate, in the project: executable, shebang resolves, and it reaches
+  #    THAT project's CLI.
+  if ! ( cd "$BC_PROJECT" && "$BC_TMP" help ) >/dev/null 2>&1; then
+    echo "✗ the new command does not run the CLI of $BC_PROJECT (§7.2 step 4 done?) — nothing replaced" >&2
+    exit 1
+  fi
+
+  # 3. Back up, into a fresh directory, so nothing is written through an existing
+  #    path. -P copies a symlink as a link.
+  BC_BACKUP=""
+  if [ -L "$BLUEPRINT_COMMAND_PATH" ] || [ -e "$BLUEPRINT_COMMAND_PATH" ]; then
+    BC_BACKUP="$(mktemp -d "$BIN_DIR/.blueprint-replaced.XXXXXX")" || { echo "✗ could not create a backup directory" >&2; exit 1; }
+    if ! cp -pP "$BLUEPRINT_COMMAND_PATH" "$BC_BACKUP/blueprint"; then
+      echo "✗ could not back up $BLUEPRINT_COMMAND_PATH — nothing replaced" >&2
+      exit 1
+    fi
+  fi
+
+  # 4. Swap: one rename within one directory. A symlink target is replaced as a
+  #    link; the file it pointed at is untouched.
+  if ! mv -f "$BC_TMP" "$BLUEPRINT_COMMAND_PATH"; then
+    echo "✗ could not move the new command into place — nothing replaced" >&2
+    exit 1
+  fi
+  BC_TMP=""
+
+  # 5. Report. The installer never deletes a backup.
+  note "✓ blueprint command replaced ($BLUEPRINT_COMMAND_PATH)"
+  if [ -n "$BC_BACKUP" ]; then
+    note "  previous command kept; restore it with: mv $BC_BACKUP/blueprint $BLUEPRINT_COMMAND_PATH"
+  fi
+  bc_shadow_check
+  exit 0
+fi
+
 # --- check mode: identical on every OS ---------------------------------------
 if [ "$MODE" = "check" ]; then
   missing=0
@@ -337,6 +519,17 @@ if [ "$MODE" = "check" ]; then
     missing=$((missing + 1))
   fi
 
+  # The command is reported, never counted: nothing in the gate calls
+  # `blueprint`, and install does not fail on it either, so check and install
+  # still report the same set.
+  if bc_foreign "$BLUEPRINT_COMMAND_PATH"; then
+    note "⚠ $BLUEPRINT_COMMAND_PATH was not written by this installer, so it is left alone."
+  elif bc_owned "$BLUEPRINT_COMMAND_PATH"; then
+    note "✓ blueprint command ($BLUEPRINT_COMMAND_PATH)"
+  else
+    note "✗ blueprint command MISSING (run: bash scripts/install-toolchain.sh)"
+  fi
+
   if [ "$missing" -eq 0 ]; then
     echo "All present."
     exit 0
@@ -344,6 +537,20 @@ if [ "$MODE" = "check" ]; then
   echo "$missing tool(s) missing — run: bash scripts/install-toolchain.sh"
   exit 1
 fi
+
+# --- Both OSes: $BIN_DIR, and the per-machine blueprint command ---------------
+# BEFORE the OS branch, so a missing Homebrew or curl cannot skip the command.
+mkdir -p "$BIN_DIR"
+case ":$PATH:" in
+  *":$BIN_DIR:"*) : ;;
+  *)
+    echo "⚠ $BIN_DIR is not on PATH — using it for this run."
+    echo "  Add it to your shell profile, or the gate will still report these missing."
+    PATH="$BIN_DIR:$PATH"
+    export PATH
+    ;;
+esac
+install_blueprint_command
 
 # --- macOS: brew install per missing tool ------------------------------------
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -402,17 +609,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 
 else
 # --- Linux: pinned release binaries into ~/.local/bin, no sudo ---------------
-  mkdir -p "$BIN_DIR"
-  case ":$PATH:" in
-    *":$BIN_DIR:"*) : ;;
-    *)
-      echo "⚠ $BIN_DIR is not on PATH — using it for this run."
-      echo "  Add it to your shell profile, or the gate will still report these missing."
-      PATH="$BIN_DIR:$PATH"
-      export PATH
-      ;;
-  esac
-
+  # $BIN_DIR and its PATH warning are set up above the OS branch now.
   case "$(uname -m)" in
     x86_64)        A_AMD=amd64; A_X64=x64;   A_64BIT=64bit ;;
     aarch64|arm64) A_AMD=arm64; A_X64=arm64; A_64BIT=ARM64 ;;

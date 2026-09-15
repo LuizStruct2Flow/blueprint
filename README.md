@@ -173,15 +173,27 @@ single CLI: **`blueprint`** (at `scripts/blueprint` in this repo).
 
 ### One-time setup
 
-Add the blueprint's `scripts/` to PATH so the CLI is callable as
-`blueprint` from any project:
+Run the toolchain installer once per machine, from this repo or any project:
 
 ```bash
-# ~/.zshrc (or ~/.bashrc)
-export PATH="$HOME/sources/struct2flow/blueprint/scripts:$PATH"
+bash scripts/install-toolchain.sh
 ```
 
-Or symlink it: `ln -s ~/sources/struct2flow/blueprint/scripts/blueprint /usr/local/bin/blueprint`.
+Along with the gate's tools, it writes the `blueprint` command to
+`~/.local/bin/blueprint`. That command runs **the CLI of the project you are
+standing in** (`scripts/blueprint`), so it names no checkout and keeps working
+wherever the blueprint lives or moves. It works from a project root.
+
+It never overwrites a `blueprint` it did not write. If you have an older
+hand-written wrapper, or a symlink or `PATH` entry into a blueprint checkout,
+replace it once your projects read the blueprint by its address:
+
+```bash
+bash scripts/install-toolchain.sh --replace-blueprint-command --project=<a migrated project>
+```
+
+That validates the new command in that project, keeps the old one in a backup
+directory, and swaps with a single rename; it prints the one-line restore.
 
 ### 1. Pull (blueprint → project)
 

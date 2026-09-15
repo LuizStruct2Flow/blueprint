@@ -422,9 +422,9 @@ Next steps:
      suite off your push path. The .example is a menu of guard shapes.
 
 Blueprint sync:
-  - Add the blueprint CLI to PATH (once per machine):
-      export PATH="\$HOME/sources/struct2flow/blueprint/scripts:\$PATH"
-    (or symlink: ln -s ~/sources/struct2flow/blueprint/scripts/blueprint /usr/local/bin/blueprint)
+  - Install the per-machine 'blueprint' command (once per machine; it runs the
+    CLI of the project you are standing in, and names no checkout):
+      bash scripts/install-toolchain.sh
   - From this project root:
       blueprint drift        # see what's changed in the blueprint since bootstrap
       blueprint pull         # pull blueprint changes forward (interactive)

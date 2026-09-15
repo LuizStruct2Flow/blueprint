@@ -934,25 +934,70 @@ describe('harness — a project marker above the workspace (BUG-110)', () => {
     })
   })
 
-  it('BUG-110 a marker in or above $TMPDIR ABORTS workspace creation, naming the path', async () => {
-    // The incident: an empty .git in the system temp dir made state-root #A6
-    // report `expected +0 not to be +0` — a message naming neither the temp dir
-    // nor the marker, so diagnosis started from innocent commits. The cause must
-    // be the failure, not an inverted assertion downstream of it.
-    await scenario('stray-marker', async (s) => {
+  // The incident: an empty .git in the system temp dir made state-root #A6
+  // report `expected +0 not to be +0`, a message naming neither the temp dir
+  // nor the marker, so diagnosis started from innocent commits. The cause must
+  // be the failure, not an inverted assertion downstream of it.
+  //
+  // THE MARKER SITS STRICTLY ABOVE TMPDIR, once per terminator. The first
+  // version of this case planted `.git` in TMPDIR itself, which a preflight
+  // examining only the base directory also passes, while it admits exactly the
+  // ancestor contamination the incident was (Jesko, TASK-028 review, finding 1).
+  // The case AT TMPDIR stays, because the base directory is examined too.
+  //
+  // MUTANTS of workspace.ts, applied to a copy and run, red set OBSERVED:
+  //   base-only traversal (`if (dirname(dir) === dir) return` -> `return`)
+  //     -> all three ABOVE cases; the AT-TMPDIR case stays green.
+  //   '.git' dropped from PROJECT_MARKERS -> AT-TMPDIR and ABOVE .git.
+  //   '.blueprint-root' dropped            -> ABOVE .blueprint-root only.
+  //   '.blueprint-source' dropped          -> ABOVE .blueprint-source only.
+  it('BUG-110 a .git IN $TMPDIR itself aborts workspace creation, naming the path and the remedy', async () => {
+    await scenario('stray-marker-at-tmpdir', async (s) => {
       const base = await s.fs.mkdirp('fake-tmp')
       await s.fs.write('fake-tmp/.git', '')
-      const saved = process.env.TMPDIR
-      process.env.TMPDIR = base
-      try {
-        await expect(createWorkspace('stray')).rejects.toThrow(join(base, '.git'))
-      } finally {
-        if (saved === undefined) delete process.env.TMPDIR
-        else process.env.TMPDIR = saved
-      }
+      const message = await refusalUnder(base)
+      expect(message).toContain(join(base, '.git'))
+      expect(message).toContain(REMEDY)
     })
   })
+
+  for (const marker of ['.git', '.blueprint-root', '.blueprint-source'] as const) {
+    it(`BUG-110 a ${marker} ABOVE $TMPDIR aborts workspace creation, naming the ancestor and the remedy`, async () => {
+      await scenario(`stray-marker-above${marker.replace('.', '-')}`, async (s) => {
+        const ancestor = await s.fs.mkdirp('fake-root')
+        await s.fs.write(`fake-root/${marker}`, '')
+        const base = await s.fs.mkdirp('fake-root/tmp/deeper')
+        const message = await refusalUnder(base)
+        expect(message).toContain(join(ancestor, marker))
+        expect(message).toContain(REMEDY)
+      })
+    })
+  }
 })
+
+/** The remedy the preflight's error must name, verbatim. */
+const REMEDY =
+  'remove the stray marker, or point TMPDIR at a directory with no marker above it'
+
+/**
+ * Create a workspace with TMPDIR pointed at `tmp`, and return the refusal's
+ * message, or '' if it was NOT refused. A workspace that is wrongly created is
+ * disposed here; it lies inside the calling scenario's workspace either way.
+ */
+async function refusalUnder(tmp: string): Promise<string> {
+  const saved = process.env.TMPDIR
+  process.env.TMPDIR = tmp
+  try {
+    const ws = await createWorkspace('stray')
+    await ws.dispose()
+    return ''
+  } catch (err) {
+    return (err as Error).message
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = saved
+  }
+}
 
 describe('harness — filesystem writes cannot escape (Andreas, Codex)', () => {
   it('BUG-058 REFUSES a write through an in-workspace symlink to the outside', async () => {

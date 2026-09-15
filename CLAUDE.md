@@ -478,6 +478,11 @@ top-level `tests/` holds the blueprint's own suites, which name blueprint bug
 numbers, so it never counts. Put project tests in their own declared roots
 (`backend/src`, `tests/e2e`, …) (TASK-039).
 
+**Which CI the checks assume.** `project_config_paths.md` also declares
+`BP_CI`. Checks on `.github/workflows` run only when it is `github-actions` or
+undeclared; for any other pipeline they skip with a visible `SKIP-NOTE`, because
+a check of an inert workflow file certifies CI that never runs (TASK-044).
+
 **Tooling consequences:**
 
 - `vitest.config.ts` `include`: both `src/**/*.test.ts` (co-located
@@ -531,6 +536,12 @@ The rules that replace it, and the two **controls** that make them checkable:
 - **If it becomes painful, fix the slow suite** — the timings name it.
   `signal-dispatch` went **125.4 s → 37.5 s** with every assertion intact once
   someone asked *why* it was slow instead of *where to put it*.
+- **A check that cannot judge this project skips out loud.** It prints
+  `SKIP-NOTE: <case>: <reason>`, which the gate surfaces the way it surfaces
+  `CANARY-NOTE:`, via `skipVisibly` / `skipNote` in
+  `tests/helpers/project-config.ts`. A bare `ctx.skip` is silent in the gate,
+  because vitest's JSON records no skip reason, and a silent skip reads as a
+  pass (TASK-044).
 
 **Why there are controls and not just rules.** The first version of this section
 claimed a silent skip was "not expressible" because `pipe_skip` requires a

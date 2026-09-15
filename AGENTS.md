@@ -110,6 +110,14 @@ Per-slice decisions live in the relevant
 - Before flipping to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md) §A–§H. If
   `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task` field
   claims are waiting, the handoff is not done.
+- **Every work item you name to the founder carries a link and a plain line.** A
+  bare ID (`S5`, `#151`, `BUG-209`) is the agent's shorthand, not the founder's
+  memory: an agent that has been working autonomously and then asks "approve
+  S5?" hands over a decision without its context. Wherever an item is mentioned
+  — a decision request, a handoff summary, the live baton's `Task` — link the
+  line that defines it (`docs/doing/BACKLOG.md:NN`, `docs/doing/BUGS.md:NN`,
+  `docs/doing/PLAN-*.md:NN`, or its current lifecycle folder) and say in one
+  sentence what it does. Look the line up; never guess it.
 
 **Agents stay active after a handoff** — after flipping the state to
 `OVER_TO_CODEX`, `OVER_TO_GEMINI`, `OVER_TO_COPILOT`, or `OVER_TO_USER`, an agent

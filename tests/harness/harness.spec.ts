@@ -1145,6 +1145,27 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
       expect(ws.root.startsWith(join(cache, 'bp-harness-tmp') + '/'), ws.root).toBe(true)
     })
   })
+
+  // bootstrap-gate runs a fresh project's own harness with TMPDIR pinned to a
+  // scenario's tmp. That tmp was created with the runner's umask, so 0775 under
+  // 0002, and the check above refused every default base below it. The umask is
+  // set here so the case does not depend on the runner's (pool: forks, so it
+  // stays in this process).
+  it('BUG-121 the directories a scenario creates are 0700 under umask 0002, and a default base below its tmp is accepted', async () => {
+    const saved = process.umask(0o002)
+    try {
+      await scenario('bug121-umask', async (s) => {
+        for (const name of ['home', 'state', 'tmp', 'logs']) {
+          expect((await stat(s.workspace.path(name))).mode & 0o777, `scenario ${name} is not 0700`).toBe(0o700)
+        }
+        const tmp = s.workspace.path('tmp')
+        const ws = await createWorkspace('bug121-nested', { env: { HOME: tmp }, systemTmp: tmp })
+        await ws.dispose()
+      })
+    } finally {
+      process.umask(saved)
+    }
+  })
 })
 
 /**

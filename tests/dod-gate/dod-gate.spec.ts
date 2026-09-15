@@ -522,6 +522,44 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   })
 
+  it('#11 storm2flow witness: a blueprint spec\'s fixture STRING naming BUG-200 does not vouch for it', async () => {
+    await scenario('dod-gate-11', async (s) => {
+      // Rehearsed by storm2flow's orchestrator on the pulled gate at dbed972:
+      // its BUG-200 and BUG-201 passed only because tests/bug-numbers holds
+      // synthetic rows with those numbers. The line below is that fixture's
+      // shape. The project declares its real roots and has a test for a
+      // different bug there, so only the fixture string could satisfy BUG-200.
+      const f = await build(s, 'r11', 'derived')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-200** | project bug | S3 | open | d |\n')
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: `backend frontend infrastructure`\n')
+      await s.fs.write(join(f.dir, 'backend/src/other.test.ts'), "it('BUG-188: an unrelated project test', () => {})\n")
+      await s.fs.write(
+        join(f.dir, 'tests/bug-numbers/bug-numbers.spec.ts'),
+        "row('BUG-200', 'cites **BUG-201** and BUG-201 again, and **BUG-200** in its own prose') +\n",
+      )
+      await commit(s, f, 'c.txt', 'BUG#200: a project fix with no test of its own')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a blueprint fixture string vouched for project BUG-200:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed but did not name the bug').toContain('BUG-200')
+    })
+  })
+
+  it('#11b storm2flow witness: a project bug tested under a declared backend/ root passes', async () => {
+    await scenario('dod-gate-11b', async (s) => {
+      // The other half of the rehearsal: 11 of 13 recent storm2flow bugs have
+      // their tests only under backend/, frontend/ or infrastructure/.
+      const f = await build(s, 'r11b', 'derived')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-188** | project bug | S3 | open | d |\n')
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: `backend frontend infrastructure`\n')
+      await s.fs.write(join(f.dir, 'backend/src/handler.test.ts'), "it('BUG-188: regression', () => {})\n")
+      await commit(s, f, 'c.txt', 'BUG#188: a project fix tested under backend/')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a test under the declared backend/ root was not found:\n${r.output}`).toBe(0)
+    })
+  })
+
   it('#10d a declared root that contains docs/ is refused — the bug\'s own row would vouch for it', async () => {
     await scenario('dod-gate-10d', async (s) => {
       // docs/doing/BUGS.md names **BUG-042** by construction (the rows stage

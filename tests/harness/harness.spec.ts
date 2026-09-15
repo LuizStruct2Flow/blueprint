@@ -989,6 +989,9 @@ describe('harness — a project marker above the workspace (BUG-110)', () => {
 //   an explicit TMPDIR ignored -> precedence and all four BUG-110 cases.
 //   the base read from process.env at call time, not at load
 //     -> the environment-change case only.
+// Those mutants were run before the loose-base and symlink-base cases existed.
+// Those two were observed red on their parent commit, where the default base was
+// never checked after mkdir.
 describe('harness — the default workspace base is private (BUG-121)', () => {
   it('BUG-121 a marker in the shared temp dir does not stop a workspace when TMPDIR is not set', async () => {
     await scenario('bug121-shared-tmp-marker', async (s) => {

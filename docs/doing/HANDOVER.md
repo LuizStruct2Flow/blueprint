@@ -210,7 +210,15 @@ hangs off that root.
   could not run inside his sandbox (its own `/tmp/.git`) — **resolved: re-run by the
   orchestrator with `TMPDIR=/home/luiz/.cache/bp-harness-tmp`, harness + state-root +
   state-dir + code-root + ts-bridge 96/96 green** (2026-09-15, on a tree that also held
-  Christian's uncommitted TASK-025 edits). **TASK-028 is review-complete and ready to push,
+  Christian's uncommitted TASK-025 edits). **TASK-025 commits 3–4 are committed locally**: `51654e8` (`released` branch)
+  and `e24d801` (the installer writes `~/.local/bin/blueprint`; shared
+  `scripts/lib/signals.sh`; install-toolchain 11/11, 19 mutants each red on its case).
+  **TASK-027 (#67) is done**: `97b466c` reproducer, `4545048` fix. **TASK-029 (#69) is in
+  progress**: promoted `39f5da9`; Christian is building its two U7 cases, including a
+  reproducer for a CLI that skips gate arming silently when `lib/gate.sh` is missing. **Then
+  Alexey reviews 3–4 + 027 + 029** (brief `.scratch/brief-alexey-025-commits-3-4-review.md`).
+  A refused deletion of an agent's own scratch copy is not a stop condition: leave it and
+  report it. **TASK-028 is review-complete and ready to push,
   but cannot go alone:** its commits interleave with TASK-025 commit 3 (`51654e8`, not yet
   reviewed) — push everything together after Alexey reviews commits 3–4.
   **Gap found: no gate stage or CI job runs `tsc`** — rowed as **TASK-031** in

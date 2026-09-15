@@ -94,6 +94,12 @@ They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
     Jesko's confirmation (`.scratch/brief-jesko-bug121-recheck2.md`) **did NOT run: Codex's
     usage limit is out again until 2026-09-16 02:10.** Eto reads the diff before the push;
     re-dispatch the brief after 02:10.
+    - **The chain check blocked the 22:14 push.** `bootstrap-gate` #2/#3 runs a fresh project's
+      gate inside a scenario. The harness creates the scenario `tmp` under umask 0002, so it is
+      0775, and the chain walk refuses it: all six BUG-121 cases failed in the nested run.
+      Philipp is making harness-created scenario dirs 0700 regardless of umask. Nothing from that
+      push reached origin; the rows and PR comments are still prepared in `.scratch/`
+      (`trig-03*.md`, `msg-wa-03*.txt`, `pr7*-close-comment.md`).
   - **Alex (TASK-034..036):** `.scratch/ALEX-task034-036-review.md`. **Fixed by Christian** in
     `5c4c5ba` (deck bullet for the link rule) and `3c13c6a` (roster example, publishing guide).
     The TASK-034 finding was declined; the reason is in its row (`cd4c373`).

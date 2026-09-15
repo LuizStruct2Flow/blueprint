@@ -1,8 +1,18 @@
 # Development Instructions
 
 This file is the struct2flow **generic** agent protocol. Project-specific
-overrides live in `project_config_overview.md`, `project_config_paths.md`,
-and `project_config_dod.md` at the repo root. Read those alongside this file.
+overrides live in five files at the repo root. They are imported here, so every
+session loads them with this file:
+
+- @project_config_overview.md
+- @project_config_paths.md
+- @project_config_dod.md
+- @project_config_security.md
+- @project_config_infra.md
+
+A project that has not created one of them yet still gets a working session:
+Claude Code skips an import whose file is missing. Project rules belong in these
+files, never in this one, because a pull replaces this file whole.
 
 **In the blueprint itself, those root files are THIS repo's own config and do
 not ship** — the seed source a new project is built from lives in
@@ -905,10 +915,9 @@ capability is non-negotiable.
 ## Blueprint sync (struct2flow framework)
 
 This CLAUDE.md is sourced from the struct2flow **blueprint** at
-`~/sources/struct2flow/blueprint/`. Project-specific extensions live in
-`project_config_overview.md`, `project_config_paths.md`,
-`project_config_dod.md`, `project_config_security.md`, and
-`project_config_infra.md` at the repo root.
+`~/sources/struct2flow/blueprint/`. Project-specific extensions live in the
+five `project_config_*.md` files at the repo root, imported at the top of this
+file.
 
 Sync is driven by a single CLI — `blueprint`. Its per-machine command is
 written by `bash scripts/install-toolchain.sh` and runs the CLI of the project

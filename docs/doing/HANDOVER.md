@@ -80,13 +80,24 @@ They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
 - **Philipp (Claude): TASK-037.** `blueprint a2bp` accepts paths the blueprint does not ship,
   with the guard kept, tests first. Also adds `docs/backlog/feature-requests.md` from #72 as the
   request inbox, plus doc sync. The two agents commit to disjoint files with pathspec commits.
-- **After both report:**
+- **BOTH BUILT, NOT PUSHED.**
+  - Christian: `dfd3cd9`, `e135324`, `8ae253a`; Eto added `d6faf8d` and `83492f3` (§10 pointer,
+    deck line).
+  - Philipp: `0c47b5b`..`6b3dc95`. a2bp now proposes unshipped and new files. It newly refuses
+    `.git` paths, gitignored paths, paths outside a work tree, and root `project_config_*.md`;
+    that last one is Philipp's call, keeping CLAUDE.md's "never back-propagated" rule.
+- **Held for DoD §1b rule 4, the cross-provider review.** Codex's usage limit resets at 21:08.
+  Dispatch then:
+  - Alexey: `.scratch/brief-alexey-task037-review.md`
+  - Alex: `.scratch/brief-alex-task034-036-review.md`
+  - Jesko: `.scratch/brief-jesko-bug121-recheck.md`
+  - Codex dispatches must pass `TMPDIR=/dev/shm` (no `~/.cache` write in its sandbox).
+- **After the reviews:**
+  - fix any findings
   - one gate push
   - CI watch
   - rows → waiting-acceptance
   - close #71–#74 with a comment naming each task, and delete their branches
-  - cross-provider review of TASK-037 when Codex's quota resets. Codex hit its usage limit
-    2026-09-15, the same wait as Jesko's BUG-121 re-check.
 
 **TASK-026 (PR #66) is DONE and waiting for acceptance** — all six changes pushed
 2026-09-14, PR closed with a comment linking the commits, its branch deleted. The shared

@@ -232,10 +232,12 @@ hangs off that root.
   brings the libs it sources first (`bdd9177`/`02b9c1d`); #37b split into independent cases
   (`0d3f3f5`, `c93bdb3`); replacement refuses a directory destination
   (`3155921`/`8082719`); a missing release branch exits 5, no fallback to main (`86af5c7`).
-  **Now:** Alexey is confirming them (`.scratch/brief-alexey-025-c34-fix-review.md`) and
-  Christian is running the full TypeScript suite. Alexey could not run vitest last time
-  (read-only temp in his sandbox), so **the orchestrator runs the full suite itself before
-  the push.** ShellCheck is not installed, so
+  **Alexey confirmed (2026-09-15): push as is** → `.scratch/ALEXEY-025-c34-fix-review.md` —
+  findings 1–5 RESOLVED, 7–9 still PASS; he ran install-toolchain + sync-by-address +
+  managed-references 73/73 with `TMPDIR=/dev/shm` (writable, outside `/tmp` and any git
+  tree — use it when a sandbox's own temp is read-only). **Push once Christian's full-suite
+  run reports**; the push gate itself is the full-suite run outside any sandbox. Check
+  `ls -ld /tmp/.git` first: the harness now refuses to run under it. ShellCheck is not installed, so
   the changed scripts are unlinted.
   A refused deletion of an agent's own scratch copy is not a stop condition: leave it and
   report it. **TASK-028 is review-complete and ready to push,

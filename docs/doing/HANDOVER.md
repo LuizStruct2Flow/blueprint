@@ -197,7 +197,11 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
-- **TASK-033 (ShellCheck in the gate and CI) is built locally, unpushed** — `168904b`,
+- **TASK-033 PUSHED 2026-09-15 as `a0ee5a6`; row in waiting-acceptance.** The ShellCheck
+  stage ran in the real gate (4.4 s) after the founder installed ShellCheck here. **Nothing
+  is in flight.** The rest of this entry is its history. Every machine that pushes now needs
+  ShellCheck: `bash scripts/install-toolchain.sh` (brew on the Mac). Earlier state: built
+  locally, unpushed — `168904b`,
   `7b8dd4b`, `8cf2a86`, `3377983`, `0a8a944`, `f8ef884` (Philipp, 2026-09-15). The 25 existing
   warnings are cleared (17 fixed, 8 disabled inline with a reason); the full suite is 837/837
   with ShellCheck on PATH. **Jesko's review (2026-09-15): push after one fix** →

@@ -33,10 +33,10 @@
 # `a2bp` and `prs` talk to the same remote. All commands except `files` and
 # `help` must run from inside a struct2flow project.
 #
-# Add this directory to PATH so the command is callable as `blueprint`:
-#   export PATH="$HOME/sources/struct2flow/blueprint/scripts:$PATH"
-# Or symlink it:
-#   ln -s ~/sources/struct2flow/blueprint/scripts/blueprint /usr/local/bin/blueprint
+# The per-machine `blueprint` command runs the CLI of the project you stand in.
+# The toolchain installer writes it, once per machine:
+#   bash scripts/install-toolchain.sh
+# It names no checkout, so moving the blueprint cannot break it (TASK-025).
 
 set -euo pipefail
 
@@ -58,6 +58,20 @@ if [ -r "$_bp_placeholders" ]; then
 else
   bp_substitute_stream()   { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
   bp_substitute_in_place() { die "scripts/lib/placeholders.sh is missing — cannot substitute safely"; }
+fi
+
+# The terminating signal handler, shared with scripts/install-toolchain.sh. Same
+# posture as the substitution helper: a missing lib fails at the point of use, so
+# `drift` still arms the gate first. The recovery uses a checkout's CLI, which has
+# the lib, so it is not circular.
+_bp_signals="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/signals.sh"
+if [ -r "$_bp_signals" ]; then
+  # shellcheck source=scripts/lib/signals.sh
+  . "$_bp_signals"
+else
+  _bp_terminating_traps() {
+    die "scripts/lib/signals.sh is missing, so an interrupted sync could not be stopped safely. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/signals.sh"
+  }
 fi
 
 # --- Canonical list of blueprint-managed files ---
@@ -160,6 +174,11 @@ MANAGED_FILES=(
   # near-copies of this logic drifted apart and disagreed on legal project
   # names containing `&` or `\` (A-07 R5-F1).
   "scripts/lib/placeholders.sh"
+  # The terminating INT/TERM handler, shared by drift/pull and the installer's
+  # command swap (TASK-025). MUST ship: without it drift and pull refuse to run
+  # rather than risk an interrupted write, and the installer cannot replace the
+  # per-machine command.
+  "scripts/lib/signals.sh"
   # Atomic baton publication. MUST ship: hand-editing Task and State as two
   # writes lets a poller sample the new State beside the previous round's Task
   # and dispatch against finished work. A settle window shrinks that race; only
@@ -695,34 +714,10 @@ BP_FETCH_TIMEOUT="${BP_FETCH_TIMEOUT:-30}"
 BP_SYNC_MODE="" BP_SYNC_SCRATCH="" BP_SYNC_CACHE="" BP_SYNC_REF="" BP_SYNC_CHILD=""
 BP_SYNC_REMOTE="" BP_SYNC_BRANCH="" BP_SYNC_SHA="" BP_SYNC_FETCHED_AT=""
 
-# _bp_terminating_traps CLEANUP — run CLEANUP on EXIT, and on INT or TERM run it,
-# clear the traps and die of that same signal.
-#
-# `trap cleanup EXIT INT TERM` is the obvious shape and it is WRONG: a trapped INT
-# runs the handler and then RESUMES the script, so an interrupted pull cleaned up
-# and went on to its next write. Re-raising with the trap cleared is what makes
-# the caller see 130 or 143 and makes nothing after the signal run (measured 12/12
-# across fetch, compare and write, foreground and `wait`, under this file's
-# `set -euo pipefail`). EXIT still covers `die` and normal returns.
-#
-# Generic on purpose. a2bp installs the resuming shape (BUG-116) and adopts this
-# by replacing `trap _a2bp_cleanup EXIT INT TERM` with
-# `_bp_terminating_traps _a2bp_cleanup`; the installer's command swap is meant to
-# use it too.
-_bp_terminating_traps() {
-  # shellcheck disable=SC2064  # the cleanup's NAME is bound here, on purpose
-  trap "$1" EXIT
-  # shellcheck disable=SC2064
-  trap "_bp_on_signal $1 INT" INT
-  # shellcheck disable=SC2064
-  trap "_bp_on_signal $1 TERM" TERM
-}
-
-_bp_on_signal() {
-  "$1"
-  trap - "$2" EXIT
-  kill -s "$2" "$$"
-}
+# _bp_terminating_traps CLEANUP and _bp_on_signal live in scripts/lib/signals.sh,
+# sourced at the top of this file: on INT or TERM they clean up, clear the traps
+# and die of that same signal, so an interrupted sync stops. The toolchain
+# installer's command swap uses the same two functions (TASK-025).
 
 # Idempotent, and if-form throughout because of `set -e`. It deletes only this
 # run's ref and never the cache: another run may be reading through it.
@@ -2097,8 +2092,8 @@ cmd_help() {
   # request. A hardcoded end line silently truncates help the moment the header
   # changes length, so it is derived from the last header line instead.
   local last
-  last=$(grep -n '^# Or symlink it:' "$0" | head -1 | cut -d: -f1)
-  sed -n "2,$((last + 1))p" "$0" | sed 's/^# //; s/^#//'
+  last=$(grep -n '^# It names no checkout' "$0" | head -1 | cut -d: -f1)
+  sed -n "2,${last}p" "$0" | sed 's/^# //; s/^#//'
 }
 
 # --- Dispatch ---

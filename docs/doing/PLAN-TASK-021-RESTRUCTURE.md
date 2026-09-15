@@ -529,6 +529,16 @@ give the three derived projects a window to pull it.
 
 ### Stage B — `scaffolding/`. **One slice of it is atomic; the stage is not.**
 
+**Precondition, added by TASK-025 (PLAN-TASK-025 §8.2). Check it before moving
+anything.** Stage B moves `scripts/blueprint`, and a per-machine `blueprint`
+command that points into a checkout breaks for every project on that machine —
+no commit can fix a file outside git. Do not start until both hold:
+
+- **Every derived project** has completed PLAN-TASK-025 §7.2 steps 4–7: its
+  `blueprint drift` header names the blueprint's remote with `(released)`.
+- **Every machine** has completed §7.2 step 8: `type -a blueprint` lists the
+  installer's command first, and nothing that resolves into a blueprint checkout.
+
 **Corrected 2026-09-10.** This section read *"necessarily atomic"*, and that
 verdict rested on two legs that were never checked separately.
 

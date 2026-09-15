@@ -891,9 +891,10 @@ This CLAUDE.md is sourced from the struct2flow **blueprint** at
 `project_config_dod.md`, `project_config_security.md`, and
 `project_config_infra.md` at the repo root.
 
-Sync is driven by a single CLI — `blueprint` — installed by adding the
-blueprint's `scripts/` to PATH (or symlinking). The agent uses it
-directly; do not hand-roll `diff -ru` invocations.
+Sync is driven by a single CLI — `blueprint`. Its per-machine command is
+written by `bash scripts/install-toolchain.sh` and runs the CLI of the project
+you are standing in, so it names no checkout. The agent uses it directly; do
+not hand-roll `diff -ru` invocations.
 
 ### Wake-time drift check (mandatory on every fresh session)
 

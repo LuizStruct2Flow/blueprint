@@ -471,6 +471,13 @@ sidebar tests muddies the per-source-file co-location rule.
 `tests/helpers/` or `tests/__helpers__/`, never co-located — they
 serve multiple tests.
 
+**Which tests count for the DoD bug gate.** The gate that checks every pushed
+`BUG#n` has a test naming it searches only the roots a project declares as
+`BP_TEST_ROOTS` in `project_config_paths.md`. In a derived project the
+top-level `tests/` holds the blueprint's own suites, which name blueprint bug
+numbers, so it never counts. Put project tests in their own declared roots
+(`backend/src`, `tests/e2e`, …) (TASK-039).
+
 **Tooling consequences:**
 
 - `vitest.config.ts` `include`: both `src/**/*.test.ts` (co-located

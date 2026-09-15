@@ -219,8 +219,16 @@ hangs off that root.
   `91f5b14` (`PROJECT_DIR` → `BP_PROJECT_DIR`, env-namespace) and `1cc78cf` (bootstrap-gate
   fixture lacked a `released` branch). **Full TypeScript suite 799/799.** Close comments
   ready: `.scratch/pr67-close-comment.md`, `.scratch/pr68-close-comment.md`,
-  `.scratch/pr69-close-comment.md`. **Alexey (Codex) is reviewing 3–4 + 027 + 029 now**
-  (brief `.scratch/brief-alexey-025-commits-3-4-review.md`). ShellCheck is not installed, so
+  `.scratch/pr69-close-comment.md`. **Alexey's review (2026-09-15): push after these fixes** →
+  `.scratch/ALEXEY-025-c34-review.md`. PASS: release job, BUG-117 parity, rollback ordering,
+  ownership, caller validation, signals, TASK-029. To fix (Christian, now): (1) S2
+  `pull scripts/blueprint` alone strands a project without `signals.sh` / the new
+  `request-config.sh`, and the recovery message says to do exactly that; (2) S2 replacement
+  into a symlink-to-directory writes into the referent and reports success; (3) S2 a Node
+  range starting with `*` bypasses the rest (`* >=99.0.0` accepts 24.1.0); (4) S3 #37b's
+  sub-runs lack independent red witnesses; (5) S3 no case for a missing
+  `blueprint_release_branch`. Alexey could not run vitest (read-only temp in his sandbox) —
+  **the orchestrator re-runs the full suite after the fixes.** ShellCheck is not installed, so
   the changed scripts are unlinted.
   A refused deletion of an agent's own scratch copy is not a stop condition: leave it and
   report it. **TASK-028 is review-complete and ready to push,

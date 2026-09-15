@@ -100,7 +100,12 @@ async function fixtureBlueprint(s: Scenario): Promise<string> {
       '-c',
       'git init -q . && git add -A && ' +
         'git ls-files --others --ignored --exclude-standard -z | xargs -0 -r git add -f && ' +
-        'git commit -qm "fixture blueprint from HEAD"',
+        'git commit -qm "fixture blueprint from HEAD" && ' +
+        // TASK-025 commit 3: bootstrap writes `blueprint_release_branch =
+        // released`, and drift and pull read that branch. The real remote has
+        // it once CI's release job publishes; a fixture without it is a remote
+        // no project can read (exit 5), not a fresh bootstrap.
+        'git branch released',
     ],
     { cwd: bp, env: IDENTITY },
   )

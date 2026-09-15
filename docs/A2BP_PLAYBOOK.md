@@ -80,8 +80,11 @@ request is filed (A-07 — `scripts/lib/contamination.sh`). It does two things:
    to a blueprint-only file, or a new file. The PR body marks each one **not
    shipped**. Decide first whether it belongs in the blueprint at all, and if it
    should reach projects, whether `MANAGED_FILES` changes with it. Before
-   filing, `a2bp` already refused `.git` paths, a root `project_config_*.md`,
-   and unmanaged files the project gitignores.
+   filing, `a2bp` already refused `.git` paths, symlinks and paths under them,
+   a root `project_config_*.md` in any letter case, unmanaged files the project
+   gitignores, files named like secrets, files `gitleaks` flags (unless
+   `gitleaks` was not installed, which it warns about), and new paths that
+   differ from a blueprint path only by letter case.
 2. **Contamination scan.** Host home paths, literal per-project state dirs,
    and any project name that survived step 1 **stop the request** and exit
    non-zero. A personal email is reported as a `NOTICE` and does not block.

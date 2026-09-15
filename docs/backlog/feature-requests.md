@@ -30,6 +30,7 @@ triaged in the owner's grooming pass, like everything else in `backlog/`.
 | `FR-storm2flow-dod-test-roots` | storm2flow | 2026-09-15 | Let a project declare where its regression tests live for the DoD bug-test stage, and stop a blueprint suite vouching for a project bug with the same number | PROMOTED TASK-039 |
 | `FR-storm2flow-refused-pull-sha` | storm2flow | 2026-09-15 | A full pull that refused any file must not advance `bootstrap_sha` | PROMOTED BUG-122 |
 | `FR-storm2flow-prepush-layout` | storm2flow | 2026-09-15 | Drop the bootstrap-time "adjust these paths" instruction from the managed `.githooks/pre-push`, and detect `infrastructure/` as well as `infra/` | PROMOTED TASK-040 |
+| `FR-storm2flow-osv-threshold` | storm2flow | 2026-09-15 | Make the osv-scanner threshold agree between the hook, CI and `docs/DoD.md` §6.2 (founder: MEDIUM+) | PROMOTED TASK-041 |
 
 The two struct2flow-www requests were filed together in pull request #72 on the
 blueprint repository, which holds their original text. The six storm2flow

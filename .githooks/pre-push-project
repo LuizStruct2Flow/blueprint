@@ -505,10 +505,15 @@ fi
 if [ -f "$BP_CODE_ROOT/scripts/run-ts-suites.sh" ]; then
   # shellcheck source=scripts/run-ts-suites.sh
   . "$BP_CODE_ROOT/scripts/run-ts-suites.sh"
+  # TASK-031: typecheck tests/ first. vitest strips types without checking
+  # them, so without this a type error pushes green. The same function runs in
+  # CI (.github/workflows/security.yml), and tests/ts-bridge #4 and #5 prove both.
+  ts_typecheck_stage "$BP_CODE_ROOT"
   # BUG-066: the CODE root, not `pwd`. This argument is what the bridge uses to
   # find tests/vitest.config.ts and the *.spec.ts population.
   ts_suites_stage "$BP_CODE_ROOT"
 else
+  pipe_skip "typecheck · TASK-031" "scripts/run-ts-suites.sh absent — run: blueprint pull scripts/run-ts-suites.sh"
   pipe_skip "vitest · TASK-018" "scripts/run-ts-suites.sh absent — run: blueprint pull scripts/run-ts-suites.sh"
 fi
 # BLUEPRINT:END

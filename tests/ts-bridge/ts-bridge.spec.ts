@@ -145,6 +145,17 @@
  *       direct run now scrubs by rule (tests/harness/env.ts isForbiddenAmbient).
  *   On the parent of TASK-025's reproducer commit the whole file is red: the
  *   imports it needs (UNPREFIXED_FORBIDDEN, isForbiddenAmbient) do not exist.
+ *
+ *   TASK-031, each applied to a copy of the tree and the suite run (observed):
+ *   M10 delete `ts_typecheck_stage "$BP_CODE_ROOT"` from the hook's managed region
+ *       Red: #4 only. Execution cannot see the hook, which is why #4 reads it.
+ *   M11 delete the "Blueprint TypeScript typecheck" step from the workflow
+ *       Red: #5 only.
+ *   M12 in `ts_typecheck`, start the compiler directly instead of via ts_scrubbed
+ *       Red: #4d, #5. Both modes lose the scrub at once, because they share one
+ *       function, and each mode's case says so.
+ *   On the parent of the fix (the reproducer commit), #4, #4b–#4f and #5 are all
+ *   red: `ts_typecheck_stage: not found`, and no workflow step typechecks.
  */
 
 import { describe, it, expect } from 'vitest'

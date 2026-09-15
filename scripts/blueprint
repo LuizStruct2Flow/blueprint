@@ -711,7 +711,7 @@ BP_FETCH_TIMEOUT="${BP_FETCH_TIMEOUT:-30}"
 
 # Run state lives in GLOBALS, never locals: the EXIT trap fires after the frame
 # that would own a local has returned — a2bp leaked a clone per run that way.
-BP_SYNC_MODE="" BP_SYNC_SCRATCH="" BP_SYNC_CACHE="" BP_SYNC_REF="" BP_SYNC_CHILD=""
+BP_SYNC_MODE="" BP_SYNC_SCRATCH="" BP_SYNC_CACHE="" BP_SYNC_REF="" BP_SYNC_CHILD="" BP_SYNC_GO=""
 BP_SYNC_REMOTE="" BP_SYNC_BRANCH="" BP_SYNC_SHA="" BP_SYNC_FETCHED_AT=""
 
 # _bp_terminating_traps CLEANUP and _bp_on_signal live in scripts/lib/signals.sh,
@@ -733,10 +733,27 @@ BP_SYNC_REMOTE="" BP_SYNC_BRANCH="" BP_SYNC_SHA="" BP_SYNC_FETCHED_AT=""
 # cleanup, holding the run for the whole budget (Alexey, S1; tests #20b).
 # #20c holds that window open (the child blocked applying its stderr redirection)
 # and signals there: under the old launch the fetch started anyway.
-# `# ponytail:` a TERM landing between bash's fork and its own signal reset in the
-# child can still be lost; the wait then lasts until the fetch ends, which the
-# budget bounds, and cleanup runs only after it. No command runs in that window.
+#
+# BUG-120 — THE TERM ITSELF CAN BE LOST, and the token makes that harmless.
+# Until its first exec the child is a bash process whose TERM handler is bash's
+# own, and that handler only RECORDS the signal. When the child's pending open
+# completes together with the TERM, the child execs `env` and the exec discards
+# the record: the fetch started AFTER cleanup signalled it, and the wait sat out
+# the whole budget. Measured: #20c pinned to one CPU lost it 40/40; this comment
+# used to call the window "between fork and signal reset, bounded by the budget",
+# and it was later and worse than that.
+# So the launch runs a gate AFTER the first exec, where TERM has its default
+# action and cannot be lost: `sh` execs the fetch only while $BP_SYNC_GO is
+# non-empty.
+# Cleanup removes that token BEFORE it sends TERM. A TERM can be lost only
+# before the first exec, hence before the gate's check, which then finds no
+# token and exits; a gate that checked earlier is already past exec, so the TERM
+# kills it, or `timeout` forwards it to the fetch. Pinned by #20d.
 _bp_sync_cleanup() {
+  # Truncated, not removed: `: >` is a builtin, so the handler never forks and
+  # never yields the CPU between the revocation and the TERM. `rm -f` did, and on
+  # one CPU the released child ran the gate in that gap (7/50 red).
+  if [ -n "$BP_SYNC_GO" ]; then : 2>/dev/null > "$BP_SYNC_GO" || true; fi
   if [ -n "$BP_SYNC_CHILD" ]; then
     kill -TERM "$BP_SYNC_CHILD" 2>/dev/null || true
     wait "$BP_SYNC_CHILD" 2>/dev/null || true
@@ -746,7 +763,7 @@ _bp_sync_cleanup() {
       update-ref -d "$BP_SYNC_REF" 2>/dev/null || true
   fi
   if [ -n "$BP_SYNC_SCRATCH" ]; then rm -rf "$BP_SYNC_SCRATCH"; fi
-  BP_SYNC_CHILD="" BP_SYNC_REF="" BP_SYNC_SCRATCH=""
+  BP_SYNC_CHILD="" BP_SYNC_REF="" BP_SYNC_SCRATCH="" BP_SYNC_GO=""
 }
 
 # _bp_shielded_write SRC DEST [MODE_FROM] — DEST gets SRC's bytes, and, given
@@ -885,7 +902,13 @@ _bp_fetch_blueprint() {
   # rather than the fetch (#20b). The same unset list, as data.
   BP_SYNC_REF="refs/bp-run/${BP_SYNC_SCRATCH##*/}"
   err="$BP_SYNC_SCRATCH/fetch.err"
-  env "${BP_REQUEST_TRANSPORT_UNSET[@]}" "$tcmd" "$BP_FETCH_TIMEOUT" \
+  # BUG-120 — the token and its gate (see _bp_sync_cleanup). `sh` is the second
+  # exec in the same process, so `$!` still becomes `timeout` (#20b).
+  BP_SYNC_GO="$BP_SYNC_SCRATCH/go"
+  printf 'go\n' > "$BP_SYNC_GO"
+  env "${BP_REQUEST_TRANSPORT_UNSET[@]}" \
+    sh -c '[ -s "$1" ] || exit 1; shift; exec "$@"' bp-refresh "$BP_SYNC_GO" \
+    "$tcmd" "$BP_FETCH_TIMEOUT" \
     git -c gc.auto=0 -c maintenance.auto=false --git-dir="$BP_SYNC_CACHE" \
     fetch -q --no-tags "$BP_SYNC_REMOTE" "+refs/heads/$BP_SYNC_BRANCH:$BP_SYNC_REF" 2>"$err" &
   BP_SYNC_CHILD=$!

@@ -210,8 +210,8 @@ hangs off that root.
   orchestrator with `TMPDIR=/home/luiz/.cache/bp-harness-tmp`, harness + state-root +
   state-dir + code-root + ts-bridge 96/96 green** (2026-09-15, on a tree that also held
   Christian's uncommitted TASK-025 edits).
-  **Gap found: no gate stage or CI job runs `tsc`** — row it once Christian's uncommitted
-  backlog edit is in. **While a Codex run is live, run suites with
+  **Gap found: no gate stage or CI job runs `tsc`** — rowed as **TASK-031** in
+  `backlog/`, re-opened after TASK-025 commit 4 lands (same workflow and hook files). **While a Codex run is live, run suites with
   `TMPDIR=/home/luiz/.cache/bp-harness-tmp`.** Still in flight:
   **Christian — TASK-025 commits 3–4 with TASK-027 (#67) and TASK-029 (#69) inside commit 4**
   (owns `security.yml`, `scripts/blueprint`, `new-project.sh`, `install-toolchain.sh`).

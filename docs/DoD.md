@@ -827,7 +827,7 @@ already.
 ### The wake side
 On "wake" (or any new prompt), **read `HANDOVER.md` first**, then
 the live baton `logs/state/signal.md`, `CLAUDE.md`, `MEMORY.md`. Re-establish the ephemeral
-state §10.3 names before continuing.
+state that §10 "What belongs in it" names (item 2) before continuing.
 
 ---
 

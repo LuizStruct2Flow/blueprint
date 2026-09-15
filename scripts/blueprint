@@ -1603,12 +1603,16 @@ cmd_pull() {
   else
     echo "${C_BOLD}Pulling from LOCAL CHECKOUT $BLUEPRINT_ROOT (BLUEPRINT_ROOT override, not the published address)${C_RESET}"
   fi
-  local pulled=0 pull_out=""
+  # BUG-122 — `held` names every selected file this run did NOT land: refused,
+  # skipped at the prompt, or never reached after `q`. bootstrap_sha may only
+  # advance when it is empty, for the same reason a partial pull may not.
+  local pulled=0 pull_out="" held=""
   for f in "${files[@]}"; do
     if [ "$f" = scripts/blueprint ] && [ -n "$cli_unmet" ]; then
       echo
       echo "  ${C_RED}skipped${C_RESET} scripts/blueprint — it sources$cli_unmet, which was not pulled, so it would refuse to run"
       refused_guard=1
+      held="$held scripts/blueprint"
       continue
     fi
     bp=$(bp_blueprint_path "$f")
@@ -1632,6 +1636,7 @@ cmd_pull() {
       # Nothing to preview and nothing to ask: pull_file reports the refusal.
       if ! pull_file "$f" "$pull_out"; then
         refused_guard=1
+        held="$held $f"
         case "$cli_needs" in *" $f "*) cli_unmet="$cli_unmet $f" ;; esac
       fi
       continue
@@ -1694,9 +1699,10 @@ cmd_pull() {
       read -r ans || ans=""
       case "$ans" in
         y|Y) ;;
-        q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; break ;;
+        q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; held="$held $f(aborted-here)"; break ;;
         *)
           echo "  ${C_DIM}skipped${C_RESET}"
+          held="$held $f"
           case "$cli_needs" in *" $f "*) cli_unmet="$cli_unmet $f" ;; esac
           continue
           ;;
@@ -1710,6 +1716,7 @@ cmd_pull() {
       echo "  ${C_RED}skipped${C_RESET} $f (see warning above)"
       # BUG-034 — pull_file declines only when a guard refused the file.
       refused_guard=1
+      held="$held $f"
       case "$cli_needs" in *" $f "*) cli_unmet="$cli_unmet $f" ;; esac
     fi
   done
@@ -1737,6 +1744,12 @@ cmd_pull() {
       echo "${C_DIM}bootstrap_sha left unchanged — this was a partial pull, so the"
       echo "project is not synced to blueprint HEAD. Run 'blueprint pull' with no"
       echo "paths to sync fully.${C_RESET}"
+    elif [ -n "$held" ]; then
+      # BUG-122 — a full pull that did not land every file it selected is a
+      # partial sync by another name. Name what held it back, so the operator
+      # knows what to fix before the next full pull can record the tip.
+      echo "${C_YELLOW}bootstrap_sha left unchanged — these files were not synced:${held}${C_RESET}"
+      echo "${C_DIM}Fix or accept them, then run 'blueprint pull' again to record the tip.${C_RESET}"
     elif [ -f .blueprint-source ] && [ "$CURRENT_SHA" != "no-sha" ]; then
       # Computed beside, then landed through the shielded writer, so a signal
       # during a pull cannot leave the config half-written.

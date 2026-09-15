@@ -237,7 +237,18 @@ hangs off that root.
   managed-references 73/73 with `TMPDIR=/dev/shm` (writable, outside `/tmp` and any git
   tree — use it when a sandbox's own temp is read-only). **Push once Christian's full-suite
   run reports**; the push gate itself is the full-suite run outside any sandbox. Check
-  `ls -ld /tmp/.git` first: the harness now refuses to run under it. ShellCheck is not installed, so
+  `ls -ld /tmp/.git` first: the harness now refuses to run under it.
+  **PUSHED 2026-09-15 as `d984a45`** (45 commits: all of TASK-025, TASK-027, TASK-028,
+  TASK-029, BUG-110, BUG-111, BUG-119, the TASK-031 row). **Rows moved to waiting-acceptance:
+  TASK-025, TASK-027, TASK-028, TASK-029, BUG-110, BUG-111, BUG-119. PRs #67, #68, #69 closed
+  with comments linking the commits; their branches deleted.** Next, in order: (1) CI green on
+  `d984a45` — **confirmed** (run 34934182706); (2) push these lifecycle commits; (3) only then dispatch Vitali on
+  BUG-118 (brief `.scratch/brief-vitali-pr64-rebuild.md`) — its reproducer fails until the
+  founder edits `.claude/settings.json`, and a failing test on HEAD blocks every push;
+  (4) TASK-031 (typecheck stage) is re-openable now that commit 4 is on main.
+  **Not done by TASK-025 and founder-led:** migrating linkedin-watcher-agent, storm2flow and
+  struct2flow-www to the address-based sync (plan §7.2, nine steps). ShellCheck is not
+  installed; the changed shell scripts are unlinted. ShellCheck is not installed, so
   the changed scripts are unlinted.
   A refused deletion of an agent's own scratch copy is not a stop condition: leave it and
   report it. **TASK-028 is review-complete and ready to push,

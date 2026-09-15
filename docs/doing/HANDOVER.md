@@ -206,10 +206,10 @@ hangs off that root.
   pull. **Per-machine command (plan §7.2 step 8):** on this Linux machine
   `~/.local/bin/blueprint` is already the installer-written
   `struct2flow-blueprint-command v1`, which runs the current project's own CLI, so the
-  TASK-021 Stage B wrapper hazard is closed here. **The Mac is unverified**: check that
-  `head -3 ~/.local/bin/blueprint` names the same marker, or run
-  `bash scripts/install-toolchain.sh --replace-blueprint-command --project=<a migrated project>`
-  there.
+  TASK-021 Stage B wrapper hazard is closed here. **The Mac is verified too** (founder,
+  2026-09-15: its `~/.local/bin/blueprint` carries the same
+  `struct2flow-blueprint-command v1` header), so the wrapper hazard is closed on both
+  machines.
 
 - **TASK-033 PUSHED 2026-09-15 as `a0ee5a6`; row in waiting-acceptance.** The ShellCheck
   stage ran in the real gate (4.4 s) after the founder installed ShellCheck here. **Nothing

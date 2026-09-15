@@ -35,6 +35,7 @@ triaged in the owner's grooming pass, like everything else in `backlog/`.
 | `FR-storm2flow-claude-md-imports` | storm2flow | 2026-09-15 | Make `CLAUDE.md` `@`-import the `project_config_*.md` files, so project rules moved out of `CLAUDE.md` stay in agent context | PROMOTED TASK-043 |
 | `FR-storm2flow-declared-ci` | storm2flow | 2026-09-15 | Let a project declare its CI so suites that assume `.github/workflows/security.yml` check the declared pipeline or skip visibly (storm2flow runs AWS CodePipeline) | PROMOTED TASK-044 |
 | `FR-storm2flow-doc-links-web-root` | storm2flow | 2026-09-15 | Let doc-links resolve site-absolute hrefs (`/security.html`, `/privacy.html`, …) through a declared web root or allowlist | PROMOTED TASK-045 |
+| `FR-storm2flow-doc-links-escape` | storm2flow | 2026-09-15 | doc-links must fail a link that leaves the repository instead of passing it when the target exists on the local disk (checks read only from the repository) | PROMOTED BUG-125 |
 
 The two struct2flow-www requests were filed together in pull request #72 on the
 blueprint repository, which holds their original text. The six storm2flow

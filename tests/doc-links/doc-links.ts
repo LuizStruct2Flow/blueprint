@@ -30,8 +30,9 @@
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { declaration } from '../helpers/project-config.js'
+import type { Runner } from '../manifest/manifest.js'
 
 export interface DocLinkScan {
   /** How many relative links were examined. The non-vacuity number. */
@@ -108,8 +109,46 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** `path` relative to `root`, or null when it lies outside `root`. */
+function inside(root: string, path: string): string | null {
+  const rel = relative(root, path)
+  return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? null : rel
+}
+
+/**
+ * BUG-125 — every path a fresh clone contains: each tracked file and each
+ * directory above one, relative to `root`.
+ *
+ * Why tracked files and not merely "inside the repository": a gitignored
+ * per-machine file (AGENT_ROSTER.md, .env, .scratch/) is inside the directory
+ * and in no clone, so a link to it is dead for every other reader, exactly as a
+ * link out of the repository is. The index is read rather than HEAD, so a file
+ * added but not yet committed still counts while the work is in progress.
+ *
+ * A failing `git ls-files` throws. Falling back to the disk would bring back the
+ * defect this exists to close.
+ */
+async function clonePaths(root: string, run: Runner): Promise<Set<string>> {
+  const r = await run('git', ['-C', root, 'ls-files', '-z', '--cached'], { cwd: root })
+  if (r.code !== 0) {
+    throw new Error(`doc-links: git ls-files failed in ${root}, so no link can be checked\n${r.output}`)
+  }
+  const paths = new Set([''])
+  for (const file of r.stdout.split('\0').filter(Boolean)) {
+    const parts = file.split('/')
+    for (let i = 1; i <= parts.length; i++) paths.add(parts.slice(0, i).join(sep))
+  }
+  return paths
+}
+
 /**
  * Scan a docs tree. Returns the count examined and every unresolved target.
+ *
+ * BUG-125 — A TARGET RESOLVES ONLY TO WHAT A CLONE CONTAINS. It is normalised
+ * against the project root (the directory holding docs/) and must be a tracked
+ * path that exists on disk. It used to be `stat`ed wherever it pointed, so
+ * `../../../../blueprint/docs/DoD.md` passed on any machine with a sibling
+ * checkout. `run` is the process runner that reaches git.
  *
  * TASK-045 — A SITE-ABSOLUTE TARGET (`/security.html`) names a served page, not
  * a path on this disk. It resolves only through what the project declares in
@@ -118,28 +157,47 @@ async function exists(path: string): Promise<boolean> {
  *     - BP_WEB_ROOT: `frontend/public`             a directory the site serves
  *     - BP_WEB_PATHS: `/security.html /terms/v1.html`   pages served from elsewhere
  *
- * With neither, it is reported, so a typo is never accepted by default. It used
- * to be resolved against the filesystem root, which reported every served page
- * and would have accepted `/etc`.
+ * With neither, it is reported, so a typo is never accepted by default. A web
+ * root must lie inside the repository, and a target must stay inside the web
+ * root, as a served site cannot reach above its own root.
  */
-export async function scanDocLinks(docsDir: string): Promise<DocLinkScan> {
+export async function scanDocLinks(docsDir: string, run: Runner): Promise<DocLinkScan> {
   const projectRoot = dirname(docsDir)
-  const webRoot = await declaration(projectRoot, 'BP_WEB_ROOT')
+  const clone = await clonePaths(projectRoot, run)
+  const declaredRoot = await declaration(projectRoot, 'BP_WEB_ROOT')
   const webPaths = (await declaration(projectRoot, 'BP_WEB_PATHS'))?.split(/\s+/).filter(Boolean) ?? []
+  const webRoot = declaredRoot === null ? null : resolve(projectRoot, declaredRoot)
+
+  /** Why `abs` does not resolve, or null when it does. */
+  const unresolved = async (abs: string): Promise<string | null> => {
+    const rel = inside(projectRoot, abs)
+    if (rel === null) return 'leaves the repository'
+    if (clone.has(rel) && (await exists(abs))) return null
+    return (await exists(abs)) ? 'exists on this disk, but git does not track it' : ''
+  }
 
   let examined = 0
   const broken: string[] = []
+  const report = (file: string, target: string, why: string) =>
+    broken.push(`${file} -> ${target}${why ? ` (${why})` : ''}`)
 
   for (const file of await markdownFiles(docsDir)) {
     const content = await readFile(file, 'utf8')
     for (const target of relativeLinkTargets(content)) {
       examined++
       if (!target.startsWith('/')) {
-        if (!(await exists(resolve(dirname(file), target)))) broken.push(`${file} -> ${target}`)
-      } else if (!webPaths.includes(target) && !(webRoot && (await exists(join(projectRoot, webRoot, target))))) {
-        broken.push(
-          `${file} -> ${target} (site-absolute: declare BP_WEB_ROOT or BP_WEB_PATHS in project_config_paths.md)`,
-        )
+        const why = await unresolved(resolve(dirname(file), target))
+        if (why !== null) report(file, target, why)
+      } else if (webPaths.includes(target)) {
+        continue
+      } else if (webRoot === null) {
+        report(file, target, 'site-absolute: declare BP_WEB_ROOT or BP_WEB_PATHS in project_config_paths.md')
+      } else if (inside(projectRoot, webRoot) === null) {
+        report(file, target, `BP_WEB_ROOT ${declaredRoot} leaves the repository`)
+      } else {
+        const abs = join(webRoot, target)
+        const why = inside(webRoot, abs) === null ? `climbs out of BP_WEB_ROOT ${declaredRoot}` : await unresolved(abs)
+        if (why !== null) report(file, target, why)
       }
     }
   }

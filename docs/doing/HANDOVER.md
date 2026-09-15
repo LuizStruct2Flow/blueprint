@@ -197,15 +197,18 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
-- **BUG-121 fixed locally, unpushed (Philipp, 2026-09-15):** `4dde3f7`..`4be9518`. Scenario
-  workspaces now default to `${XDG_CACHE_HOME:-$HOME/.cache}/bp-harness-tmp`, resolved once
-  at load; an explicit non-empty `TMPDIR` still wins; the BUG-110 preflight is kept. Full
-  suite 841/841 with `TMPDIR` unset and set. **Jesko (Codex) reviewed it: push after one fix**
-  (`.scratch/JESKO-bug121-review.md`). An EXISTING default base is not made private: this
-  machine's is 0775. Philipp is making the harness tighten it to 0700, or refuse it if it is
-  a symlink, not a directory, or owned by someone else. Until that is pushed, the workaround
-  below still applies. Codex sandboxes cannot write `~/.cache` (EROFS), so a Codex reviewer
-  running the harness needs `TMPDIR=/dev/shm`. History:
+- **BUG-121 PUSHED 2026-09-15 (`dbed972`, gate green WITHOUT the TMPDIR workaround).** Scenario
+  workspaces default to `${XDG_CACHE_HOME:-$HOME/.cache}/bp-harness-tmp`, resolved once at
+  load and kept 0700. It is refused if it is a symlink, not a directory, or not yours. An
+  explicit non-empty `TMPDIR` still wins, and the BUG-110 preflight is kept. **Plain
+  `git push` is enough again.**
+  - Jesko (Codex) reviewed the first fix and asked for the 0700 tightening
+    (`.scratch/JESKO-bug121-review.md`). Philipp added it in `18ed663`/`dbed972`.
+  - **Jesko's re-check of that delta did NOT run: Codex hit its usage limit.** Eto read it and
+    pushed. Re-dispatch `.scratch/brief-jesko-bug121-recheck.md` when the quota resets.
+  - Codex sandboxes cannot write `~/.cache` (EROFS), so a Codex reviewer running the harness
+    needs `TMPDIR=/dev/shm`.
+  - History (resolved):
 - **ANY Codex run on this machine can turn the push gate red (BUG-121, fix next).** Scenario
   workspaces default to `/tmp`, and since TASK-028 the harness refuses every scenario while an
   empty `/tmp/.git` exists. Codex sandboxes create that folder for a few minutes, including

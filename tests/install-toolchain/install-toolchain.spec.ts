@@ -89,7 +89,7 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { closeSync, constants, existsSync, openSync, writeSync } from 'node:fs'
-import { lstat, readFile, readdir, readlink, stat } from 'node:fs/promises'
+import { cp, lstat, readFile, readdir, readlink, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -518,6 +518,114 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
       const other = await stub(s, 'other/blueprint', 'OTHER')
       const r = await install(s, m, [], { path: `${s.workspace.path('other')}:${m.bin}:${base}` })
       expect(r.output).toContain(`⚠ blueprint resolves to ${other} first on PATH, not ${m.target}.`)
+    })
+  })
+})
+
+// --- TASK-029: U7 of a2bp request PR #69 (linkedin-watcher-agent) -------------
+//
+// The request made a SYMLINKED CLI load its lib/ from its physical path, and
+// made drift refuse to report without its helpers. The symlink rewrite is not
+// ported: commit 4 replaced the symlinked command with one that execs the
+// project's own scripts/blueprint. What U7 proved still has to hold for that
+// command, so its two assertions travel here. #U7a: the installed command is
+// the project's CLI, byte for byte in what it reports. #U7b: a CLI missing its
+// lib/ never produces a report, and says the gate is not armed (A-22).
+
+async function gitOk(s: Scenario, cwd: string, args: string[]) {
+  const r = await s.run('git', args, { cwd })
+  expect(r.code, `git ${args.join(' ')} failed in ${cwd}:\n${r.output}`).toBe(0)
+  return r.stdout.trim()
+}
+
+async function repo(s: Scenario, dir: string) {
+  await gitOk(s, dir, ['init', '-q', '-b', 'main', '.'])
+  await gitOk(s, dir, ['config', 'user.email', 't@local'])
+  await gitOk(s, dir, ['config', 'user.name', 't'])
+  await gitOk(s, dir, ['config', 'commit.gpgsign', 'false'])
+  await gitOk(s, dir, ['add', '-A'])
+  await gitOk(s, dir, ['commit', '-q', '-m', 'init'])
+  return gitOk(s, dir, ['rev-parse', 'HEAD'])
+}
+
+/** A fixture blueprint remote with a `released` branch. */
+async function releasedRemote(s: Scenario) {
+  await s.fs.write('remote/CLAUDE.md', '# CLAUDE\nfor {{PROJECT_NAME}}\n')
+  await s.fs.write('remote/docs/DoD.md', '# DoD\nowner {{PROJECT_NAME}}\n')
+  await s.fs.write('remote/tests/fixture/test.sh', 'echo fixture\n')
+  const dir = s.workspace.path('remote')
+  const head = await repo(s, dir)
+  await gitOk(s, dir, ['branch', 'released'])
+  return { dir, head }
+}
+
+/**
+ * A migrated project named `proj` (§7.2 steps 4–7) with a copy of this tree's
+ * CLI. `lib` says how much of scripts/lib/ it has. Its DoD differs from the
+ * remote's, so a real report has a drifted line to show.
+ */
+async function migrated(s: Scenario, tag: string, remote: { dir: string; head: string }, lib: 'all' | 'none' | 'no-gate') {
+  const rel = `${tag}/proj`
+  await s.fs.write(`${rel}/CLAUDE.md`, '# CLAUDE\nfor proj\n')
+  await s.fs.write(`${rel}/docs/DoD.md`, '# DoD\nowner proj\nedited here\n')
+  await s.fs.write(`${rel}/tests/fixture/test.sh`, 'echo fixture\n')
+  await s.fs.write(`${rel}/.githooks/pre-push`, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  await s.fs.write(
+    `${rel}/.blueprint-source`,
+    [
+      'config_version           = 2',
+      `blueprint_remote         = ${remote.dir}`,
+      'blueprint_branch         = main',
+      'blueprint_release_branch = released',
+      `bootstrap_sha            = ${remote.head}`,
+      'bootstrap_date           = 2026-01-01',
+      '',
+    ].join('\n'),
+  )
+  const proj = s.workspace.path(rel)
+  const scripts = join(REPO_ROOT, 'scripts')
+  await cp(scripts, join(proj, 'scripts'), {
+    recursive: true,
+    filter: (p) =>
+      lib === 'all' ||
+      (lib === 'none' ? !p.startsWith(join(scripts, 'lib')) : p !== join(scripts, 'lib', 'gate.sh')),
+  })
+  await repo(s, proj)
+  return proj
+}
+
+/** The one part of a drift report that differs between two honest runs. */
+const untimed = (out: string) => out.replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/g, '<time>')
+
+describe('TASK-029 — U7 (PR #69): the installed command is the project CLI, and an incomplete CLI never reports', () => {
+  it('#U7a from a migrated project, the installed command reports exactly what the project CLI reports', async () => {
+    await scenario('install-toolchain-u7a', async (s) => {
+      const base = await baseline(s)
+      const m = await machine(s, 'a', base)
+      await install(s, m, [])
+      const proj = await migrated(s, 'a', await releasedRemote(s), 'all')
+      const env = { HOME: m.home, PATH: base }
+      const direct = join(proj, 'scripts/blueprint')
+
+      // Warm-up: the first run arms the gate and fills the cache, and says so.
+      // Both compared runs then start from the same state.
+      const warm = await s.run(direct, ['drift'], { cwd: proj, env })
+      expect(warm.code, warm.output).toBe(0)
+
+      const viaDirect = await s.run(direct, ['drift'], { cwd: proj, env })
+      const viaCommand = await s.run(m.target, ['drift'], { cwd: proj, env })
+
+      // NON-VACUITY: a real report, from the address, with the gate line and a
+      // drifted file — or "identical" would hold for two runs that did nothing.
+      expect(viaDirect.stdout).toContain('(released)')
+      expect(viaDirect.stdout).toContain('gate:')
+      expect(viaDirect.stdout).toMatch(/~ +docs\/DoD\.md/)
+
+      expect(untimed(viaCommand.stdout), `the installed command's report differs\n${viaCommand.output}`).toBe(
+        untimed(viaDirect.stdout),
+      )
+      expect(untimed(viaCommand.stderr)).toBe(untimed(viaDirect.stderr))
+      expect(viaCommand.code).toBe(viaDirect.code)
     })
   })
 })

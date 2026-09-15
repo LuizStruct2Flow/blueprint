@@ -186,7 +186,7 @@ async function refuseReplaceableAbove(from: string): Promise<void> {
 export interface Workspace {
   /** Physical (symlink-resolved) absolute path to this scenario's root. */
   readonly root: string
-  /** Create a directory under the root and return its physical path. */
+  /** Create a directory under the root, mode 0700, and return its physical path. */
   dir(...segments: string[]): Promise<string>
   /** A path under the root. Does not create anything. */
   path(...segments: string[]): string
@@ -227,7 +227,11 @@ export async function createWorkspace(
 
     async dir(...segments: string[]): Promise<string> {
       const target = join(root, ...segments)
-      await mkdir(target, { recursive: true })
+      // 0700 whatever the umask (BUG-121). A scenario's tmp becomes its children's
+      // TMPDIR, and a nested harness refuses a default base below a directory
+      // group or others can write to. Under umask 0002 plain mkdir gave 0775.
+      await mkdir(target, { recursive: true, mode: 0o700 })
+      await chmod(target, 0o700)
       return target
     },
 

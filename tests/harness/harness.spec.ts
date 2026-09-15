@@ -975,6 +975,67 @@ describe('harness — a project marker above the workspace (BUG-110)', () => {
   }
 })
 
+// BUG-121. Every Codex workspace-write sandbox on the machine, from ANY project,
+// creates an empty /tmp/.git for a few minutes. With workspaces under /tmp by
+// default, the preflight above then refused every scenario and the whole gate
+// went red (52 of 55 suites on a docs-only push). The preflight was right; the
+// default base was wrong. The shared temp dir is a stand-in inside this
+// scenario, so no case here touches the real /tmp.
+describe('harness — the default workspace base is private (BUG-121)', () => {
+  it('BUG-121 a marker in the shared temp dir does not stop a workspace when TMPDIR is not set', async () => {
+    await scenario('bug121-shared-tmp-marker', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      await s.fs.write('shared-tmp/.git', '')
+      const home = await s.fs.mkdirp('home-real')
+      const ws = await createWorkspace('bug121', { env: { HOME: home }, systemTmp })
+      try {
+        const base = join(home, '.cache', 'bp-harness-tmp')
+        expect(ws.root.startsWith(base + '/'), `workspace ${ws.root} is not under ${base}`).toBe(true)
+        expect((await stat(base)).mode & 0o777, 'the private base was not created 0700').toBe(0o700)
+      } finally {
+        await ws.dispose()
+      }
+    })
+  })
+
+  it('BUG-121 XDG_CACHE_HOME places the private base, and an explicitly set TMPDIR wins over it', async () => {
+    await scenario('bug121-precedence', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      const home = await s.fs.mkdirp('home-real')
+      const cache = await s.fs.mkdirp('xdg-cache')
+      const chosen = await s.fs.mkdirp('chosen-tmp')
+
+      const xdg = await createWorkspace('bug121-xdg', { env: { HOME: home, XDG_CACHE_HOME: cache }, systemTmp })
+      await xdg.dispose()
+      expect(xdg.root.startsWith(join(cache, 'bp-harness-tmp') + '/'), xdg.root).toBe(true)
+
+      const explicit = await createWorkspace('bug121-tmpdir', {
+        env: { TMPDIR: chosen, HOME: home, XDG_CACHE_HOME: cache },
+        systemTmp,
+      })
+      await explicit.dispose()
+      expect(explicit.root.startsWith(chosen + '/'), explicit.root).toBe(true)
+    })
+  })
+
+  it('BUG-121 a marker above the PRIVATE base still refuses, naming it', async () => {
+    await scenario('bug121-private-marker', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      const home = await s.fs.mkdirp('home-real')
+      await s.fs.write('home-real/.git', '')
+      const message = await createWorkspace('bug121-refused', { env: { HOME: home }, systemTmp }).then(
+        async (ws) => {
+          await ws.dispose()
+          return ''
+        },
+        (err: Error) => err.message,
+      )
+      expect(message).toContain(join(home, '.git'))
+      expect(message).toContain(REMEDY)
+    })
+  })
+})
+
 /** The remedy the preflight's error must name, verbatim. */
 const REMEDY =
   'remove the stray marker, or point TMPDIR at a directory with no marker above it'

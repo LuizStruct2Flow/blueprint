@@ -59,7 +59,7 @@ export interface LifecycleScan {
   readonly forwardingNotes: readonly string[]
 }
 
-const RECORD_FILES = ['BUGS.md', 'BACKLOG.md', 'CHANGES.md']
+const RECORD_FILES = ['BUGS.md', 'BACKLOG.md']
 
 async function readOrEmpty(path: string): Promise<string> {
   try {
@@ -98,7 +98,7 @@ async function recordedHere(docsDir: string, id: string, state: string): Promise
   return false
 }
 
-/** Every `BUGS.md` / `BACKLOG.md` / `CHANGES.md` under `docsDir`, recursively. */
+/** Every `BUGS.md` / `BACKLOG.md` under `docsDir`, recursively. */
 async function recordFiles(docsDir: string): Promise<string[]> {
   const found: string[] = []
   const walk = async (d: string): Promise<void> => {

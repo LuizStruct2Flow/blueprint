@@ -111,9 +111,6 @@
  *     `waiting-acceptance/` is indistinguishable from one in `doing/` to every
  *     assertion here. The branch is advisory (it notes, it does not fail), which
  *     is why this is a gap and not a defect.
- *   - `dod_find_row`'s `CHANGES.md` lookup. Both implementations seed only
- *     `BUGS.md` and `BACKLOG.md`, so a behaviour-change row has never been
- *     resolved by either.
  */
 
 import { describe, it, expect } from 'vitest'

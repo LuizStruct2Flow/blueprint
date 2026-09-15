@@ -73,7 +73,7 @@ dod_find_row() {
   _dg_num="${1##*-}"
   _dg_num="$(printf '%s' "$_dg_num" | sed 's/^0*//')"
   for _dg_state in backlog doing waiting-acceptance "done"; do
-    for _dg_f in "docs/$_dg_state/BUGS.md" "docs/$_dg_state/BACKLOG.md" "docs/$_dg_state/CHANGES.md"; do
+    for _dg_f in "docs/$_dg_state/BUGS.md" "docs/$_dg_state/BACKLOG.md"; do
       [ -f "$_dg_f" ] || continue
       if grep -qE "^\| \*\*${_dg_type}-0*${_dg_num}\*\*" "$_dg_f"; then
         printf '%s\n' "$_dg_state"

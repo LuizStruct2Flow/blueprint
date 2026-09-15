@@ -704,7 +704,7 @@ pull_file() {
 # read would leave two answers to "does the blueprint have this file", which is
 # BUG-113's shape arriving by another route.
 #
-# Plan: docs/doing/PLAN-TASK-025.md §1–§5.
+# Plan: docs/done/PLAN-TASK-025.md §1–§5.
 
 # One budget for the refresh, in seconds. A warm refresh is one round trip; only
 # a first run transfers the pack.

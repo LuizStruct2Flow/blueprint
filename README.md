@@ -291,8 +291,12 @@ change to a file the blueprint does not ship (`templates/`, a blueprint-only
 doc), or a new file. They go through the same guard and PR, and are marked
 **not shipped** so the reviewer sees no project will receive them. If a file
 *should* ship, the request is also a change to the `MANAGED_FILES` array in
-`scripts/blueprint`. `a2bp` still refuses anything inside `.git`, a root
-`project_config_*.md`, a symlink, and an unmanaged file your project gitignores.
+`scripts/blueprint`. Before contacting the remote, `a2bp` refuses anything inside
+`.git`, a root `project_config_*.md` in any letter case, a symlink or a path under
+one, an unmanaged file your project gitignores (tracked or not), a file named like
+a secret (`.env`, `*.pem`, `*.key`, `id_rsa*`, …), and any file in which `gitleaks`
+finds a secret. It also refuses a new path that differs from a blueprint path
+only by letter case.
 
 **The contamination guard.** It used to `cp` into the blueprint working tree,
 which is how both BUG-002 and A-09 entered. That write path is gone, and the

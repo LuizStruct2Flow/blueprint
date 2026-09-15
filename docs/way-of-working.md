@@ -293,9 +293,10 @@ all eight concerns below, plus the agent infra, live in one git repo.
   CI passed, fast-forwarded by a CI job, so a broken `main` never fans out.
 - **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
   improvement lands in a project, it travels back to the blueprint
-  so *every other project* inherits it next time they pull. It carries any
-  file, including one the blueprint does not ship or does not have yet, and
-  marks that one **not shipped** for the reviewer.
+  so *every other project* inherits it next time they pull. It also carries a
+  file the blueprint does not ship or does not have yet, marked **not shipped**
+  for the reviewer, and refuses secrets (by name and by `gitleaks`), `.git`
+  paths and project config before it contacts the remote.
 - **Guarded push** — the same multiplier that spreads a good rule spreads a
   leaked one. So `a2bp` reverse-substitutes the project's name back to
   `{{PROJECT_NAME}}` and **blocks** on host paths, foreign state dirs, and

@@ -140,6 +140,28 @@ interface Transcripts {
   readonly subRel: string
 }
 
+/** The session transcript Claude Code writes for a fixture, under the scenario's HOME. */
+const sessionRel = (f: FeedFixture): string =>
+  `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess.jsonl`
+
+/**
+ * A subagent's sibling meta file, as Claude Code writes it beside the session
+ * transcript. THE DISPATCH DESCRIPTION IN IT IS THE ONLY CARRIER OF THE PERSONA,
+ * and `parentAgentId` (present only on a nested dispatch) the only link from a
+ * helper to the agent that started it. Shape recorded 2026-09-15 (BUG-124).
+ */
+async function writeMeta(
+  s: Scenario,
+  session: string,
+  agentId: string,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  await s.fs.write(
+    session.replace(/\.jsonl$/, `/subagents/agent-${agentId}.meta.json`),
+    `${JSON.stringify({ agentType: 'general-purpose', toolUseId: 'toolu_x', spawnDepth: 1, ...meta })}\n`,
+  )
+}
+
 /**
  * The transcript tree Claude Code actually writes, under the scenario's HOME.
  *
@@ -147,24 +169,53 @@ interface Transcripts {
  * how the real client names it; deriving it rather than hardcoding is what makes
  * the fixture follow the workspace instead of agreeing with it by coincidence.
  */
-async function transcripts(s: Scenario, f: FeedFixture, agentId: string): Promise<Transcripts> {
-  const projectDir = `home/.claude/projects/${f.repo.replace(/\//g, '-')}`
-  const mainRel = `${projectDir}/sess.jsonl`
-  const subRel = `${projectDir}/sess/subagents/agent-${agentId}.jsonl`
+async function transcripts(
+  s: Scenario,
+  f: FeedFixture,
+  agentId: string,
+  meta: Record<string, unknown> = { description: "Nadia implements Pike's prescription" },
+): Promise<Transcripts> {
+  const mainRel = sessionRel(f)
+  const subRel = mainRel.replace(/\.jsonl$/, `/subagents/agent-${agentId}.jsonl`)
 
-  await s.fs.write(mainRel, '')
+  await s.fs.write(mainRel, '', { append: true })
   await s.fs.write(subRel, '')
-  // THE DISPATCH DESCRIPTION IS THE ONLY CARRIER OF THE PERSONA.
-  await s.fs.write(
-    `${projectDir}/sess/subagents/agent-${agentId}.meta.json`,
-    `${JSON.stringify({
-      agentType: 'general-purpose',
-      description: "Nadia implements Pike's prescription",
-      toolUseId: 'toolu_x',
-      spawnDepth: 1,
-    })}\n`,
-  )
+  await writeMeta(s, mainRel, agentId, meta)
   return { mainRel, subRel }
+}
+
+/**
+ * The hook payloads Claude Code ACTUALLY sends — recorded from a live dispatch on
+ * 2026-09-15 (BUG-124), trimmed to the fields that matter.
+ *
+ * NEITHER CARRIES THE DISPATCH DESCRIPTION. The previous #4 fed the hook a
+ * `description` field that no real payload has, so it passed while every real
+ * bookend in the feed read `[general-purpose - Claude Code]`. And at SubagentStart
+ * the meta file that does carry it is not there yet: measured absent across a 2 s
+ * poll from inside the hook, i.e. it is written after the hook RETURNS. At
+ * SubagentStop it is present every time.
+ */
+function hookPayload(
+  event: 'SubagentStart' | 'SubagentStop',
+  sessionJsonl: string,
+  agentId: string,
+  agentType = 'general-purpose',
+): Record<string, unknown> {
+  const start = {
+    session_id: 'sess',
+    transcript_path: sessionJsonl,
+    cwd: '/',
+    agent_id: agentId,
+    agent_type: agentType,
+    hook_event_name: event,
+  }
+  if (event === 'SubagentStart') return start
+  return {
+    ...start,
+    stop_hook_active: false,
+    agent_transcript_path: sessionJsonl.replace(/\.jsonl$/, `/subagents/agent-${agentId}.jsonl`),
+    last_assistant_message: 'OK',
+  }
 }
 
 /** A standalone tree holding only the hook, its libs and a roster — for #5 and #6. */
@@ -185,11 +236,11 @@ async function hookTree(s: Scenario, name: string, rosterLib: string): Promise<s
   return dir
 }
 
-/** Feed a SubagentStart payload to the hook. */
+/** Feed a hook payload to the hook, as Claude Code does, and wait for it to exit. */
 async function fireHook(
   s: Scenario,
   dir: string,
-  payload: Record<string, string>,
+  payload: Record<string, unknown>,
   env: Record<string, string | undefined> = {},
   timeoutMs = 30_000,
 ) {
@@ -371,61 +422,104 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
   // =========================================================================
   // #4 — the hook labels its bookends from the same lookup.
   // =========================================================================
-  it('#4 the dispatch bookend carries the persona, not the agent type', async () => {
+  const hookFixture = (s: Scenario) =>
+    feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren', withHook: true })
+
+  it('#4 BUG-124: the dispatch bookend carries the persona, although its meta file is written after the hook returns', async () => {
     await scenario('sf-4a', async (s) => {
       // Two labels that agree only by coincidence is the BUG-010/BUG-021 shape.
-      const f = await feedFixture(s, 'repo', {
-        source: SUBJECT,
-        roster: ROSTER,
-        holder: 'Wren',
-        withHook: true,
-      })
-      const r = await s.run(
-        'sh',
-        [
-          '-c',
-          `printf '%s' "$1" | sh scripts/log-activity.sh`,
-          'x',
-          JSON.stringify({
-            hook_event_name: 'SubagentStart',
-            agent_id: 'abc123def456',
-            subagent_type: 'general-purpose',
-            description: 'Nadia implements Pikes prescription',
-          }),
-        ],
-        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log }, timeoutMs: 30_000 },
-      )
-      expect(r.code, r.output).toBe(0)
+      const f = await hookFixture(s)
+      const session = join(s.workspace.root, sessionRel(f))
 
-      expect(await f.read()).toContain('[Nadia - Claude Code] → dispatched')
+      const r = await fireHook(s, f.repo, hookPayload('SubagentStart', session, 'abc123def456'), {
+        ...f.env,
+        AGENT_FEED_LOG: f.log,
+      })
+      expect(r.code, r.output).toBe(0)
+      // Only NOW, as the real client does it.
+      await writeMeta(s, sessionRel(f), 'abc123def456', { description: "Nadia implements Pike's prescription" })
+
+      await f.expectLine('[Nadia - Claude Code] → dispatched')
+      expect(await f.count('→ dispatched'), 'one dispatch, one bookend').toBe(1)
     })
   })
 
-  it('#4 .subagent-map records the persona, so the fallback path is right too', async () => {
+  it('#4 BUG-124: the finish bookend carries the persona', async () => {
     await scenario('sf-4b', async (s) => {
-      const f = await feedFixture(s, 'repo', {
-        source: SUBJECT,
-        roster: ROSTER,
-        holder: 'Wren',
-        withHook: true,
-      })
-      await s.run(
-        'sh',
-        [
-          '-c',
-          `printf '%s' "$1" | sh scripts/log-activity.sh`,
-          'x',
-          JSON.stringify({
-            hook_event_name: 'SubagentStart',
-            agent_id: 'abc123def456',
-            subagent_type: 'general-purpose',
-            description: 'Nadia implements Pikes prescription',
-          }),
-        ],
-        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log }, timeoutMs: 30_000 },
-      )
+      const f = await hookFixture(s)
+      await writeMeta(s, sessionRel(f), 'abc123def456', { description: "Nadia implements Pike's prescription" })
 
-      expect(await s.fs.read('repo/logs/.subagent-map')).toMatch(/^abc123def456 Nadia$/m)
+      const r = await fireHook(
+        s,
+        f.repo,
+        hookPayload('SubagentStop', join(s.workspace.root, sessionRel(f)), 'abc123def456'),
+        { ...f.env, AGENT_FEED_LOG: f.log },
+      )
+      expect(r.code, r.output).toBe(0)
+
+      expect(await f.read()).toContain('[Nadia - Claude Code] ← finished')
+    })
+  })
+
+  it("#4 BUG-124: a helper a persona starts is labelled with that persona, not only the helper's type", async () => {
+    await scenario('sf-4c', async (s) => {
+      // The 23:04 case: Christian started a claude-code-guide helper, and its
+      // bookends and 43 lines read `[claude-code-guide - Claude Code]` with
+      // nothing tying them to him. `parentAgentId` is the tie.
+      const f = await hookFixture(s)
+      await writeMeta(s, sessionRel(f), 'abc123def456', { description: "Nadia implements Pike's prescription" })
+      await writeMeta(s, sessionRel(f), 'fed654cba321', {
+        agentType: 'claude-code-guide',
+        description: 'Check missing import behaviour',
+        parentAgentId: 'abc123def456',
+        spawnDepth: 2,
+      })
+
+      const r = await fireHook(
+        s,
+        f.repo,
+        hookPayload('SubagentStop', join(s.workspace.root, sessionRel(f)), 'fed654cba321', 'claude-code-guide'),
+        { ...f.env, AGENT_FEED_LOG: f.log },
+      )
+      expect(r.code, r.output).toBe(0)
+
+      expect(await f.read()).toContain('[Nadia › claude-code-guide - Claude Code] ← finished')
+    })
+  })
+
+  it("#4 BUG-124: a helper's STREAMED lines carry the same parent label", async () => {
+    await scenario('sf-4d', async (s) => {
+      const f = await feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren' })
+      await transcripts(s, f, 'abc123def456')
+      const t = await transcripts(s, f, 'fed654cba321', {
+        agentType: 'claude-code-guide',
+        description: 'Check missing import behaviour',
+        parentAgentId: 'abc123def456',
+        spawnDepth: 2,
+      })
+
+      await f.withFeed(async () => {
+        await f.readerReady(t.subRel, { wrap: (tag) => rec(tag, true) })
+        await s.fs.write(t.subRel, rec('HELPER-LINE', true), { append: true })
+        await f.expectLine('HELPER-LINE')
+
+        expect(await f.read()).toContain('[Nadia › claude-code-guide - Claude Code] HELPER-LINE')
+      })
+    })
+  })
+
+  it('#4 a meta file that never appears costs the label, not the bookend', async () => {
+    await scenario('sf-4e', async (s) => {
+      const f = await hookFixture(s)
+      const r = await fireHook(
+        s,
+        f.repo,
+        hookPayload('SubagentStart', join(s.workspace.root, sessionRel(f)), 'abc123def456'),
+        { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '1' },
+      )
+      expect(r.code, r.output).toBe(0)
+
+      await f.expectLine('[general-purpose - Claude Code] → dispatched')
     })
   })
 
@@ -446,16 +540,13 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
       // line break falls.
       const dir = await hookTree(s, 'poison', 'exit 3\n')
       const feedLog = join(await s.fs.mkdirp('poison/logs'), 'feed.log')
+      // The meta is PRESENT, so the hook really runs the lookup through the lib.
+      await writeMeta(s, 'poison/sess.jsonl', 'deadbeef', { description: 'Nadia does a thing' })
 
       const r = await fireHook(
         s,
         dir,
-        {
-          hook_event_name: 'SubagentStart',
-          agent_id: 'deadbeef',
-          subagent_type: 'general-purpose',
-          description: 'Nadia does a thing',
-        },
+        hookPayload('SubagentStop', join(dir, 'sess.jsonl'), 'deadbeef'),
         { AGENT_FEED_LOG: feedLog },
       )
 
@@ -485,6 +576,7 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
       // than one that dies: it stalls the tool call it was only there to observe.
       const dir = await hookTree(s, 'hang', 'while :; do :; done\n')
       const feedLog = join(await s.fs.mkdirp('hang/logs'), 'feed.log')
+      await writeMeta(s, 'hang/sess.jsonl', 'hang01', { description: 'Nadia does a thing' })
 
       // The outer bound is the HARNESS's, deliberately several times the hook's, so
       // a regression shows up as a failure and never as a suite that never returns.
@@ -493,12 +585,7 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
       const r = await fireHook(
         s,
         dir,
-        {
-          hook_event_name: 'SubagentStart',
-          agent_id: 'hang01',
-          subagent_type: 'general-purpose',
-          description: 'Nadia does a thing',
-        },
+        hookPayload('SubagentStop', join(dir, 'sess.jsonl'), 'hang01'),
         { AGENT_FEED_LOG: feedLog, BP_ROSTER_LOOKUP_TIMEOUT: '1' },
         20_000,
       )
@@ -509,13 +596,9 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
           `hook stderr:\n${r.stderr}`,
       ).toBe(0)
       expect(
-        (await readFile(feedLog, 'utf8').catch(() => '')).length,
-        'the hook survived the hang but logged nothing — the bookend is what makes a dispatch visible',
-      ).toBeGreaterThan(0)
-      expect(
-        await s.fs.read('hang/logs/.subagent-map'),
-        'no .subagent-map row after a bounded lookup — the streamed-line fallback goes dark',
-      ).toMatch(/^hang01 /m)
+        await readFile(feedLog, 'utf8').catch(() => ''),
+        'the hook survived the hang but did not land the bookend labelled by agent type',
+      ).toContain('[general-purpose - Claude Code] ← finished')
     })
   })
 

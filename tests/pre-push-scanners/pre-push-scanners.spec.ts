@@ -303,6 +303,29 @@ describe('BUG-003 — scanner failures and scanner findings are distinguished', 
   })
 })
 
+describe('TASK-040 — the IaC stages find infrastructure/ as well as infra/', () => {
+  it('#iac-1 a project with infrastructure/cdk.json reaches the CDK synth stage', async () => {
+    await scenario('scanners-iac-1', async (s) => {
+      // storm2flow keeps its CDK app in infrastructure/. The hook looked only in
+      // infra/, so the synth stage was skipped and the gate still said PASSED.
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['clean'])
+      await s.fs.write('repo/infrastructure/cdk.json', '{}\n')
+      const cwdLog = s.workspace.path('cdk-cwd')
+      await f.shims.add('cdk', `pwd >${JSON.stringify(cwdLog)}\nexit 0`)
+
+      const r = await f.runHook()
+
+      expect(r.code, r.output).toBe(0)
+      expect(await s.fs.exists('cdk-cwd'), `cdk synth never ran for infrastructure/\n${r.output}`).toBe(true)
+      expect((await readFile(cwdLog, 'utf8')).trim(), 'cdk synth ran outside infrastructure/').toMatch(
+        /\/infrastructure$/,
+      )
+    })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // The fixture: a repo the hook can run in and exit quickly.
 //

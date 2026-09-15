@@ -326,6 +326,52 @@ async function dotNames(m: Machine, prefix: string) {
 
 const baseline = (s: Scenario) => s.pathWithout(['curl', 'brew', 'blueprint'])
 
+/** #37b: a machine whose target is a wrapper around a checkout printing OLD, and a project printing NEW. */
+async function replacement(s: Scenario, tag: string, o: { link?: boolean; noCli?: boolean; legacy?: boolean } = {}) {
+  const base = await baseline(s)
+  const m = await machine(s, tag, base)
+  const old = await stub(s, `old-${tag}/scripts/blueprint`, 'OLD')
+  const wrapper = `#!/usr/bin/env bash\nexec ${old} "$@"\n`
+  if (o.link) {
+    await s.fs.write(`home-${tag}/.local/bin/.keep`, '')
+    const ln = await s.run('ln', ['-s', old, m.target], { cwd: s.workspace.root })
+    expect(ln.code, ln.output).toBe(0)
+  } else {
+    await s.fs.write(m.targetRel, wrapper, { mode: 0o755 })
+  }
+  await s.fs.write(
+    `proj-${tag}/.blueprint-source`,
+    'config_version = 2\n' +
+      (o.legacy ? `blueprint_source = ${old}\n` : '') +
+      'blueprint_remote = /nowhere.git\nblueprint_branch = main\nblueprint_release_branch = released\n',
+  )
+  if (!o.noCli) await stub(s, `proj-${tag}/scripts/blueprint`, 'NEW')
+  return { m, base, old, wrapper, proj: s.workspace.path(`proj-${tag}`) }
+}
+
+type Replacement = Awaited<ReturnType<typeof replacement>>
+
+/** The old command survived: same bytes, still runs, and no temp file was left. */
+async function intact(s: Scenario, f: Replacement, what: string, output: string) {
+  expect(await readFile(f.m.target, 'utf8'), `${what}: the old command changed:\n${output}`).toBe(f.wrapper)
+  expect(await prints(s, f.m, f.proj), `${what}: the old command no longer runs`).toBe('OLD')
+  expect(await dotNames(f.m, '.blueprint.new.'), `${what}: a temp file was left`).toEqual([])
+}
+
+/** The swap happened as §8.1 says. Returns the backup's path. */
+async function replaced(s: Scenario, f: Replacement, what: string, r: { code: number | null; output: string }) {
+  expect(r.code, `${what}:\n${r.output}`).toBe(0)
+  expect(await readFile(f.m.target, 'utf8'), `${what}: the target is not the body`).toBe(BODY)
+  expect(await prints(s, f.m, f.proj), `${what}: the new command does not run the project CLI`).toBe('NEW')
+  const backups = await dotNames(f.m, '.blueprint-replaced.')
+  expect(backups, `${what}: expected exactly one backup`).toHaveLength(1)
+  expect(await dotNames(f.m, '.blueprint.new.'), `${what}: a temp file was left`).toEqual([])
+  expect(r.output).toContain(`✓ blueprint command replaced (${f.m.target})`)
+  const backup = join(f.m.bin, backups[0] ?? '', 'blueprint')
+  expect(r.output).toContain(`restore it with: mv ${backup} ${f.m.target}`)
+  return backup
+}
+
 describe('TASK-025 — the installer writes the per-machine blueprint command', () => {
   it('#34 the command is written, exact, executable, names no checkout, and runs the project CLI', async () => {
     await scenario('install-toolchain-34', async (s) => {
@@ -400,18 +446,27 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
       for (const line of FOREIGN.slice(1)) expect(ra.output).toContain(line)
       const ca = await install(s, a, ['check'])
       expect(ca.output, '(a) check did not report the foreign command').toContain(`⚠ ${a.target} ${FOREIGN[0]}`)
+      expect(await readFile(a.target, 'utf8'), `(a) check changed the wrapper:\n${ca.output}`).toBe(wrapper)
 
-      // (b) a symlink into a checkout: never followed, never replaced
+      // (b) a symlink is never followed and never owned: one into a checkout,
+      // and one to a file holding the EXACT released body — ownership is a
+      // regular file's bytes, so a link to the right bytes is still foreign.
       const b = await machine(s, 'b', base)
-      await s.fs.write(`home-b/.local/bin/.keep`, '')
-      const linked = join(b.root, 'scripts/blueprint')
-      const ln = await s.run('ln', ['-s', linked, b.target], { cwd: s.workspace.root })
-      expect(ln.code, ln.output).toBe(0)
-      const rb = await install(s, b, [])
-      expect((await lstat(b.target)).isSymbolicLink(), `(b) the link was replaced:\n${rb.output}`).toBe(true)
-      expect(await readlink(b.target)).toBe(linked)
-      expect(await readFile(linked, 'utf8'), '(b) the checkout CLI was written through the link').toBe(stubText('ROOT'))
-      expect(rb.output).toContain(`⚠ ${b.target} ${FOREIGN[0]}`)
+      await s.fs.write('home-b/.local/bin/.keep', '')
+      const releasedBody = await s.fs.write('elsewhere/blueprint', BODY, { mode: 0o755 })
+      for (const linked of [join(b.root, 'scripts/blueprint'), releasedBody]) {
+        const before = await readFile(linked, 'utf8')
+        const ln = await s.run('ln', ['-sfn', linked, b.target], { cwd: s.workspace.root })
+        expect(ln.code, ln.output).toBe(0)
+        const rb = await install(s, b, [])
+        expect((await lstat(b.target)).isSymbolicLink(), `(b) the link to ${linked} was replaced:\n${rb.output}`).toBe(true)
+        expect(await readlink(b.target)).toBe(linked)
+        expect(rb.output, `(b) a link to ${linked} was taken as the installer's`).toContain(`⚠ ${b.target} ${FOREIGN[0]}`)
+        const cb = await install(s, b, ['check'])
+        expect(cb.output, `(b) check did not report the link to ${linked}`).toContain(`⚠ ${b.target} ${FOREIGN[0]}`)
+        expect(await readlink(b.target), `(b) check replaced the link to ${linked}`).toBe(linked)
+        expect(await readFile(linked, 'utf8'), `(b) ${linked} was written through the link`).toBe(before)
+      }
 
       // (c) the marker proves nothing: the body plus one edited line is foreign
       const c = await machine(s, 'c', base)
@@ -422,123 +477,110 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
       for (const line of FOREIGN.slice(1)) expect(rc.output).toContain(line)
       const cc = await install(s, c, ['check'])
       expect(cc.output).toContain(`⚠ ${c.target} ${FOREIGN[0]}`)
+      expect(await readFile(c.target, 'utf8'), `(c) check changed the edited body:\n${cc.output}`).toBe(edited)
     })
   })
 
-  it('#37b --replace-blueprint-command: the approved swap, and every failure before it leaves the old command', async () => {
-    await scenario('install-toolchain-37b', async (s) => {
-      const base = await baseline(s)
-
-      /** A machine whose target is a wrapper around a checkout printing OLD, and a project printing NEW. */
-      async function fixture(tag: string, o: { link?: boolean; noCli?: boolean; legacy?: boolean } = {}) {
-        const m = await machine(s, tag, base)
-        const old = await stub(s, `old-${tag}/scripts/blueprint`, 'OLD')
-        const wrapper = `#!/usr/bin/env bash\nexec ${old} "$@"\n`
-        if (o.link) {
-          await s.fs.write(`home-${tag}/.local/bin/.keep`, '')
-          const ln = await s.run('ln', ['-s', old, m.target], { cwd: s.workspace.root })
-          expect(ln.code, ln.output).toBe(0)
-        } else {
-          await s.fs.write(m.targetRel, wrapper, { mode: 0o755 })
-        }
-        await s.fs.write(
-          `proj-${tag}/.blueprint-source`,
-          'config_version = 2\n' +
-            (o.legacy ? `blueprint_source = ${old}\n` : '') +
-            'blueprint_remote = /nowhere.git\nblueprint_branch = main\nblueprint_release_branch = released\n',
-        )
-        if (!o.noCli) await stub(s, `proj-${tag}/scripts/blueprint`, 'NEW')
-        return { m, old, wrapper, proj: s.workspace.path(`proj-${tag}`) }
-      }
-
-      async function intact(f: Awaited<ReturnType<typeof fixture>>, what: string, output: string) {
-        expect(await readFile(f.m.target, 'utf8'), `${what}: the old command changed:\n${output}`).toBe(f.wrapper)
-        expect(await prints(s, f.m, f.proj), `${what}: the old command no longer runs`).toBe('OLD')
-        expect(await dotNames(f.m, '.blueprint.new.'), `${what}: a temp file was left`).toEqual([])
-      }
-
-      async function replaced(f: Awaited<ReturnType<typeof fixture>>, what: string, r: { code: number | null; output: string }) {
-        expect(r.code, `${what}:\n${r.output}`).toBe(0)
-        expect(await readFile(f.m.target, 'utf8'), `${what}: the target is not the body`).toBe(BODY)
-        expect(await prints(s, f.m, f.proj), `${what}: the new command does not run the project CLI`).toBe('NEW')
-        const backups = await dotNames(f.m, '.blueprint-replaced.')
-        expect(backups, `${what}: expected exactly one backup`).toHaveLength(1)
-        expect(await dotNames(f.m, '.blueprint.new.'), `${what}: a temp file was left`).toEqual([])
-        expect(r.output).toContain(`✓ blueprint command replaced (${f.m.target})`)
-        const backup = join(f.m.bin, backups[0] ?? '', 'blueprint')
-        expect(r.output).toContain(`restore it with: mv ${backup} ${f.m.target}`)
-        return backup
-      }
-
-      // (a) from the project
-      const a = await fixture('a')
-      const backupA = await replaced(a, '(a)', await install(s, a.m, ['--replace-blueprint-command'], { cwd: a.proj }))
-      expect(await readFile(backupA, 'utf8'), '(a) the backup is not the old wrapper').toBe(a.wrapper)
-
-      // (a2) from the installer's root, naming the project
-      const a2 = await fixture('a2')
-      const r2 = await install(s, a2.m, ['--replace-blueprint-command', `--project=${a2.proj}`], { cwd: a2.m.root })
-      const backupA2 = await replaced(a2, '(a2)', r2)
-      expect(await readFile(backupA2, 'utf8')).toBe(a2.wrapper)
-
-      // (b) a symlink target is replaced as a link; what it pointed at is untouched
-      const b = await fixture('b', { link: true })
-      const backupB = await replaced(b, '(b)', await install(s, b.m, ['--replace-blueprint-command'], { cwd: b.proj }))
-      expect((await lstat(b.m.target)).isFile()).toBe(true)
-      expect((await lstat(backupB)).isSymbolicLink(), '(b) the backup is not the link').toBe(true)
-      expect(await readlink(backupB)).toBe(b.old)
-      expect(await readFile(b.old, 'utf8'), '(b) the checkout CLI was written through the link').toBe(stubText('OLD'))
-
-      // (c) injected failures, one tool per run
-      for (const tool of ['chmod', 'cp', 'mv']) {
-        const f = await fixture(`fail-${tool}`)
-        const shims = await s.shimDir(`shim-fail-${tool}`)
-        await shims.add(tool, 'exit 1')
-        const r = await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.proj, path: `${shims.dir}:${base}` })
-        expect(r.code, `(c) ${tool} failing still exited 0:\n${r.output}`).not.toBe(0)
-        await intact(f, `(c) ${tool} failing`, r.output)
-      }
-
-      // (c) validation failing, the installer root keeping its working ROOT CLI in every run
-      const noCli = await fixture('no-cli', { noCli: true })
-      const rn = await install(s, noCli.m, ['--replace-blueprint-command'], { cwd: noCli.proj })
-      expect(rn.code, `(c) a project without scripts/blueprint was accepted:\n${rn.output}`).not.toBe(0)
-      await intact(noCli, '(c) no project CLI', rn.output)
-
-      const legacy = await fixture('legacy', { legacy: true })
-      const rl = await install(s, legacy.m, ['--replace-blueprint-command'], { cwd: legacy.proj })
-      expect(rl.code, `(c) a project still carrying blueprint_source was accepted:\n${rl.output}`).not.toBe(0)
-      expect(rl.output).toContain(`✗ ${legacy.proj} is not a migrated project`)
-      await intact(legacy, '(c) blueprint_source present', rl.output)
-
-      const atRoot = await fixture('at-root')
-      const rr = await install(s, atRoot.m, ['--replace-blueprint-command'], { cwd: atRoot.m.root })
-      expect(rr.code, `(c) the installer root was validated as the project:\n${rr.output}`).not.toBe(0)
-      await intact(atRoot, '(c) from the root without --project', rr.output)
-
-      // (d) interrupted before the swap: a cp that blocks, and INT/TERM to the group and to the installer alone
-      const runs: Array<[Sig, 'group' | 'alone']> = [
-        ['SIGINT', 'group'],
-        ['SIGTERM', 'group'],
-        ['SIGINT', 'alone'],
-        ['SIGTERM', 'alone'],
-      ]
-      for (const [sig, to] of runs) {
-        const tag = `${sig.toLowerCase()}-${to}`
-        const f = await fixture(tag)
-        const blocker = await seam(s, tag, 'cp')
-        const { child, done } = start(s, f.m.installer, ['--replace-blueprint-command'], f.proj, {
-          HOME: f.m.home,
-          PATH: `${blocker.dir}:${base}`,
-        })
-        await reached(blocker)
-        process.kill(to === 'group' ? -(child.pid ?? 0) : (child.pid ?? 0), sig)
-        release(blocker)
-        const d = await done
-        expect(diedOf(d, sig), `(d) ${sig} to the ${to} did not end the installer\n${show(d)}`).toBe(true)
-        await intact(f, `(d) ${sig} to the ${to}`, show(d))
-      }
+  // ONE CASE PER SUB-RUN (Alexey, c3-4 review #4). As one case, the first
+  // failing run hid every later one, so R1 and R3 were seen red only at (a) and
+  // the failure-path runs they break were never observed. Each case owns its
+  // scenario now, and a mutant reddens every run it breaks.
+  describe('#37b --replace-blueprint-command: the approved swap, and every failure before it leaves the old command', () => {
+    it('(a) from the project: replaced, runs the project CLI, one backup of the old wrapper, no temp', async () => {
+      await scenario('install-toolchain-37b-a', async (s) => {
+        const f = await replacement(s, 'a')
+        const r = await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.proj })
+        const backup = await replaced(s, f, '(a)', r)
+        expect(await readFile(backup, 'utf8'), '(a) the backup is not the old wrapper').toBe(f.wrapper)
+      })
     })
+
+    it("(a2) from the installer's root with --project: the same result", async () => {
+      await scenario('install-toolchain-37b-a2', async (s) => {
+        const f = await replacement(s, 'a2')
+        const r = await install(s, f.m, ['--replace-blueprint-command', `--project=${f.proj}`], { cwd: f.m.root })
+        const backup = await replaced(s, f, '(a2)', r)
+        expect(await readFile(backup, 'utf8')).toBe(f.wrapper)
+      })
+    })
+
+    it('(b) a symlink to a file is replaced as a link: the backup is the link, the file it named is untouched', async () => {
+      await scenario('install-toolchain-37b-b', async (s) => {
+        const f = await replacement(s, 'b', { link: true })
+        const backup = await replaced(s, f, '(b)', await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.proj }))
+        expect((await lstat(f.m.target)).isFile()).toBe(true)
+        expect((await lstat(backup)).isSymbolicLink(), '(b) the backup is not the link').toBe(true)
+        expect(await readlink(backup)).toBe(f.old)
+        expect(await readFile(f.old, 'utf8'), '(b) the checkout CLI was written through the link').toBe(stubText('OLD'))
+      })
+    })
+
+    for (const tool of ['chmod', 'cp', 'mv']) {
+      it(`(c) ${tool} failing: non-zero, the old command intact and running, no temp`, async () => {
+        await scenario(`install-toolchain-37b-fail-${tool}`, async (s) => {
+          const f = await replacement(s, tool)
+          const shims = await s.shimDir(`shim-fail-${tool}`)
+          await shims.add(tool, 'exit 1')
+          const r = await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.proj, path: `${shims.dir}:${f.base}` })
+          expect(r.code, `(c) ${tool} failing still exited 0:\n${r.output}`).not.toBe(0)
+          await intact(s, f, `(c) ${tool} failing`, r.output)
+        })
+      })
+    }
+
+    it('(c) validation: a project with no scripts/blueprint is refused, even though the root has a CLI', async () => {
+      await scenario('install-toolchain-37b-no-cli', async (s) => {
+        const f = await replacement(s, 'no-cli', { noCli: true })
+        const r = await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.proj })
+        expect(r.code, `(c) a project without scripts/blueprint was accepted:\n${r.output}`).not.toBe(0)
+        await intact(s, f, '(c) no project CLI', r.output)
+      })
+    })
+
+    it('(c) validation: a project still carrying blueprint_source is refused as not migrated', async () => {
+      await scenario('install-toolchain-37b-legacy', async (s) => {
+        const f = await replacement(s, 'legacy', { legacy: true })
+        const r = await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.proj })
+        expect(r.code, `(c) a project still carrying blueprint_source was accepted:\n${r.output}`).not.toBe(0)
+        expect(r.output).toContain(`✗ ${f.proj} is not a migrated project`)
+        await intact(s, f, '(c) blueprint_source present', r.output)
+      })
+    })
+
+    it("(c) validation: run from the installer's root without --project is refused", async () => {
+      await scenario('install-toolchain-37b-at-root', async (s) => {
+        const f = await replacement(s, 'at-root')
+        const r = await install(s, f.m, ['--replace-blueprint-command'], { cwd: f.m.root })
+        expect(r.code, `(c) the installer root was validated as the project:\n${r.output}`).not.toBe(0)
+        await intact(s, f, '(c) from the root without --project', r.output)
+      })
+    })
+
+    const interrupts: Array<[Sig, 'group' | 'alone']> = [
+      ['SIGINT', 'group'],
+      ['SIGTERM', 'group'],
+      ['SIGINT', 'alone'],
+      ['SIGTERM', 'alone'],
+    ]
+    for (const [sig, to] of interrupts) {
+      it(`(d) ${sig} to the ${to} while the backup copies: died of it, the old command intact, no temp`, async () => {
+        const tag = `${sig.toLowerCase()}-${to}`
+        await scenario(`install-toolchain-37b-${tag}`, async (s) => {
+          const f = await replacement(s, tag)
+          const blocker = await seam(s, tag, 'cp')
+          const { child, done } = start(s, f.m.installer, ['--replace-blueprint-command'], f.proj, {
+            HOME: f.m.home,
+            PATH: `${blocker.dir}:${f.base}`,
+          })
+          await reached(blocker)
+          process.kill(to === 'group' ? -(child.pid ?? 0) : (child.pid ?? 0), sig)
+          release(blocker)
+          const d = await done
+          expect(diedOf(d, sig), `(d) ${sig} to the ${to} did not end the installer\n${show(d)}`).toBe(true)
+          await intact(s, f, `(d) ${sig} to the ${to}`, show(d))
+        })
+      })
+    }
   })
 
   it('#38 a blueprint earlier on PATH is named', async () => {

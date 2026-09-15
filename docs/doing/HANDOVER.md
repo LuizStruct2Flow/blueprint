@@ -90,7 +90,10 @@ They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
   `~/.cache` write in its sandbox).
   - **Jesko (BUG-121 re-check):** `.scratch/JESKO-bug121-recheck.md`, push after one fix. chmod,
     realpath and mkdtemp re-resolve the path after lstat, so an untrusted parent chain lets
-    another user swap it. **Philipp is adding an ancestor trust check.**
+    another user swap it. **Fixed by Philipp in `2ec249e`/`e61436f`:** an ancestor trust check.
+    Jesko's confirmation (`.scratch/brief-jesko-bug121-recheck2.md`) **did NOT run: Codex's
+    usage limit is out again until 2026-09-16 02:10.** Eto reads the diff before the push;
+    re-dispatch the brief after 02:10.
   - **Alex (TASK-034..036):** `.scratch/ALEX-task034-036-review.md`. **Fixed by Christian** in
     `5c4c5ba` (deck bullet for the link rule) and `3c13c6a` (roster example, publishing guide).
     The TASK-034 finding was declined; the reason is in its row (`cd4c373`).

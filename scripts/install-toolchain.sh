@@ -61,6 +61,7 @@ BIN_DIR="${HOME}/.local/bin"
 GITLEAKS_VERSION="8.28.0"
 OSV_SCANNER_VERSION="2.2.2"
 HELM_VERSION="3.19.0"
+SHELLCHECK_VERSION="0.10.0"
 
 # REQUIREMENTS, not pins — a distinction worth keeping straight. The versions
 # above say "install exactly this"; these say "anything this accepts can run the
@@ -77,11 +78,12 @@ HELM_VERSION="3.19.0"
 HARNESS_MANIFEST="$ROOT/tests/package.json"
 NPM_MIN_MAJOR="8"
 
-# Tools the pre-push gate actually probes for (`command -v` in .githooks/pre-push).
-# Keep this in step with that file — a tool listed here that the gate never uses
-# is install-time cost for nothing, and one the gate uses that is missing here
-# is a silent pipe_skip.
-SECURITY_TOOLS="gitleaks semgrep osv-scanner jq"
+# Tools the pre-push gate actually probes for (`command -v` in .githooks/pre-push,
+# and in scripts/run-ts-suites.sh for shellcheck). Keep this in step with those
+# files — a tool listed here that the gate never uses is install-time cost for
+# nothing, and one the gate uses that is missing here is a silent pipe_skip.
+# ShellCheck does not skip: its stage BLOCKS when it is missing (TASK-033).
+SECURITY_TOOLS="gitleaks semgrep osv-scanner jq shellcheck"
 # `aws` is not probed by the gate, but every AWS recipe in docs/INFRASTRUCTURE.md
 # needs it, and `check --infra` must report the same set that `--infra` installs
 # — a check narrower than the install is how a machine reports itself ready and
@@ -591,6 +593,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   brew_install semgrep     semgrep
   brew_install osv-scanner osv-scanner
   brew_install jq          jq
+  brew_install shellcheck  shellcheck
 
   # coreutils is keyed on the COMMAND it provides, not on the formula name:
   # `have coreutils` is always false, so a formula-keyed check reinstalls it
@@ -626,8 +629,8 @@ else
 # --- Linux: pinned release binaries into ~/.local/bin, no sudo ---------------
   # $BIN_DIR and its PATH warning are set up above the OS branch now.
   case "$(uname -m)" in
-    x86_64)        A_AMD=amd64; A_X64=x64;   A_64BIT=64bit ;;
-    aarch64|arm64) A_AMD=arm64; A_X64=arm64; A_64BIT=ARM64 ;;
+    x86_64)        A_AMD=amd64; A_X64=x64;   A_SC=x86_64 ;;
+    aarch64|arm64) A_AMD=arm64; A_X64=arm64; A_SC=aarch64 ;;
     *) echo "❌ unsupported architecture: $(uname -m)" >&2; exit 1 ;;
   esac
 
@@ -665,10 +668,13 @@ else
     return 1
   }
 
+  # `tar -xf`, not `-xzf`: tar detects the compression from the archive's
+  # content, so one extractor takes gitleaks' and helm's .tar.gz and
+  # ShellCheck's .tar.xz (TASK-033).
   install_tarball() {
     _tool="$1"; _url="$2"; _member="$3"
     _tmp="$(mktemp -d)" || return 1
-    if fetch "$_url" "$_tmp/pkg.tgz" && tar -xzf "$_tmp/pkg.tgz" -C "$_tmp" "$_member" 2>/dev/null; then
+    if fetch "$_url" "$_tmp/pkg" && tar -xf "$_tmp/pkg" -C "$_tmp" "$_member" 2>/dev/null; then
       install -m 0755 "$_tmp/$_member" "$BIN_DIR/$_tool"
       rm -rf "$_tmp"
       return 0
@@ -713,6 +719,18 @@ else
       || fail_tool semgrep "pip --user install failed (try pipx)"
   else
     fail_tool semgrep "needs python3 or pipx"
+  fi
+
+  # TASK-033: the gate's shell lint stage BLOCKS without ShellCheck. Its release
+  # is a static binary, so the pinned download works on any distro without sudo.
+  if have shellcheck; then
+    note "✓ shellcheck already present"
+  elif install_tarball shellcheck \
+        "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${A_SC}.tar.xz" \
+        "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"; then
+    verify shellcheck
+  else
+    fail_tool shellcheck "download/extract failed (pinned v${SHELLCHECK_VERSION}; or install it with apt/dnf)"
   fi
 
   if [ "$WITH_INFRA" = "yes" ]; then

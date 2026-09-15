@@ -24,8 +24,10 @@ Three categories of leak we are preventing:
    captured production logs, etc. — replace with whatever your project
    has).
 2. **AI configurations**: the founder's Claude Code permission
-   allowlist, the struct2flow methodology files, the multi-AI review
-   chain (`AGENT_SIGNAL.md`, `docs/doing/SLICE-*/CODEX_REVIEW.md`).
+   allowlist, the struct2flow methodology files (including the
+   `AGENT_SIGNAL.md` protocol document), and the multi-AI review chain
+   itself: the runtime handoff history in `logs/state/signal-history.log`
+   and review records such as `docs/doing/SLICE-*/CODEX_REVIEW.md`.
 3. **Operational state**: ongoing plan decisions, handover docs, codex
    run logs.
 

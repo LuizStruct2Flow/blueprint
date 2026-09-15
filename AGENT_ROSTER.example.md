@@ -25,8 +25,9 @@
 > baton normally.
 
 The team. Each member is a **persona** with a fixed **name**, a **role**, and the
-**backing agent** that powers it. The persona name is what goes in
-`AGENT_SIGNAL.md`'s `Holder` field and in `OVER_TO_<NAME>` handoffs — so two
+**backing agent** that powers it. The persona name is what goes in the
+`Holder` field of the live baton `logs/state/signal.md` (published by
+`scripts/signal-set.sh`) and in `OVER_TO_<NAME>` handoffs — so two
 sessions backed by the same agent type (e.g. two Claude Code sessions) stay
 distinguishable. This prevents the same-type collision where two "Claude Code"
 sessions both answer `OVER_TO_CLAUDE` and fight over the mic.

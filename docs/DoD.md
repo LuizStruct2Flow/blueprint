@@ -329,7 +329,11 @@ struct2flow convention — the project's exact targets are wired in
 5. **`.claude/settings.json` host-path guard** — fails the push if the
    COMMITTED `settings.json` contains absolute paths under `/Users/<name>/`
    or `/home/<name>/`. Host-specific entries belong in
-   `.claude/settings.local.json` (gitignored). Three drift cycles in a row
+   `.claude/settings.local.json` (gitignored). Rules the whole team shares
+   that are this project's own belong in `.claude/settings.project.json`
+   (tracked, never pulled), which `blueprint pull` merges into
+   `settings.json`; the guard scans the merged, committed `settings.json`, so
+   it covers them too. Three drift cycles in a row
    landed `~/.ssh`, `~/sources/`, and `~/Library/Containers/...` in the
    shared settings via Claude Code's auto-allowlist; this guard prevents
    the fourth.

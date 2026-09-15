@@ -69,9 +69,22 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
-**Now (2026-09-15): the four derived-project PRs #71–#74, implemented in the blueprint.**
-Rows are in `docs/doing/BACKLOG.md`, promotion commits `bad3c2e`..`2448f58`, unpushed.
-They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
+**PUSHED 2026-09-15 (`4267ac8`, gate green): TASK-034..038 and the BUG-121 hardening.** All five
+task rows are in `docs/waiting-acceptance/BACKLOG.md`. PRs #71–#74 are closed with comments
+naming their tasks, and their branches are deleted. The row moves (`92a5cf5`..) and this note are
+local, for the next push. **Still open:**
+- **CI** for `4267ac8`: a Monitor was armed at push time and dies with the session. Check with
+  `gh run list --repo LuizStruct2Flow/blueprint --commit 4267ac8e6ebbd4ed69503e5e21b9717a11eb4a98`.
+- **Two Codex re-checks, after 2026-09-16 02:10** (usage limit). Both reviewed items are already
+  pushed.
+  - **Jesko on BUG-121:** `.scratch/brief-jesko-bug121-recheck2.md` covers the chain check
+    `2ec249e`/`e61436f` and the umask fix `9a89e54`/`4267ac8`.
+  - **Alexey on TASK-037's fixes** `f1b1f93`..`f23e7cb`: `.scratch/brief-alexey-task037-recheck.md`,
+    with the secret refusal weighted most heavily.
+  - Dispatch both with the usual `codex exec` line (§4). Output goes to
+    `.scratch/JESKO-bug121-recheck2.md` and `.scratch/ALEXEY-task037-recheck.md`.
+
+History of how it got here (safe to delete once the re-checks are in):
 - **Christian (Claude): TASK-034, TASK-035, TASK-036**
   - TASK-034: acceptance and any delegation of it are the founder's. Removes the QA-2 rule in
     four places, including `templates/`.

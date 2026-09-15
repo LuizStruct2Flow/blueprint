@@ -398,8 +398,9 @@ function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean 
  * the one place the token exists to be seen. The pair alone would therefore
  * license the single most dangerous combination this file can express. Requiring
  * the cwd to be contained is what turns "derives its own feed" into "derives a
- * feed inside this workspace": the workspace root is an mkdtemp under the system
- * temp dir and so is inside no git tree, so from a contained cwd git either
+ * feed inside this workspace": the workspace root is an mkdtemp under a base
+ * that workspace.ts refuses if any project marker sits at or above it (BUG-110,
+ * BUG-121), so it is inside no git tree, and from a contained cwd git either
  * finds a repository inside the workspace or finds none and pwd answers.
  *
  * This is a rule and not an exemption (TASK-018 R5): any scenario that hands a

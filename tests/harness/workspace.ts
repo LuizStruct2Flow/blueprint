@@ -1,7 +1,7 @@
 /**
  * tests/harness/workspace.ts — a per-scenario temp root that owns its cleanup.
  *
- * Two defects shaped this file, both found by execution:
+ * Three defects shaped this file, all found by execution:
  *
  *  - BUG-036: macOS `mktemp -d` returns /var/folders/..., while /var is a
  *    symlink to /private/var, so a process's REAL cwd is reported under
@@ -12,10 +12,12 @@
  *    the trap covered only $WORK. 133 MB of leaked blueprint archives, measured.
  *    So a workspace is not a path — it is a handle that knows how to remove
  *    itself, and teardown ASSERTS the removal rather than hoping.
+ *  - BUG-121: workspaces lived under the shared /tmp, which any process on the
+ *    machine writes to. See workspaceBase.
  */
 
 import { mkdtemp, rm, mkdir, realpath, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 /** What scripts/lib/state-dir.sh `bp_state_root` treats as a project root. */
@@ -32,15 +34,16 @@ const PROJECT_MARKERS = ['.git', '.blueprint-root', '.blueprint-source'] as cons
  * reporting `expected +0 not to be +0`. So the cause is made the failure.
  *
  * THE OPERATIONAL CONSEQUENCE IS DELIBERATE: while a stray marker sits in or
- * above the temp dir, EVERY scenario refuses to start and the whole TypeScript
+ * above the base, EVERY scenario refuses to start and the whole TypeScript
  * harness is unavailable. The remedy is to remove the marker, or to point
- * TMPDIR at a directory with no marker above it (for example
- * `TMPDIR=$HOME/.cache/bp-tmp`). A partial run under a contaminated temp dir
- * would be worse, because its greens would not mean what they say.
+ * TMPDIR at a directory with no marker above it. A partial run under a
+ * contaminated base would be worse, because its greens would not mean what they
+ * say. Since BUG-121 the default base is private, so the /tmp/.git a Codex
+ * sandbox leaves no longer reaches it and needs no TMPDIR workaround.
  *
  * Ported from PR #68 (linkedin-watcher-agent).
  */
-async function refuseProjectMarkerAbove(base: string): Promise<void> {
+async function refuseProjectMarkerAbove(base: string, why: string): Promise<void> {
   for (let dir = base; ; dir = dirname(dir)) {
     for (const marker of PROJECT_MARKERS) {
       const found = join(dir, marker)
@@ -51,11 +54,11 @@ async function refuseProjectMarkerAbove(base: string): Promise<void> {
       if (exists) {
         throw new Error(
           `Project marker above every scenario workspace: ${found}. Fixtures ` +
-            `are created under ${base}, and bp_state_root walks UP for this ` +
-            `marker, so a tree that should resolve nothing would resolve ` +
-            `${dir}, and an assertion that it fails loudly inverts instead ` +
-            `(BUG-110). No scenario can run until this is fixed: remove the ` +
-            `stray marker, or point TMPDIR at a directory with no marker above it.`,
+            `are created under ${base} (${why}), and bp_state_root walks UP ` +
+            `for this marker, so a tree that should resolve nothing would ` +
+            `resolve ${dir}, and an assertion that it fails loudly inverts ` +
+            `instead (BUG-110). No scenario can run until this is fixed: remove ` +
+            `the stray marker, or point TMPDIR at a directory with no marker above it.`,
         )
       }
     }
@@ -74,10 +77,19 @@ export interface BaseSource {
     readonly XDG_CACHE_HOME?: string | undefined
     readonly HOME?: string | undefined
   }
-  /** The shared temp dir the OS falls back to when TMPDIR is unset. */
+  /**
+   * The shared temp dir the OS falls back to when TMPDIR is unset. The default
+   * never uses it; it is in the seam so a spec can plant a marker exactly where
+   * workspaces used to go and prove they no longer do.
+   */
   readonly systemTmp: string
 }
 
+/**
+ * The real sources. process.env is read at call time and IS the operator's:
+ * scenario() hands its HOME, TMPDIR and XDG_CACHE_HOME to children only and
+ * never writes them into process.env.
+ */
 function realBaseSource(): BaseSource {
   return {
     env: {
@@ -89,8 +101,33 @@ function realBaseSource(): BaseSource {
   }
 }
 
-async function workspaceBase(source: BaseSource): Promise<string> {
-  return source.env.TMPDIR || source.systemTmp
+/**
+ * The directory every workspace is created under, and why it is that one.
+ *
+ * AN EXPLICITLY SET TMPDIR WINS. "Explicitly set" means TMPDIR is present and
+ * non-empty. Unset or empty is the inherited default, which os.tmpdir() would
+ * turn into the shared /tmp. TMP and TEMP, which node also consults, do not
+ * count. On macOS launchd sets TMPDIR to a per-user /var/folders directory, so
+ * it counts as set there, and that directory is private to the user anyway.
+ *
+ * OTHERWISE A PRIVATE BASE: ${XDG_CACHE_HOME:-$HOME/.cache}/bp-harness-tmp,
+ * created 0700 if missing. /tmp is shared with every process on the machine,
+ * and every Codex workspace-write sandbox, from any project, creates an empty
+ * /tmp/.git there for minutes at a time (BUG-110). With workspaces under /tmp
+ * the preflight then refused every scenario, and a docs-only push went 52 of 55
+ * suites red with no Codex running in this checkout. CI runners have a writable
+ * HOME, so the same default applies there without a step setting it.
+ *
+ * The preflight still runs on whichever base this returns.
+ */
+async function workspaceBase(source: BaseSource): Promise<{ dir: string; why: string }> {
+  const { TMPDIR, XDG_CACHE_HOME, HOME } = source.env
+  if (TMPDIR) {
+    return { dir: TMPDIR, why: 'TMPDIR is set, so it wins over the private default base' }
+  }
+  const dir = join(XDG_CACHE_HOME || join(HOME || homedir(), '.cache'), 'bp-harness-tmp')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  return { dir, why: 'TMPDIR is unset, so this is the private default base' }
 }
 
 export interface Workspace {
@@ -121,8 +158,9 @@ export async function createWorkspace(
   // and mkdtemp inherits that symlinked prefix; resolving afterwards would
   // still work, but resolving first means every derived path is physical by
   // construction rather than by remembering to convert.
-  const base = await realpath(await workspaceBase(source))
-  await refuseProjectMarkerAbove(base)
+  const { dir, why } = await workspaceBase(source)
+  const base = await realpath(dir)
+  await refuseProjectMarkerAbove(base, why)
   const root = await mkdtemp(join(base, `${safeLabel}-`))
 
   let disposed = false
@@ -159,8 +197,8 @@ export async function createWorkspace(
       if (survived) {
         throw new Error(
           `Workspace survived teardown: ${root}. This is the BUG-049 class — ` +
-            `debris accumulates in $TMPDIR and is itself a cross-suite hazard, ` +
-            `because a2bp-e2e scans that directory for leaked dirs.`,
+            `debris accumulates in the workspace base and is itself a ` +
+            `cross-suite hazard.`,
         )
       }
     },

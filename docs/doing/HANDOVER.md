@@ -204,7 +204,9 @@ hangs off that root.
   `.scratch/JESKO-task033-review.md` — installer, `sh_lint`, stage/CI parity, mutants, the 25
   fixes and docs all pass (install-toolchain 31/31, every TASK-033 case green). The fix: the
   Linux download helper comment in `scripts/install-toolchain.sh` falsely says downloads are
-  checksummed; Philipp is correcting it to match the file header. **Before it is pushed, ShellCheck
+  checksummed; **fixed in `3020ae8`** (the wrong wording dated from `fe08cb5`, TASK-018; installer 31/31,
+  ShellCheck clean). **TASK-033 is review-complete; the only blocker is the install below.**
+  **Before it is pushed, ShellCheck
   must be installed on the pushing machine**: the stage blocks without it, and ts-bridge
   #6b/#6c/#7 run the real linter. On this machine `bash scripts/install-toolchain.sh check`
   reports ShellCheck as the only missing tool; the installer puts the pinned release into

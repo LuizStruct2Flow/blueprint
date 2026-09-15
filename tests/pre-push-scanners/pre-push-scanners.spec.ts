@@ -393,6 +393,12 @@ describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () =
       const f = await fixture(s)
       await shellTargets(s)
       const script = await s.fs.write('ci-semgrep.sh', runs[0] ?? '')
+      // The step's JSON must land outside the tree it scans: written into the
+      // checkout, semgrep scans its own half-written output and reports a Syntax
+      // error on it (seen in the real image, 2026-09-16).
+      const tree = async (): Promise<string> =>
+        (await s.run('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: f.dir })).output
+      const before = await tree()
       const cases: [SemgrepMode, boolean][] = [
         ['clean', true],
         ['shellparse', true],
@@ -415,6 +421,7 @@ describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () =
         if (passes) expect(r.code, `CI failed a ${mode} scan\n${r.output}`).toBe(0)
         else expect(r.code, `CI passed a ${mode} scan\n${r.output}`).not.toBe(0)
         if (mode === 'partial') expect(r.output, 'CI did not name the unanalysed path').toContain('src/broken.js')
+        expect(await tree(), `the ${mode} run wrote into the scanned tree`).toBe(before)
       }
     })
   })

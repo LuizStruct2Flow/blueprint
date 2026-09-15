@@ -380,28 +380,59 @@ _st_semgrep(){
   #     to zero findings, which would fail open;
   #   - a NON-ZERO exit with zero results — exit 1 is not semgrep's clean exit,
   #     so "0 results" there is not a proven-complete scan (Codex R2-1).
-  # Only the exit code proves completeness; only the results array proves
-  # findings. Neither is inferred from the other.
+  #   - exit 0 and zero results, but an `.errors` entry this policy does not
+  #     accept (BUG-126). semgrep exits 0 when it could not parse a target and
+  #     says so ONLY in `.errors`, so that file was never analysed.
+  # Only the exit code and `.errors` prove completeness; only the results array
+  # proves findings. Neither is inferred from the other.
+  #
+  # BUG-126 — THE PARSE-ERROR POLICY, reviewed 2026-09-16. Exactly one class of
+  # error is accepted: a "Syntax error" or "PartialParsing" on a SHELL script
+  # (*.sh, *.bash, or an sh/bash/dash shebang, which is how semgrep itself picks
+  # bash for an extensionless file). semgrep's bash parser rejects valid scripts:
+  # 18 shellcheck-clean files in the blueprint alone, so blocking on them would
+  # block every push. Shell is linted by shellcheck (sh_lint) instead. Every other
+  # error blocks: any other type, any other language, an error with no path.
+  # Accepted errors are counted in a note, never dropped silently.
+  # .github/workflows/security.yml's sast job applies the same policy, and
+  # tests/pre-push-scanners BUG-126 #ci executes it over this stage's payloads.
+  #
+  # Prints "  <type>  <path>" for each error the policy does not accept.
+  _sg_unaccepted_errors() {
+    jq -r '.errors[] | [(.type | if type == "array" then .[0] else . end // "unknown" | tostring), (.path // "")] | @tsv' "$_sg_json" |
+      while IFS="$(printf '\t')" read -r _sg_t _sg_p; do
+        case "$_sg_t" in
+          "Syntax error"|PartialParsing)
+            case "$_sg_p" in *.sh|*.bash) continue ;; esac
+            if [ -f "$_sg_p" ] && head -n 1 <"$_sg_p" | grep -Eq '^#!.*[/ ](ba|da)?sh([[:space:]]|$)'; then
+              continue
+            fi ;;
+        esac
+        printf '  %s  %s\n' "$_sg_t" "${_sg_p:-<no path>}"
+      done
+  }
+
   _sg_classify() {
-    _sg_rc=0
+    _sg_rc=0; _sg_unaccepted=''
     # shellcheck disable=SC2086
     semgrep $1 --json \
       --config=p/owasp-top-ten \
       --severity=WARNING --severity=ERROR \
       --timeout=20 --metrics=off --quiet \
       . >"$_sg_json" 2>"$_sg_err" || _sg_rc=$?
-    # Require a well-formed results ARRAY. `jq -e` is false/non-zero when the
-    # JSON is invalid, or `.results` is missing / not an array — all incomplete.
-    if ! jq -e '(.results | type) == "array"' "$_sg_json" >/dev/null 2>&1; then
+    # Require well-formed results AND errors ARRAYS. `jq -e` is false/non-zero
+    # when the JSON is invalid, or either is missing / not an array — incomplete.
+    if ! jq -e '(.results | type) == "array" and (.errors | type) == "array"' "$_sg_json" >/dev/null 2>&1; then
       _sg_class=incomplete; return
     fi
     _sg_findings="$(jq '.results | length' "$_sg_json")"
+    _sg_unaccepted="$(_sg_unaccepted_errors)"
     if [ "${_sg_findings:-0}" -gt 0 ]; then
       _sg_class=finding                       # real results, regardless of exit
-    elif [ "$_sg_rc" -eq 0 ]; then
-      _sg_class=clean                          # zero results AND a clean exit
+    elif [ "$_sg_rc" -ne 0 ] || [ -n "$_sg_unaccepted" ]; then
+      _sg_class=incomplete                     # a non-zero exit, or errors not accepted
     else
-      _sg_class=incomplete                     # zero results but a non-zero exit
+      _sg_class=clean                          # zero results, clean exit, no unaccepted error
     fi
   }
 
@@ -415,6 +446,7 @@ _st_semgrep(){
     # how this gate ran, and it is the local signature of the io_uring failure
     # documented in HANDOVER §2. Silently recovering would hide a real thing.
     pipe_note "retrying single-job"
+    _sg_retried=1
     _sg_classify "--jobs 1"
   fi
 
@@ -427,13 +459,32 @@ _st_semgrep(){
     return 1
   elif [ "$_sg_class" = "incomplete" ]; then
     tail -20 "$_sg_err"
+    if [ -n "$_sg_unaccepted" ]; then
+      echo "   semgrep reported these errors (type, path):"
+      printf '%s\n' "$_sg_unaccepted" | head -40
+    fi
     rm -f "$_sg_json" "$_sg_err"
+    if [ "$_sg_rc" -eq 0 ] && [ -n "$_sg_unaccepted" ]; then
+      echo "❌ semgrep exited 0 but reported errors — the SAST scan is INCOMPLETE, not clean."
+      echo "   Code semgrep could not parse was NOT analysed, so the push is blocked."
+      echo "   Fix the syntax, or exclude the path in .semgrepignore if it is not source."
+      echo "   If semgrep is wrong about valid code, extend the reviewed policy in"
+      echo "   _sg_unaccepted_errors (.githooks/pre-push) AND the sast job in"
+      echo "   .github/workflows/security.yml, by error type and path."
+      return 1
+    fi
     echo "❌ semgrep could not complete (exit $_sg_rc) — the SAST gate did NOT run."
     echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
     echo "   Common causes: an unwritable ~/.semgrep dir, or registry/network"
     echo "   unavailable for the p/ pack. Re-run, or set SEMGREP_RULES to a local"
     echo "   ruleset if you need to work offline."
     return 1
+  fi
+  _sg_accepted="$(jq '.errors | length' "$_sg_json")"
+  if [ "${_sg_accepted:-0}" -gt 0 ]; then
+    _sg_note="${_sg_accepted} shell parse error(s) accepted by the BUG-126 policy"
+    if [ -n "${_sg_retried:-}" ]; then _sg_note="; $_sg_note"; fi
+    pipe_note "$_sg_note"
   fi
   rm -f "$_sg_json" "$_sg_err"
   return 0

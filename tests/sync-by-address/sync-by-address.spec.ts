@@ -117,6 +117,21 @@
  *        partner and is not mutant-deterministic)
  *   M29  no warning on the override path                 → #29
  *
+ *   BUG-120 (#20c revised, #20d, #20e), observed on a copy (.scratch/b120/mutants120.py):
+ *     the CLI before the fix (no token gate) → #20d, red 10/10 pinned, every run
+ *       sitting out the 3 s budget (3010–3027 ms)
+ *     the gate never checks the token        → #20d #20e
+ *     token revoked AFTER the TERM           → #20e
+ *     token revoked with a forking `rm -f`   → #20e; as the fix's first version,
+ *       it also left #20d 7/50 and #20c 2/50 red pinned
+ *     no token written                       → every case that fetches (fails
+ *       closed: no refresh runs at all)
+ *   The two ordering mutants go red only in #20e: no timed case holds the
+ *   microseconds they move.
+ *   STRESS AFTER THE FIX, one vitest process per run, pinned with `taskset -c N`:
+ *     #20c 50/50 green, #20d 50/50 green; unpinned #20c 50/50 green.
+ *   Before it, #20c pinned was red 40/40 on an unmodified copy of the tree.
+ *
  *   M16 onward were run against a COPY of the tree, not this checkout: every
  *   derived project on the machine runs this checkout's scripts/blueprint
  *   through the per-machine command, and a mutant there is a broken tool for
@@ -132,7 +147,7 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import type { ChildProcess } from 'node:child_process'
-import { closeSync, constants, existsSync, openSync, writeSync } from 'node:fs'
+import { closeSync, constants, existsSync, openSync, statSync, writeSync } from 'node:fs'
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -392,6 +407,30 @@ function release(seam: Seam) {
     writeSync(fd, 'go\n')
   } finally {
     closeSync(fd)
+  }
+}
+
+/**
+ * BUG-120 — wait until the run's cleanup has revoked the refresh token (emptied
+ * or removed with its scratch). Without the token (the CLI before BUG-120's fix)
+ * this returns at once, so the release is as immediate as it always was.
+ */
+async function revoked(token: string) {
+  await vi.waitFor(
+    () => {
+      if (existsSync(token) && statSync(token).size > 0) throw new Error(`the token is not revoked yet: ${token}`)
+    },
+    { timeout: 60_000, interval: 1 },
+  )
+}
+
+/** A FIFO's read end, or null when cleanup has already removed it with its scratch. */
+function openReader(fifo: string): number | null {
+  try {
+    return openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
   }
 }
 
@@ -1067,11 +1106,17 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       )
 
       run1.child.kill('SIGINT')
+      // BUG-120: release only once cleanup has revoked the token, so the claim
+      // under test is exactly "no fetch starts after cleanup has begun". A
+      // release racing the signal lets the child reach the gate before the run's
+      // handler has even started, which no design can prevent and which is
+      // indistinguishable from a signal sent a moment later (#20d covers it).
+      await revoked(join(held, 'go'))
       // Now let any still-waiting writer open the FIFO, and keep the read end
       // open so a fetch that does start is not killed by a closed pipe.
-      const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+      const reader = openReader(fifo)
       const d = await run1.done
-      closeSync(reader)
+      if (reader !== null) closeSync(reader)
       release(never)
 
       expect(diedOf(d, 'SIGINT'), show(d)).toBe(true)
@@ -1139,20 +1184,62 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
 
         const signalled = Date.now()
         child.kill('SIGINT')
-        const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+        const reader = openReader(fifo)
         const d = await done
         const ending = Date.now() - signalled
-        closeSync(reader)
+        if (reader !== null) closeSync(reader)
         release(never)
 
+        // WHAT THIS ASSERTS, AND WHY NOT "ssh never reached". The release races
+        // the signal here on purpose: it is what loses the TERM. It also lets the
+        // child reach the gate before the run's handler starts (1/50 pinned), a
+        // fetch started in the run's own reaction time, which nothing can
+        // prevent. What the fix guarantees is that such a fetch is past its exec,
+        // so cleanup's TERM kills it at once. A LOST TERM is what makes the run
+        // sit out the budget, so the budget is the assertion. "No fetch starts
+        // after cleanup has begun" is #20c's.
         expect(diedOf(d, 'SIGINT'), `${tag}: ${show(d)}`).toBe(true)
-        expect(existsSync(never.marker), `${tag}: a fetch started after cleanup signalled the refresh child (BUG-120)`).toBe(
-          false,
-        )
         expect(ending, `${tag}: the run sat out the fetch budget — cleanup's TERM was lost (BUG-120)`).toBeLessThan(2_000)
         await expectNothingLeft(s, `${tag}: a TERM with the release`)
       }
     })
+  })
+
+  it('#20e BUG-120: the fetch is gated on a token that cleanup revokes, without forking, before its TERM (structural)', async () => {
+    // WHY STRUCTURAL. The lost TERM needs the child's release and cleanup's TERM
+    // to land in the microseconds between its open returning and its exec, and
+    // no command on PATH runs there. A stopped child cannot hold it: on SIGCONT
+    // the pending TERM interrupts the open and bash dies of it (measured). #20d
+    // catches a missing gate by the budget it then sits out, but only the text
+    // can pin the two orderings the gate relies on: the token is revoked BEFORE
+    // the TERM, and with a builtin, since a forked `rm` yields the CPU to the
+    // child in between (7/50 red pinned, measured).
+    const text = await readFile(join(REPO_ROOT, 'scripts/blueprint'), 'utf8')
+    const code = (body: string) =>
+      body
+        .split('\n')
+        .filter((l) => !/^\s*#/.test(l))
+        .join('\n')
+
+    const cleanup = code(text.match(/^_bp_sync_cleanup\(\) \{\n([\s\S]*?)\n\}$/m)?.[1] ?? '')
+    expect(cleanup, 'no _bp_sync_cleanup() { … } definition to check').not.toBe('')
+    const revoke = cleanup.search(/:\s[^\n]*>\s*"\$BP_SYNC_GO"/)
+    const term = cleanup.indexOf('kill -TERM "$BP_SYNC_CHILD"')
+    expect(revoke, 'cleanup does not revoke the token with a builtin truncation').toBeGreaterThanOrEqual(0)
+    expect(term, 'cleanup sends no TERM to the refresh child').toBeGreaterThan(revoke)
+    expect(
+      cleanup.slice(0, term),
+      'cleanup runs an external command before its TERM, which yields the CPU to the child',
+    ).not.toMatch(/\b(rm|mv|truncate|sh|bash|env)\s/)
+
+    const launch = code(text.match(/^_bp_fetch_blueprint\(\) \{\n([\s\S]*?)\n\}$/m)?.[1] ?? '')
+    expect(launch, 'no _bp_fetch_blueprint() { … } definition to check').not.toBe('')
+    const gate = launch.indexOf(`sh -c '[ -s "$1" ] || exit 1; shift; exec "$@"' bp-refresh "$BP_SYNC_GO"`)
+    expect(gate, 'the refresh is not gated on the token after its first exec').toBeGreaterThanOrEqual(0)
+    expect(launch.indexOf('"$tcmd" "$BP_FETCH_TIMEOUT"', gate), 'the gate does not run before the fetch').toBeGreaterThan(gate)
+    const token = launch.indexOf(`printf 'go\\n' > "$BP_SYNC_GO"`)
+    expect(token, 'the token is not written non-empty before the launch').toBeGreaterThanOrEqual(0)
+    expect(token).toBeLessThan(gate)
   })
 
   it('#21 INT and TERM during the compare: died of the signal, no scratch, no ref, no write', async () => {

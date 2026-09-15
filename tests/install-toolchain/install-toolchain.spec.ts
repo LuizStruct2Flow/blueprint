@@ -45,6 +45,14 @@
  *   never reached `-`: #4 passed as "unsupported" rather than as
  *   "uninterpretable". The evaluator now checks every comparator's form before
  *   evaluating any, and #4 requires the UNVERIFIED verdict.
+ * #6 (Alexey, c3-4 review #3), observed the same way (.scratch/c025/mutants9.py):
+ *   The evaluator before the fix (a leading `*` skipped the alternative) → #6
+ *   a leading `*` accepts the alternative                                → #6
+ *   a leading `*` skips the form check                                   → #6
+ *   THE LAST FIRST LEFT #6 GREEN. `* nonsense` is refused either way, because
+ *   evaluating `nonsense` throws. #6 now also carries `* 20 - 22`, where the
+ *   bare `20` fails on Node 24 before `-` is parsed, so only the form check can
+ *   refuse it.
  *
  * TASK-025 COMMIT 4 — THE PER-MACHINE `blueprint` COMMAND (#34–#38, #37b).
  * ~/.local/bin/blueprint was hand-written and exec'd a checkout path, so moving
@@ -230,6 +238,14 @@ describe('TASK-027 — check derives the Node requirement from tests/package.jso
       const junk = await check(s, '24.1.0', await copyWithManifest(s, 'junk', engines('* nonsense')))
       expect(junk.line, `"* nonsense" was not refused as uninterpretable:\n${junk.output}`).toMatch(/UNVERIFIED/)
       expect(junk.code).toBe(1)
+
+      // The FORM CHECK after a wildcard, not only the evaluation: in `* 20 - 22`
+      // the bare `20` fails on Node 24 before `-` is ever parsed, so only the
+      // up-front check can call this range uninterpretable. `* nonsense` alone
+      // cannot tell, because evaluating `nonsense` throws either way.
+      const late = await check(s, '24.1.0', await copyWithManifest(s, 'late', engines('* 20 - 22')))
+      expect(late.line, `"* 20 - 22" was judged, not refused as uninterpretable:\n${late.output}`).toMatch(/UNVERIFIED/)
+      expect(late.code).toBe(1)
 
       // A lone wildcard still means any version.
       const any = await check(s, '24.1.0', await copyWithManifest(s, 'any', engines('*')))

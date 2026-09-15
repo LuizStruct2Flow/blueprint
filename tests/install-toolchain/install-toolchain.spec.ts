@@ -804,6 +804,115 @@ describe('TASK-029 — U7 (PR #69): the installed command is the project CLI, an
   })
 })
 
+// --- TASK-033: ShellCheck, installed on both OSes and reported by check -------
+//
+// The pre-push gate's shell lint stage BLOCKS without ShellCheck, so the one
+// script that sets a machine up must install it and `check` must report it —
+// a check narrower than what the gate needs is how a machine reports itself
+// ready and is not. #40 and #41 install nothing for real: the OS is a `uname`
+// shim, `brew` and `curl` are recording shims, and every other tool the install
+// path would fetch is already "present" as a stub.
+
+const SHELLCHECK_VERSION = '0.10.0'
+
+/** The "N tool(s) missing" count `check` ends with, or 0 when it printed none. */
+const missingCount = (out: string) => Number(/(\d+) tool\(s\) missing/.exec(out)?.[1] ?? 0)
+
+/** Shims for an install run on `os` that touch no network: uname, and every other fetched tool as a stub. */
+async function offlineInstall(s: Scenario, name: string, os: 'Linux' | 'Darwin') {
+  const shims = await s.shimDir(name)
+  for (const tool of ['gitleaks', 'osv-scanner', 'semgrep', 'jq']) await shims.add(tool, `echo "${tool} stub"`)
+  await shims.add('uname', `case "$1" in -m) echo x86_64 ;; *) echo ${os} ;; esac`)
+  return shims
+}
+
+describe('TASK-033 — the installer installs ShellCheck on macOS and Linux, and check reports it', () => {
+  it('#39 check reports a present shellcheck, and counts a missing one as missing', async () => {
+    await scenario('install-toolchain-39', async (s) => {
+      // The node shim's directory only: fakeNode's PATH also carries the real
+      // one, where an installed shellcheck would answer for the "missing" run.
+      const nodeDir = (await fakeNode(s, '24.1.0')).split(':')[0] ?? ''
+      const base = await s.pathWithout(['shellcheck'])
+      const run = (path: string) =>
+        s.run('bash', [join(REPO_ROOT, SCRIPT), 'check'], { cwd: s.workspace.root, env: { PATH: path } })
+
+      const without = await run(`${nodeDir}:${base}`)
+      expect(without.output, `check said nothing about a missing shellcheck:\n${without.output}`).toMatch(
+        /✗ shellcheck\s+MISSING/,
+      )
+
+      const sc = await s.shimDir('sc')
+      await sc.add('shellcheck', `echo "version: ${SHELLCHECK_VERSION}"`)
+      const withIt = await run(`${sc.dir}:${nodeDir}:${base}`)
+      expect(withIt.output, `check did not report a present shellcheck:\n${withIt.output}`).toMatch(/✓ shellcheck\b/)
+      expect(
+        missingCount(without.output),
+        `a missing shellcheck is not counted:\n--- without ---\n${without.output}\n--- with ---\n${withIt.output}`,
+      ).toBe(missingCount(withIt.output) + 1)
+    })
+  })
+
+  it('#40 on Linux, install fetches the PINNED release and installs shellcheck into ~/.local/bin', async () => {
+    await scenario('install-toolchain-40', async (s) => {
+      const base = await s.pathWithout(['curl', 'brew', 'blueprint', 'shellcheck'])
+      const m = await machine(s, 'a', base)
+      const shims = await offlineInstall(s, 'offline-linux', 'Linux')
+
+      // The release as GitHub ships it: shellcheck-v<ver>/shellcheck inside a .tar.xz.
+      const member = `shellcheck-v${SHELLCHECK_VERSION}/shellcheck`
+      await s.fs.write(`release/${member}`, `#!/bin/sh\necho "version: ${SHELLCHECK_VERSION}"\n`, { mode: 0o755 })
+      const tarball = s.workspace.path('release.tar.xz')
+      const tar = await s.run('tar', ['-cJf', tarball, '-C', s.workspace.path('release'), member], {
+        cwd: s.workspace.root,
+      })
+      expect(tar.code, tar.output).toBe(0)
+
+      // curl serves that file for the shellcheck URL, records every URL, and
+      // fails any other fetch the way an unreachable host would.
+      const urls = s.workspace.path('curl-urls')
+      await shims.add(
+        'curl',
+        `out=""; url=""\n` +
+          `while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; https://*) url="$1" ;; esac; shift; done\n` +
+          `echo "$url" >> '${urls}'\n` +
+          `case "$url" in *koalaman/shellcheck*) cp '${tarball}' "$out" ;; *) exit 22 ;; esac`,
+      )
+
+      const r = await install(s, m, [], { path: `${shims.dir}:${base}` })
+
+      const url = `https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz`
+      const fetched = await readFile(urls, 'utf8').catch(() => '')
+      expect(fetched.split('\n'), `the pinned ShellCheck release was never fetched:\n${r.output}`).toContain(url)
+      const installed = join(m.bin, 'shellcheck')
+      const st = await stat(installed).catch(() => null)
+      expect(st?.isFile(), `no shellcheck in ${m.bin}:\n${r.output}`).toBe(true)
+      expect((st?.mode ?? 0) & 0o111, 'the installed shellcheck is not executable').not.toBe(0)
+      expect(r.output).toContain('✓ shellcheck installed')
+    })
+  })
+
+  it('#41 on macOS, install runs brew install shellcheck', async () => {
+    await scenario('install-toolchain-41', async (s) => {
+      const base = await s.pathWithout(['curl', 'brew', 'blueprint', 'shellcheck'])
+      const m = await machine(s, 'a', base)
+      const shims = await offlineInstall(s, 'offline-mac', 'Darwin')
+      const calls = s.workspace.path('brew-calls')
+      await shims.add(
+        'brew',
+        `echo "$*" >> '${calls}'\n` +
+          `if [ "$1 $2" = "install shellcheck" ]; then printf '#!/bin/sh\\necho "version: ${SHELLCHECK_VERSION}"\\n' > '${shims.dir}/shellcheck'; chmod 755 '${shims.dir}/shellcheck'; fi\n` +
+          `exit 0`,
+      )
+
+      const r = await install(s, m, [], { path: `${shims.dir}:${base}` })
+
+      const brewed = await readFile(calls, 'utf8').catch(() => '')
+      expect(brewed.split('\n'), `brew was never asked for shellcheck:\n${r.output}`).toContain('install shellcheck')
+      expect(r.output).toContain('✓ shellcheck installed')
+    })
+  })
+})
+
 // --- the seam pattern (tests/sync-by-address), for #37b (d) -------------------
 // Copied, not imported: that file is a spec, and importing it would register its
 // cases here; tests/harness is not this task's to extend.

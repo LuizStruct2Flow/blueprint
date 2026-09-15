@@ -204,7 +204,14 @@ hangs off that root.
   nothing. **Watch with `tail -F`**, which reopens by name, and check `--status` whenever the
   feed goes quiet while agents are working. Cause not yet determined.
 
-- **PUSHES ARE BLOCKED: `sync-by-address` #20c is red on 2 of 2 gate runs (BUG-120).** On
+- **RESOLVED 2026-09-15 — pushed as `903117f`:** BUG-118 (the founder moved
+  `put-approval-result` to `ask`), BUG-120 (the #20c race fix passed the loaded gate) and
+  TASK-031 (the typecheck stage). All three rows are in waiting-acceptance. PR #64 is closed
+  with a comment, and its branch is deleted on the remote and locally. CI on `903117f`: check
+  `gh run list` before the next push. Still open, not blocking: a row for PR #64's BUG-095
+  test commit, which was never carried over; ShellCheck is not installed. History of the
+  block:
+- **Pushes were blocked: `sync-by-address` #20c was red on 2 of 2 gate runs (BUG-120).** On
   2026-09-15 two consecutive docs-only pushes (08:00, 08:21) failed it — "a fetch started
   AFTER the run was signalled" — with the code byte-identical to `d984a45`, which had passed
   its own gate, CI and 816/816. A real race in TASK-025's signal handling that the gate's

@@ -216,6 +216,26 @@ describe('TASK-027 — check derives the Node requirement from tests/package.jso
       expect(pastPatch.line, `^0.0.3 accepted 0.0.4:\n${pastPatch.output}`).toMatch(/✗ node/)
     })
   })
+
+  it('#6 a wildcard is one comparator: it neither waives the ones after it nor their syntax check', async () => {
+    await scenario('install-toolchain-6', async (s) => {
+      // Alexey (Codex) review of 1cc78cf, finding 3: an alternative beginning
+      // with `*` was accepted before any later token was read, so the manifest
+      // stopped being the authority and unknown syntax stopped failing closed.
+      const bound = await check(s, '24.1.0', await copyWithManifest(s, 'bound', engines('* >=99.0.0')))
+      expect(bound.line, `"* >=99.0.0" accepted node 24.1.0:\n${bound.output}`).toMatch(/✗ node/)
+      expect(bound.line, `"* >=99.0.0" is interpretable, so it must be judged:\n${bound.output}`).not.toMatch(/UNVERIFIED/)
+      expect(bound.code).toBe(1)
+
+      const junk = await check(s, '24.1.0', await copyWithManifest(s, 'junk', engines('* nonsense')))
+      expect(junk.line, `"* nonsense" was not refused as uninterpretable:\n${junk.output}`).toMatch(/UNVERIFIED/)
+      expect(junk.code).toBe(1)
+
+      // A lone wildcard still means any version.
+      const any = await check(s, '24.1.0', await copyWithManifest(s, 'any', engines('*')))
+      expect(any.line, `"*" rejected node 24.1.0:\n${any.output}`).toMatch(/✓ node v/)
+    })
+  })
 })
 
 // --- TASK-025 commit 4: the per-machine `blueprint` command (PLAN §8.1) -------

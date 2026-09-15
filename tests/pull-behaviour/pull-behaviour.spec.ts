@@ -272,4 +272,29 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
       )
     })
   })
+
+  it('#4 BUG-122: a full pull that REFUSED a file leaves bootstrap_sha alone and names the file', async () => {
+    await scenario('pull-behaviour-4', async (s) => {
+      const f = await fixtureBlueprint(s, 'e')
+      const p = await newProject(s, 'e', 'prefused', f)
+      // An END with no open region: bp_marker_structure calls it `bad`, so pull
+      // refuses docs/DoD.md while CLAUDE.md, which is behind, still gets pulled.
+      await s.fs.write(join(p, 'docs/DoD.md'), '# DoD\n<!-- BLUEPRINT:END -->\n')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      // The fixture's premise: one file pulled, one refused. Without the pull
+      // there is no advance to wrongly make; without the refusal, #3's case.
+      expect(r.output, 'fixture broken — nothing was pulled').toMatch(/pulled CLAUDE\.md/)
+      expect(r.code, `a refused file must still exit 4:\n${r.output}`).toBe(4)
+
+      expect(
+        await shaOf(p),
+        `a full pull advanced bootstrap_sha while docs/DoD.md was refused — the ` +
+          `project now reads as synced to a commit it does not match:\n${r.output}`,
+      ).toBe(f.first)
+      expect(r.output, 'the message must name the file that held bootstrap_sha back').toMatch(
+        /bootstrap_sha left unchanged[\s\S]*docs\/DoD\.md/,
+      )
+    })
+  })
 })

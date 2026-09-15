@@ -36,30 +36,36 @@
 # Those steps are PRINTED as a reminder stage instead. Visibility is not
 # enforcement, and saying so is the point.
 
+# TASK-039 — subjects are parsed by scripts/lib/commit-subject.sh, the library
+# the commit-msg hook uses. This file used to carry its own sed pattern, which
+# accepted subjects the hook refuses: two definitions of one rule.
+_dg_subject_lib="${BP_CODE_ROOT:-.}/scripts/lib/commit-subject.sh"
+if [ -r "$_dg_subject_lib" ]; then
+  # shellcheck source=scripts/lib/commit-subject.sh
+  . "$_dg_subject_lib"
+fi
+
+# _dg_need_parser → fails, saying why, when commit-subject.sh did not load.
+#
+# BUG-040 is why this is loud. When the item list came back empty (BSD sed on
+# macOS), every stage built on it passed over nothing and the gate printed
+# PASSED. A missing parser would produce the same empty list.
+_dg_need_parser() {
+  command -v commit_subject_item >/dev/null 2>&1 && return 0
+  echo "cannot read $_dg_subject_lib, so this push's items are unknown."
+  echo "Run: blueprint pull scripts/lib/commit-subject.sh"
+  return 1
+}
+
 # dod_items_in_push RANGE_LIST
 #   Prints one normalised item id per line (BUG-19, TASK-1) for every commit in
-#   the outgoing range whose subject starts with <TYPE>#<n>:. Merge, revert and
-#   root commits carry no item by design and are simply absent.
-# BUG-040 — the extraction below MUST be an ERE (`sed -nE`). It used a BRE with
-# `\(BUG\|FEATURE\|TASK\)`, and alternation inside `\(...\)` is a GNU sed
-# EXTENSION that BSD sed does not implement. On macOS the expression matched
-# nothing, so this function returned an empty list — and an empty list means
-# every stage built on it passes VACUOUSLY.
-#
-# That is not a cosmetic portability nit. It silently disabled three DoD rules
-# on every macOS developer's machine: "every item in this push has a backlog
-# row" (§1b rule 1 / §7C) and both regression-test requirements. The gate went
-# on printing PASSED over work it had stopped examining, which is this repo's
-# signature failure sitting inside the guard that enforces the Definition of
-# Done. `tests/dod-gate` caught it exactly as designed — three cases reporting
-# "PASSED — the rule is unenforced".
-#
-# ERE alternation is POSIX and works on both seds. Do not "simplify" it back.
+#   the outgoing range whose subject names an item under the commit-msg rule.
+#   Merge, revert and root commits carry no item by design and are absent.
 dod_items_in_push() {
   for _dg_range in $1; do
     git log --format='%s' "$_dg_range" 2>/dev/null
   done \
-    | sed -nE 's/^(BUG|FEATURE|TASK)#([0-9]+):.*/\1-\2/p' \
+    | while IFS= read -r _dg_subject; do commit_subject_item "$_dg_subject"; done \
     | sort -u
 }
 
@@ -92,6 +98,7 @@ dod_find_row() {
 # reopen moves them back. Folder placement is what `lcm` reconciles; existence
 # is what this gate can assert without guessing intent.
 dod_stage_rows() {
+  _dg_need_parser || return 1
   _dg_items="$(dod_items_in_push "$1")"
   if [ -z "$_dg_items" ]; then
     echo "no item-bearing commits in this push (merge/revert/root only)"
@@ -121,13 +128,90 @@ dod_stage_rows() {
 # names it is the one thing §7B can check mechanically. FEATURE and TASK items
 # are not required to have one, so they are not checked — asserting a rule that
 # does not exist would train people to ignore the stage.
+#
+# TASK-039 — WHERE IT LOOKS. The roots come from project_config_paths.md:
+#
+#   - BP_TEST_ROOTS: `backend/src frontend/e2e`
+#
+# space-separated, relative to the project root. Undeclared, the root is
+# `$BP_CODE_ROOT/tests`, which is what the blueprint needs.
+#
+# WHAT IT NEVER COUNTS. Outside the blueprint, `$BP_CODE_ROOT/tests` is the
+# blueprint's managed directory: its suites name the BLUEPRINT's bug numbers, and
+# storm2flow had about 97 bugs passing on them with no test of their own. So in
+# any checkout without `.blueprint-root`, a root that is or contains that
+# directory is refused. `docs/` and `.git` are refused the same way everywhere.
+#
+# Why "the whole directory" rather than per suite: nothing in a derived project
+# records which files under tests/ came from the blueprint. `export-ignore` only
+# names suites that do NOT ship, and a marker would have to be added to every
+# shipped suite and trusted on its contents. `.blueprint-root` is already the
+# positive, export-ignored answer to "is this the blueprint" (BUG-013), and
+# keying on its ABSENCE fails loud: an unrecognised checkout reports bugs
+# untested instead of passing them.
+#
+# The exception is a declared root strictly INSIDE one of them (`tests/e2e`,
+# where CLAUDE.md puts E2E suites). Declaring it is the project claiming it.
+dod_test_roots() {
+  _dg_decl="$(sed -n 's/^- BP_TEST_ROOTS: `\(.*\)`[[:space:]]*$/\1/p' project_config_paths.md 2>/dev/null | head -n 1)"
+  if [ -z "$_dg_decl" ]; then
+    printf '%s\n' "${BP_CODE_ROOT:-.}/tests"
+    return 0
+  fi
+  for _dg_word in $_dg_decl; do printf '%s\n' "$_dg_word"; done
+}
+
 dod_stage_bugtests() {
+  _dg_need_parser || return 1
   _dg_items="$(dod_items_in_push "$1")"
   _dg_bugs="$(printf '%s\n' "$_dg_items" | sed -n 's/^BUG-//p')"
   if [ -z "$_dg_bugs" ]; then
     echo "no BUG items in this push"
     return 0
   fi
+
+  # Directories that are never evidence of a test. A root that IS one of them,
+  # or CONTAINS one, is refused whole rather than pruned: docs/ holds the bug's
+  # own backlog row, so a `.` root would pass every bug on it, and a derived
+  # project's root also holds the blueprint's managed scripts/ and CLAUDE.md,
+  # which name blueprint bugs too. No prune list covers that; refusing does.
+  _dg_never="$(cd -P docs 2>/dev/null && pwd)
+$(cd -P .git 2>/dev/null && pwd)"
+  if [ ! -f .blueprint-root ]; then
+    _dg_never="$_dg_never
+$(cd -P "${BP_CODE_ROOT:-.}/tests" 2>/dev/null && pwd)"
+  fi
+
+  _dg_plan=""
+  _dg_searched=""
+  _dg_skipped=""
+  while IFS= read -r _dg_r; do
+    [ -n "$_dg_r" ] || continue
+    if ! _dg_rp="$(cd -P "$_dg_r" 2>/dev/null && pwd)"; then
+      _dg_skipped="$_dg_skipped $_dg_r(absent)"
+      continue
+    fi
+    _dg_why=""
+    while IFS= read -r _dg_x; do
+      [ -n "$_dg_x" ] || continue
+      case "$_dg_x/" in
+        "$_dg_rp"/*) _dg_why="${_dg_x##*/}"; break ;;
+      esac
+    done <<EOF
+$_dg_never
+EOF
+    if [ -n "$_dg_why" ]; then
+      _dg_skipped="$_dg_skipped $_dg_r(contains $_dg_why/)"
+      continue
+    fi
+    _dg_plan="$_dg_plan$_dg_r
+"
+    _dg_searched="$_dg_searched $_dg_r"
+  done <<EOF
+$(dod_test_roots)
+EOF
+  if [ -n "$_dg_skipped" ]; then pipe_note "not searched:$_dg_skipped"; fi
+
   _dg_untested=""
   _dg_parked=""
   _dg_tested=""
@@ -147,11 +231,20 @@ dod_stage_bugtests() {
     # check would have reported the bug UNTESTED with its test sitting in the
     # file -- a specific, plausible, wrong answer that reads as the gate
     # working. docs/config/findings.md F-002, instance 8.
-    # BUG-066: the suite tree lives under the CODE root, which is not the
+    # BUG-066: the default root lives under the CODE root, which is not the
     # project root once TASK-021 moves the code under scaffolding/. The `docs/`
     # paths above stay cwd-relative on purpose — those are the PROJECT's own
     # lifecycle files and do not move.
-    if grep -raqE "BUG-0*${_dg_n}\b" "${BP_CODE_ROOT:-.}/tests/" 2>/dev/null; then
+    _dg_hit=""
+    while IFS= read -r _dg_r; do
+      if [ -n "$_dg_r" ] && grep -raqE "BUG-0*${_dg_n}\b" "$_dg_r" 2>/dev/null; then
+        _dg_hit=1
+        break
+      fi
+    done <<EOF
+$_dg_plan
+EOF
+    if [ -n "$_dg_hit" ]; then
       _dg_tested="$_dg_tested BUG-$_dg_n"
     else
       _dg_untested="$_dg_untested BUG-$_dg_n"
@@ -159,11 +252,15 @@ dod_stage_bugtests() {
   done
   [ -n "$_dg_parked" ] && pipe_note "parked, no fix to test yet:$_dg_parked"
   if [ -n "$_dg_untested" ]; then
-    echo "No test under tests/ names:$_dg_untested"
+    echo "No test under the searched roots names:$_dg_untested"
+    echo "  searched:${_dg_searched:- nothing}"
+    [ -n "$_dg_skipped" ] && echo "  not searched:$_dg_skipped"
     echo ""
     echo "DoD §2 — every bug fix carries a regression test that references the"
     echo "bug number, so 'it is fixed' is checkable later by something other"
-    echo "than trust."
+    echo "than trust. Declare where this project's tests live in"
+    echo "project_config_paths.md:  - BP_TEST_ROOTS: \`backend/src frontend/e2e\`"
+    echo "Outside the blueprint, tests/ holds the blueprint's suites and never counts."
     return 1
   fi
   # Names only what it actually checked. Reporting the parked ones here as

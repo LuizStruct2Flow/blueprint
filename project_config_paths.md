@@ -16,6 +16,17 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 | `scripts/` | Project utility scripts (the agent-protocol scripts come from the blueprint) |
 | `docs/` | Project documentation, lifecycle-managed (see CLAUDE.md) |
 
+## Regression test roots
+
+> Where the DoD gate's bug-test stage (`docs/DoD.md` §2) looks for a test
+> naming each `BUG-NNN` in a push.
+
+- BP_TEST_ROOTS: `tests`
+
+In the blueprint, `tests/` is this repo's own regression suites, so it counts.
+This is also the undeclared default. The line is written out so the declaration
+is visible here, as it is in every derived project.
+
 ## Local agent state
 
 > Where the agent dispatchers write logs and artefacts on the founder's

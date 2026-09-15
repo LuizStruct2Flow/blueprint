@@ -204,6 +204,24 @@ Every bug — minor or major — follows this:
    ```js
    it('BUG-007: <one-line summary>', () => { … })
    ```
+   The pre-push gate checks this (`§2 every BUG has a regression test`). It
+   searches the test roots the project declares in `project_config_paths.md`:
+
+   ```
+   - BP_TEST_ROOTS: `backend/src frontend/e2e`
+   ```
+
+   The list is space-separated and relative to the project root. With no
+   declaration, the gate searches `tests/`. Two rules keep the match honest:
+   - **Outside the blueprint, `tests/` never counts.** There it holds the
+     suites the blueprint ships, and they name the *blueprint's* bug numbers.
+     A blueprint suite that mentions `BUG-042` is not your BUG-042's test.
+   - **A root that is, or contains, `docs/`, `.git`, or that `tests/` is
+     refused.** For example, `docs/` holds the bug's own backlog row, so
+     declaring `.` would pass every bug.
+
+   A declared root strictly inside `tests/`, such as `tests/e2e`, is the
+   project's own and is searched. A parked bug in `backlog/` needs no test yet.
 4. **No recurring bugs**: if it's fixed, it stays fixed. A bug coming
    back means the regression test was wrong, not "oh well, refile it".
 

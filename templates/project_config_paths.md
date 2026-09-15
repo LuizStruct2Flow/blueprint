@@ -16,6 +16,19 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 | `scripts/` | Project utility scripts (the agent-protocol scripts come from the blueprint) |
 | `docs/` | Project documentation, lifecycle-managed (see CLAUDE.md) |
 
+## Regression test roots
+
+> Where this project's tests live. The DoD gate's bug-test stage
+> (`docs/DoD.md` §2) looks here for a test that names each `BUG-NNN` in a push.
+> List every directory, separated by spaces, relative to the repo root.
+
+- BP_TEST_ROOTS: `backend/src frontend/src`
+
+`tests/` does not count here. It holds the suites the blueprint ships, and they
+name the blueprint's bug numbers, not this project's. A directory you create
+inside it, such as `tests/e2e`, does count once you list it. A root that
+contains `docs/`, `.git` or `tests/` is refused, so do not list `.`.
+
 ## Local agent state
 
 > Where the agent dispatchers write logs and artefacts on the founder's

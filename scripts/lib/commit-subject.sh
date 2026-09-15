@@ -1,8 +1,9 @@
 #!/bin/sh
 # scripts/lib/commit-subject.sh — THE definition of "a subject names its item".
 #
-# Sourced, not executed. Used by `.githooks/commit-msg` (one commit, locally)
-# and by `scripts/check-commit-subjects.sh` (many subjects, in CI).
+# Sourced, not executed. Used by `.githooks/commit-msg` (one commit, locally),
+# by `scripts/check-commit-subjects.sh` (many subjects, in CI), and by
+# `scripts/lib/dod-gate.sh` (which items a push serves, TASK-039).
 #
 # WHY IT IS A LIBRARY
 #
@@ -36,6 +37,22 @@ commit_subject_ok() {
     "Merge "*|"Revert "*|"fixup!"*|"squash!"*|"amend!"*) return 0 ;;
   esac
   printf '%s' "${1:-}" | grep -qE '^(BUG|FEATURE|TASK)#[0-9]+: .+'
+}
+
+# commit_subject_item SUBJECT → the item it names, as BUG-19, or nothing.
+#
+# Nothing for an exempt subject (it names no item) and for one commit_subject_ok
+# rejects, so the DoD gate sees exactly the items the hook would have let land.
+# Shell patterns and parameter expansion only: BUG-040 was a sed expression that
+# BSD sed read differently, and this has no second dialect to disagree with.
+commit_subject_item() {
+  case "${1:-}" in
+    BUG#*|FEATURE#*|TASK#*) ;;
+    *) return 0 ;;
+  esac
+  commit_subject_ok "$1" || return 0
+  _csi_head="${1%%:*}"
+  printf '%s-%s\n' "${_csi_head%%#*}" "${_csi_head#*#}"
 }
 
 # commit_subject_help → the rejection text, on stdout. Shared so the hook and CI

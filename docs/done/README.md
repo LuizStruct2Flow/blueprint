@@ -4,8 +4,8 @@ The source of truth for "what has been delivered" (not "what has been merged").
 Items only land here on explicit founder acceptance.
 
 `BUGS.md` holds accepted bug fixes (newest at top) and is always here.
-`CHANGES.md` — the chronological log of accepted forward features — is
-created on first use; its absence means none has been accepted yet.
+`BACKLOG.md` holds accepted tasks and features, and is created when the first
+one is accepted; its absence means none has been accepted yet.
 Multi-file epics (folders) sit alongside, and `tests/lifecycle-index/` #3
 fails the push if one is stranded in a folder its row has left.
 

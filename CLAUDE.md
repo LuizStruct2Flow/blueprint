@@ -284,8 +284,9 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
 2. **Once the fix/feature is ON `main`** → move to **`waiting-acceptance/`**:
    - Move the bug row from `doing/BUGS.md` to `waiting-acceptance/BUGS.md`.
    - Move the `PLAN-*.md` file from `doing/` to `waiting-acceptance/`.
-   - Behaviour changes (no underlying defect) → row in
-     `waiting-acceptance/CHANGES.md`.
+   - Move the backlog row (tasks, features, behaviour changes with no
+     underlying defect) from `doing/BACKLOG.md` to
+     `waiting-acceptance/BACKLOG.md`.
 
    **The trigger is landing on `main`.** For most work that is the push
    itself, since §"The blueprint's `main` is its trunk" means you push straight

@@ -159,38 +159,24 @@ runs them on every push. Best-effort, not exhaustive — the
 |---|---|---|
 | | | |
 
-## Acceptance authority — delegated to QA-2 for infrastructure work
+## Acceptance authority — the founder's
 
-> **Founder decision, 2026-07-29:** *"since this bugs are hard to do the manual
-> validation, I delegate these ones to the machine."*
+> **Founder decision, 2026-09-15:** *"an agent may not delegate acceptance to
+> another agent without consulting me. I'm responsible for the acceptance or its
+> delegation."*
 
-`docs/DoD.md` §1 and CLAUDE.md say the founder is the only gate into `done/`.
-For **this class of work that rule is delegated to QA-2 (Jesko, Codex)**, whose
-recorded ACCEPT/REJECT verdict is the acceptance. Accepted items move to
-`done/` without a further founder signal; rejected items go back to `doing/`.
+**Final acceptance is the founder's.** An agent may propose a QA pass by an
+agent from the other provider, and run it once the founder agrees. That verdict
+becomes acceptance only when the founder explicitly delegates acceptance of
+**that item**. There is no standing delegation for any class of work, and an
+agent never delegates acceptance to another agent on its own authority.
 
-**Which class.** Agent-protocol and repo-infrastructure defects whose delivered
-behaviour a human cannot reasonably observe by hand: pre-push gate behaviour,
-the contamination guard, dispatcher and feed process behaviour, bootstrap
-contents, cross-project state isolation. These are validated by running
-commands and reading exit codes and process tables — exactly what an agent does
-better than a person clicking. It does **not** extend to user-surface work,
-where the founder's "would you show this to someone else" judgement is the
-whole point and no test can stand in for it.
-
-**Conditions, because delegation is not abdication:**
-
-- The verdict must carry **executed evidence** — commands and their output —
-  not inspection. This is the bar QA-2's own 2026-07-24 round-2 record set.
-- Rejections stand. A-22 was rejected once and its caveat (a human who clones
-  and pushes without ever running the feed or drift is still ungated) has not
-  been closed; delegated authority includes the authority to re-reject.
-- **Known limitation, stated rather than hidden:** the accepting agent is often
-  the same one that four-eyes-reviewed the work — Jesko reviewed A-03 across
-  eleven rounds and then accepts it. That is less independent than a human
-  acceptance test. It is mitigated by the evidence requirement and by other
-  personas (Slava, Kathrin) having reviewed parts of the same range, but it is
-  a real reduction in independence and the founder took it knowingly.
+**History.** The 2026-07-29 decision (*"I delegate these ones to the machine"*)
+covered the items in that day's QA pass: BUG-001, BUG-002, BUG-003,
+A-01/A-12/A-14, A-05/A-27, A-03, A-07 and A-09 accepted, A-22 rejected
+([`docs/done/ACCEPTANCE-JESKO-2026-07-29.md`](docs/done/ACCEPTANCE-JESKO-2026-07-29.md)).
+This section later restated it as a standing rule for a whole class of work;
+TASK-034 removed that generalisation.
 
 ## Failure modes seen on this project
 

@@ -87,13 +87,111 @@ ts_declared_suites(){
 # declared hazard outside the prefixes; tests/ts-bridge #1c imports
 # UNPREFIXED_FORBIDDEN to pin that the two agree.
 ts_scrubbed(){
+  ( _ts_scrub_env; exec "$@" )
+}
+
+# _ts_scrub_env — the scrub itself, for a subshell that runs more than one
+# command under it: sh_lint lists files with git and then starts ShellCheck, and
+# both must see the scrubbed environment. It unsets in the CURRENT shell, so call
+# it inside a subshell.
+_ts_scrub_env(){
+  for _v in $(env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\1/p'); do
+    unset "$_v"
+  done
+  unset BLUEPRINT_ROOT
+}
+
+# --- TASK-033: ShellCheck ----------------------------------------------------
+#
+# The shipped scripts carried `# shellcheck` directives as if they were linted,
+# and nothing installed ShellCheck or ran it. Measured on 2026-09-15 with
+# ShellCheck 0.10.0: 25 warnings across the 45 scripts this derives, 0 errors.
+# They were fixed or disabled with a reason before this stage existed.
+#
+# THE SEVERITY IS WARNING. A warning is ShellCheck saying a script probably
+# misbehaves: an unused or misspelt variable, a brace or `done` parsed as
+# something else, a masked return value. Info and style are advice about idiom
+# (266 of those in the same scripts). A stage that fails on advice is one people
+# learn to route around, and ERROR alone would have passed all 25 real findings.
+# Never lower it to make the stage pass; fix the finding, or disable it inline
+# with a reason.
+#
+# ShellCheck is required on every machine that pushes (founder decision,
+# 2026-09-15). scripts/install-toolchain.sh installs it on macOS and Linux.
+
+# sh_lint_files [ROOT] — the scripts to lint, one repo-relative path per line.
+#
+# DERIVED, never listed: every file git TRACKS under scripts/ or .githooks/ that
+# is shell by extension (.sh) or by shebang (sh, bash, dash). Tracked, because an
+# untracked file ships nowhere. Those two directories, because they are the
+# shipped scripts; tests/ holds fixtures and ShellCheck cannot lint heredocs
+# inside TypeScript anyway. Returns 1 only when git cannot list the tree, so a
+# broken listing cannot read as "nothing to lint".
+#
+# The shebang test is an `if`, not `grep && printf`. The hook runs under `set -e`,
+# and a loop whose LAST file is not shell would otherwise end with grep's 1 and
+# kill the listing before `return 0`. The stage then reported "cannot list" for
+# a healthy tree. tests/ts-bridge #6d found it with a text file sorting last;
+# this repo was passing only because its last tracked script is a .sh.
+sh_lint_files(){
+  _slf_root="${1:-.}"
+  _slf_tracked="$(git -C "$_slf_root" -c core.quotePath=false ls-files -- scripts .githooks)" || return 1
+  printf '%s\n' "$_slf_tracked" | while IFS= read -r _slf; do
+    case "$_slf" in
+      '') ;;
+      *.sh) printf '%s\n' "$_slf" ;;
+      *)
+        if head -n 1 "$_slf_root/$_slf" 2>/dev/null | grep -Eq '^#!.*[/ ](sh|bash|dash)([[:space:]]|$)'; then
+          printf '%s\n' "$_slf"
+        fi
+        ;;
+    esac
+  done
+  return 0
+}
+
+# sh_lint [ROOT] — THE ONE LINT COMMAND. The gate's stage below and the shell
+# lint step in .github/workflows/security.yml both call it, and tests/ts-bridge
+# #6d and #7 execute both. Listing and linting run under one scrub, so an
+# exported GIT_DIR cannot point `git ls-files` at another repository.
+sh_lint(){
   (
-    for _v in $(env | sed -nE 's/^((GIT|AGENT|BP)_[A-Za-z0-9_]*)=.*/\1/p'); do
-      unset "$_v"
-    done
-    unset BLUEPRINT_ROOT
-    exec "$@"
+    _ts_scrub_env
+    cd "${1:-.}" || exit 1
+    if ! _sl_list="$(sh_lint_files .)"; then
+      echo "cannot list the tracked files under scripts/ and .githooks/ (not a git work tree?)"
+      exit 1
+    fi
+    if [ -z "$_sl_list" ]; then
+      echo "no tracked shell scripts under scripts/ or .githooks/, so there is nothing to lint"
+      exit 0
+    fi
+    set --
+    while IFS= read -r _sl_f; do
+      set -- "$@" "$_sl_f"
+    done <<EOF
+$_sl_list
+EOF
+    exec shellcheck --severity=warning -- "$@"
   )
+}
+
+# sh_lint_stage [ROOT] — the gate's shell lint stage. It BLOCKS when ShellCheck
+# is missing, and prints how to install it: a skip would be a green gate over a
+# lint that never ran, the rule the typecheck stage applies to a missing compiler.
+sh_lint_stage(){
+  _sl_root="${1:-$(pwd)}"
+  if ! command -v shellcheck >/dev/null 2>&1; then
+    echo "❌ ShellCheck is not installed, so the shell scripts cannot be linted."
+    echo "   Install it, then push again:"
+    echo ""
+    echo "       bash scripts/install-toolchain.sh"
+    echo ""
+    echo "   (macOS: it runs brew install shellcheck. Linux: it installs a pinned release into ~/.local/bin.)"
+    pipe_stage "shellcheck · TASK-033" false
+    return 1
+  fi
+  pipe_stage "shellcheck · TASK-033" sh_lint "$_sl_root"
 }
 
 # ts_typecheck [ROOT] — TASK-031. `tsc --noEmit -p ROOT/tests` with the PINNED

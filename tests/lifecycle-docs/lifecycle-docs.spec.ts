@@ -204,20 +204,20 @@ describe('lifecycle-docs — a record that states something untrue costs more th
       // Both real instances pointed at waiting-acceptance/ while the items sat
       // in done/, and one of them was three lines above the sentence "Do not
       // narrate status here".
-      files['doing/CHANGES.md'] =
-        '*(Empty — BUG-023 landed in #32 and is in ../waiting-acceptance/)*\n'
+      files['doing/BACKLOG.md'] =
+        '*(Empty — TASK-023 landed in #32 and is in ../waiting-acceptance/)*\n'
 
       const scan = await scanTree(s, 'bp', files)
 
       expect(scan.forwardingNotes).toHaveLength(1)
-      expect(scan.forwardingNotes[0]).toContain('doing/CHANGES.md')
+      expect(scan.forwardingNotes[0]).toContain('doing/BACKLOG.md')
     })
   })
 
   it('#5 a bare "*(Empty.)*" is the correct form and is not flagged', async () => {
     await scenario('lifecycle-5-bare', async (s) => {
       const files = healthyTree()
-      files['doing/CHANGES.md'] = '*(Empty.)*\n'
+      files['doing/BACKLOG.md'] = '*(Empty.)*\n'
 
       const scan = await scanTree(s, 'bp', files)
 

@@ -69,6 +69,25 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
+**Now (2026-09-15): the four derived-project PRs #71–#74, implemented in the blueprint.**
+Rows are in `docs/doing/BACKLOG.md`, promotion commits `bad3c2e`..`2448f58`, unpushed.
+They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
+- **Christian (Claude): TASK-034, TASK-035, TASK-036**
+  - TASK-034: acceptance and any delegation of it are the founder's. Removes the QA-2 rule in
+    four places, including `templates/`.
+  - TASK-035: AGENTS.md rule, link plus a plain line (#73).
+  - TASK-036: three DoD pointers (#74).
+- **Philipp (Claude): TASK-037.** `blueprint a2bp` accepts paths the blueprint does not ship,
+  with the guard kept, tests first. Also adds `docs/backlog/feature-requests.md` from #72 as the
+  request inbox, plus doc sync. The two agents commit to disjoint files with pathspec commits.
+- **After both report:**
+  - one gate push
+  - CI watch
+  - rows → waiting-acceptance
+  - close #71–#74 with a comment naming each task, and delete their branches
+  - cross-provider review of TASK-037 when Codex's quota resets. Codex hit its usage limit
+    2026-09-15, the same wait as Jesko's BUG-121 re-check.
+
 **TASK-026 (PR #66) is DONE and waiting for acceptance** — all six changes pushed
 2026-09-14, PR closed with a comment linking the commits, its branch deleted. The shared
 comparison it built is `bp_prospective_pull` / `bp_prospective_for` in
@@ -451,6 +470,16 @@ independent checking in one session. Re-measure a number before repeating it.
 ---
 
 ## 5. OPEN FOR THE FOUNDER
+
+- **Founder decisions 2026-09-15 on #71–#74 (from struct2flow-www and storm2flow):**
+  - **#71:** "an agent may not delegate acceptance to another agent without consulting me. I'm
+    responsible for the acceptance or its delegation." This is TASK-034.
+  - **#72:** a2bp should carry files the blueprint does not ship, because the owner reviews and
+    can reject contamination. This is TASK-037.
+  - **#73:** "I want it." This is TASK-035.
+  - **#74:** "seems ok." This is TASK-036.
+  - **How to name items to the founder:** re-ask an open question in full, with a link and a
+    plain line per item. Never point back at "your answer about X".
 
 - **Repository settings (founder, 2026-09-14): squash-merge only, and a branch is deleted
   when its PR merges.** A closed-unmerged PR's branch is NOT auto-deleted — delete it by

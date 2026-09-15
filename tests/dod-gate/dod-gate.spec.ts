@@ -200,11 +200,11 @@ async function appendRow(s: Scenario, f: Fixture, relPath: string, row: string) 
  * pipeline renderer, which `tests/pipeline` owns. The stub is also why the
  * `rows outside doing/` branch is uncovered here — noted in the docblock.
  */
-async function runStage(s: Scenario, f: Fixture, fn: string, range: string) {
+async function runStage(s: Scenario, f: Fixture, fn: string, range: string, env: Record<string, string> = {}) {
   return s.run(
     'bash',
     ['-c', `pipe_note(){ :; }\n. ./${LIB}\n"$1" "$2"\n`, 'dod-stage', fn, range],
-    { cwd: f.dir, env: BATON_FROM_FIXTURE },
+    { cwd: f.dir, env: { ...BATON_FROM_FIXTURE, ...env } },
   )
 }
 
@@ -505,14 +505,36 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   })
 
-  it('#10b a declared root that contains tests/ still skips the shipped suites', async () => {
+  it('#10b a declared root that contains the shipped tests/ is refused, not searched', async () => {
     await scenario('dod-gate-10b', async (s) => {
-      // Declaring `.` must not smuggle tests/ back in.
-      const f = await derivedFix(s, 'r10b', '.')
-      await s.fs.write(join(f.dir, SHIPPED_SUITE), SHIPPED_TEXT)
+      // Declaring a parent must not smuggle tests/ back in. The code root is
+      // `scaffolding/` (the TASK-021 layout) so the declared root contains the
+      // shipped tests/ and NOT docs/, which isolates the tests/ rule from #10d.
+      const f = await derivedFix(s, 'r10b', 'scaffolding')
+      await s.fs.copyIn(join(REPO_ROOT, SUBJECT_LIB), join(f.dir, 'scaffolding', SUBJECT_LIB))
+      await s.fs.write(join(f.dir, 'scaffolding', SHIPPED_SUITE), SHIPPED_TEXT)
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f), {
+        BP_CODE_ROOT: join(f.dir, 'scaffolding'),
+      })
+      expect(r.code, `a root containing the shipped tests/ vouched for a project bug:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was refused').toContain('contains tests/')
+    })
+  })
+
+  it('#10d a declared root that contains docs/ is refused — the bug\'s own row would vouch for it', async () => {
+    await scenario('dod-gate-10d', async (s) => {
+      // docs/doing/BUGS.md names **BUG-042** by construction (the rows stage
+      // requires it), so a `.` root would pass every bug with no test at all.
+      // A blueprint fixture, so tests/ is not what refuses it.
+      const f = await build(s, 'r10d')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-042** | untested | S3 | open | d |\n')
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: `.`\n')
+      await commit(s, f, 'c.txt', 'BUG#42: a fix with no regression test')
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
-      expect(r.code, `a declared '.' root searched the blueprint's suites:\n${r.output}`).not.toBe(0)
+      expect(r.code, `the bug's own backlog row passed as its regression test:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was refused').toContain('contains docs/')
     })
   })
 

@@ -69,14 +69,18 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
-**PUSHED 2026-09-15 (`4267ac8`, gate green): TASK-034..038 and the BUG-121 hardening.** All five
-task rows are in `docs/waiting-acceptance/BACKLOG.md`. PRs #71–#74 are closed with comments
+**PUSHED 2026-09-15 (`4267ac8`, gate green): TASK-034..038 and the BUG-121 hardening.** **The
+founder accepted every waiting task the same evening ("all tasks accepted"):** TASK-025..031,
+033 and 034..038 are in `docs/done/BACKLOG.md`, one commit each, and PLAN-TASK-025 moved with
+its row. Bugs were not part of it: 11 bug rows, BUG-121 included, still wait in
+`docs/waiting-acceptance/BUGS.md`. PRs #71–#74 are closed with comments
 naming their tasks, and their branches are deleted. The row moves (`92a5cf5`..) and this note are
 local, for the next push. **Still open:**
 - **CI** for `4267ac8`: a Monitor was armed at push time and dies with the session. Check with
   `gh run list --repo LuizStruct2Flow/blueprint --commit 4267ac8e6ebbd4ed69503e5e21b9717a11eb4a98`.
 - **Two Codex re-checks, after 2026-09-16 02:10** (usage limit). Both reviewed items are already
-  pushed.
+  pushed, and TASK-037 is accepted. A real finding reopens the item: move its row back to
+  `doing/` and tell the founder.
   - **Jesko on BUG-121:** `.scratch/brief-jesko-bug121-recheck2.md` covers the chain check
     `2ec249e`/`e61436f` and the umask fix `9a89e54`/`4267ac8`.
   - **Alexey on TASK-037's fixes** `f1b1f93`..`f23e7cb`: `.scratch/brief-alexey-task037-recheck.md`,

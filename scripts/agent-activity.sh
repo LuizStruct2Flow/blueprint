@@ -394,7 +394,7 @@ pump(){
   local f="$1" kind="$2" who="$3"
   [ -f "$f" ] || return 0
 
-  local size inode off tmp got k frag last
+  local size inode off tmp got k frag
   size="$(f_size "$f")"; inode="$(f_inode "$f")"
   [ -n "$size" ] || return 0
 

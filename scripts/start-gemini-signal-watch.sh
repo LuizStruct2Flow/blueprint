@@ -46,7 +46,6 @@ if [ -L "$_bp_self" ]; then
   exit 1
 fi
 _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
-BP_CODE_ROOT="$_bp_root"
 ROOT="$_bp_root"
 
 # Discover the Gemini binary.

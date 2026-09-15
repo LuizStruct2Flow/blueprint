@@ -22,7 +22,7 @@
 
 set -u
 
-here="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+here="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 lib="$here/lib/commit-subject.sh"
 
 if [ ! -r "$lib" ]; then

@@ -14,11 +14,14 @@
 # shellcheck shell=bash
 
 # Exit statuses, distinct so a script cannot mistake one outcome for another.
+# shellcheck disable=SC2034 # read by scripts/blueprint, which sources this file (cmd_a2bp)
+{
 BP_RC_OK=0                 # filed clean
 BP_RC_PENDING=3            # filed, awaiting a decision — deliberately non-zero
 BP_RC_BLOCKED=4            # a guard refused; nothing filed
 BP_RC_FAILED=5             # the CLI could not do its job
 BP_RC_NOTHING=6            # nothing to request
+}
 
 # --- bp_file_scratch ---------------------------------------------------------
 # A scratch bare clone under the system temp dir — never inside either
@@ -32,7 +35,7 @@ bp_file_scratch() {
 # Prints the resolved base SHA. Transport environment; the caller re-enters the
 # scrubbed one for everything after.
 bp_file_fetch_base() {
-  local scratch="$1" remote="$2" branch="$3" bare="$1/bare"
+  local remote="$2" branch="$3" bare="$1/bare"
 
   # --object-format=sha1 explicitly: a host configured to default to SHA-256
   # rehashes identical content, so the same request would build to a different

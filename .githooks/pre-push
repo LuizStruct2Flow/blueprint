@@ -201,7 +201,7 @@ push_log_opts() {
 # deliberately stripped PATH and caught exactly that. Parameter expansion is
 # POSIX and needs nothing installed.
 _pp_head="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
-_pp_n="$(git rev-list --count @{u}..HEAD 2>/dev/null || echo '?')"
+_pp_n="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo '?')"
 # BUG-077: `pwd`, not `git rev-parse --show-toplevel`. git runs hooks from the
 # work-tree root, so this is the same answer from a syscall no exported GIT_DIR
 # can redirect — and it is the PROJECT root, which is what the banner names,
@@ -691,6 +691,7 @@ for _pp_c in "$BP_CODE_ROOT/.githooks/pre-push-project" ".githooks/pre-push-proj
   break
 done
 if [ -n "$_pp_proj" ]; then
+  # shellcheck source=.githooks/pre-push-project
   . "$_pp_proj"
 else
   pipe_skip "project guards" "no .githooks/pre-push-project"

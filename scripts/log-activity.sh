@@ -149,7 +149,6 @@ if [ -r "$ROSTER_LIB" ]; then
   fi
 fi
 label="${plabel:-${AGENT_FEED_LABEL:-subagent}}"
-ts="$(date +%H:%M:%S)"
 
 # Map this subagent's id → persona so the live feed (agent-activity.sh's
 # subagent_feed) can label the STREAMED internal lines from

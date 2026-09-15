@@ -309,6 +309,13 @@ bootstrap_date   = $TODAY
 # BLUEPRINT_ROOT=<checkout> for that shell.
 blueprint_remote = FILL-ME-IN
 blueprint_branch = main
+
+# The branch 'blueprint drift' and 'blueprint pull' read: released is the newest
+# main commit on which the blueprint's CI passed. a2bp still files requests
+# against blueprint_branch. A bootstrap made between a push and its green CI run
+# may record a bootstrap_sha released does not contain yet; drift says so, and
+# the next full pull records a released commit.
+blueprint_release_branch = released
 EOF
 
 # --- Seed the LIVE baton (BUG-019) ---

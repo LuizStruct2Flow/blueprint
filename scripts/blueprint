@@ -841,7 +841,10 @@ _bp_fetch_blueprint() {
   }
   eval "$cfg_out"
   BP_SYNC_REMOTE="$BP_CFG_REMOTE"
-  BP_SYNC_BRANCH="$BP_CFG_BRANCH"
+  # The READ branch: blueprint_release_branch when set (`released`, which CI
+  # fast-forwards to the newest commit every job passed), else blueprint_branch.
+  # a2bp keeps BP_CFG_BRANCH as its pull-request base (PLAN §7.4).
+  BP_SYNC_BRANCH="$BP_CFG_READ_BRANCH"
 
   tcmd=$(bp_staleness_timeout_cmd)
   [ -n "$tcmd" ] || _bp_fetch_fail "no 'timeout' or 'gtimeout' on PATH, so the fetch could not be bounded"

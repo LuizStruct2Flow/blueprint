@@ -200,8 +200,11 @@ last synced (read from `.blueprint-source`). The agent surfaces a short
 summary and offers to pull forward.
 
 **Which blueprint.** `drift` and `pull` read the blueprint **by its address** —
-`blueprint_remote` and `blueprint_branch` in `.blueprint-source` — never from a
-folder on your machine. Every run refreshes a per-machine cache
+`blueprint_remote` in `.blueprint-source`, on the branch named by
+`blueprint_release_branch` (else `blueprint_branch`) — never from a folder on
+your machine. A bootstrapped project reads `released`: the newest `main` commit
+on which the blueprint's CI passed, which a CI job fast-forwards and nothing else
+moves. Every run refreshes a per-machine cache
 (`${XDG_CACHE_HOME:-~/.cache}/struct2flow/`) and compares against the tip it just
 fetched, and the header names that remote, branch and full SHA. So a blueprint
 checkout that is behind, or ahead with unpushed commits, no longer changes the
@@ -249,7 +252,8 @@ command implements; making it a boundary needs a separate, narrower credential
 
 It requires `config_version = 2` in `.blueprint-source`, naming
 `blueprint_remote` and `blueprint_branch`; a version 1 config refuses and prints
-the lines to add. The remote is never inferred from a local checkout's `origin`,
+the lines to add. Requests are always filed against `blueprint_branch` —
+`blueprint_release_branch` only changes what `drift` and `pull` read. The remote is never inferred from a local checkout's `origin`,
 because that would be right often enough to be trusted and silently wrong for
 anyone tracking a fork.
 

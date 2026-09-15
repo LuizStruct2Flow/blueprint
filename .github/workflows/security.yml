@@ -267,3 +267,48 @@ jobs:
         # whole file and run zero jobs for four days (BUG-115).
         run: |
           echo "::notice::No tests/package.json in this checkout, so the TypeScript suites did not run. Since TASK-018 phase 2 the harness ships to every project, so this is unexpected — either the harness was removed deliberately, or this checkout predates the toolchain shipping. Restore it with: blueprint pull tests/"
+
+  # TASK-025 (PLAN §7.4) — `released` is the newest main commit on which every
+  # other job in this file passed. Derived projects read it through
+  # blueprint_release_branch; main stays the trunk the owner pushes to and a2bp
+  # files against.
+  #
+  #   - It pushes $GITHUB_SHA, the commit every `needs` job tested, never `main`
+  #     by name, which may have moved during the run.
+  #   - `needs` lists EVERY other job. A failed or skipped one skips the release.
+  #     tests/sync-by-address #33 derives the job list from this file, so a job
+  #     added later and left out of `needs` turns it red.
+  #   - Push events only, and this repository only: the file is MANAGED and
+  #     ships to every derived project, where the condition is false and the job
+  #     shows as skipped. A fork of the blueprint edits the repository name.
+  #   - Never force. The server refuses a non-fast-forward. If `released` already
+  #     contains the SHA (an older run finishing after a newer one), the job is
+  #     green; any other refusal is red and leaves the ref where it was.
+  #   - The refusal path reads FETCH_HEAD, not origin/released: a remote-tracking
+  #     ref exists only if the checkout configured a fetch refspec, and without
+  #     one the legitimate old-run rerun failed (PLAN §R4 #4). #33b runs this
+  #     block against a bare remote in every state, with and without a refspec.
+  #   - `contents: write` on this job only. It starts no test runner.
+  release:
+    name: release (fast-forward released to the tested commit)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.repository == 'LuizStruct2Flow/blueprint'
+    needs: [secret-scan, sast, sca, commit-subjects, shell-tests, ts-tests]
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Fast-forward released
+        shell: bash
+        run: |
+          if git push origin "$GITHUB_SHA:refs/heads/released"; then exit 0; fi
+          git fetch origin refs/heads/released
+          if git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "released already contains $GITHUB_SHA: a newer green run got there first"
+            exit 0
+          fi
+          echo "::error::released does not contain $GITHUB_SHA and was not moved"
+          exit 1

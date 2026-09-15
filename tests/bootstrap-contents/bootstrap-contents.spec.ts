@@ -359,6 +359,12 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       expect(conf, 'bootstrap no longer records the address placeholder drift and pull read').toMatch(
         /^blueprint_remote\s*=\s*FILL-ME-IN$/m,
       )
+      // And the branch they read: released, which CI fast-forwards to the newest
+      // commit every job passed. blueprint_branch stays a2bp's base.
+      expect(conf, 'bootstrap does not point a new project at released').toMatch(
+        /^blueprint_release_branch\s*=\s*released$/m,
+      )
+      expect(conf, 'bootstrap moved a2bp\'s base off main').toMatch(/^blueprint_branch\s*=\s*main$/m)
     })
   })
 })

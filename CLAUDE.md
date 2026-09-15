@@ -1032,10 +1032,16 @@ change still requires a human to merge a PR.
 The command needs `config_version = 2` in `.blueprint-source`:
 
 ```
-config_version   = 2
-blueprint_remote = git@github.com:<owner>/<blueprint>.git
-blueprint_branch = main
+config_version           = 2
+blueprint_remote         = git@github.com:<owner>/<blueprint>.git
+blueprint_branch         = main
+blueprint_release_branch = released
 ```
+
+`blueprint_branch` is where requests are filed; `a2bp` never reads
+`blueprint_release_branch`. That optional field is the branch `drift` and `pull`
+read — `released`, which the blueprint's CI fast-forwards to the newest `main`
+commit on which every job passed. Without it they read `blueprint_branch`.
 
 A version 1 config (no `config_version`) refuses and prints those lines. The
 remote is **never inferred** from the local checkout's `origin`: that would be

@@ -27,6 +27,9 @@ triaged in the owner's grooming pass, like everything else in `backlog/`.
 |---|---|---|---|---|
 | `FR-www-qa2-standing-delegation` | struct2flow-www | 2026-09-14 | Remove the standing "acceptance delegated to QA-2" rule from the template and the blueprint's own docs | PROMOTED TASK-034 |
 | `FR-www-a2bp-feature-requests` | struct2flow-www | 2026-09-14 | Let derived projects raise requests `blueprint a2bp` could not carry, without opening PRs by hand | PROMOTED TASK-037 |
+| `FR-storm2flow-dod-test-roots` | storm2flow | 2026-09-15 | Let a project declare where its regression tests live for the DoD bug-test stage, and stop a blueprint suite vouching for a project bug with the same number | PROMOTED TASK-039 |
 
-Both were filed together in pull request #72 on the blueprint repository, which
-holds their original text.
+The two struct2flow-www requests were filed together in pull request #72 on the
+blueprint repository, which holds their original text. The six storm2flow
+requests were pushed on the branch `fr/storm2flow/2026-09-15` without a pull
+request; their text now lives in the promoted items.

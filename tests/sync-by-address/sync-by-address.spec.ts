@@ -151,6 +151,7 @@ import { closeSync, constants, existsSync, openSync, statSync, writeSync } from 
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { notGithubActions, skipVisibly } from '../helpers/project-config.js'
 import { parseDocument } from 'yaml'
 
 const BLACKHOLE = 'ssh://git@127.0.0.1/blackhole.git'
@@ -1677,7 +1678,9 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
-  it("#33 the release job's declared shape: bash, push events in this repository, after every other job, the only writer", async () => {
+  it("#33 the release job's declared shape: bash, push events in this repository, after every other job, the only writer", async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
     const text = await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8')
     const found = releaseOf(text)
     expect(found, 'no job publishes refs/heads/released').not.toBeNull()
@@ -1702,7 +1705,9 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     }
   })
 
-  it('#33b the release block, run: every state of released, with and without a fetch refspec', async () => {
+  it('#33b the release block, run: every state of released, with and without a fetch refspec', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
     await scenario('sync-by-address-33b', async (s) => {
       const found = releaseOf(await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'))
       expect(found, 'no release block to run').not.toBeNull()
@@ -1756,7 +1761,9 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
-  it('#39 the rollback reaches migrated projects: published through the job, the job removed last', async () => {
+  it('#39 the rollback reaches migrated projects: published through the job, the job removed last', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
     await scenario('sync-by-address-39', async (s) => {
       // "CI" is this function: after every push, if the workflow AT THE PUSHED
       // SHA has the release job, run that SHA's own release block against the

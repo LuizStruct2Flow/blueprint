@@ -416,6 +416,22 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
       ).toMatch(STAGE_LINE)
     })
   })
+
+  it('#8 TASK-044 a SKIP-NOTE printed by a PASSING run reaches the gate output', async () => {
+    await scenario('tsbridge-8', async (s) => {
+      // A skipped case is otherwise invisible in the gate. On a pass the bridge
+      // deletes vitest's output, and vitest's JSON carries no skip reason. So a
+      // case skipped because the project runs another CI would look like a pass.
+      const note = 'SKIP-NOTE: demo > #3: the declared CI is aws-codepipeline'
+      const f = await fixture(s)
+      await f.npx(0, note)
+
+      const r = await f.runBridge()
+
+      expect(r.output, r.output).toMatch(STAGE_LINE)
+      expect(r.output, `the skip reason never reached the gate\n${r.output}`).toContain(note)
+    })
+  })
 })
 
 interface WorkflowStep {
@@ -618,8 +634,8 @@ interface BridgeFixture {
   readonly dir: string
   /** PATH with the stub `npx` first. */
   readonly shimPath: string
-  /** A stub `npx` that records the environment it was handed, then exits `code`. */
-  npx(code: number): Promise<void>
+  /** A stub `npx` that records the environment it was handed, prints `say`, then exits `code`. */
+  npx(code: number, say?: string): Promise<void>
   /** The GIT_ / AGENT_ prefixed names the stub saw, or null if it never ran. */
   seenEnv(): Promise<{ names: string[] } | null>
   runBridge(options?: { inject?: string }): Promise<{ code: number | null; output: string }>
@@ -661,7 +677,7 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
     dir,
     shimPath: shims.path(),
 
-    async npx(code: number): Promise<void> {
+    async npx(code: number, say = ''): Promise<void> {
       // The recording path is HARD-CODED rather than passed through the
       // environment: the bridge unsets every GIT_*/AGENT_* name before invoking
       // the runner, which is the behaviour under test, so a variable is exactly
@@ -674,6 +690,7 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
         `env | sed -nE 's/^(${recorded})=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
           `printf 'ran\\n' >> ${JSON.stringify(seenPath)}\n` +
           `echo "stub npx: pretending to be vitest"\n` +
+          (say ? `printf '%s\\n' ${JSON.stringify(say)}\n` : '') +
           `for a in "$@"; do\n` +
           `  case "$a" in --outputFile=*) out="\${a#--outputFile=}" ;; esac\n` +
           `done\n` +

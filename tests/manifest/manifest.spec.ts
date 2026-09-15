@@ -530,6 +530,52 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
   })
 })
 
+describe('TASK-044 — #5 and #5b judge GitHub Actions only when the project runs it', () => {
+  /**
+   * A workflow both checks fail: it names no suite (#5) and has no jobs (#5b).
+   * So a check that passes over it did not look, and one that is red did.
+   */
+  const inert = (files: Map<string, string>) => {
+    files.set('.github/workflows/security.yml', 'on: push\njobs: {}\n')
+  }
+
+  it('#5/#5b a declared non-GitHub CI SKIPS both checks, naming the CI, rather than passing them', async () => {
+    await scenario('manifest-ci-other', async (s) => {
+      // storm2flow runs AWS CodePipeline. The managed security.yml is inert there,
+      // so certifying it certifies a pipeline that never runs.
+      const checks = await inspectFixture(s, 'bp', (files) => {
+        inert(files)
+        files.set('project_config_paths.md', '# Paths\n\n- BP_CI: `aws-codepipeline`\n')
+      })
+
+      expect(red(checks)).toEqual([])
+      // Still ANSWERED, as skips: a check that vanished is the BUG-005 shape.
+      expect(checks.map((c) => c.id)).toEqual(['#1', '#1b', '#2b', '#2c', '#4', '#5', '#5b', '#7', '#7b'])
+      expect(checks.filter((c) => c.skipped).map((c) => c.id)).toEqual(['#5', '#5b'])
+      for (const id of ['#5', '#5b']) {
+        expect(checks.find((c) => c.id === id)?.skipped, `${id} did not name the declared CI`).toContain(
+          'aws-codepipeline',
+        )
+      }
+    })
+  })
+
+  it.each([
+    ['declares github-actions (the blueprint)', '# Paths\n\n- BP_CI: `github-actions`\n'],
+    ['declares nothing (today)', null],
+  ])('#5/#5b a project that %s still has its workflow judged', async (tag, config) => {
+    await scenario(`manifest-ci-${config === null ? 'none' : 'github'}`, async (s) => {
+      const checks = await inspectFixture(s, 'bp', (files) => {
+        inert(files)
+        if (config !== null) files.set('project_config_paths.md', config)
+      })
+
+      expect(red(checks), tag).toEqual(['#5', '#5b'])
+      expect(checks.filter((c) => c.skipped)).toEqual([])
+    })
+  })
+})
+
 describe('BUG-005 — THE REAL TREE', () => {
   it('#live every check passes over this checkout, over a non-vacuous suite set', async () => {
     await scenario('manifest-live', async (s) => {

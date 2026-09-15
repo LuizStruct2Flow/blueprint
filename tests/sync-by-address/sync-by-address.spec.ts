@@ -122,6 +122,11 @@
  *   through the per-machine command, and a mutant there is a broken tool for
  *   them. REPO_ROOT follows the harness's own location, so the copy is enough.
  *
+ * #16b (Alexey, c3-4 review #5), observed on a copy (.scratch/c025/mutants9.py
+ * set9b): the read falls back to blueprint_branch when the release branch is
+ * missing → #16b. It also reddens #4, #20, #20b and #20c, whose remotes the
+ * mutant's extra ls-remote hangs on or cannot reach.
+ *
  * Plan: docs/doing/PLAN-TASK-025.md §9.2.
  */
 
@@ -830,6 +835,33 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       expect(r.stderr).toContain("no branch 'nope' on that remote")
       expect(r.stderr).not.toMatch(/could not connect|unable to connect|Could not read from remote/i)
       expectNoReport(r)
+    })
+  })
+
+  it('#16b the RELEASE branch named but missing, with main present: drift and pull exit 5, never fall back to main', async () => {
+    await scenario('sync-by-address-16b', async (s) => {
+      // Alexey (Codex) review of 1cc78cf, finding 5: #16 names a missing
+      // blueprint_branch with no release field, and #30 a present release
+      // branch. Neither pins a read that quietly falls back to main when only
+      // the release branch is missing — which would hand a project untested
+      // commits while every header still looked normal.
+      const remote = await blueprintRemote(s, 'published')
+      const proj = await project(s, remote.dir, remote.head, 'OLD', {
+        extra: ['blueprint_release_branch = not-yet-released'],
+      })
+      const cli = await cliCopy(s, 'cli')
+      const before = await snapshot(proj)
+
+      for (const args of [['drift'], ['pull', '--yes']]) {
+        const r = await run(s, cli, proj, args)
+        expect(r.code, `${args.join(' ')}:\n${r.output}`).toBe(5)
+        expect(r.stderr, `${args.join(' ')} did not name the missing release branch`).toContain(
+          "no branch 'not-yet-released' on that remote",
+        )
+        expect(r.output, `${args.join(' ')} read main instead`).not.toContain('(main)')
+        expectNoReport(r)
+        expect(await snapshot(proj), `${args.join(' ')} changed project files`).toEqual(before)
+      }
     })
   })
 

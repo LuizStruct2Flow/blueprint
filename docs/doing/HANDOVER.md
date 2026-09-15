@@ -197,6 +197,13 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **`sync-by-address` #20c can go red under gate load (BUG-120, parked, fix next).** On
+  2026-09-15 a docs-only push failed it — "a fetch started AFTER the run was signalled" —
+  with the code byte-identical to a commit that had passed the gate, CI and 816/816. It is a
+  real race in TASK-025's signal handling, not a broken change. **If you retry a red push on
+  #20c, cite BUG-120 in what you report** — a quietly retried red is how merging over red
+  starts.
+
 - **CI GREEN AGAIN on `4bbcac7` (run 34904164240, 2026-09-15); BUG-117 is in
   waiting-acceptance.** **Philipp — TASK-028 DONE locally (2026-09-15), 7 commits, unpushed**
   (`554b86a`..`68d212c`): BUG-110 closed by its long-planned preflight (the harness now

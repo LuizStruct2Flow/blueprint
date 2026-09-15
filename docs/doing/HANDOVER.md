@@ -210,7 +210,12 @@ hangs off that root.
   non-empty, and cleanup revokes it with the non-forking builtin `: >` before sending TERM.
   After the fix, pinned and unpinned stress runs are 150/150 green; the old CLI fails 10/10.
   Full suite 824/828: the 4 red are BUG-118's reproducer and bootstrap-gate carrying it.
-  **Alexey (Codex) is reviewing it.** **The push is still blocked by BUG-118**: the
+  **Alexey's review (2026-09-15): push as is** →
+  `.scratch/ALEXEY-bug120-review.md` — the mechanism is proven, #20d is red on the parent
+  (3021 ms against a 2000 ms ceiling), the focused suites pass 72/72, and #20c passes 20/20
+  idle and 20/20 under eight CPU burners. No fetch can start once cleanup begins; a fetch
+  released in the instant between signal delivery and the handler starting is killed at
+  once, and the docs say exactly that. **The push is still blocked by BUG-118**: the
   bootstrapped project's gate runs its failing reproducer until the founder edits
   `.claude/settings.json`. Do not retry the push before both are done; if you ever
   retry a red push on #20c, cite BUG-120. **In parallel:** Philipp's TASK-031 (typecheck

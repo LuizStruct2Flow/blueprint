@@ -213,10 +213,15 @@ hangs off that root.
   Christian's uncommitted TASK-025 edits). **TASK-025 commits 3–4 are committed locally**: `51654e8` (`released` branch)
   and `e24d801` (the installer writes `~/.local/bin/blueprint`; shared
   `scripts/lib/signals.sh`; install-toolchain 11/11, 19 mutants each red on its case).
-  **TASK-027 (#67) is done**: `97b466c` reproducer, `4545048` fix. **TASK-029 (#69) is in
-  progress**: promoted `39f5da9`; Christian is building its two U7 cases, including a
-  reproducer for a CLI that skips gate arming silently when `lib/gate.sh` is missing. **Then
-  Alexey reviews 3–4 + 027 + 029** (brief `.scratch/brief-alexey-025-commits-3-4-review.md`).
+  **TASK-027 (#67) is done**: `97b466c` reproducer, `4545048` fix. **TASK-029 (#69) is done**:
+  `c07e53d` (U7a), `9051918`/`332c417` (U7b reproducer + drift refuses to report when it
+  cannot arm the gate). Two regressions in commits 3–4 found by the full suite and fixed:
+  `91f5b14` (`PROJECT_DIR` → `BP_PROJECT_DIR`, env-namespace) and `1cc78cf` (bootstrap-gate
+  fixture lacked a `released` branch). **Full TypeScript suite 799/799.** Close comments
+  ready: `.scratch/pr67-close-comment.md`, `.scratch/pr68-close-comment.md`,
+  `.scratch/pr69-close-comment.md`. **Alexey (Codex) is reviewing 3–4 + 027 + 029 now**
+  (brief `.scratch/brief-alexey-025-commits-3-4-review.md`). ShellCheck is not installed, so
+  the changed scripts are unlinted.
   A refused deletion of an agent's own scratch copy is not a stop condition: leave it and
   report it. **TASK-028 is review-complete and ready to push,
   but cannot go alone:** its commits interleave with TASK-025 commit 3 (`51654e8`, not yet

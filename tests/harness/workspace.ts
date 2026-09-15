@@ -16,7 +16,7 @@
  *    machine writes to. See workspaceBase.
  */
 
-import { mkdtemp, rm, mkdir, realpath, stat } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, rm, mkdir, realpath, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -112,7 +112,10 @@ const LOADED_BASE_SOURCE: BaseSource = {
  * it counts as set there, and that directory is private to the user anyway.
  *
  * OTHERWISE A PRIVATE BASE: ${XDG_CACHE_HOME:-$HOME/.cache}/bp-harness-tmp,
- * created 0700 if missing. /tmp is shared with every process on the machine,
+ * created 0700 if missing and set to 0700 if it exists with a looser mode. It
+ * must be a real directory owned by the current user, or this refuses. An
+ * explicit TMPDIR is never changed: the caller chose it, and the preflight is
+ * the guard there. /tmp is shared with every process on the machine,
  * and every Codex workspace-write sandbox, from any project, creates an empty
  * /tmp/.git there for minutes at a time (BUG-110). With workspaces under /tmp
  * the preflight then refused every scenario, and a docs-only push went 52 of 55
@@ -127,7 +130,21 @@ async function workspaceBase(source: BaseSource): Promise<{ dir: string; why: st
     return { dir: TMPDIR, why: 'TMPDIR is set, so it wins over the private default base' }
   }
   const dir = join(XDG_CACHE_HOME || join(HOME || homedir(), '.cache'), 'bp-harness-tmp')
-  await mkdir(dir, { recursive: true, mode: 0o700 })
+  // mkdir's mode applies only to a directory it creates, so an existing base is
+  // checked and tightened here. That is what makes the base private.
+  const st = await lstat(dir).catch(async (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'ENOENT') throw err
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    return lstat(dir)
+  })
+  if (st.isSymbolicLink() || !st.isDirectory() || st.uid !== process.getuid?.()) {
+    throw new Error(
+      `The default workspace base ${dir} must be a directory owned by you, not a ` +
+        `symlink, so that it can be kept private (mode 0700) (BUG-121). Remove it ` +
+        `and it is recreated, or point TMPDIR at a directory with no marker above it.`,
+    )
+  }
+  if ((st.mode & 0o777) !== 0o700) await chmod(dir, 0o700)
   return { dir, why: 'TMPDIR is unset, so this is the private default base' }
 }
 

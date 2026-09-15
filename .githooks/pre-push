@@ -525,8 +525,9 @@ else
   pipe_skip "SCA · osv-scanner" "osv-scanner not installed locally — SCA skipped (CI will catch it)."
 fi
 
-# Adjust these paths / commands to match your project's workspaces.
-# {{PROJECT_NAME}}: edit this block during bootstrap to reflect your layout.
+# Do not edit this block for your layout: a pull replaces this whole file. A
+# project's own build/lint/test stages belong after the end marker in
+# .githooks/pre-push-project, which a pull preserves.
 
 # Each workspace runs the same gate order (per docs/DoD.md §4):
 #   build → lint → format:check → test:coverage → project guards
@@ -539,7 +540,7 @@ fi
 #                    greenfield ≥90% / brownfield ≥70% threshold not met,
 #                    per project_config_dod.md)
 
-# These stages only recognise backend/, frontend/ and infra/. A project laid out
+# These stages only recognise backend/, frontend/ and infra/ (or infrastructure/). A project laid out
 # any other way skips every one of them and the gate still ends PASSED, so the
 # skip says where that project's own build/lint/test stages belong. (The hint
 # deliberately does not spell the marker token: prose naming a marker is how
@@ -582,37 +583,44 @@ fi
 # tool is installed. Missing tool prints a hint and skips — CI re-runs as
 # the backstop. Same UX pattern as the security gate above.
 
+# The IaC tree is infra/ or infrastructure/, resolved once for all three recipes.
+# ponytail: first match wins; a project with both only gets infra/ checked.
+_iac=""
+for _d in infra infrastructure; do
+  if [ -d "$_d" ]; then _iac="$_d"; break; fi
+done
+
 _st_cdk(){
-  ( cd infra && cdk synth --quiet >/dev/null ) || {
+  ( cd "$_iac" && cdk synth --quiet >/dev/null ) || {
     echo "❌ cdk synth failed. Fix the IaC errors before pushing."
-    echo "   Run 'cd infra && cdk synth' locally to see the full output."
+    echo "   Run 'cd $_iac && cdk synth' locally to see the full output."
     return 1
   }
 }
 _st_terraform(){
-  ( cd infra && terraform fmt -check -recursive >/dev/null ) || {
-    echo "❌ Terraform files are unformatted. Run 'terraform fmt -recursive' in infra/ and recommit."
+  ( cd "$_iac" && terraform fmt -check -recursive >/dev/null ) || {
+    echo "❌ Terraform files are unformatted. Run 'terraform fmt -recursive' in $_iac/ and recommit."
     return 1
   }
   # terraform validate needs init; skip if .terraform/ isn't present (CI does the deeper validate)
-  if [ -d infra/.terraform ]; then
-    ( cd infra && terraform validate >/dev/null ) || {
+  if [ -d "$_iac/.terraform" ]; then
+    ( cd "$_iac" && terraform validate >/dev/null ) || {
       echo "❌ terraform validate failed. Fix the IaC errors before pushing."
       return 1
     }
   else
-    echo "    (skipping terraform validate — run 'terraform init' in infra/ to enable locally)"
+    echo "    (skipping terraform validate — run 'terraform init' in $_iac/ to enable locally)"
   fi
 }
 _st_helm(){
-  for chart in infra/charts/*/; do
+  for chart in "$_iac"/charts/*/; do
     helm lint "$chart" >/dev/null || { echo "❌ helm lint failed on $chart"; return 1; }
   done
 }
 
-if [ -d infra ]; then
-  # Recipe A — CDK (TypeScript): detect by infra/cdk.json
-  if [ -f infra/cdk.json ]; then
+if [ -n "$_iac" ]; then
+  # Recipe A — CDK (TypeScript): detect by <iac>/cdk.json
+  if [ -f "$_iac/cdk.json" ]; then
     if command -v cdk >/dev/null 2>&1; then
       pipe_stage "IaC synth · cdk" _st_cdk
     else
@@ -620,8 +628,8 @@ if [ -d infra ]; then
     fi
   fi
 
-  # Recipe B — Terraform: detect by any infra/**/*.tf
-  if ls infra/**/*.tf >/dev/null 2>&1 || ls infra/*.tf >/dev/null 2>&1; then
+  # Recipe B — Terraform: detect by any <iac>/**/*.tf
+  if ls "$_iac"/**/*.tf >/dev/null 2>&1 || ls "$_iac"/*.tf >/dev/null 2>&1; then
     if command -v terraform >/dev/null 2>&1; then
       pipe_stage "IaC validate · terraform" _st_terraform
     else
@@ -629,8 +637,8 @@ if [ -d infra ]; then
     fi
   fi
 
-  # Recipe C — Helm charts: detect by infra/charts/*/Chart.yaml
-  if ls infra/charts/*/Chart.yaml >/dev/null 2>&1; then
+  # Recipe C — Helm charts: detect by <iac>/charts/*/Chart.yaml
+  if ls "$_iac"/charts/*/Chart.yaml >/dev/null 2>&1; then
     if command -v helm >/dev/null 2>&1; then
       pipe_stage "IaC lint · helm" _st_helm
     else
@@ -638,7 +646,7 @@ if [ -d infra ]; then
     fi
   fi
 else
-  pipe_skip "IaC validate" "no infra/ directory — $_pp_layout_hint"
+  pipe_skip "IaC validate" "no infra/ or infrastructure/ directory — $_pp_layout_hint"
 fi
 
 # --- .claude/settings.json host-path guard (generic struct2flow rule) ---

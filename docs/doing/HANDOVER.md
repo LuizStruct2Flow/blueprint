@@ -197,6 +197,14 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **TASK-033 (ShellCheck in the gate and CI) is built locally, unpushed** — `168904b`,
+  `7b8dd4b`, `8cf2a86`, `3377983`, `0a8a944`, `f8ef884` (Philipp, 2026-09-15). The 25 existing
+  warnings are cleared (17 fixed, 8 disabled inline with a reason); the full suite is 837/837
+  with ShellCheck on PATH. **Jesko (Codex) is reviewing it.** **Before it is pushed, ShellCheck
+  must be installed on the pushing machine**: the stage blocks without it, and ts-bridge
+  #6b/#6c/#7 run the real linter. On this machine `bash scripts/install-toolchain.sh check`
+  reports ShellCheck as the only missing tool; the installer puts the pinned release into
+  `~/.local/bin` without sudo on Linux, and uses brew on the Mac.
 - **The activity feed can stop without leaving a trace.** On 2026-09-15 `--status` reported
   "not running" around 11:37; the last line had been written at 10:35 and nothing in `logs/`
   said why. Restarting it (`bash scripts/agent-activity.sh --daemon`) recreates

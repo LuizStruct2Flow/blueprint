@@ -105,6 +105,19 @@
  *     records that it was "caught by running the bridge rather than by reading
  *     it", and then nothing pinned it; #1e does.
  *
+ * TASK-031 — THE TYPECHECK (#4, #5). vitest strips types without checking them,
+ * so a green suite set says nothing about types: two tsc errors sat on main until
+ * BUG-119, and `exactOptionalPropertyTypes` was enforced by nobody. The gate's
+ * typecheck stage and CI's typecheck step call ONE function in this bridge,
+ * `ts_typecheck`, which starts the pinned compiler through `ts_scrubbed` — BUG-117's
+ * lesson applied before the two modes could diverge, not after. #4 reads the
+ * hook's managed region, live lines only, for the one link execution cannot reach
+ * (the hook is the whole gate). #4b–#4f EXECUTE the stage from a copy of this
+ * bridge: a planted type error fails it with the real pinned compiler, a clean tree
+ * passes, the compiler sees no scrubbed name, a project with no tests/package.json
+ * skips with a reason, and an uninstalled compiler blocks. #5 EXECUTES every
+ * workflow step that starts tsc, the way #3 does for vitest.
+ *
  * MUTATION RECIPE (R6), each applied to `scripts/run-ts-suites.sh`:
  *
  *   M1  delete the `for _v in $(env | sed …); do unset "$_v"; done` scrub
@@ -139,6 +152,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { FORBIDDEN_ENV, UNPREFIXED_FORBIDDEN, isForbiddenAmbient } from '../harness/env.js'
+import { liveCmds } from '../manifest/manifest.js'
 import { parseDocument } from 'yaml'
 
 /**
@@ -384,12 +398,9 @@ describe('BUG-117 — CI starts vitest under the same scrub as the gate', () => 
       // a `run:` block, against the recording stub. The decoys are undeclared
       // names in all three prefixes plus the unprefixed hazard: a fix that named
       // one runner variable would still hand the stub the rest.
-      const wf = parseDocument(
-        await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
-      ).toJS() as { jobs?: Record<string, { steps?: WorkflowStep[] }> }
-      const steps = Object.values(wf.jobs ?? {})
-        .flatMap((job) => job.steps ?? [])
-        .filter((step) => typeof step.run === 'string' && /\bvitest\s+run\b/.test(step.run))
+      const steps = (await workflowSteps()).filter(
+        (step) => typeof step.run === 'string' && /\bvitest\s+run\b/.test(step.run),
+      )
       expect(steps.length, 'no workflow step runs vitest — this case would assert nothing').toBeGreaterThan(0)
 
       const f = await fixture(s)
@@ -418,6 +429,115 @@ describe('BUG-117 — CI starts vitest under the same scrub as the gate', () => 
           seen?.names ?? [],
           `step "${step.name}" hands vitest the runner's environment — the harness refuses every scenario while any of these is set`,
         ).toEqual([])
+      }
+    })
+  })
+})
+
+/** Every step of every job in the real workflow, as GitHub parses it. */
+async function workflowSteps(): Promise<WorkflowStep[]> {
+  const wf = parseDocument(
+    await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
+  ).toJS() as { jobs?: Record<string, { steps?: WorkflowStep[] }> }
+  return Object.values(wf.jobs ?? {}).flatMap((job) => job.steps ?? [])
+}
+
+/** Printed by a stage driver after the stage returns — absent when the stage stopped the gate. */
+const AFTER = 'TC-FIXTURE-CONTINUED'
+
+describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed command', () => {
+  it('#4 the managed region of the hook calls ts_typecheck_stage in live code', async () => {
+    // Text, and only for the link execution cannot reach: the hook IS the whole
+    // gate. What the call does is executed in #4b–#4f. Comment lines are removed
+    // first (liveCmds, Codex R2-F1b), so a commented-out call is not an invocation.
+    // The managed region, because that is what `blueprint pull` delivers: a call
+    // below the end marker would exist in this repo and in no derived project.
+    const hook = await readFile(join(REPO_ROOT, '.githooks/pre-push-project'), 'utf8')
+    const end = hook.search(/^# BLUEPRINT:END/m)
+    expect(end, 'the hook has no managed region').toBeGreaterThan(0)
+    expect(
+      liveCmds(hook.slice(0, end)),
+      'the gate never calls the typecheck stage, so a type error in tests/ pushes green',
+    ).toMatch(/^[ \t]*ts_typecheck_stage[ \t]+"\$BP_CODE_ROOT"[ \t]*$/m)
+  })
+
+  it('#4b a planted type error FAILS the stage, shows the compiler error, and stops the gate', async () => {
+    await scenario('tsbridge-tc-4b', async (s) => {
+      const f = await typecheckFixture(s, { tsc: 'real', planted: true })
+      const r = await f.runStage()
+      expect(r.code, `a type error passed the typecheck stage\n${r.output}`).not.toBe(0)
+      expect(r.output, `the stage failed without showing tsc's error\n${r.output}`).toContain('TS2322')
+      expect(r.output, `no failed typecheck stage rendered\n${r.output}`).toMatch(/✗\s+typecheck · TASK-031/)
+      expect(r.output, 'the gate carried on past a failed typecheck').not.toContain(AFTER)
+    })
+  })
+
+  it('#4c a clean tree PASSES and renders the stage — so #4b is not a stage that always fails', async () => {
+    await scenario('tsbridge-tc-4c', async (s) => {
+      const f = await typecheckFixture(s, { tsc: 'real' })
+      const r = await f.runStage()
+      expect(r.code, r.output).toBe(0)
+      expect(r.output, `no passing typecheck stage rendered\n${r.output}`).toMatch(/✓\s+typecheck · TASK-031\s/)
+      expect(r.output).toContain(AFTER)
+    })
+  })
+
+  it('#4d the stage starts the compiler through ts_scrubbed: it sees no GIT_*, AGENT_*, BP_* or unprefixed forbidden name', async () => {
+    await scenario('tsbridge-tc-4d', async (s) => {
+      const f = await typecheckFixture(s, { tsc: 'stub' })
+      const r = await f.runStage()
+      expect(await f.seenEnv(), `the stage handed the compiler these (null: it never ran)\n${r.output}`).toEqual([])
+    })
+  })
+
+  it('#4e a project with no tests/package.json SKIPS with a stated reason and starts no compiler', async () => {
+    await scenario('tsbridge-tc-4e', async (s) => {
+      const f = await typecheckFixture(s, { tsc: 'stub', packageJson: false })
+      const r = await f.runStage()
+      expect(r.code, r.output).toBe(0)
+      expect(r.output).toContain('typecheck · TASK-031')
+      expect(r.output, `the skip gave no reason\n${r.output}`).toContain('skipped · no tests/package.json')
+      expect(await f.seenEnv(), 'a skipped stage started the compiler').toBeNull()
+      expect(r.output).toContain(AFTER)
+    })
+  })
+
+  it('#4f an uninstalled compiler BLOCKS rather than skipping or fetching one', async () => {
+    await scenario('tsbridge-tc-4f', async (s) => {
+      // The same argument as the vitest stage's tests/node_modules guard: a skip
+      // is a green gate over a check that never ran, and `npx tsc` would fetch an
+      // unpinned compiler mid-push.
+      const f = await typecheckFixture(s, { tsc: 'none' })
+      const r = await f.runStage()
+      expect(r.code, `an absent compiler did not block\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('tests/node_modules/.bin/tsc is absent')
+      expect(r.output).not.toContain(AFTER)
+    })
+  })
+
+  it('#5 CI typechecks through the same function: every step that starts tsc goes through ts_typecheck, scrubbed, and fails on a planted error', async () => {
+    await scenario('tsbridge-tc-5', async (s) => {
+      const steps = (await workflowSteps()).filter(
+        (step) => typeof step.run === 'string' && /\b(tsc|ts_typecheck)\b/.test(step.run),
+      )
+      expect(steps.length, 'no workflow step typechecks tests/, so CI passes a type error').toBeGreaterThan(0)
+      expect(
+        steps.filter((step) => !/(^|\s)ts_typecheck\b/m.test(step.run ?? '')).map((step) => step.name),
+        'these steps start tsc themselves rather than through ts_typecheck — a second copy of the command',
+      ).toEqual([])
+
+      for (const [i, step] of steps.entries()) {
+        const stub = await typecheckFixture(s, { tsc: 'stub', name: `tc5-stub-${i}` })
+        const r1 = await stub.runCiStep(step, i)
+        expect(
+          await stub.seenEnv(),
+          `step "${step.name}" handed the compiler these (null: it never ran)\n${r1.output}`,
+        ).toEqual([])
+
+        const real = await typecheckFixture(s, { tsc: 'real', planted: true, name: `tc5-real-${i}` })
+        const r2 = await real.runCiStep(step, i)
+        expect(r2.code, `step "${step.name}" passed a planted type error\n${r2.output}`).not.toBe(0)
+        expect(r2.output).toContain('TS2322')
       }
     })
   })
@@ -534,25 +654,12 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
       // undeclared GIT_ALLOW_PROTOCOL and AGENT_TASK025_DECOY (the population a
       // direct run now scrubs by rule), and the declared-inert GIT_AUTHOR_NAME.
       // None can redirect git inside the driver.
-      const values: Record<(typeof DRIVER_EXPORTS)[number], string> = {
-        GIT_DIR: join(dir, '.git-decoy'),
-        GIT_INDEX_FILE: join(dir, '.git-decoy/index'),
-        GIT_CONFIG_GLOBAL: join(dir, '.gitconfig-decoy'),
-        AGENT_FEED_TAG: `${s.escapeToken}-GATE`,
-        AGENT_SIGNAL_FILE: join(dir, 'decoy-signal.md'),
-        AGENT_STATE_HOME: join(dir, 'decoy-state'),
-        BLUEPRINT_ROOT: join(dir, 'decoy-blueprint'),
-        GIT_ALLOW_PROTOCOL: 'decoy',
-        AGENT_TASK025_DECOY: s.escapeToken,
-        GIT_AUTHOR_NAME: 'decoy',
-      }
       const driver = await s.fs.write(
         'run-bridge.sh',
         `cd ${JSON.stringify(dir)}\n` +
           `PATH=${JSON.stringify(shims.path())}\n` +
           `export PATH\n` +
-          DRIVER_EXPORTS.map((k) => `${k}=${JSON.stringify(values[k])}\n`).join('') +
-          `export ${DRIVER_EXPORTS.join(' ')}\n` +
+          decoyExports(dir, s.escapeToken) +
           `set -e\n` +
           `. ./scripts/lib/pipeline.sh\n` +
           `pipe_init 'ts-bridge fixture' >/dev/null 2>&1 || true\n` +
@@ -562,6 +669,131 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
       )
       const r = await s.run('sh', [driver], { cwd: dir, timeoutMs: 120_000 })
       return { code: r.code, output: r.output }
+    },
+  }
+}
+
+/**
+ * DRIVER_EXPORTS as shell assignments plus one `export` line. Every decoy points
+ * inside `dir`, and AGENT_FEED_TAG keeps the scenario's escape token (BUG-062).
+ */
+function decoyExports(dir: string, token: string): string {
+  const values: Record<(typeof DRIVER_EXPORTS)[number], string> = {
+    GIT_DIR: join(dir, '.git-decoy'),
+    GIT_INDEX_FILE: join(dir, '.git-decoy/index'),
+    GIT_CONFIG_GLOBAL: join(dir, '.gitconfig-decoy'),
+    AGENT_FEED_TAG: `${token}-GATE`,
+    AGENT_SIGNAL_FILE: join(dir, 'decoy-signal.md'),
+    AGENT_STATE_HOME: join(dir, 'decoy-state'),
+    BLUEPRINT_ROOT: join(dir, 'decoy-blueprint'),
+    GIT_ALLOW_PROTOCOL: 'decoy',
+    AGENT_TASK025_DECOY: token,
+    GIT_AUTHOR_NAME: 'decoy',
+  }
+  return (
+    DRIVER_EXPORTS.map((k) => `${k}=${JSON.stringify(values[k])}\n`).join('') +
+    `export ${DRIVER_EXPORTS.join(' ')}\n`
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The typecheck fixture (TASK-031): a project holding a tests/ tree the bridge's
+// typecheck stage accepts, with a real, stub or absent compiler.
+// ---------------------------------------------------------------------------
+
+interface TypecheckFixture {
+  /** The compiler's recorded GIT_/AGENT_/BP_/unprefixed names, or null if it never ran. */
+  seenEnv(): Promise<string[] | null>
+  /** Source pipeline.sh and the bridge under `set -e`, as the hook does, and run the stage. */
+  runStage(): Promise<{ code: number | null; output: string }>
+  /** Run one workflow step exactly as GitHub runs a `run:` block. */
+  runCiStep(step: WorkflowStep, i: number): Promise<{ code: number | null; output: string }>
+}
+
+async function typecheckFixture(
+  s: Scenario,
+  opts: { tsc: 'real' | 'stub' | 'none'; planted?: boolean; packageJson?: boolean; name?: string },
+): Promise<TypecheckFixture> {
+  const name = opts.name ?? 'tc'
+  const dir = await s.workspace.dir(name)
+  const seenPath = s.workspace.path(`${name}-seen-env`)
+
+  for (const lib of ['scripts/lib/pipeline.sh', 'scripts/run-ts-suites.sh']) {
+    await s.fs.copyIn(join(REPO_ROOT, lib), `${name}/${lib}`)
+  }
+  if (opts.packageJson !== false) await s.fs.write(`${name}/tests/package.json`, '{ "private": true }\n')
+  // Minimal on purpose: no `types: ["node"]`, so the fixture needs no @types tree.
+  await s.fs.write(
+    `${name}/tests/tsconfig.json`,
+    JSON.stringify({
+      compilerOptions: { target: 'ES2022', lib: ['ES2022'], strict: true, noEmit: true, types: [], skipLibCheck: true },
+      include: ['**/*.ts'],
+    }) + '\n',
+  )
+  await s.fs.write(`${name}/tests/clean.ts`, 'export const clean: number = 1\n')
+  if (opts.planted) {
+    await s.fs.write(`${name}/tests/planted.ts`, "export const planted: number = 'not a number'\n")
+  }
+  await s.fs.mkdirp(`${name}/tests/node_modules/.bin`)
+
+  if (opts.tsc === 'stub') {
+    const recorded = `(GIT|AGENT|BP)_[A-Za-z0-9_]*|${UNPREFIXED_FORBIDDEN.join('|')}`
+    await s.fs.write(
+      `${name}/tests/node_modules/.bin/tsc`,
+      `#!/bin/sh\n` +
+        `env | sed -nE 's/^(${recorded})=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
+        `printf 'ran\\n' >> ${JSON.stringify(seenPath)}\n`,
+      { mode: 0o755 },
+    )
+  } else if (opts.tsc === 'real') {
+    // THE PINNED COMPILER this checkout installed, linked rather than copied: it
+    // loads its lib files relative to its real path.
+    const ln = await s.run(
+      'ln',
+      ['-s', join(REPO_ROOT, 'tests/node_modules/typescript/bin/tsc'), join(dir, 'tests/node_modules/.bin/tsc')],
+      { cwd: dir },
+    )
+    expect(ln.code, ln.output).toBe(0)
+  }
+
+  const run = async (file: string, body: string) => {
+    const driver = await s.fs.write(file, body)
+    const r = await s.run('sh', [driver], { cwd: dir, timeoutMs: 120_000 })
+    return { code: r.code, output: r.output }
+  }
+
+  return {
+    async seenEnv() {
+      try {
+        const lines = (await readFile(seenPath, 'utf8')).split('\n').filter(Boolean)
+        return lines.filter((l) => l !== 'ran')
+      } catch {
+        return null
+      }
+    },
+
+    runStage() {
+      return run(
+        `${name}-stage.sh`,
+        `cd ${JSON.stringify(dir)}\n` +
+          decoyExports(dir, s.escapeToken) +
+          `set -e\n` +
+          `. ./scripts/lib/pipeline.sh\n` +
+          `pipe_init 'typecheck fixture' >/dev/null 2>&1 || true\n` +
+          `. ./scripts/run-ts-suites.sh\n` +
+          `ts_typecheck_stage ${JSON.stringify(dir)}\n` +
+          `echo ${AFTER}\n`,
+      )
+    },
+
+    async runCiStep(step, i) {
+      const script = await s.fs.write(`${name}-ci-step-${i}.sh`, step.run ?? '')
+      return run(
+        `${name}-ci-driver-${i}.sh`,
+        `cd ${JSON.stringify(join(dir, step['working-directory'] ?? '.'))}\n` +
+          decoyExports(dir, s.escapeToken) +
+          `exec bash --noprofile --norc -eo pipefail ${JSON.stringify(script)}\n`,
+      )
     },
   }
 }

@@ -104,9 +104,10 @@ export function startWatcher(
   args: string[],
   options: { cwd?: string; env?: Record<string, string | undefined> } = {},
 ): Watcher {
+  // BUG-119: spread, so a caller's option is forwarded rather than rebuilt away.
   const child: ChildProcess = s.background(command, args, {
+    ...options,
     cwd: options.cwd ?? s.workspace.root,
-    env: options.env,
   })
 
   let output = ''

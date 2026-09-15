@@ -265,9 +265,11 @@ export async function scenario(
     },
 
     runScript(relPath, args = [], options = {}) {
+      // BUG-119: spread, so a field SpawnOptions gains is forwarded rather than
+      // silently dropped here — the way run() and background() already do.
       return registry.run('bash', [join(REPO_ROOT, relPath), ...args], {
+        ...options,
         cwd: options.cwd ?? workspace.root,
-        timeoutMs: options.timeoutMs,
         env: { ...baseEnv, ...(options.env ?? {}) },
       })
     },

@@ -1365,7 +1365,15 @@ cmd_drift() {
   # BUG-077: _bp_project_root, never `git rev-parse` — arm_gate writes
   # repo-local config, so an environment-redirectable root arms the wrong repo.
   _bp_proj="$(_bp_project_root)"
-  [ -r "$_bp_lib" ] && . "$_bp_lib" && arm_gate "$_bp_proj"
+  # TASK-029 (U7, a2bp request PR #69): a missing gate.sh used to skip arming
+  # without a word, and drift went on to print a report. An ungated project
+  # with nothing saying so is A-22, so say it and refuse to report.
+  if [ ! -r "$_bp_lib" ]; then
+    echo "  ${C_RED}⚠ gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed${C_RESET}"
+    die "refusing to report drift without scripts/lib/gate.sh. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/gate.sh"
+  fi
+  . "$_bp_lib"
+  arm_gate "$_bp_proj"
   # BUG-032 — the push keepalive rides the same two wake paths, for the same
   # reason: it is repo-local config, so a clone starts without it.
   command -v arm_push_keepalive >/dev/null 2>&1 \

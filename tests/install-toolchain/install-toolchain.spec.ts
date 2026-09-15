@@ -85,6 +85,16 @@
  * On the CLI side (set7b, the same copy): dropping scripts/lib/signals.sh from
  * MANAGED_FILES reddens bootstrap-contents #0 (BUG-015). Not sourcing it
  * reddens 36 of sync-by-address's 41 cases, since drift and pull then refuse.
+ *
+ * TASK-029 — U7 OF a2bp REQUEST PR #69 (linkedin-watcher-agent), #U7a and #U7b.
+ * OBSERVED the same way (.scratch/c025/mutants8.py):
+ *   CLI at the reproducer commit (silent skip) → #U7b (none): no gate line
+ *   the command drops "$@"                     → #34 #37b #U7a #U7b
+ *   gate line printed, no refusal              → #U7b (no-gate): exit 0
+ *   refusal without the gate line              → #U7b (none)
+ * NOT SEEN: a command that discards stderr leaves #U7a green (only #34 and #37b
+ * go red, on the body bytes), because a healthy drift writes nothing to stderr.
+ * #34's byte-exact body is what pins that.
  */
 
 import { describe, it, expect, vi } from 'vitest'

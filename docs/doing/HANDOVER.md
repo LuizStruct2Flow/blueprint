@@ -197,6 +197,15 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **ANY Codex run on this machine can turn the push gate red (BUG-121, fix next).** Scenario
+  workspaces default to `/tmp`, and since TASK-028 the harness refuses every scenario while an
+  empty `/tmp/.git` exists. Codex sandboxes create that folder for a few minutes, including
+  runs from OTHER projects (storm2flow's `codex-signal-watch.sh`, VS Code Codex sessions). On
+  2026-09-15 a docs-only push went 52/55 red with nobody running Codex here. **Until BUG-121
+  lands, push with `TMPDIR=/home/luiz/.cache/bp-harness-tmp git push origin main`**, which is
+  the remedy the refusal message names. A red gate whose failures all say "Project marker
+  above every scenario workspace" is this, not your change.
+
 - **Derived projects migrated to address-based sync (founder, 2026-09-15).** All three have
   `blueprint_remote` and no `blueprint_source`. linkedin-watcher-agent and struct2flow-www
   are at `bootstrap_sha 7d64687` with `blueprint_release_branch = released`. **storm2flow has

@@ -189,21 +189,25 @@ bp_request_transport_env() {
 #
 # The last branch is the only guess in here, and it is confined to CREATIONS —
 # a path neither half holds. There is nothing to align against, so it follows
-# the tree: if the base has a `scaffolding/` at all, a new managed file belongs
+# the tree: if the base has a `scaffolding/` at all, a new MANAGED file belongs
 # inside it.
 #
-# ponytail: since TASK-037 a CREATION may also be a new blueprint-only file,
-# which belongs at the root, and this guess puts it under `scaffolding/` once
-# that exists. Harmless while no base has `scaffolding/`; when TASK-021 moves,
-# pass cmd_a2bp's managed/unshipped answer in here and place unshipped
-# creations at the root.
+# TASK-037 — a creation may instead be a new blueprint-only file, which ships
+# to nobody and so belongs at the root. cmd_a2bp exports that answer as
+# BP_REQUEST_UNSHIPPED, one project-relative path per line. It is read HERE
+# because every caller (base content, validation, no-op detection, build,
+# assert) asks this function, so one reading keeps them all at one coordinate.
+# The variable is not a spec field, because the spec feeds the request key.
+# Unset means "managed", which is what a direct caller of the libs gets.
 bp_base_path() {
-  local bare="$1" base="$2" path="$3"
+  local bare="$1" base="$2" path="$3" unshipped=0
+  case $'\n'"${BP_REQUEST_UNSHIPPED:-}" in *$'\n'"$path"$'\n'*) unshipped=1 ;; esac
   if bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding/$path" 2>/dev/null; then
     printf 'scaffolding/%s' "$path"
   elif bp_request_hermetic git -C "$bare" cat-file -e "$base:$path" 2>/dev/null; then
     printf '%s' "$path"
-  elif bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding" 2>/dev/null; then
+  elif [ "$unshipped" -eq 0 ] && \
+       bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding" 2>/dev/null; then
     printf 'scaffolding/%s' "$path"
   else
     printf '%s' "$path"

@@ -628,6 +628,32 @@ describe('TASK-029 — U7 (PR #69): the installed command is the project CLI, an
       expect(viaCommand.code).toBe(viaDirect.code)
     })
   })
+
+  it('#U7b a project CLI missing its lib/ exits non-zero, says the gate is NOT armed, and prints no report', async () => {
+    await scenario('install-toolchain-u7b', async (s) => {
+      const base = await baseline(s)
+      const m = await machine(s, 'a', base)
+      await install(s, m, [])
+      const remote = await releasedRemote(s)
+
+      for (const lib of ['none', 'no-gate'] as const) {
+        const proj = await migrated(s, lib, remote, lib)
+        const r = await s.run(m.target, ['drift'], { cwd: proj, env: { HOME: m.home, PATH: base } })
+        expect(r.code, `(${lib}) drift from an incomplete CLI exited 0\n${r.output}`).not.toBe(0)
+        expect(r.output, `(${lib}) the gate was not armed and nothing said so (A-22)\n${r.output}`).toMatch(
+          /gate:.*NOT armed/,
+        )
+        expect(r.output, `(${lib}) an incomplete CLI printed a clean report`).not.toContain(
+          '✓ All blueprint-managed files match',
+        )
+        expect(r.output, `(${lib}) an incomplete CLI printed per-file report lines`).not.toMatch(/^\s*[~+!] \S/m)
+        expect(
+          await s.run('git', ['config', '--get', 'core.hooksPath'], { cwd: proj }).then((g) => g.stdout.trim()),
+          `(${lib}) the gate was armed after all, so the message is false`,
+        ).toBe('')
+      }
+    })
+  })
 })
 
 // --- the seam pattern (tests/sync-by-address), for #37b (d) -------------------

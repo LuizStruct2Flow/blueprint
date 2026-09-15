@@ -173,6 +173,19 @@
  *   exactly as listed above. Logs: .scratch/philipp-task031-mutants/, one per
  *   run, each headed by the revision and TMPDIR it ran with. The first run left
  *   no log, and a reviewer whose baseline was red could not tell M11 apart.
+ *
+ *   TASK-033, each applied to a fresh copy and ts-bridge run from a GREEN
+ *   baseline (20/20), with ShellCheck 0.10.0 first on PATH. Logs, one per run:
+ *   .scratch/philipp-task033-mutants/.
+ *   M13 delete `sh_lint_stage "$BP_CODE_ROOT"` from the hook's managed region
+ *       Red: #6 only.
+ *   M14 delete the "Blueprint shell lint" step from the workflow
+ *       Red: #7 only.
+ *   M15 in `sh_lint`, `exit 0` instead of starting ShellCheck (linter bypassed)
+ *       Red: #6b, #6d, #7. #6c and #6e stay green, correctly: a clean tree
+ *       passes either way, and the missing-ShellCheck block comes before sh_lint.
+ *   On the parent of the fix (the reproducer commit), #6 found no call, #6b–#6e
+ *   failed with `sh_lint_stage: not found`, and #7 found no step.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -815,14 +828,7 @@ async function typecheckFixture(
   await s.fs.mkdirp(`${name}/tests/node_modules/.bin`)
 
   if (opts.tsc === 'stub') {
-    const recorded = `(GIT|AGENT|BP)_[A-Za-z0-9_]*|${UNPREFIXED_FORBIDDEN.join('|')}`
-    await s.fs.write(
-      `${name}/tests/node_modules/.bin/tsc`,
-      `#!/bin/sh\n` +
-        `env | sed -nE 's/^(${recorded})=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
-        `printf 'ran\\n' >> ${JSON.stringify(seenPath)}\n`,
-      { mode: 0o755 },
-    )
+    await s.fs.write(`${name}/tests/node_modules/.bin/tsc`, `#!/bin/sh\n${recordingStub(seenPath)}`, { mode: 0o755 })
   } else if (opts.tsc === 'real') {
     // THE PINNED COMPILER this checkout installed, linked rather than copied: it
     // loads its lib files relative to its real path.

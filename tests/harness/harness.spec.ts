@@ -1090,6 +1090,68 @@ describe('harness — process ownership', () => {
     ).resolves.toBeUndefined()
   })
 
+  it('BUG-111 a timed-out run returns only once the group it killed is GONE, not merely signalled', async () => {
+    // "reaps a background process the scenario forgot" went red under gate load
+    // and never alone. `sh -c 'sleep 30'` is two processes on dash: SIGKILL
+    // reaches both, Node reaps `sh`, but `sleep` is orphaned and waits for init
+    // to reap it. `run()` used to throw as soon as `sh` closed, so under load
+    // teardown sampled the group while that zombie was still in it, and
+    // reported a "survivor" the harness had itself already killed.
+    //
+    // Init's reaping latency cannot be controlled, so this makes the window
+    // CERTAIN instead of likely. A helper forks the `sleep` into the run's
+    // group, leaves the group itself (so SIGKILL does not reach it), and reaps
+    // its child only 500 ms after it dies. Its stdio is /dev/null, so it cannot
+    // hold `close` back the way a pipe holder would. Ported from PR #68
+    // (linkedin-watcher-agent).
+    //
+    // The 3 s timeout is not the property: it only has to outlast perl starting
+    // and writing `ready`, which under gate load can exceed the request's 1 s.
+    await scenario('harness-slow-reap', async (s) => {
+      await s.fs.write(
+        'slow-reaper.pl',
+        [
+          'my $dead = 0',
+          '$SIG{CHLD} = sub { $dead = 1 }',
+          'my $pgid = getpgrp()',
+          'my $z = fork()',
+          'die "fork: $!" unless defined $z',
+          'if ($z == 0) { exec "sleep", "30" or die "exec: $!" }',
+          'setpgrp(0, 0) or die "setpgrp: $!"',
+          'open(my $fh, ">", "ready.tmp") or die',
+          'print $fh "$pgid\\n"',
+          'close $fh',
+          'rename "ready.tmp", "ready" or die',
+          'sleep 1 until $dead',
+          'select(undef, undef, undef, 0.5)',
+          'waitpid($z, 0)',
+          '',
+        ].join(';\n'),
+      )
+      await expect(
+        s.run(
+          'sh',
+          [
+            '-c',
+            'perl slow-reaper.pl </dev/null >/dev/null 2>&1 & ' +
+              'while [ ! -e ready ]; do sleep 0.01; done; exec sleep 30',
+          ],
+          { cwd: s.workspace.root, timeoutMs: 3_000 },
+        ),
+      ).rejects.toThrow(/Timed out/)
+
+      const pgid = Number((await s.fs.read('ready')).trim())
+      expect(pgid).toBeGreaterThan(1)
+      let code: string | undefined
+      try {
+        process.kill(-pgid, 0)
+      } catch (err) {
+        code = (err as NodeJS.ErrnoException).code
+      }
+      expect(code, `group ${pgid} still had a member when run() returned`).toBe('ESRCH')
+    })
+  })
+
   it('a timed-out process does not survive', async () => {
     await scenario('harness-timeout', async (s) => {
       const started = Date.now()

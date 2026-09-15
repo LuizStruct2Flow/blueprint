@@ -197,6 +197,20 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **Derived projects migrated to address-based sync (founder, 2026-09-15).** All three have
+  `blueprint_remote` and no `blueprint_source`. linkedin-watcher-agent and struct2flow-www
+  are at `bootstrap_sha 7d64687` with `blueprint_release_branch = released`. **storm2flow has
+  no `blueprint_release_branch` line**, so its drift and pull read `main`, including commits
+  CI has not yet passed; its own `.blueprint-source` records the pull as partial.
+  struct2flow-www carries a large uncommitted Astro upgrade that is its own work, not the
+  pull. **Per-machine command (plan §7.2 step 8):** on this Linux machine
+  `~/.local/bin/blueprint` is already the installer-written
+  `struct2flow-blueprint-command v1`, which runs the current project's own CLI, so the
+  TASK-021 Stage B wrapper hazard is closed here. **The Mac is unverified**: check that
+  `head -3 ~/.local/bin/blueprint` names the same marker, or run
+  `bash scripts/install-toolchain.sh --replace-blueprint-command --project=<a migrated project>`
+  there.
+
 - **TASK-033 PUSHED 2026-09-15 as `a0ee5a6`; row in waiting-acceptance.** The ShellCheck
   stage ran in the real gate (4.4 s) after the founder installed ShellCheck here. **Nothing
   is in flight.** The rest of this entry is its history. Every machine that pushes now needs

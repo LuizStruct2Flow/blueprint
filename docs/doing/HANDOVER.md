@@ -200,7 +200,11 @@ hangs off that root.
 - **TASK-033 (ShellCheck in the gate and CI) is built locally, unpushed** — `168904b`,
   `7b8dd4b`, `8cf2a86`, `3377983`, `0a8a944`, `f8ef884` (Philipp, 2026-09-15). The 25 existing
   warnings are cleared (17 fixed, 8 disabled inline with a reason); the full suite is 837/837
-  with ShellCheck on PATH. **Jesko (Codex) is reviewing it.** **Before it is pushed, ShellCheck
+  with ShellCheck on PATH. **Jesko's review (2026-09-15): push after one fix** →
+  `.scratch/JESKO-task033-review.md` — installer, `sh_lint`, stage/CI parity, mutants, the 25
+  fixes and docs all pass (install-toolchain 31/31, every TASK-033 case green). The fix: the
+  Linux download helper comment in `scripts/install-toolchain.sh` falsely says downloads are
+  checksummed; Philipp is correcting it to match the file header. **Before it is pushed, ShellCheck
   must be installed on the pushing machine**: the stage blocks without it, and ts-bridge
   #6b/#6c/#7 run the real linter. On this machine `bash scripts/install-toolchain.sh check`
   reports ShellCheck as the only missing tool; the installer puts the pinned release into

@@ -156,6 +156,11 @@
  *       function, and each mode's case says so.
  *   On the parent of the fix (the reproducer commit), #4, #4b–#4f and #5 are all
  *   red: `ts_typecheck_stage: not found`, and no workflow step typechecks.
+ *   RE-RUN FROM A GREEN BASELINE, with every run's log kept (Jesko, TASK-031
+ *   review, S2): the unmutated copy passed 14/14, and M10, M11 and M12 went red
+ *   exactly as listed above. Logs: .scratch/philipp-task031-mutants/, one per
+ *   run, each headed by the revision and TMPDIR it ran with. The first run left
+ *   no log, and a reviewer whose baseline was red could not tell M11 apart.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -476,8 +481,8 @@ describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed com
     await scenario('tsbridge-tc-4b', async (s) => {
       const f = await typecheckFixture(s, { tsc: 'real', planted: true })
       const r = await f.runStage()
-      expect(r.code, `a type error passed the typecheck stage\n${r.output}`).not.toBe(0)
-      expect(r.output, `the stage failed without showing tsc's error\n${r.output}`).toContain('TS2322')
+      expect(r.code, describeRun('a type error passed the typecheck stage', r)).not.toBe(0)
+      expect(r.output, describeRun("the stage failed without showing tsc's TS2322", r)).toContain('TS2322')
       expect(r.output, `no failed typecheck stage rendered\n${r.output}`).toMatch(/✗\s+typecheck · TASK-031/)
       expect(r.output, 'the gate carried on past a failed typecheck').not.toContain(AFTER)
     })
@@ -527,6 +532,22 @@ describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed com
   })
 
   it('#5 CI typechecks through the same function: every step that starts tsc goes through ts_typecheck, scrubbed, and fails on a planted error', async () => {
+    // WHAT THIS CASE NEEDS FROM ITS ENVIRONMENT. It is stated here because a
+    // reviewer's Codex sandbox turned it red twice with a non-zero exit and NO
+    // output at all (Jesko, TASK-031 review, S1). The same checkout passed 14/14
+    // outside that sandbox, with TMPDIR in ~/.cache and in /dev/shm.
+    //   - It must be allowed to EXECUTE this checkout's
+    //     tests/node_modules/.bin/tsc: node running typescript/bin/tsc through a
+    //     symlink out of the scenario workspace. So node must be on PATH and
+    //     runnable there.
+    //   - It needs a writable TMPDIR, where the scenario workspace lives.
+    // What that sandbox denied is NOT identified, because it could not be
+    // reproduced outside it. Inside it, #4b (the same compiler, run by `sh`) and
+    // #3 (a step run by `exec bash --noprofile --norc -eo pipefail`, with a stub
+    // runner) both passed. Only this combination, a bash-run step starting the
+    // real compiler, failed. When TS2322 is missing, the failure now prints the
+    // exit code, the signal, the commands and both streams, so a repeat names
+    // its cause instead of an empty diff.
     await scenario('tsbridge-tc-5', async (s) => {
       const steps = (await workflowSteps()).filter(
         (step) => typeof step.run === 'string' && /\b(tsc|ts_typecheck)\b/.test(step.run),
@@ -542,13 +563,15 @@ describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed com
         const r1 = await stub.runCiStep(step, i)
         expect(
           await stub.seenEnv(),
-          `step "${step.name}" handed the compiler these (null: it never ran)\n${r1.output}`,
+          describeRun(`step "${step.name}" handed the compiler these (null: it never ran)`, r1),
         ).toEqual([])
 
         const real = await typecheckFixture(s, { tsc: 'real', planted: true, name: `tc5-real-${i}` })
         const r2 = await real.runCiStep(step, i)
-        expect(r2.code, `step "${step.name}" passed a planted type error\n${r2.output}`).not.toBe(0)
-        expect(r2.output).toContain('TS2322')
+        expect(r2.code, describeRun(`step "${step.name}" passed a planted type error`, r2)).not.toBe(0)
+        expect(r2.output, describeRun(`step "${step.name}" failed without showing tsc's TS2322`, r2)).toContain(
+          'TS2322',
+        )
       }
     })
   })
@@ -712,13 +735,45 @@ function decoyExports(dir: string, token: string): string {
 // typecheck stage accepts, with a real, stub or absent compiler.
 // ---------------------------------------------------------------------------
 
+/** What one fixture run did, kept whole so a failed assertion can show all of it. */
+interface FixtureRun {
+  code: number | null
+  signal: NodeJS.Signals | null
+  stdout: string
+  stderr: string
+  output: string
+  /** The exact commands that ran: the driver, and for a CI step the step's own block. */
+  command: string
+}
+
+/**
+ * The message for an assertion about a fixture run: exit code, signal, the
+ * commands, and stdout and stderr separately. A non-zero exit with nothing
+ * printed means the compiler never started, and this says so rather than
+ * leaving a reviewer an empty `toContain` diff (Jesko, TASK-031 review, S1).
+ */
+function describeRun(what: string, r: FixtureRun): string {
+  const silent = r.stdout.trim() === '' && r.stderr.trim() === ''
+  return (
+    `${what}\n` +
+    `  exit code: ${r.code ?? 'none'}   signal: ${r.signal ?? 'none'}\n` +
+    (silent
+      ? '  NOTHING was printed on stdout or stderr: the compiler most likely never started.\n' +
+        "  See #5's environment note: it must be allowed to execute tests/node_modules/.bin/tsc.\n"
+      : '') +
+    `--- commands run ---\n${r.command}\n` +
+    `--- stdout ---\n${r.stdout}\n` +
+    `--- stderr ---\n${r.stderr}`
+  )
+}
+
 interface TypecheckFixture {
   /** The compiler's recorded GIT_/AGENT_/BP_/unprefixed names, or null if it never ran. */
   seenEnv(): Promise<string[] | null>
   /** Source pipeline.sh and the bridge under `set -e`, as the hook does, and run the stage. */
-  runStage(): Promise<{ code: number | null; output: string }>
+  runStage(): Promise<FixtureRun>
   /** Run one workflow step exactly as GitHub runs a `run:` block. */
-  runCiStep(step: WorkflowStep, i: number): Promise<{ code: number | null; output: string }>
+  runCiStep(step: WorkflowStep, i: number): Promise<FixtureRun>
 }
 
 async function typecheckFixture(
@@ -767,10 +822,10 @@ async function typecheckFixture(
     expect(ln.code, ln.output).toBe(0)
   }
 
-  const run = async (file: string, body: string) => {
+  const run = async (file: string, body: string): Promise<FixtureRun> => {
     const driver = await s.fs.write(file, body)
     const r = await s.run('sh', [driver], { cwd: dir, timeoutMs: 120_000 })
-    return { code: r.code, output: r.output }
+    return { code: r.code, signal: r.signal, stdout: r.stdout, stderr: r.stderr, output: r.output, command: body }
   }
 
   return {
@@ -799,12 +854,13 @@ async function typecheckFixture(
 
     async runCiStep(step, i) {
       const script = await s.fs.write(`${name}-ci-step-${i}.sh`, step.run ?? '')
-      return run(
+      const r = await run(
         `${name}-ci-driver-${i}.sh`,
         `cd ${JSON.stringify(join(dir, step['working-directory'] ?? '.'))}\n` +
           decoyExports(dir, s.escapeToken) +
           `exec bash --noprofile --norc -eo pipefail ${JSON.stringify(script)}\n`,
       )
+      return { ...r, command: `${r.command}# ${script}:\n${step.run ?? ''}` }
     },
   }
 }

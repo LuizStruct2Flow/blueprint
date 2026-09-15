@@ -96,6 +96,54 @@ ts_scrubbed(){
   )
 }
 
+# ts_typecheck [ROOT] — TASK-031. `tsc --noEmit -p ROOT/tests` with the PINNED
+# compiler, started through ts_scrubbed.
+#
+# THIS IS THE ONE TYPECHECK COMMAND. The gate's stage below calls it, and so does
+# the typecheck step in .github/workflows/security.yml, which sources this file:
+# BUG-117's lesson applied before the two modes could diverge, not after.
+# tests/ts-bridge #4d and #5 execute both to prove it.
+#
+# WHY IT EXISTS: vitest strips types without checking them, so a green suite set
+# says nothing about types. Two tsc errors sat on main until BUG-119, and
+# tests/tsconfig.json's exactOptionalPropertyTypes was enforced by nobody.
+#
+# The binary PATH, not `npx tsc`: npx answers a missing local compiler by
+# fetching one, which is an unpinned package installed mid-push (see the vitest
+# stage's tests/node_modules guard). The path is resolved BEFORE the scrub, so
+# the scrub cannot remove anything the path depends on.
+ts_typecheck(){
+  ts_scrubbed "${1:-.}/tests/node_modules/.bin/tsc" --noEmit -p "${1:-.}/tests"
+}
+
+# ts_typecheck_stage [ROOT] — the gate's typecheck stage. It runs BEFORE the
+# vitest batch: it takes seconds, not minutes, and a type error is a reason to
+# stop before paying for the suites.
+ts_typecheck_stage(){
+  _tc_root="${1:-$(pwd)}"
+
+  # SKIP, with a reason, where there is no harness to check. The CI step's
+  # hashFiles guard keys on the same file, so the two modes skip together.
+  if [ ! -f "$_tc_root/tests/package.json" ]; then
+    pipe_skip "typecheck · TASK-031" "no tests/package.json — no TypeScript harness in this project"
+    return 0
+  fi
+
+  # BLOCK, do not skip, when the harness is there and its compiler is not: the
+  # same argument, and the same remedy, as the vitest stage's guard below.
+  if [ ! -x "$_tc_root/tests/node_modules/.bin/tsc" ]; then
+    echo "❌ The TypeScript typecheck cannot run: tests/node_modules/.bin/tsc is absent."
+    echo "   Install the pinned tree once, then push again:"
+    echo ""
+    echo "       (cd tests && npm ci)"
+    echo ""
+    pipe_stage "typecheck · TASK-031" false
+    return 1
+  fi
+
+  pipe_stage "typecheck · TASK-031" ts_typecheck "$_tc_root"
+}
+
 # ts_suites_stage [ROOT] — the whole thing.
 ts_suites_stage(){
   _ts_root="${1:-$(pwd)}"

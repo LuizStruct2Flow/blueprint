@@ -241,6 +241,15 @@ jobs:
         if: hashFiles('tests/package.json') != ''
         working-directory: tests
         run: npm ci
+      # TASK-031 — THE TYPECHECK, through the function the pre-push gate's
+      # typecheck stage calls, so the two modes run one command. vitest strips
+      # types without checking them, so without this step CI passes a type error.
+      # tests/ts-bridge #5 executes this block.
+      - name: Blueprint TypeScript typecheck
+        if: hashFiles('tests/package.json') != ''
+        run: |
+          . scripts/run-ts-suites.sh
+          ts_typecheck .
       # A separate job from the shell suites, deliberately. These need a
       # toolchain the shell half does not, and a missing or broken toolchain
       # must fail one clearly-named job rather than taking 40 shell suites down

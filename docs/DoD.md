@@ -501,9 +501,11 @@ For every push:
 - [ ] **SAST clean** — Semgrep + lint security plugins ran clean
       (or every suppression has a justification comment naming the
       threat-model entry that makes it safe).
-- [ ] **SCA clean** — `osv-scanner` reports zero `HIGH`+ CVEs in
-      project lockfiles. New CVEs below `HIGH` tracked in
-      `docs/config/findings.md` with a planned upgrade date.
+- [ ] **SCA clean** — `osv-scanner` reports zero `MEDIUM`+ vulnerabilities
+      (CVSS >= 4.0) in project dependencies. This is what the pre-push hook
+      and CI both block on. Anything below `MEDIUM` is reported, not
+      blocking, and tracked in `docs/config/findings.md` with a planned
+      upgrade date.
 - [ ] **IaC clean** (if the push touches CDK / Terraform / k8s
       manifests) — `trivy config` reports zero `HIGH`+ findings.
 
@@ -525,7 +527,7 @@ What you don't ship:
 - `// eslint-disable-next-line` / `// nosemgrep` / `# nosec`
   without a justification comment.
 - A new public route without a corresponding ZAP baseline run.
-- A dep upgrade that introduces a new `HIGH`+ CVE without an
+- A dep upgrade that introduces a new `MEDIUM`+ CVE without an
   immediate rollback or pin.
 
 The §7 handoff checklist §E pulls these boxes in alongside §6.1's

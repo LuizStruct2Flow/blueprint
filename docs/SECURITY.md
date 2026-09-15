@@ -82,12 +82,14 @@ not pre-push budget.
 
 ### 3. SCA — `osv-scanner` for dependency CVEs
 
-Pre-push: `osv-scanner --lockfile=backend/package-lock.json --lockfile=frontend/package-lock.json`.
-Fails on any CVE rated **High** or **Critical**. Below that → tracked
-in `docs/config/findings.md` as a planned upgrade.
+Pre-push: `osv-scanner scan source --recursive --format=json .`, with the
+severity applied over the JSON. A vulnerability rated **Medium** or above
+(CVSS >= 4.0) blocks. Anything lower is printed but does not block, and you
+track it in `docs/config/findings.md` as a planned upgrade.
 
-CI nightly: same scan across the full repo; if a *new* CVE just
-dropped in something we already use, it fires an alert (same SNS →
+CI applies the same MEDIUM+ rule, on every push and nightly
+(`.github/workflows/security.yml`, `sca` job). A *new* CVE in something
+we already use fails the nightly run and fires an alert (same SNS →
 Slack pipe as MALT).
 
 ### 4. IaC scan — `trivy config` over the CDK output
@@ -237,7 +239,7 @@ Per the blueprint pre-push hook (DoD §4 enriched in §4.7):
    the commits being pushed (**not** `protect --staged`, which scans an index
    that is empty at pre-push time — A-03)
 2. `semgrep --config=auto` — fails on `WARNING+` severity
-3. `osv-scanner --lockfile=…` — fails on `HIGH+` CVE
+3. `osv-scanner scan source --recursive .` — fails on a `MEDIUM+` vulnerability (CVSS >= 4.0); lower ones are reported, not blocking
 4. (lint security plugins ride inside `npm run lint` — already wired)
 
 Budget: all four must fit inside the §3.7 pre-push ≤30 s ceiling.
@@ -256,7 +258,8 @@ usual offender, not gitleaks).
 ### Nightly scans
 
 - `osv-scanner` over all lockfiles — catches *new* CVEs in deps we
-  already use. Alert routes through the same MALT pipe.
+  already use. Same `MEDIUM+` block as the push. Alert routes through
+  the same MALT pipe.
 - ZAP full active scan against prod (read-paths only).
 - Nuclei against deployed targets — template-based, complementary
   to ZAP.
@@ -297,7 +300,7 @@ When a security finding hits production:
   a justification comment naming the threat model entry that makes
   the suppression safe.
 - A new public route without a corresponding ZAP baseline run.
-- A dep upgrade that introduces a new HIGH+ CVE without an immediate
+- A dep upgrade that introduces a new MEDIUM+ CVE without an immediate
   rollback or pin.
 - A `findings.md` entry left untriaged across two consecutive
   grooming passes — either fix, defer with a date, or mark

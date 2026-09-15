@@ -581,6 +581,43 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
         })
       })
     }
+
+    // Alexey, c3-4 review #2: `mv -f temp target` with a directory (or a link to
+    // one) as the target moves the command INTO it, returns 0, and the
+    // installer reported "replaced" with no command in place.
+    for (const shape of ['link', 'directory'] as const) {
+      it(`(e) a target that is a ${shape === 'link' ? 'symlink to a directory' : 'directory'}: refused, nothing written inside it`, async () => {
+        await scenario(`install-toolchain-37b-dir-${shape}`, async (s) => {
+          const m = await machine(s, 'e', await baseline(s))
+          await s.fs.write('home-e/.local/bin/.keep', '')
+          await s.fs.write('referent/keep', 'kept\n')
+          const referent = s.workspace.path('referent')
+          if (shape === 'link') {
+            const ln = await s.run('ln', ['-s', referent, m.target], { cwd: s.workspace.root })
+            expect(ln.code, ln.output).toBe(0)
+          } else {
+            await s.fs.write('home-e/.local/bin/blueprint/keep', 'kept\n')
+          }
+          await s.fs.write(
+            'proj-e/.blueprint-source',
+            'config_version = 2\nblueprint_remote = /nowhere.git\nblueprint_branch = main\nblueprint_release_branch = released\n',
+          )
+          await stub(s, 'proj-e/scripts/blueprint', 'NEW')
+          const inside = shape === 'link' ? referent : m.target
+
+          const r = await install(s, m, ['--replace-blueprint-command'], { cwd: s.workspace.path('proj-e') })
+
+          expect(r.code, `(e) a ${shape} target was "replaced":\n${r.output}`).not.toBe(0)
+          if (shape === 'link') {
+            expect((await lstat(m.target)).isSymbolicLink(), `(e) the link was replaced:\n${r.output}`).toBe(true)
+            expect(await readlink(m.target)).toBe(referent)
+          }
+          expect((await readdir(inside)).sort(), `(e) something was written inside the ${shape}:\n${r.output}`).toEqual(['keep'])
+          expect(await readFile(join(inside, 'keep'), 'utf8')).toBe('kept\n')
+          expect(await dotNames(m, '.blueprint.new.'), `(e) a temp file was left:\n${r.output}`).toEqual([])
+        })
+      })
+    }
   })
 
   it('#38 a blueprint earlier on PATH is named', async () => {

@@ -84,11 +84,34 @@
  *   R7   EXIT trap only, no signal handler    → #37b (d) INT to the installer alone
  *   R8   the resuming `trap … EXIT INT TERM`  → #37b (d) group INT
  *   M38  no shadow check                      → #38
+ * (SUPERSEDED by the per-case record below, after #37b was split.)
  * WHERE THE PLAN'S PREDICTION WAS NOT WHAT RAN: R1 was predicted red in every
  * (c) and (d) run and R3 in the validation runs. Both go red earlier, at (a),
  * because the backup no longer holds the old wrapper, so the later runs are not
  * reached. R8 was not in the plan's catalogue. The plan predicted R7's run
  * exactly.
+ *
+ * #37b SPLIT, ONE CASE PER SUB-RUN (Alexey, c3-4 review #4), re-observed on a
+ * copy (.scratch/c025/mutants9.py set9a). Case names are shortened:
+ *   R1 rm the target before preparing  → (a) (a2) (b); (c) chmod, cp, mv, no-CLI;
+ *                                        (d) all four
+ *                                        [not (c) legacy or at-root: they are
+ *                                        refused before the rm]
+ *   R2 the body straight onto target   → the same eleven as R1, for the same
+ *                                        reason
+ *   R3 swap before validating          → (a) (a2) (b); (c) chmod, cp, no-CLI,
+ *                                        legacy, at-root; (d) all four
+ *                                        [not (c) mv: the shimmed mv makes the
+ *                                        early swap fail too]
+ *   R4 validate in $ROOT (revision 5)  → (c) no-CLI
+ *   R5 skip the migrated-project test  → (c) legacy, at-root
+ *   R6 ignore --project                → (a2)
+ *   R7 EXIT trap only                  → (d) SIGINT to the installer alone
+ *   R8 the resuming `trap … EXIT INT TERM` → (d) all four
+ *   D1 no directory refusal            → (e) symlink to a directory
+ *   D2 refuse a plain directory only   → (e) symlink to a directory
+ *   [(e) plain directory stays green under D1: the backup's `cp -pP` fails on
+ *   a directory before the swap, which is why the refusal must not rely on it]
  *
  * On the CLI side (set7b, the same copy): dropping scripts/lib/signals.sh from
  * MANAGED_FILES reddens bootstrap-contents #0 (BUG-015). Not sourcing it

@@ -345,11 +345,16 @@ describe('a2bp validates its destination and its inputs before anything leaves',
 
   it('#9 a root project_config_*.md is refused, pointing at project_config_*.md', async () => {
     await scenario('a2bp-inputs-9', async (s) => {
-      const { proj, managed } = await project(s)
+      // In a git work tree, and asserting the configuration REASON. The first
+      // version used a fixture outside any repository and the substring
+      // `project_config`, which the ignore-status error also printed — so
+      // removing the configuration guard left this green (Alexey, TASK-037 P5).
+      const { proj, managed } = await repoProject(s)
+      await s.fs.write('rproj/project_config_dod.md', 'private\n')
       const r = await call(s, 'bp_inputs_validate', [proj, managed, 'project_config_dod.md'])
       expect(r.code, 'an unmanaged project-specific file was accepted for back-propagation').not.toBe(0)
-      expect(r.output, 'the refusal does not point at project_config_*.md').toContain(
-        'project_config',
+      expect(r.output, 'refused, but not as the project configuration').toContain(
+        "is this project's own configuration",
       )
     })
   })
@@ -524,6 +529,28 @@ describe('a2bp validates its destination and its inputs before anything leaves',
         if (r.code === 0) problems.push(`${n} was accepted`)
         else if (!r.output.includes('named like a secret')) problems.push(`${n} refused, but not as a secret`)
       }
+      expect(problems).toEqual([])
+    })
+  })
+
+  it('#22 TASK-037: a root project_config_*.md is refused in any case; templates/ stays accepted', async () => {
+    await scenario('a2bp-inputs-22', async (s) => {
+      // On a case-folding checkout PROJECT_CONFIG_DOD.MD IS project_config_dod.md.
+      const { proj, managed } = await repoProject(s)
+      const variants = ['PROJECT_CONFIG_DOD.MD', 'Project_Config_x.md']
+      for (const v of variants) await s.fs.write(`rproj/${v}`, 'private\n')
+      await s.fs.write('rproj/templates/project_config_dod.md', 'seed\n')
+
+      const problems: string[] = []
+      for (const v of variants) {
+        const r = await call(s, 'bp_inputs_validate', [proj, managed, v])
+        if (r.code === 0) problems.push(`${v} was accepted`)
+        else if (!r.output.includes("is this project's own configuration")) {
+          problems.push(`${v} refused, but not as the project configuration`)
+        }
+      }
+      const seed = await call(s, 'bp_inputs_validate', [proj, managed, 'templates/project_config_dod.md'])
+      if (seed.code !== 0) problems.push(`templates/project_config_dod.md was refused: ${seed.output}`)
       expect(problems).toEqual([])
     })
   })

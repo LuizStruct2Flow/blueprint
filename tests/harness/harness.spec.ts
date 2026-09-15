@@ -1018,6 +1018,32 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
     })
   })
 
+  // The base comes from the environment the harness LOADED with, not from
+  // process.env at the moment a scenario starts. Specs change process.env on
+  // purpose: TASK-025 H2 sets an ambient XDG_CACHE_HOME to prove a scenario
+  // replaces it. Read at call time, that value became the base, and with TMPDIR
+  // unset H2 died on `mkdir /somewhere` before its first assertion.
+  it('BUG-121 an environment change after the harness loaded does not move the base', async () => {
+    const keys = ['TMPDIR', 'XDG_CACHE_HOME', 'HOME'] as const
+    const saved = keys.map((k) => [k, process.env[k]] as const)
+    delete process.env.TMPDIR
+    process.env.XDG_CACHE_HOME = '/somewhere/the-operators-real-cache'
+    process.env.HOME = '/somewhere/the-operators-real-home'
+    let root = ''
+    try {
+      const ws = await createWorkspace('bug121-loaded-env')
+      root = ws.root
+      await ws.dispose()
+    } finally {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+    expect(root, 'no workspace was created').not.toBe('')
+    expect(root.startsWith('/somewhere'), `the base followed a later process.env change: ${root}`).toBe(false)
+  })
+
   it('BUG-121 a marker above the PRIVATE base still refuses, naming it', async () => {
     await scenario('bug121-private-marker', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')

@@ -1019,6 +1019,19 @@ blueprint a2bp docs/DoD.md
 against it. It writes into no working tree — not yours, not the blueprint's —
 and it lands nothing.
 
+**It carries any file, not only managed ones (TASK-037).** A path the blueprint
+does not ship (`templates/`, a blueprint-only doc) is proposed as a change to it,
+and a path the blueprint does not have is proposed as a new file. Both go through
+the same guard and the same PR, and each is marked **not shipped** in the output
+and in the PR body, so the reviewer judges it as a blueprint-only change. A new
+file has no base to align against, so nothing in it is restored: a literal
+project name blocks until you write `{{PROJECT_NAME}}` or justify an
+`a2bp-allow`. What `a2bp` still refuses, before contacting the remote: a path
+outside the project, a symlink, anything inside a `.git` directory, a root
+`project_config_*.md` (that is the blueprint's own config), and an unmanaged path
+the project gitignores. A request that is not yet a file change goes in
+`docs/backlog/feature-requests.md` in the blueprint.
+
 It used to `cp` the file straight into the blueprint working tree, which made
 every derived project a writer to the generic blueprint. That is the mechanism
 by which **BUG-002** and **A-09** fanned out to every project on their next

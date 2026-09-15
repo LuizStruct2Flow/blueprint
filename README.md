@@ -286,9 +286,13 @@ Until they are fixed, confirm a filing landed by its PR URL, not by exit code.
 Filing returns a **non-zero** status on purpose: filed is not landed, and no
 script may read "PR opened" as "the blueprint has this".
 
-`a2bp` refuses files that aren't in the blueprint-managed list — if a
-new file *should* be managed, add it to the `MANAGED_FILES` array in
-`scripts/blueprint` first (a2bp itself), then re-run.
+`a2bp` also carries files that aren't in the blueprint-managed list: a
+change to a file the blueprint does not ship (`templates/`, a blueprint-only
+doc), or a new file. They go through the same guard and PR, and are marked
+**not shipped** so the reviewer sees no project will receive them. If a file
+*should* ship, the request is also a change to the `MANAGED_FILES` array in
+`scripts/blueprint`. `a2bp` still refuses anything inside `.git`, a root
+`project_config_*.md`, a symlink, and an unmanaged file your project gitignores.
 
 **The contamination guard.** It used to `cp` into the blueprint working tree,
 which is how both BUG-002 and A-09 entered. That write path is gone, and the

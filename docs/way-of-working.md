@@ -240,6 +240,7 @@ A configurable team of **named personas**, each backed by whichever agent you ac
 - **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
 - **The live baton is untracked, and that is load-bearing** — it lives in `logs/state/signal.md`, not in a tracked file. Git *owns* tracked files in the working tree, so `switch` / `checkout` / `stash` / `rebase` rewrite them — including under a running dispatch, which silently left the dispatched agent with nothing to claim (BUG-019). Rare until a spell of branch-per-change made it routine, and the hazard outlives that: any `switch` under a live dispatch does it. One writer (`scripts/signal-set.sh`) publishes atomically, so no poller can sample a half-written baton. Hand-off history moved from `git log` to an append-only journal, which also captures flips that were never committed
 - **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_<A>` ≠ `OVER_TO_<B>`)
+- **Every item named to the founder carries a link and a plain line** — a bare ID is the agent's shorthand, not the founder's memory, so a decision request, a handoff or the baton's `Task` links the line that defines the item and says in one sentence what it does
 - **Read-only + out-of-scope work** allowed in parallel
 - **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
 - **Codex / Gemini dispatched by flipping the signal**, not by direct CLI call

@@ -29,6 +29,19 @@ name the blueprint's bug numbers, not this project's. A directory you create
 inside it, such as `tests/e2e`, does count once you list it. A root that
 contains `docs/`, `.git` or `tests/` is refused, so do not list `.`.
 
+## CI
+
+> Which pipeline runs this project's CI. The blueprint ships
+> `.github/workflows/security.yml`, and several suites check that workflow.
+
+- BP_CI: `github-actions`
+
+`github-actions` means that workflow is your CI, and the suites check it. Any
+other value names your real pipeline, for example `aws-codepipeline`,
+`gitlab-ci` or `none`. Then those checks skip, and the gate prints each skip
+with the value you wrote. They do not pass. Leaving the line out means
+`github-actions`.
+
 ## Local agent state
 
 > Where the agent dispatchers write logs and artefacts on the founder's

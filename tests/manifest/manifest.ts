@@ -100,12 +100,19 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseDocument } from 'yaml'
+import { notGithubActions } from '../helpers/project-config.js'
 
 /** One check's verdict. `ok: false` carries the message the operator reads. */
 export interface CheckResult {
   readonly id: string
   readonly ok: boolean
   readonly message: string
+  /**
+   * TASK-044 — set when the check did not judge this tree, with the reason.
+   * Not a failure (`ok` stays true), and not a pass either: the caller must
+   * print it, because an unanswered check that says nothing is BUG-005.
+   */
+  readonly skipped?: string
 }
 
 /** A process runner. `scenario.run` satisfies it; nothing else is accepted. */
@@ -697,8 +704,19 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
 
   // =========================================================================
   // 5. EVERY SUITE IS ACTUALLY IN THE WORKFLOW.
+  //
+  //    TASK-044: #5 and #5b are about GitHub Actions. A project that declares
+  //    another CI still receives the managed workflow, inert, and a pass over it
+  //    would certify a pipeline that never runs. Both are answered as SKIPPED,
+  //    naming the declared CI, and never dropped: a check that vanishes is the
+  //    silence this file exists to refuse.
   // =========================================================================
-  if (hasCi) {
+  const notGithub = await notGithubActions(root)
+  if (notGithub) {
+    for (const id of ['#5', '#5b']) {
+      checks.push({ id, ok: true, message: `${id} ${notGithub}`, skipped: notGithub })
+    }
+  } else if (hasCi) {
     const missing: string[] = []
     for (const s of d.names) {
       if (suitesWithSh.has(s) && !shInvoked(ciCmds, s, false)) missing.push(`${s}(shell runner)`)
@@ -728,7 +746,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
     // No workflows directory means no CI to check, the same way #5 does not apply.
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
-  if (workflows.length > 0) {
+  if (!notGithub && workflows.length > 0) {
     const broken: string[] = []
     for (const f of workflows) {
       const rel = `.github/workflows/${f}`

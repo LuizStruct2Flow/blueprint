@@ -47,9 +47,10 @@
  *     verdict differed; noted because a silent tightening is still a change.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, type TestContext } from 'vitest'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { inspect, type CheckResult } from './manifest.js'
+import { notGithubActions, skipNote, skipVisibly } from '../helpers/project-config.js'
 import {
   baselineTree,
   gateFor,
@@ -574,10 +575,45 @@ describe('TASK-044 — #5 and #5b judge GitHub Actions only when the project run
       expect(checks.filter((c) => c.skipped)).toEqual([])
     })
   })
+
+  it.each([
+    ['- BP_CI: `aws-codepipeline`\n', 'aws-codepipeline'],
+    ['- BP_CI: `github-actions`\n', null],
+    ['- BP_CI: ``\n', null],
+    ['# nothing declared\n', null],
+  ])('notGithubActions over %j names the CI only when it is not GitHub', async (config, named) => {
+    await scenario('manifest-ci-decl', async (s) => {
+      const root = await s.workspace.dir('p')
+      await s.fs.write('p/project_config_paths.md', config)
+      const why = await notGithubActions(root)
+      if (named === null) expect(why).toBeNull()
+      else expect(why).toContain(named)
+    })
+  })
+
+  it('skipVisibly prints the SKIP-NOTE the gate surfaces, THEN skips — a skip, not a pass', () => {
+    const said: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((m: string) => void said.push(m))
+    let skippedWith: string | undefined
+    const ctx = {
+      task: { name: 'a case' },
+      skip: (note: string) => {
+        skippedWith = note
+        throw new Error('skipped')
+      },
+    } as unknown as TestContext
+    try {
+      expect(() => skipVisibly(ctx, 'the declared CI is x')).toThrow('skipped')
+    } finally {
+      warn.mockRestore()
+    }
+    expect(said).toEqual(['SKIP-NOTE: a case: the declared CI is x'])
+    expect(skippedWith).toBe('the declared CI is x')
+  })
 })
 
 describe('BUG-005 — THE REAL TREE', () => {
-  it('#live every check passes over this checkout, over a non-vacuous suite set', async () => {
+  it('#live every check passes over this checkout, over a non-vacuous suite set', async (ctx) => {
     await scenario('manifest-live', async (s) => {
       // Read-only over the real tree: the whole point is to fail the push when
       // the gate, CI and the export boundary have come apart, so pointing it at
@@ -587,6 +623,8 @@ describe('BUG-005 — THE REAL TREE', () => {
       const report = checks.map((c) => `${c.ok ? '  ok — ' : 'FAIL: '}${c.message}`).join('\n')
 
       expect(red(checks), report).toEqual([])
+      // TASK-044: a check that did not judge this tree says so in the gate.
+      for (const c of checks) if (c.skipped) skipNote(`${ctx.task.name} (${c.id})`, c.skipped)
 
       // THE CHECK IDS THAT MUST HAVE BEEN ANSWERED — because "everything
       // passed" and "nothing was asked" render identically, which is BUG-066's

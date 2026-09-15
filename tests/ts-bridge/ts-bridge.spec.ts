@@ -194,6 +194,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { FORBIDDEN_ENV, UNPREFIXED_FORBIDDEN, isForbiddenAmbient } from '../harness/env.js'
 import { liveCmds } from '../manifest/manifest.js'
+import { notGithubActions, skipVisibly } from '../helpers/project-config.js'
 import { parseDocument } from 'yaml'
 
 /**
@@ -441,7 +442,9 @@ interface WorkflowStep {
 }
 
 describe('BUG-117 — CI starts vitest under the same scrub as the gate', () => {
-  it('#3 every workflow step that runs vitest hands it no GIT_*, AGENT_*, BP_* or unprefixed forbidden name', async () => {
+  it('#3 every workflow step that runs vitest hands it no GIT_*, AGENT_*, BP_* or unprefixed forbidden name', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
     await scenario('tsbridge-3', async (s) => {
       // THE GATE AND CI ARE TWO EXECUTION MODES OF ONE SUITE SET. The harness
       // refuses a test process carrying any undeclared GIT_* / AGENT_* name
@@ -572,7 +575,9 @@ describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed com
     })
   })
 
-  it('#5 CI typechecks through the same function: every step that starts tsc goes through ts_typecheck, scrubbed, and fails on a planted error', async () => {
+  it('#5 CI typechecks through the same function: every step that starts tsc goes through ts_typecheck, scrubbed, and fails on a planted error', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
     // WHAT THIS CASE NEEDS FROM ITS ENVIRONMENT. It is stated here because a
     // reviewer's Codex sandbox turned it red twice with a non-zero exit and NO
     // output at all (Jesko, TASK-031 review, S1). The same checkout passed 14/14
@@ -1014,7 +1019,9 @@ describe('TASK-033 — the gate and CI lint the shipped shell scripts through on
     })
   })
 
-  it('#7 CI lints through the same function: a step calls sh_lint, hands ShellCheck no scrubbed name, and fails on a planted warning', async () => {
+  it('#7 CI lints through the same function: a step calls sh_lint, hands ShellCheck no scrubbed name, and fails on a planted warning', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
     // Steps are found by `sh_lint`, not by the word `shellcheck`: the step that
     // makes sure ShellCheck is installed names the binary legitimately.
     await scenario('tsbridge-sc-7', async (s) => {

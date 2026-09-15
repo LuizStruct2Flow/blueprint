@@ -403,7 +403,12 @@ ts_suites_stage(){
   # the report would exist only inside the test, which is precisely the silent
   # pass the canary was changed to avoid. `CANARY-NOTE:` is the marker
   # tests/harness/canary.ts emits; the two must move together.
-  grep -F 'CANARY-NOTE:' "$_ts_out" | sed 's/^/  ⚠ /' | head -20 || true
+  #
+  # TASK-044 — `SKIP-NOTE:` is the same contract for a SKIPPED case
+  # (tests/helpers/project-config.ts). vitest's JSON records no skip reason, so
+  # without this a case skipped because the project runs another CI would render
+  # as a plain pass.
+  grep -F -e 'CANARY-NOTE:' -e 'SKIP-NOTE:' "$_ts_out" | sed 's/^/  ⚠ /' | head -20 || true
 
   rm -f "$_ts_out"
 

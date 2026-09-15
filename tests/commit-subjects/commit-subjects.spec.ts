@@ -66,6 +66,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { MUST_TRAVEL, scanWiring, type WiringScan } from './commit-subjects.js'
+import { notGithubActions, skipNote } from '../helpers/project-config.js'
 
 const RULE_LIB = join(REPO_ROOT, 'scripts/lib/commit-subject.sh')
 const CHECKER = join(REPO_ROOT, 'scripts/check-commit-subjects.sh')
@@ -104,7 +105,7 @@ async function checkerSays(
 }
 
 describe('TASK-002 — the item rule is checked where the commit is actually made', () => {
-  it('#1+#3+#4+#5+#6 the real repository is wired end to end', async () => {
+  it('#1+#3+#4+#5+#6 the real repository is wired end to end', async (ctx) => {
     const scan = await scanWiring(REPO_ROOT)
 
     // #1 — ONE definition. The hook's regex living only inside the hook is what
@@ -119,13 +120,20 @@ describe('TASK-002 — the item rule is checked where the commit is actually mad
     )
     // #5 — THE ASSERTION THAT MATTERS. The squash-merge subject IS the PR title,
     // so checking only the branch's commits leaves the actual defect unguarded.
-    expect(scan.ciInvokesChecker, 'CI never invokes the checker — the rule stays local-only').toBe(
-      true,
-    )
-    expect(scan.ciChecksPrTitle, 'CI does not check the PR title — the squash door stays open').toBe(
-      true,
-    )
-    expect(scan.ciRerunsOnEdit, 'a title edited after a green run would bypass the check').toBe(true)
+    // TASK-044: that door is GitHub's. A project on another CI has no such
+    // workflow to check, and says so rather than passing over an inert file.
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) {
+      skipNote(`${ctx.task.name} (#5)`, notGithub)
+    } else {
+      expect(scan.ciInvokesChecker, 'CI never invokes the checker — the rule stays local-only').toBe(
+        true,
+      )
+      expect(scan.ciChecksPrTitle, 'CI does not check the PR title — the squash door stays open').toBe(
+        true,
+      )
+      expect(scan.ciRerunsOnEdit, 'a title edited after a green run would bypass the check').toBe(true)
+    }
     // #6 — both files travel, or a derived project gets a hook that cannot load
     // its rule.
     expect(scan.unmanaged, `${scan.unmanaged.join(' ')} do not travel`).toEqual([])

@@ -27,6 +27,16 @@ In the blueprint, `tests/` is this repo's own regression suites, so it counts.
 This is also the undeclared default. The line is written out so the declaration
 is visible here, as it is in every derived project.
 
+## CI
+
+> Which pipeline runs this repo's CI. Suites that read `.github/workflows/`
+> judge it only when this says GitHub Actions.
+
+- BP_CI: `github-actions`
+
+The blueprint's CI is `.github/workflows/security.yml`, so every workflow check
+runs here. This is also the undeclared default.
+
 ## Local agent state
 
 > Where the agent dispatchers write logs and artefacts on the founder's

@@ -179,8 +179,10 @@ bp_inputs_validate() {
     # The project's own configuration. CLAUDE.md: project-specific edits go in
     # project_config_*.md and are never back-propagated. At the blueprint root
     # these paths are the BLUEPRINT's own config (BUG-009), so a request would
-    # propose replacing it with this project's.
-    case "$canon" in
+    # propose replacing it with this project's. Case-folded: on a case-folding
+    # checkout PROJECT_CONFIG_DOD.MD is that same file. Root only, so
+    # templates/project_config_*.md (the generic seed) stays proposable.
+    case "$(printf '%s' "$canon" | tr 'A-Z' 'a-z')" in
       project_config_*.md)
         echo "bp_inputs: '$canon' is this project's own configuration (project_config_*.md)." >&2
         echo "  It is never back-propagated. A change to what new projects are seeded" >&2

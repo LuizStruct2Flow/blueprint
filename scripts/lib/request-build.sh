@@ -50,7 +50,25 @@ bp_build_validate_base() {
           rc=1 ;;
       esac
     else
-      # Absent: every existing parent component must be a real tree, or the
+      # Absent: it, and each parent, must not differ from a base path only by
+      # case. A git tree holds `Readme.md` beside `README.md`; a case-folding
+      # checkout (macOS by default) cannot, so the request would break every
+      # such consumer. An exact parent is fine: that is where the file goes.
+      # ponytail: ASCII case folding (awk tolower); Unicode folding if a
+      # non-ASCII collision ever matters.
+      local clash
+      clash=$(bp_request_hermetic git -C "$bare" -c core.quotePath=false \
+                ls-tree -r -t --name-only "$base" 2>/dev/null | \
+              BP_T="$tpath" awk '
+                BEGIN { n = split(ENVIRON["BP_T"], c, "/"); p = ""
+                        for (i = 1; i <= n; i++) { p = (i == 1 ? c[1] : p "/" c[i]); want[tolower(p)] = p } }
+                { l = tolower($0); if ((l in want) && want[l] != $0) { print; exit } }')
+      if [ -n "$clash" ]; then
+        echo "  base holds '$clash', which differs from $path only by case — a case-insensitive checkout cannot hold both" >&2
+        rc=1
+        continue
+      fi
+      # Every existing parent component must be a real tree, or the
       # entry cannot be created without restructuring the base.
       parent=$(dirname "$tpath")
       while [ "$parent" != "." ] && [ "$parent" != "/" ]; do

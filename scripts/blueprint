@@ -16,8 +16,9 @@
 #                               blueprint's remote. It writes into no working
 #                               tree and cannot land anything. The blueprint
 #                               owner implements it: merging as-is, adapting, or
-#                               rewriting. Add --dry-run to see the diff without
-#                               filing.
+#                               rewriting. FILE may be one the blueprint does not
+#                               ship, or a new one; the request says so. Add
+#                               --dry-run to see the diff without filing.
 #   blueprint prs               List open a2bp requests, plus pushed branches
 #                               with no PR.
 #   blueprint files             List the blueprint-managed files (source of truth).
@@ -1845,7 +1846,17 @@ cmd_a2bp() {
     rm -f "$managed_list"
     return "$BP_RC_BLOCKED"
   }
+  # TASK-037 — accepted paths outside MANAGED_FILES. They are filed like any
+  # other, but no derived project will ever receive them, and the operator and
+  # the reviewer are both told so. Newline-delimited, one path per line.
+  local unshipped="" vline
+  while IFS= read -r vline; do
+    [ -n "$vline" ] || continue
+    bp_inputs_is_managed "${vline%%:*}" "$managed_list" || unshipped="${unshipped}${vline%%:*}"$'\n'
+  done <<< "$validated"
   rm -f "$managed_list"
+  # shellcheck disable=SC2317
+  _a2bp_unshipped() { case $'\n'"$unshipped" in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
 
   # --- scratch, cleaned on EVERY exit path ---------------------------------
   # BP_A2BP_SCRATCH is GLOBAL on purpose. As a `local` it is out of scope by the
@@ -1889,6 +1900,10 @@ cmd_a2bp() {
     [ -n "$spec" ] || continue
     path=${spec%%:*}
     mode=${spec#*:}
+
+    if _a2bp_unshipped "$path"; then
+      echo "  ${C_YELLOW}not shipped${C_RESET}  $path  ${C_DIM}(not in MANAGED_FILES: no derived project receives it)${C_RESET}"
+    fi
 
     basecopy="$scratch/base.$(printf '%s' "$path" | tr '/' '_')"
     bp_file_base_content "$bare" "$base" "$path" "$basecopy"
@@ -1974,6 +1989,11 @@ cmd_a2bp() {
   echo
   bp_request_hermetic git -C "$bare" --no-pager diff --stat "$base" "$commit" | sed 's/^/  /'
   echo
+  for spec in "${specs[@]}"; do
+    if _a2bp_unshipped "${spec%%:*}"; then
+      echo "  ${C_YELLOW}not shipped to derived projects:${C_RESET} ${spec%%:*}"
+    fi
+  done
 
   if [ "$dry_run" -eq 1 ]; then
     echo "${C_DIM}--dry-run: nothing pushed. Full diff:${C_RESET}"
@@ -2059,7 +2079,7 @@ cmd_a2bp() {
   fi
 
   local body
-  body=$(bp_file_pr_body "$proj_name" "$base" "$BP_CFG_REMOTE" "$BP_CFG_BRANCH" "${specs[@]}")
+  body=$(bp_file_pr_body "$proj_name" "$base" "$BP_CFG_REMOTE" "$BP_CFG_BRANCH" "$unshipped" "${specs[@]}")
   url=$(bp_request_transport_env gh pr create --repo "$slug" \
           --base "$BP_CFG_BRANCH" --head "$ref" \
           --title "a2bp: ${#specs[@]} file(s) from $proj_name" \

@@ -37,7 +37,7 @@ bp_build_validate_base() {
       case "$type/$mode" in
         blob/100644|blob/100755) : ;;
         tree/*)
-          echo "  base holds a DIRECTORY at $path — replacing a tree with a file is a restructure, not an edit to a managed file" >&2
+          echo "  base holds a DIRECTORY at $path — replacing a tree with a file is a restructure, not an edit to a file" >&2
           rc=1 ;;
         blob/120000)
           echo "  base holds a SYMLINK at $path — overwriting it would change what every consumer resolves" >&2

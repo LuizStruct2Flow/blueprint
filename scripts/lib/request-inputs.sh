@@ -7,7 +7,14 @@
 # and A-09 both got in; the contamination guard checks the CONTENT, and this
 # checks that the content came from where the operator said.
 #
+# TASK-037 — a request may carry a file the blueprint does NOT ship: a change to
+# a blueprint-only file, or a new file. Membership in MANAGED_FILES no longer
+# decides whether a path is accepted, only whether it is labelled "not shipped".
+# That check used to be the only thing keeping `.git/` and gitignored secrets
+# out of a request, so those are now guards of their own.
+#
 # Plan: docs/doing/PLAN-A2BP-PR.md §5.1.
+# Requires: request.sh (bp_request_transport_env)
 #
 # shellcheck shell=bash
 
@@ -67,12 +74,12 @@ bp_inputs_mode() {
 # BUG-029 — a managed entry ending in `/` names a DIRECTORY, and every file the
 # blueprint ships under it is managed.
 #
-# The exact-match test above cannot see those. `cmd_a2bp` is the one command
+# An exact-match test cannot see those. `cmd_a2bp` is the one command
 # that never calls `read_blueprint_source` — it works against the fetched REMOTE
 # base rather than a local checkout, deliberately — so it has no HEAD to expand
 # the directory from and validates against the raw MANAGED_FILES list. Without
-# this, `a2bp tests/pipeline/pipeline.spec.ts` is refused as unmanaged, i.e. no suite
-# could ever be back-propagated.
+# this, `a2bp tests/pipeline/pipeline.spec.ts` is labelled not shipped, which
+# tells the reviewer something false about a suite every project receives.
 #
 # Prefix, and the trailing `/` is what makes it a safe one: `tests/` matches
 # `tests/pipeline/pipeline.spec.ts` and not a sibling `testsuite/…`. This is a
@@ -92,15 +99,19 @@ _bp_inputs_under_managed_dir() {
   return 1
 }
 
+# --- bp_inputs_is_managed CANON MANAGED_LIST_FILE ----------------------------
+# Is this canonical path shipped to derived projects? Exact entry, or under a
+# managed directory. MANAGED_LIST_FILE holds one MANAGED_FILES entry per line,
+# passed as a file so the answer has one source and cannot drift from the CLI.
+bp_inputs_is_managed() {
+  grep -qxF -- "$1" "$2" || _bp_inputs_under_managed_dir "$1" "$2"
+}
+
 # --- bp_inputs_validate ROOT MANAGED_LIST_FILE PATH... -----------------------
 # Prints one `<canonical-path>:<mode>` line per accepted input, sorted byte-wise
 # and de-duplicated. Any refusal fails the whole call: a request is filed as one
 # unit, so proceeding with a subset would file something the operator did not
 # ask for.
-#
-# MANAGED_LIST_FILE holds one managed path per line — passed as a file rather
-# than an array so the check has a single source and cannot drift from the CLI's
-# MANAGED_FILES.
 bp_inputs_validate() {
   local root="$1" managed="$2"; shift 2
   local raw canon mode rc=0
@@ -114,14 +125,47 @@ bp_inputs_validate() {
   for raw in "$@"; do
     canon=$(bp_inputs_canonicalise "$raw") || { rc=1; continue; }
 
-    # MANAGED_FILES is checked on the CANONICAL form, so `./docs/DoD.md` and
-    # `docs/../docs/DoD.md` cannot slip past a check that only matches the
-    # literal spelling.
-    if ! grep -qxF -- "$canon" "$managed" && ! _bp_inputs_under_managed_dir "$canon" "$managed"; then
-      echo "bp_inputs: '$canon' is not a blueprint-managed file." >&2
-      echo "  Only files in MANAGED_FILES can be back-propagated; project-specific" >&2
-      echo "  content belongs in project_config_*.md. See 'blueprint files'." >&2
-      rc=1; continue
+    # Every rule below runs on the CANONICAL form, so `./.git/config` and
+    # `docs/../.env` cannot slip past a check that only matches the literal
+    # spelling.
+
+    # Repository metadata is never a proposal: `.git/config` carries remotes
+    # and sometimes credentials. Case-insensitive, because on a case-folding
+    # filesystem `.GIT/config` is the same file.
+    case "/$(printf '%s' "$canon" | tr 'A-Z' 'a-z')/" in
+      */.git/*)
+        echo "bp_inputs: '$canon' is inside a .git directory; repository metadata is never filed" >&2
+        rc=1; continue ;;
+    esac
+
+    # The project's own configuration. CLAUDE.md: project-specific edits go in
+    # project_config_*.md and are never back-propagated. At the blueprint root
+    # these paths are the BLUEPRINT's own config (BUG-009), so a request would
+    # propose replacing it with this project's.
+    case "$canon" in
+      project_config_*.md)
+        echo "bp_inputs: '$canon' is this project's own configuration (project_config_*.md)." >&2
+        echo "  It is never back-propagated. A change to what new projects are seeded" >&2
+        echo "  with is a change to templates/$canon in the blueprint." >&2
+        rc=1; continue ;;
+    esac
+
+    # Outside the managed set, the project's .gitignore is what separates
+    # content from secrets and local state (`.env`, AGENT_ROSTER.md, logs/):
+    # the contamination scan has no secret patterns. Managed paths skip this
+    # only because they are shipped content by definition.
+    if ! bp_inputs_is_managed "$canon" "$managed"; then
+      local ign_rc=0
+      bp_request_transport_env git -C "$root" check-ignore -q -- "$canon" 2>/dev/null || ign_rc=$?
+      case "$ign_rc" in
+        0) echo "bp_inputs: '$canon' is gitignored in this project; ignored files are never filed" >&2
+           rc=1; continue ;;
+        1) : ;;
+        *) # Unanswered is not "not ignored" (BUG-003: a guard that cannot run
+           # is not a guard that passed).
+           echo "bp_inputs: cannot tell whether '$canon' is gitignored: '$root' is not a git work tree" >&2
+           rc=1; continue ;;
+      esac
     fi
 
     # -L before -f: `[ -f ]` follows symlinks, so a symlink to a regular file

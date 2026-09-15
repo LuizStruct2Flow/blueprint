@@ -69,12 +69,8 @@ async function scanTree(
   name: string,
   files: Record<string, string>,
   project: Record<string, string> = {},
-  untracked: Record<string, string> = {},
 ): Promise<ReturnType<typeof scanDocLinks>> {
-  // A GIT REPOSITORY, because a link must resolve in a fresh clone (BUG-125):
-  // what is on this disk but not tracked is not something a reader receives.
-  const repo = await s.gitRepo(name)
-  await s.workspace.dir(name, 'docs')
+  const root = await s.workspace.dir(name, 'docs')
   for (const [rel, content] of Object.entries(files)) {
     await s.fs.write(join(name, 'docs', rel), content)
   }
@@ -82,12 +78,7 @@ async function scanTree(
   for (const [rel, content] of Object.entries(project)) {
     await s.fs.write(join(name, rel), content)
   }
-  await repo.git(['add', '--', '.'])
-  // Present on disk, never added: `untracked` is relative to the project root.
-  for (const [rel, content] of Object.entries(untracked)) {
-    await s.fs.write(join(name, rel), content)
-  }
-  return scanDocLinks(join(repo.dir, 'docs'), s.run)
+  return scanDocLinks(root)
 }
 
 /** Enough resolving links to clear the non-vacuity floor, plus a real target. */
@@ -347,16 +338,18 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
       })
     })
 
-    it('#3 a file inside the repository that git does not track does not satisfy a link', async () => {
-      await scenario('doc-links-untracked', async (s) => {
-        // A gitignored per-machine file (AGENT_ROSTER.md, .env, .scratch/) is
-        // on this disk and in no clone, the same class one directory closer.
-        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[notes](../local-notes.md)\n' }, {}, {
-          'local-notes.md': '# never added\n',
+    it('#3 a local-only file INSIDE the repository still resolves — the privacy block keeps CLAUDE.md untracked by design', async () => {
+      await scenario('doc-links-local-only', async (s) => {
+        // DECIDED, and pinned so it is not "tightened" back. A tracked-files rule
+        // was built first. It reported `DOCUMENTATION.md -> ../CLAUDE.md` in every
+        // freshly bootstrapped project, because .gitignore keeps CLAUDE.md,
+        // AGENTS.md, docs/DoD.md and HANDOVER.md private and managed docs link
+        // them. The scan is a plain directory here, so nothing is tracked at all.
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[rules](../CLAUDE.md)\n' }, {
+          'CLAUDE.md': '# local-only\n',
         })
 
-        expect(scan.broken).toHaveLength(1)
-        expect(scan.broken[0]).toContain('../local-notes.md')
+        expect(scan.broken).toEqual([])
       })
     })
 
@@ -387,19 +380,17 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
   })
 
   it('THE REAL TREE — every relative link under docs/ resolves', async () => {
-    // It writes nothing. The scenario is here for its process runner: BUG-125
-    // asks git which files a clone contains. The floor is asserted first for the
-    // same reason the shell suite asserted it first — a scan that examined
-    // nothing would otherwise report a clean docs tree.
-    await scenario('doc-links-real-tree', async (s) => {
-      const scan = await scanDocLinks(join(REPO_ROOT, 'docs'), s.run)
+    // No scenario(): this reads the repository and writes nothing, so a
+    // workspace would be theatre. The floor is asserted first for the same
+    // reason the shell suite asserted it first — a scan that examined nothing
+    // would otherwise report a clean docs tree.
+    const scan = await scanDocLinks(join(REPO_ROOT, 'docs'))
 
-      expect(
-        scan.examined,
-        `only ${scan.examined} relative link(s) examined — the extractor is ` +
-          `probably broken, so a pass proves nothing`,
-      ).toBeGreaterThanOrEqual(20)
-      expect(scan.broken, scan.broken.join('\n')).toEqual([])
-    })
+    expect(
+      scan.examined,
+      `only ${scan.examined} relative link(s) examined — the extractor is ` +
+        `probably broken, so a pass proves nothing`,
+    ).toBeGreaterThanOrEqual(20)
+    expect(scan.broken, scan.broken.join('\n')).toEqual([])
   })
 })

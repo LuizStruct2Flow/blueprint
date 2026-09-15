@@ -118,6 +118,18 @@
  * skips with a reason, and an uninstalled compiler blocks. #5 EXECUTES every
  * workflow step that starts tsc, the way #3 does for vitest.
  *
+ * TASK-033 — THE SHELL LINT (#6, #7), the same shape. The scripts carried
+ * `# shellcheck` directives as if they were linted, and nothing installed or ran
+ * ShellCheck. `sh_lint` lints the tracked shell scripts under scripts/ and
+ * .githooks/ at severity WARNING, through the same scrub; the gate's stage and a
+ * CI step call it. #6 reads the hook for the call. #6b–#6e EXECUTE the stage in
+ * a git fixture: a planted SC2034 fails it through the REAL ShellCheck, an
+ * info-level SC2086 passes (the threshold), a recording stub shows which files
+ * were linted and that no scrubbed name reached it, and a missing ShellCheck
+ * blocks. #7 executes the CI step. The real-ShellCheck cases REQUIRE it installed
+ * and fail naming the installer when it is not: skipping would be a green suite
+ * over a lint that never ran.
+ *
  * MUTATION RECIPE (R6), each applied to `scripts/run-ts-suites.sh`:
  *
  *   M1  delete the `for _v in $(env | sed …); do unset "$_v"; done` scrub
@@ -822,37 +834,66 @@ async function typecheckFixture(
     expect(ln.code, ln.output).toBe(0)
   }
 
+  return {
+    seenEnv: () => recordedNames(seenPath),
+    ...stageDrivers(s, name, dir, `ts_typecheck_stage ${JSON.stringify(dir)}`),
+  }
+}
+
+/** The GIT_/AGENT_/BP_/unprefixed names a recording stub wrote to `file`, or null if it never ran. */
+async function recordedNames(file: string): Promise<string[] | null> {
+  try {
+    const lines = (await readFile(file, 'utf8')).split('\n').filter(Boolean)
+    return lines.filter((l) => l !== 'ran')
+  } catch {
+    return null
+  }
+}
+
+/** A recording stub body: the forbidden-prefix names it was handed go to `envFile`, its argv to `argsFile`. */
+function recordingStub(envFile: string, argsFile?: string): string {
+  const recorded = `(GIT|AGENT|BP)_[A-Za-z0-9_]*|${UNPREFIXED_FORBIDDEN.join('|')}`
+  return (
+    (argsFile === undefined ? '' : `printf '%s\\n' "$@" > ${JSON.stringify(argsFile)}\n`) +
+    `env | sed -nE 's/^(${recorded})=.*/\\1/p' | sort > ${JSON.stringify(envFile)}\n` +
+    `printf 'ran\\n' >> ${JSON.stringify(envFile)}\n`
+  )
+}
+
+/**
+ * The two ways a fixture runs a bridge stage, shared by the typecheck (TASK-031)
+ * and shell lint (TASK-033) fixtures: as the hook does (`set -e`, the renderer
+ * and the bridge sourced, then `stageCall`), and as GitHub runs a workflow step.
+ * Both export the decoys and keep the whole run for describeRun. `path`, when
+ * given, is the child's PATH.
+ */
+function stageDrivers(s: Scenario, name: string, dir: string, stageCall: string, path?: string) {
   const run = async (file: string, body: string): Promise<FixtureRun> => {
     const driver = await s.fs.write(file, body)
-    const r = await s.run('sh', [driver], { cwd: dir, timeoutMs: 120_000 })
+    const r = await s.run('sh', [driver], {
+      cwd: dir,
+      timeoutMs: 120_000,
+      ...(path === undefined ? {} : { env: { PATH: path } }),
+    })
     return { code: r.code, signal: r.signal, stdout: r.stdout, stderr: r.stderr, output: r.output, command: body }
   }
 
   return {
-    async seenEnv() {
-      try {
-        const lines = (await readFile(seenPath, 'utf8')).split('\n').filter(Boolean)
-        return lines.filter((l) => l !== 'ran')
-      } catch {
-        return null
-      }
-    },
-
-    runStage() {
+    runStage(): Promise<FixtureRun> {
       return run(
         `${name}-stage.sh`,
         `cd ${JSON.stringify(dir)}\n` +
           decoyExports(dir, s.escapeToken) +
           `set -e\n` +
           `. ./scripts/lib/pipeline.sh\n` +
-          `pipe_init 'typecheck fixture' >/dev/null 2>&1 || true\n` +
+          `pipe_init '${name} fixture' >/dev/null 2>&1 || true\n` +
           `. ./scripts/run-ts-suites.sh\n` +
-          `ts_typecheck_stage ${JSON.stringify(dir)}\n` +
+          `${stageCall}\n` +
           `echo ${AFTER}\n`,
       )
     },
 
-    async runCiStep(step, i) {
+    async runCiStep(step: WorkflowStep, i: number): Promise<FixtureRun> {
       const script = await s.fs.write(`${name}-ci-step-${i}.sh`, step.run ?? '')
       const r = await run(
         `${name}-ci-driver-${i}.sh`,
@@ -862,5 +903,194 @@ async function typecheckFixture(
       )
       return { ...r, command: `${r.command}# ${script}:\n${step.run ?? ''}` }
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TASK-033 — the shell lint stage: ShellCheck in the gate and in CI, the way
+// TASK-031 runs the typecheck.
+// ---------------------------------------------------------------------------
+
+const SC_STAGE = 'shellcheck · TASK-033'
+/** An unused variable: ShellCheck SC2034, severity WARNING. */
+const PLANTED = '#!/bin/sh\nunused=1\n'
+/** An unquoted expansion: ShellCheck SC2086, severity INFO, below the stage's threshold. */
+const INFO_ONLY = '#!/bin/sh\necho $1\n'
+
+describe('TASK-033 — the gate and CI lint the shipped shell scripts through one scrubbed command', () => {
+  it('#6 the managed region of the hook calls sh_lint_stage in live code', async () => {
+    // Text, for the one link execution cannot reach, as #4 does for the typecheck.
+    const hook = await readFile(join(REPO_ROOT, '.githooks/pre-push-project'), 'utf8')
+    const end = hook.search(/^# BLUEPRINT:END/m)
+    expect(end, 'the hook has no managed region').toBeGreaterThan(0)
+    expect(
+      liveCmds(hook.slice(0, end)),
+      'the gate never calls the shell lint stage, so a ShellCheck finding pushes green',
+    ).toMatch(/^[ \t]*sh_lint_stage[ \t]+"\$BP_CODE_ROOT"[ \t]*$/m)
+  })
+
+  it('#6b a planted warning FAILS the stage through the real ShellCheck, names the finding, and stops the gate', async () => {
+    await scenario('tsbridge-sc-6b', async (s) => {
+      const f = await lintFixture(s, { shellcheck: 'real', tracked: { 'scripts/planted.sh': PLANTED } })
+      const r = await f.runStage()
+      expect(r.code, describeRun('a ShellCheck warning passed the lint stage', r)).not.toBe(0)
+      expect(r.output, describeRun("the stage failed without showing ShellCheck's SC2034", r)).toContain('SC2034')
+      expect(r.output, describeRun('no failed lint stage rendered', r)).toMatch(new RegExp(`✗\\s+${SC_STAGE}`))
+      expect(r.output, 'the gate carried on past a failed lint').not.toContain(AFTER)
+    })
+  })
+
+  it('#6c the threshold is WARNING: an info-level finding passes and the stage renders, so #6b is not a stage that always fails', async () => {
+    await scenario('tsbridge-sc-6c', async (s) => {
+      const f = await lintFixture(s, {
+        shellcheck: 'real',
+        tracked: { 'scripts/info.sh': INFO_ONLY, '.githooks/hook': '#!/bin/sh\necho ok\n' },
+      })
+      const r = await f.runStage()
+      expect(r.code, describeRun('an info-level finding failed the lint stage', r)).toBe(0)
+      expect(r.output, describeRun('no passing lint stage rendered', r)).toMatch(new RegExp(`✓\\s+${SC_STAGE}\\s`))
+      expect(r.output).toContain(AFTER)
+    })
+  })
+
+  it('#6d the set is DERIVED from git — tracked shell files under scripts/ and .githooks/, by extension or shebang — linted at warning, scrubbed', async () => {
+    await scenario('tsbridge-sc-6d', async (s) => {
+      const f = await lintFixture(s, {
+        shellcheck: 'stub',
+        tracked: {
+          'scripts/a.sh': '#!/bin/sh\necho a\n',
+          'scripts/lib/b.sh': 'echo b\n',
+          'scripts/cli': '#!/usr/bin/env bash\necho cli\n',
+          '.githooks/hook': '#!/bin/sh\necho hook\n',
+          'scripts/notes.txt': 'not a script\n',
+          'scripts/data': 'no shebang at all\n',
+          'docs/elsewhere.sh': '#!/bin/sh\necho outside\n',
+        },
+        untracked: { 'scripts/untracked.sh': '#!/bin/sh\necho untracked\n' },
+      })
+      const r = await f.runStage()
+      const args = await f.seenArgs()
+      expect(args, describeRun('the stage never started ShellCheck', r)).not.toBeNull()
+      expect(
+        (args ?? []).filter((a) => !a.startsWith('-')).sort(),
+        describeRun('the linted set is not the tracked shell files under scripts/ and .githooks/', r),
+      ).toEqual(['.githooks/hook', 'scripts/a.sh', 'scripts/cli', 'scripts/lib/b.sh'])
+      expect(args, 'the stage does not pin the severity threshold at warning').toContain('--severity=warning')
+      expect(await f.seenEnv(), describeRun('the stage handed ShellCheck these', r)).toEqual([])
+    })
+  })
+
+  it('#6e a missing ShellCheck BLOCKS the gate and prints the install command', async () => {
+    await scenario('tsbridge-sc-6e', async (s) => {
+      const f = await lintFixture(s, { shellcheck: 'none', tracked: { 'scripts/a.sh': '#!/bin/sh\necho a\n' } })
+      const r = await f.runStage()
+      expect(r.code, describeRun('a missing ShellCheck did not block', r)).not.toBe(0)
+      expect(r.output).toContain('ShellCheck is not installed')
+      expect(r.output).toContain('bash scripts/install-toolchain.sh')
+      expect(r.output).not.toContain(AFTER)
+    })
+  })
+
+  it('#7 CI lints through the same function: a step calls sh_lint, hands ShellCheck no scrubbed name, and fails on a planted warning', async () => {
+    // Steps are found by `sh_lint`, not by the word `shellcheck`: the step that
+    // makes sure ShellCheck is installed names the binary legitimately.
+    await scenario('tsbridge-sc-7', async (s) => {
+      const steps = (await workflowSteps()).filter(
+        (step) => typeof step.run === 'string' && /(^|\s)sh_lint\b/m.test(step.run),
+      )
+      expect(steps.length, 'no workflow step lints the shell scripts, so CI passes a ShellCheck finding').toBeGreaterThan(0)
+
+      for (const [i, step] of steps.entries()) {
+        const stub = await lintFixture(s, {
+          shellcheck: 'stub',
+          tracked: { 'scripts/a.sh': '#!/bin/sh\necho a\n' },
+          name: `sc7-stub-${i}`,
+        })
+        const r1 = await stub.runCiStep(step, i)
+        expect(
+          await stub.seenEnv(),
+          describeRun(`step "${step.name}" handed ShellCheck these (null: it never ran)`, r1),
+        ).toEqual([])
+
+        const real = await lintFixture(s, {
+          shellcheck: 'real',
+          tracked: { 'scripts/planted.sh': PLANTED },
+          name: `sc7-real-${i}`,
+        })
+        const r2 = await real.runCiStep(step, i)
+        expect(r2.code, describeRun(`step "${step.name}" passed a planted ShellCheck warning`, r2)).not.toBe(0)
+        expect(r2.output, describeRun(`step "${step.name}" failed without showing SC2034`, r2)).toContain('SC2034')
+      }
+    })
+  })
+})
+
+interface LintFixture {
+  /** The names ShellCheck's stub was handed, or null if it never ran. */
+  seenEnv(): Promise<string[] | null>
+  /** The arguments ShellCheck's stub was handed, or null if it never ran. */
+  seenArgs(): Promise<string[] | null>
+  runStage(): Promise<FixtureRun>
+  runCiStep(step: WorkflowStep, i: number): Promise<FixtureRun>
+}
+
+/**
+ * A git repository whose TRACKED files are `tracked`, plus `untracked` files it
+ * never adds, and a real, stub or absent ShellCheck. The bridge and its renderer
+ * are copied in UNTRACKED, so they are not part of the set being linted.
+ *
+ * A REAL ShellCheck is required, not skipped when absent: TASK-033 makes it a
+ * requirement of every machine that pushes, and a case that skipped would be a
+ * green suite over a lint that never ran.
+ */
+async function lintFixture(
+  s: Scenario,
+  opts: {
+    shellcheck: 'real' | 'stub' | 'none'
+    tracked: Record<string, string>
+    untracked?: Record<string, string>
+    name?: string
+  },
+): Promise<LintFixture> {
+  const name = opts.name ?? 'lint'
+  const repo = await s.gitRepo(name)
+  const envFile = s.workspace.path(`${name}-seen-env`)
+  const argsFile = s.workspace.path(`${name}-seen-args`)
+
+  for (const lib of ['scripts/lib/pipeline.sh', 'scripts/run-ts-suites.sh']) {
+    await s.fs.copyIn(join(REPO_ROOT, lib), `${name}/${lib}`)
+  }
+  for (const [rel, body] of Object.entries({ ...opts.tracked, ...(opts.untracked ?? {}) })) {
+    await s.fs.write(`${name}/${rel}`, body)
+  }
+  const add = await repo.git(['add', '--', ...Object.keys(opts.tracked)])
+  expect(add.code, add.output).toBe(0)
+
+  let path: string | undefined
+  if (opts.shellcheck === 'stub') {
+    const shims = await s.shimDir(`${name}-bin`)
+    await shims.add('shellcheck', recordingStub(envFile, argsFile))
+    path = shims.path()
+  } else if (opts.shellcheck === 'none') {
+    path = await s.pathWithout(['shellcheck'])
+  } else {
+    const found = await s.run('sh', ['-c', 'command -v shellcheck'], { cwd: repo.dir })
+    expect(
+      found.code,
+      'ShellCheck is not installed on this machine. TASK-033 makes it a requirement of the gate and of this ' +
+        'case, which runs the real linter: bash scripts/install-toolchain.sh',
+    ).toBe(0)
+  }
+
+  return {
+    seenEnv: () => recordedNames(envFile),
+    async seenArgs() {
+      try {
+        return (await readFile(argsFile, 'utf8')).split('\n').filter(Boolean)
+      } catch {
+        return null
+      }
+    },
+    ...stageDrivers(s, name, repo.dir, `sh_lint_stage ${JSON.stringify(repo.dir)}`, path),
   }
 }

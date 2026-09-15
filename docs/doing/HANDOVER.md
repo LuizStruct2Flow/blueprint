@@ -163,8 +163,22 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     semgrep's `.errors`, so a `PartialParsing` run (exit 0, `results: []`) is called clean. CI's
     `semgrep scan --error` likely has the same hole. Reported by Sylvia from Jesko's review of
     storm2flow's CodeBuild copy. Started without asking, under the security concern's
-    capability 4. **Philipp is fixing it** (`.scratch/brief-fr-f.md`); it is included in the late
-    Codex brief.
+    capability 4. **Fixed by Philipp** (`ab38a96`, `6a08518`).
+    - Unaccepted semgrep errors now make a run incomplete, in the gate and in CI. The gate
+      keeps its `--jobs 1` retry, then blocks.
+    - **One accepted class:** Syntax error / PartialParsing on shell scripts. Semgrep throws 18
+      of those on this repo's shellcheck-clean scripts. Accepted errors are counted visibly.
+    - CI carries a copy of the policy; test `#ci` runs the real workflow step so the copies
+      cannot drift.
+    - Verified in the real `returntocorp/semgrep` image; not yet on a live GitHub run.
+- **ALL AGENTS DONE (00:23, 2026-09-16).** Everything waits for the 02:12 Codex reviews:
+  - Alexey: `.scratch/brief-alexey-fr-code-review.md`
+  - Alex: `.scratch/brief-alex-fr-docs-review.md`
+  - Alex: `.scratch/brief-alex-fr-late-review.md`
+  - Alexey: `.scratch/brief-alexey-task037-recheck.md`
+  - Jesko: `.scratch/brief-jesko-bug121-recheck2.md`
+
+  Dispatch the three new-work reviews first. Codex quota ran out after ~3 runs last time.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

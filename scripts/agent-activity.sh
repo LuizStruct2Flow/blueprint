@@ -175,18 +175,16 @@ persona_label(){
   bp_roster_label "$BP_STATE_ROOT" "$1"
 }
 
-# --- who is behind one subagent transcript? (BUG-027) ------------------------
-# Every subagent transcript has a sibling agent-<id>.meta.json, and its
-# `description` is the dispatch text — the only place the PERSONA appears.
-# `agentType` beside it is `general-purpose` for all of them, which is what the
-# hook was recording: fourteen identical rows in .subagent-map and every line of
-# every persona labelled the same.
+# --- who is behind one subagent transcript? (BUG-027, BUG-124) ---------------
+# Every subagent transcript has a sibling agent-<id>.meta.json: the dispatch
+# `description` (the only place the PERSONA appears), `agentType`
+# (`general-purpose` for nearly all of them), and `parentAgentId` on a helper a
+# subagent started. bp_roster_subagent_label turns that into the label, and the
+# hook's bookends call the same function, so the two cannot disagree (BUG-010,
+# BUG-021) — which they did until BUG-124, when the hook derived its own.
 #
-# The name is read through scripts/lib/roster.sh, the same lookup the hook uses,
-# so the two labels cannot drift into disagreeing (BUG-010, BUG-021).
-#
-# Falls back to the previous behaviour — the mapped agent type, then a truncated
-# id — rather than failing. A stable, unhelpful label beats a feed that stops.
+# Falls back to a truncated id rather than failing. A stable, unhelpful label
+# beats a feed that stops.
 #
 # Resolved ONCE per transcript and cached by the caller, because the meta file is
 # written at dispatch and the transcript only becomes interesting after that. The
@@ -195,15 +193,9 @@ persona_label(){
 # every tick would cost a jq per subagent per tick forever — pay that only if the
 # race is ever actually observed.
 subagent_label(){
-  local f="$1" aid="$2" name
-  name="$(bp_roster_name_in_text "$BP_STATE_ROOT" \
-          "$(jq -r '.description // empty' "${f%.jsonl}.meta.json" 2>/dev/null)" 2>/dev/null)"
-  if [ -n "$name" ]; then
-    bp_roster_label "$BP_STATE_ROOT" "$name"
-    return 0
-  fi
-  name="$(grep -m1 "^$aid " "$log_dir/.subagent-map" 2>/dev/null | awk '{print $2}')"
-  printf '%s - Claude Code' "${name:-sub:${aid:0:6}}"
+  local f="$1" aid="$2"
+  bp_roster_subagent_label "$BP_STATE_ROOT" "${f%.jsonl}.meta.json" 2>/dev/null ||
+    printf 'sub:%s - Claude Code' "${aid:0:6}"
 }
 
 # Resolve once now; the supervisor re-resolves whenever the roster changes.

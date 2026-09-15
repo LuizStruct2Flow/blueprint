@@ -40,6 +40,7 @@
 #   bp_roster_name_for_role   <repo-root|file> <role>
 #   bp_roster_backing_for_name <repo-root|file> <name>
 #   bp_roster_name_in_text    <repo-root|file> <free text>   # BUG-027
+#   bp_roster_subagent_label  <repo-root|file> <agent-<id>.meta.json>   # BUG-124
 
 # --- warning memo -----------------------------------------------------------
 # Deliberately a space-delimited string rather than an associative array: this
@@ -209,6 +210,51 @@ bp_roster_name_in_text(){
   ')"
   [ -n "$hit" ] || return 1
   printf '%s' "$hit"
+}
+
+# --- a Claude subagent's meta file -> its feed label (BUG-124) ---------------
+# THE one way a subagent is labelled, for the streamed lines (agent-activity.sh)
+# and for both hook bookends (log-activity.sh). They used to derive it apart —
+# the feed from the meta file, the hook from a `description` field no real hook
+# payload carries — so every bookend read `[general-purpose - Claude Code]` while
+# the lines between them read the persona.
+#
+# Claude Code writes `agent-<id>.meta.json` beside the transcript: `description`
+# (the dispatch text), `agentType`, and `parentAgentId` on a nested dispatch only.
+#   1. the description names a persona  -> "<Name> - <Backing>"
+#   2. else a parent can be resolved    -> "<parent who> › <type> - Claude Code"
+#   3. else                             -> "<type> - Claude Code"
+# (2) is how a helper a persona starts stays attributed to that persona. The
+# parent is resolved by the same rules, so an unnamed chain reads
+# `general-purpose › claude-code-guide`, which is honest rather than invented.
+# rc 1 when the meta is unreadable or says nothing, so a caller keeps its own
+# fallback. Needs jq; without it everything is empty and that is rc 1 too.
+bp_roster_subagent_label(){
+  local who
+  who="$(_bp_roster_subagent_who "$1" "$2" 0)"
+  case $? in
+    0) bp_roster_label "$1" "$who" ;;
+    2) printf '%s - Claude Code' "$who" ;;
+    *) return 1 ;;
+  esac
+}
+
+# rc 0: a roster name. rc 2: a type, possibly prefixed by its parent. rc 1: nothing.
+_bp_roster_subagent_who(){
+  local src="$1" meta="$2" depth="$3" name type parent up
+  [ -r "$meta" ] || return 1
+  if name="$(bp_roster_name_in_text "$src" "$(jq -r '.description // empty' "$meta" 2>/dev/null)")"; then
+    printf '%s' "$name"; return 0
+  fi
+  type="$(jq -r '.agentType // empty' "$meta" 2>/dev/null)"
+  parent="$(jq -r '.parentAgentId // empty' "$meta" 2>/dev/null)"
+  # The depth cap only guards against a meta file that names itself as an ancestor.
+  if [ -n "$parent" ] && [ "$depth" -lt 8 ]; then
+    up="$(_bp_roster_subagent_who "$src" "$(dirname "$meta")/agent-$parent.meta.json" $((depth + 1)))"
+    case $? in 0|2) printf '%s › %s' "$up" "${type:-subagent}"; return 2 ;; esac
+  fi
+  [ -n "$type" ] || return 1
+  printf '%s' "$type"; return 2
 }
 
 # --- name -> backing agent --------------------------------------------------

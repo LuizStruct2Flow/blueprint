@@ -72,7 +72,14 @@ async function runHook(
   s: Scenario,
   name: string,
   layout: Layout,
-): Promise<{ code: number | null; output: string; found: string; codeRoot: string }> {
+): Promise<{
+  code: number | null
+  output: string
+  found: string
+  codeRoot: string
+  // BUG-119: returned and asserted on (#3) but missing here, so `tsc --noEmit` failed.
+  childRoot: string
+}> {
   const root = await s.workspace.dir(name)
 
   // The file UNDER TEST is the working tree's, not HEAD's: a spec that read

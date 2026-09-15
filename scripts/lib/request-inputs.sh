@@ -10,8 +10,10 @@
 # TASK-037 — a request may carry a file the blueprint does NOT ship: a change to
 # a blueprint-only file, or a new file. Membership in MANAGED_FILES no longer
 # decides whether a path is accepted, only whether it is labelled "not shipped".
-# That check used to be the only thing keeping `.git/` and gitignored secrets
-# out of a request, so those are now guards of their own.
+# That check used to be the only thing keeping `.git/` and secrets out of a
+# request, so those are now guards of their own: `.git` paths, symlinked
+# parents, ignored files (tracked or not), secret filenames, and a gitleaks scan
+# of every input's content — all before any remote contact.
 #
 # Plan: docs/doing/PLAN-A2BP-PR.md §5.1.
 # Requires: request.sh (bp_request_transport_env)
@@ -107,6 +109,42 @@ bp_inputs_is_managed() {
   grep -qxF -- "$1" "$2" || _bp_inputs_under_managed_dir "$1" "$2"
 }
 
+# --- _bp_inputs_secret_scan ROOT ACCEPTED ------------------------------------
+# gitleaks, the pre-push gate's secret scanner, over every accepted input's
+# bytes, managed or not. It runs here, before the fetch, because a reviewer
+# rejecting the PR cannot un-disclose a secret the push already carried.
+#
+# The project's bytes, not the staged ones: staging only restores
+# {{PROJECT_NAME}} on lines the fetched base already holds, so a secret that
+# appears only in the staged form is already in the blueprint.
+#
+# Missing gitleaks is skipped with a named warning, exactly as the pre-push gate
+# skips it, and the PR still meets the blueprint's own CI secret-scan. A scan
+# that ran and could not finish is NOT a skip: it blocks (BUG-003).
+_bp_inputs_secret_scan() {
+  local root="$1" accepted="$2" line canon out gl_rc rc=0
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "bp_inputs: gitleaks not installed — secret scan skipped, as in the pre-push gate (install: bash scripts/install-toolchain.sh)" >&2
+    return 0
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    canon=${line%:*}
+    gl_rc=0
+    out=$(gitleaks dir --no-banner --no-color --redact --verbose -- "$root/$canon" 2>&1) || gl_rc=$?
+    case "$gl_rc" in
+      0) : ;;
+      1) echo "bp_inputs: gitleaks found a secret in '$canon'; secrets are never filed. Rotate it if it was ever pushed anywhere." >&2
+         printf '%s\n' "$out" | sed 's/^/    /' >&2
+         rc=1 ;;
+      *) echo "bp_inputs: gitleaks could not complete on '$canon' (exit $gl_rc) — the secret scan did NOT run" >&2
+         printf '%s\n' "$out" | tail -5 | sed 's/^/    /' >&2
+         rc=1 ;;
+    esac
+  done <<< "$accepted"
+  return "$rc"
+}
+
 # --- bp_inputs_validate ROOT MANAGED_LIST_FILE PATH... -----------------------
 # Prints one `<canonical-path>:<mode>` line per accepted input, sorted byte-wise
 # and de-duplicated. Any refusal fails the whole call: a request is filed as one
@@ -150,23 +188,48 @@ bp_inputs_validate() {
         rc=1; continue ;;
     esac
 
+    # A symlinked DIRECTORY on the way is the same hole as a symlinked file
+    # (checked below): the bytes come from wherever it points. Walked for every
+    # input, managed or not, before anything asks git about the path.
+    local walked="" rest="$canon" part linked=""
+    while case "$rest" in */*) true ;; *) false ;; esac; do
+      part=${rest%%/*}; rest=${rest#*/}
+      walked=${walked:+$walked/}$part
+      if [ -L "$root/$walked" ]; then linked="$walked"; break; fi
+    done
+    if [ -n "$linked" ]; then
+      echo "bp_inputs: '$canon' is under '$linked', which is a symlink; refusing to file bytes from wherever it points" >&2
+      rc=1; continue
+    fi
+
     # Outside the managed set, the project's .gitignore is what separates
-    # content from secrets and local state (`.env`, AGENT_ROSTER.md, logs/):
-    # the contamination scan has no secret patterns. Managed paths skip this
-    # only because they are shipped content by definition.
+    # content from local state (AGENT_ROSTER.md, logs/). Managed paths skip
+    # this only because they are shipped content by definition.
+    #
+    # --no-index: without it git answers from the index, so a force-tracked
+    # file is never reported as ignored whatever the pattern says.
     if ! bp_inputs_is_managed "$canon" "$managed"; then
-      local ign_rc=0
-      bp_request_transport_env git -C "$root" check-ignore -q -- "$canon" 2>/dev/null || ign_rc=$?
+      local ign_rc=0 ign_err
+      ign_err=$(bp_request_transport_env git -C "$root" check-ignore --no-index -q -- "$canon" 2>&1) || ign_rc=$?
       case "$ign_rc" in
         0) echo "bp_inputs: '$canon' is gitignored in this project; ignored files are never filed" >&2
            rc=1; continue ;;
         1) : ;;
         *) # Unanswered is not "not ignored" (BUG-003: a guard that cannot run
-           # is not a guard that passed).
-           echo "bp_inputs: cannot tell whether '$canon' is gitignored: '$root' is not a git work tree" >&2
+           # is not a guard that passed). git's own reason, not a guess at it.
+           echo "bp_inputs: cannot tell whether '$canon' is gitignored: ${ign_err:-git check-ignore exited $ign_rc}" >&2
            rc=1; continue ;;
       esac
     fi
+
+    # Secrets, by name. The content scan below is the real check; this catches
+    # the files whose name alone says what they are, including when no scanner
+    # is installed. Case-folded, for the same reason as `.git` above.
+    case "$(printf '%s' "${canon##*/}" | tr 'A-Z' 'a-z')" in
+      .env|.env.*|*.pem|*.key|id_rsa*|id_ed25519*|*.p12|*.pfx)
+        echo "bp_inputs: '$canon' is named like a secret (.env, .pem, .key, id_rsa, id_ed25519, .p12, .pfx); secrets are never filed" >&2
+        rc=1; continue ;;
+    esac
 
     # -L before -f: `[ -f ]` follows symlinks, so a symlink to a regular file
     # passes it. Filing through one would send bytes from a location the
@@ -197,6 +260,7 @@ bp_inputs_validate() {
   done
 
   [ "$rc" -eq 0 ] || return 1
+  _bp_inputs_secret_scan "$root" "$accepted" || return 1
 
   # Sorted and de-duplicated here, once. The request key is a pure function of
   # the spec list, so ordering is a correctness property: the same request typed

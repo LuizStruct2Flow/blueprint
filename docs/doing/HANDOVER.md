@@ -137,6 +137,16 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     storm2flow's founder rule "checks read only from the repository"; the inbox records it as
     `FR-storm2flow-doc-links-escape` → BUG-125. Christian takes it after TASK-045.
   - Codex brief for all four late items: `.scratch/brief-alex-fr-late-review.md`.
+  - **BUG-124 fixed by Philipp** (`51d4978`, `fc64966`, verified live).
+    - Real SubagentStart/Stop payloads carry no description; it lives only in
+      `agent-<id>.meta.json`, which appears just after the start hook returns.
+    - Labels now come from one lookup, `bp_roster_subagent_label`: the persona in the
+      description, or `<parent> › <type>` via `parentAgentId`.
+    - The start marker is written by a detached, 5 s-bounded background process. **Codex must
+      check that it cannot accumulate** (BUG-001 history).
+    - `logs/.subagent-map` is removed.
+    - Each helper still gets two finish lines, because Claude Code fires the stop hook twice.
+      That behaviour predates the fix and is left alone.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

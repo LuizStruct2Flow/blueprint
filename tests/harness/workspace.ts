@@ -129,7 +129,15 @@ async function workspaceBase(source: BaseSource): Promise<{ dir: string; why: st
   if (TMPDIR) {
     return { dir: TMPDIR, why: 'TMPDIR is set, so it wins over the private default base' }
   }
-  const dir = join(XDG_CACHE_HOME || join(HOME || homedir(), '.cache'), 'bp-harness-tmp')
+  const wanted = join(XDG_CACHE_HOME || join(HOME || homedir(), '.cache'), 'bp-harness-tmp')
+  // lstat below inspects the base, but chmod, realpath and mkdtemp look the path
+  // up again. So the directories above it are checked first, and every later
+  // step uses their resolved form. After that only this user or root can swap
+  // the base between the check and its use.
+  await mkdir(dirname(wanted), { recursive: true, mode: 0o700 })
+  const parent = await realpath(dirname(wanted))
+  await refuseReplaceableAbove(parent)
+  const dir = join(parent, 'bp-harness-tmp')
   // mkdir's mode applies only to a directory it creates, so an existing base is
   // checked and tightened here. That is what makes the base private.
   const st = await lstat(dir).catch(async (err: NodeJS.ErrnoException) => {
@@ -146,6 +154,33 @@ async function workspaceBase(source: BaseSource): Promise<{ dir: string; why: st
   }
   if ((st.mode & 0o777) !== 0o700) await chmod(dir, 0o700)
   return { dir, why: 'TMPDIR is unset, so this is the private default base' }
+}
+
+/**
+ * Refuse unless only this user or root can replace entries in `from` or any
+ * directory above it (BUG-121). Whoever can rename or unlink in one of them
+ * could swap the base for a symlink after it is checked. A sticky directory
+ * lets others remove only their own entries, and a base someone else created
+ * is refused by the ownership check on the base itself.
+ */
+async function refuseReplaceableAbove(from: string): Promise<void> {
+  const uid = process.getuid?.()
+  for (let dir = from; ; dir = dirname(dir)) {
+    const st = await lstat(dir)
+    const ownerTrusted = st.uid === uid || st.uid === 0
+    const openToOthers = (st.mode & 0o022) !== 0 && (st.mode & 0o1000) === 0
+    if (!ownerTrusted || openToOthers) {
+      throw new Error(
+        `${dir} is owned by uid ${st.uid} with mode ${(st.mode & 0o7777).toString(8)}. ` +
+          `Every directory above the default workspace base must be owned by you ` +
+          `or root, and not writable by group or others unless it is sticky, ` +
+          `because anyone who can replace entries there could swap the base for a ` +
+          `symlink (BUG-121). Fix that directory's owner or mode, or point TMPDIR ` +
+          `at a directory you trust.`,
+      )
+    }
+    if (dirname(dir) === dir) return
+  }
 }
 
 export interface Workspace {

@@ -33,6 +33,18 @@
  *     exactly no-chain-guard.sh, session-resume.sh and wait-mic.sh; #2 red,
  *     the same three absent after `pull --yes` reported 37 files pulled.
  *   With the three entries: #1 #2 green.
+ *
+ * TASK-025 #3 (Alexey, c3-4 review #1) — observed on a copy of the tree with
+ * its history (.scratch/c025/mutants9.py set9b):
+ *   The CLI before the fix (copies only what it is named)   → #3: the project's
+ *     own CLI exits 1, "scripts/lib/signals.sh is missing"
+ *   No lib closure at all                                    → #3
+ * NOT SEEN: deriving the closure from `lib/NAME.sh` paths only, dropping the
+ * `for lib in a.sh b.sh` lists, leaves #3 green. Every lib this old project
+ * needs updated is ALSO named by a path somewhere in the CLI's code, so the
+ * list form has no independent witness here. Also unwitnessed: a lib the
+ * operator DECLINES interactively, or a guard refuses, keeps the CLI from
+ * being written. That path needs a terminal to answer the prompt.
  */
 
 import { describe, it, expect } from 'vitest'

@@ -709,7 +709,7 @@ for c in ./scripts/blueprint ./scaffolding/scripts/blueprint; do
   [ -x "$c" ] && exec "$c" "$@"
 done
 echo "blueprint: no scripts/blueprint in $PWD. Run from a project root," >&2
-echo "  or fetch the CLI once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/blueprint" >&2
+echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/blueprint" >&2
 exit 1
 ```
 

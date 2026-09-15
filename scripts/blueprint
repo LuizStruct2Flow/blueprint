@@ -1491,6 +1491,20 @@ cmd_drift() {
 }
 
 # --- Subcommand: pull ---
+# _bp_cli_libs — the scripts/lib/*.sh files the blueprint's CLI needs, one per
+# line: every NAME.sh its CODE names (not its comments, not MANAGED_FILES) that
+# exists as scripts/lib/NAME.sh in the blueprint. Read from the CLI being
+# PULLED, so a lib it starts sourcing travels with it without an edit here.
+# Catches both `lib/NAME.sh` paths and `for lib in a.sh b.sh` lists.
+_bp_cli_libs() {
+  local name
+  sed -e '/^MANAGED_FILES=(/,/^)/d' -e '/^[[:space:]]*#/d' "$(bp_blueprint_path scripts/blueprint)" \
+    | { grep -oE '[A-Za-z0-9_-]+\.sh' || true; } | sort -u \
+    | while IFS= read -r name; do
+        if [ -f "$(bp_blueprint_path "scripts/lib/$name")" ]; then printf 'scripts/lib/%s\n' "$name"; fi
+      done
+}
+
 cmd_pull() {
   read_blueprint_source
 
@@ -1532,6 +1546,31 @@ cmd_pull() {
     return 0
   fi
 
+  # TASK-025 — THE CLI TRAVELS WITH THE LIBS IT SOURCES. `pull` copies exactly
+  # what it is named, so `pull scripts/blueprint` used to land a CLI beside libs
+  # older than it, and the project's own CLI then refused to run (Alexey, c3-4
+  # review #1). The libs go FIRST and the CLI LAST, and if any of them is not
+  # pulled the CLI is not written either. A partial pull adds the libs; a full
+  # pull already selected every one that differs, so it is only reordered.
+  local cli_needs=" " cli_unmet="" lib rest=()
+  if printf '%s\n' "${files[@]}" | grep -qx 'scripts/blueprint'; then
+    for f in "${files[@]}"; do
+      if [ "$f" != scripts/blueprint ]; then rest+=("$f"); fi
+    done
+    files=()
+    while IFS= read -r lib; do
+      cli_needs="$cli_needs$lib "
+      case " ${rest[*]:-} " in
+        *" $lib "*) ;;
+        *) if [ "$partial" -eq 1 ]; then files+=("$lib"); fi ;;
+      esac
+    done < <(_bp_cli_libs)
+    files+=(${rest[@]+"${rest[@]}"} scripts/blueprint)
+    if [ "$partial" -eq 1 ] && [ "$cli_needs" != " " ]; then
+      echo "scripts/blueprint brings the libs it sources:$cli_needs"
+    fi
+  fi
+
   if [ "$BP_SYNC_MODE" = address ]; then
     echo "${C_BOLD}Pulling from $BP_SYNC_REMOTE ($BP_SYNC_BRANCH) at $BP_SYNC_SHA${C_RESET}"
   else
@@ -1539,6 +1578,12 @@ cmd_pull() {
   fi
   local pulled=0 pull_out=""
   for f in "${files[@]}"; do
+    if [ "$f" = scripts/blueprint ] && [ -n "$cli_unmet" ]; then
+      echo
+      echo "  ${C_RED}skipped${C_RESET} scripts/blueprint — it sources$cli_unmet, which was not pulled, so it would refuse to run"
+      refused_guard=1
+      continue
+    fi
     bp=$(bp_blueprint_path "$f")
     if [ ! -f "$bp" ]; then
       echo "  ${C_RED}skip${C_RESET}  $f  (not in blueprint)"
@@ -1558,7 +1603,10 @@ cmd_pull() {
     echo "${C_BOLD}── $f${C_RESET}"
     if [ "$BP_PP_MODE" = refuse ]; then
       # Nothing to preview and nothing to ask: pull_file reports the refusal.
-      pull_file "$f" "$pull_out" || refused_guard=1
+      if ! pull_file "$f" "$pull_out"; then
+        refused_guard=1
+        case "$cli_needs" in *" $f "*) cli_unmet="$cli_unmet $f" ;; esac
+      fi
       continue
     fi
     if [ ! -f "$f" ]; then
@@ -1620,7 +1668,11 @@ cmd_pull() {
       case "$ans" in
         y|Y) ;;
         q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; break ;;
-        *) echo "  ${C_DIM}skipped${C_RESET}"; continue ;;
+        *)
+          echo "  ${C_DIM}skipped${C_RESET}"
+          case "$cli_needs" in *" $f "*) cli_unmet="$cli_unmet $f" ;; esac
+          continue
+          ;;
       esac
     fi
     mkdir -p "$(dirname "$f")"
@@ -1631,6 +1683,7 @@ cmd_pull() {
       echo "  ${C_RED}skipped${C_RESET} $f (see warning above)"
       # BUG-034 — pull_file declines only when a guard refused the file.
       refused_guard=1
+      case "$cli_needs" in *" $f "*) cli_unmet="$cli_unmet $f" ;; esac
     fi
   done
   rm -f "$pull_out"

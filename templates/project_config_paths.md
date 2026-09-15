@@ -52,7 +52,7 @@ Add either line, or both, as its own list item:
 
 - ``BP_WEB_ROOT: `frontend/public` `` names the repo directory the site serves.
   A link to `/security.html` resolves when `frontend/public/security.html`
-  exists.
+  exists and git tracks it. The directory must be inside this repo.
 - ``BP_WEB_PATHS: `/security.html /terms/v1.html` `` lists pages served from
   somewhere else, separated by spaces. Each must match the link exactly.
 

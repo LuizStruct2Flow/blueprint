@@ -387,17 +387,19 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
   })
 
   it('THE REAL TREE — every relative link under docs/ resolves', async () => {
-    // No scenario(): this reads the repository and writes nothing, so a
-    // workspace would be theatre. The floor is asserted first for the same
-    // reason the shell suite asserted it first — a scan that examined nothing
-    // would otherwise report a clean docs tree.
-    const scan = await scanDocLinks(join(REPO_ROOT, 'docs'))
+    // It writes nothing. The scenario is here for its process runner: BUG-125
+    // asks git which files a clone contains. The floor is asserted first for the
+    // same reason the shell suite asserted it first — a scan that examined
+    // nothing would otherwise report a clean docs tree.
+    await scenario('doc-links-real-tree', async (s) => {
+      const scan = await scanDocLinks(join(REPO_ROOT, 'docs'), s.run)
 
-    expect(
-      scan.examined,
-      `only ${scan.examined} relative link(s) examined — the extractor is ` +
-        `probably broken, so a pass proves nothing`,
-    ).toBeGreaterThanOrEqual(20)
-    expect(scan.broken, scan.broken.join('\n')).toEqual([])
+      expect(
+        scan.examined,
+        `only ${scan.examined} relative link(s) examined — the extractor is ` +
+          `probably broken, so a pass proves nothing`,
+      ).toBeGreaterThanOrEqual(20)
+      expect(scan.broken, scan.broken.join('\n')).toEqual([])
+    })
   })
 })

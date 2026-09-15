@@ -99,7 +99,28 @@ rules in `.scratch/brief-common-fr.md`):
 
 Agents report text for files they do not own (deck, README, cross-owned docs) and Eto applies it.
 Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota returns after
-2026-09-16 02:10. PRs #71–#74 are closed with comments
+2026-09-16 02:10.
+
+**Progress:**
+- **Philipp done.** BUG-122: `da4f7b2`, `f4b1c25`. TASK-042: `29aaa0f`, `1e62d68`. Eto added the
+  TASK-042 docs in `0df1fb8` (README, deck) and `e4c32be` (DoD). `.gitignore` was deliberately
+  not changed: `.claude/` stays ignored, and the project file is `git add -f`'d.
+  - **Pull impact:** the first pull after this ships refuses `settings.json` in every derived
+    project whose copy carries rules the blueprint does not ship (storm2flow certainly). It
+    prints them as a ready `.claude/settings.project.json` to save.
+- **Vitali done.** TASK-039: `e7e1d68`, `e25f4a7`. TASK-041: `d6fa8ca`, plus the root configs by
+  Eto in `bf8d37c`. His report of a `tsc` error in `permission-policy.spec.ts` was a mid-work
+  state; `tsc` is clean at `bf8d37c`.
+- **Christian (TASK-040, TASK-043) still running.** After he reports, apply in CLAUDE.md:
+  - Philipp's settings paragraph (`.scratch/pending-t042-owned-docs.md`)
+  - a one-line note in §"Test directory layout": in a derived project, tests count for the DoD
+    bug gate only under `BP_TEST_ROOTS`, and the top-level `tests/` is the blueprint's
+- **Codex reviews after 02:10**, briefs ready:
+  - `.scratch/brief-alexey-fr-code-review.md` (BUG-122, TASK-042, TASK-039)
+  - `.scratch/brief-alex-fr-docs-review.md` (TASK-040, 041, 043)
+  - then the two older re-checks (`brief-alexey-task037-recheck.md`, `brief-jesko-bug121-recheck2.md`)
+  - **Nothing from this batch is pushed until those verdicts are in.** The bug and task
+    acceptances are committed locally and ride the same push. PRs #71–#74 are closed with comments
 naming their tasks, and their branches are deleted. The row moves (`92a5cf5`..) and this note are
 local, for the next push. **Still open:**
 - **CI** for `4267ac8`: a Monitor was armed at push time and dies with the session. Check with

@@ -396,6 +396,15 @@ if [ "$MODE" = "replace-command" ]; then
     exit 0
   fi
 
+  # A directory, or a link to one, is refused before anything is prepared.
+  # `mv -f temp target` would move the command INTO it, return 0, and this
+  # would report "replaced" with no command in place (Alexey, c3-4 review #2).
+  # `-d` follows a link, so one test covers both shapes.
+  if [ -d "$BLUEPRINT_COMMAND_PATH" ]; then
+    echo "✗ $BLUEPRINT_COMMAND_PATH is a directory, or a link to one; move it aside, then run this again" >&2
+    exit 1
+  fi
+
   # Which project, and is it one the command can serve? The state §7.2 step 7
   # verifies: .blueprint-source sets blueprint_release_branch and no longer has
   # blueprint_source. The blueprint itself has no .blueprint-source, so running

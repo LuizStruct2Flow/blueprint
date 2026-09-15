@@ -399,6 +399,30 @@ describe('a2bp request commits are deterministic, minimal, and assert their own 
     })
   })
 
+  it('#7d TASK-037: a new path differing from the base only by case is refused, parents included', async () => {
+    await scenario('a2bp-build-7d', async (s) => {
+      // A git tree holds `Readme.md` and `README.md` side by side; a macOS
+      // checkout cannot. Exact collisions are refused above; these were not.
+      const up = await s.gitRepo('upstream-case')
+      await s.fs.write('upstream-case/Readme.md', '# readme\n')
+      await s.fs.write('upstream-case/Docs/guide.md', 'guide\n')
+      await up.commitAll('base')
+      const base = (await up.git(['rev-parse', 'HEAD'])).stdout.trim()
+      const bare = await bareClone(s, up.dir)
+
+      const problems: string[] = []
+      for (const bad of ['README.md', 'docs/NEW.md']) {
+        const r = await call(s, 'bp_build_validate_base', [bare, base, bad])
+        if (r.code === 0) problems.push(`${bad} was accepted`)
+        else if (!r.output.includes('only by case')) problems.push(`${bad} refused, but not for case: ${r.output}`)
+      }
+      // Non-vacuity: the exact parent and an unrelated path still pass.
+      const ok = await call(s, 'bp_build_validate_base', [bare, base, 'Docs/NEW.md', 'other/NEW.md'])
+      if (ok.code !== 0) problems.push(`exact-case paths were refused: ${ok.output}`)
+      expect(problems).toEqual([])
+    })
+  })
+
   it('#8 the assertion catches an unseeded index — the defect that survived ten plan reviews', async () => {
     await scenario('a2bp-build-8', async (s) => {
       // Built by hand from an EMPTY index — exactly what the missing read-tree

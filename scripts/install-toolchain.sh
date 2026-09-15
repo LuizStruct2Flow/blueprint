@@ -194,6 +194,7 @@ try {
   const have = process.versions.node.split(".").map(Number)
   const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
   const satisfies = (c) => {
+    if (c === "*") return true
     const m = /^(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(c)
     if (!m) throw new Error("cannot interpret engines.node \"" + range + "\" in " + file)
     const [M, n, p] = [m[2], m[3] || 0, m[4] || 0].map(Number)
@@ -214,21 +215,26 @@ try {
       default: return lo >= 0 && hi < 0
     }
   }
-  const alts = range.split("||").map((alt) => alt.replace(/(\^|~|>=|<=|>|<|=)\s+/g, "$1").trim().split(/\s+/))
+  // An empty alternative has no tokens and means any version.
+  const alts = range
+    .split("||")
+    .map((alt) => alt.replace(/(\^|~|>=|<=|>|<|=)\s+/g, "$1").trim().split(/\s+/).filter(Boolean))
   // EVERY comparator is checked for a known form BEFORE any is evaluated.
   // Evaluation short-circuits, so an unknown token after one that already fails
   // was never parsed: `20 - 22` on Node 24 read as "unsupported" rather than
   // "cannot interpret", and a mutant that passed every uninterpretable range
   // left tests/install-toolchain #4 green.
+  // `*` is ONE comparator. Skipping an alternative that began with it waived
+  // every token after it, so `* >=99.0.0` accepted any Node and `* nonsense`
+  // was never refused (tests/install-toolchain #6).
   for (const cs of alts) {
-    if (cs[0] === "" || cs[0] === "*") continue
     for (const c of cs) {
-      if (!/^(\^|~|>=|<=|>|<|=)?v?\d+(\.\d+)?(\.\d+)?$/.test(c)) {
+      if (c !== "*" && !/^(\^|~|>=|<=|>|<|=)?v?\d+(\.\d+)?(\.\d+)?$/.test(c)) {
         throw new Error("cannot interpret engines.node \"" + range + "\" in " + file)
       }
     }
   }
-  const ok = alts.some((cs) => cs[0] === "" || cs[0] === "*" || cs.every(satisfies))
+  const ok = alts.some((cs) => cs.every(satisfies))
   console.log(range)
   process.exit(ok ? 0 : 3)
 } catch (e) {

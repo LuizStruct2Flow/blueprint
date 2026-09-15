@@ -117,6 +117,21 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
   - Claude Code skips a missing `@`-import silently (checked in its installed source).
   - **The imports add ~976 lines / 43.5 KB to always-on context** here (CLAUDE.md is 1276),
     ~947 lines in a fresh project. That matters for TASK-024.
+- **Vitali added storm2flow's rehearsal witnesses to TASK-039** in `cc74f6c`: a blueprint fixture
+  string cannot vouch for project BUG-200, and a `backend/` root counts. Both were red on the
+  pre-TASK-039 lib and are green now.
+- **Three more items promoted 2026-09-15 late, founder decisions:**
+  - **BUG-124** (`7242d8d`): the feed labels subagent start/finish markers and nested helpers by
+    agent type, so the founder could not see Christian. Philipp is fixing it; brief
+    `.scratch/brief-fr-e.md`.
+  - **TASK-044** (`32a1c59`): a project declares its CI; the GitHub-only suites skip visibly
+    otherwise.
+  - **TASK-045** (`18829a9`): doc-links gets a declared web root or allowlist.
+  - Both tasks came from storm2flow's orchestrator (Sylvia, session `storm2flow-3b`), who
+    messaged directly after rehearsing the pulled gate. **Christian** builds both
+    (`.scratch/brief-fr-d.md`). Both are recorded PROMOTED in the inbox. She was told TASK-042's
+    pull refusal is coming for storm2flow's `settings.json`.
+  - All three need Codex review too: add them to Alex's docs brief or a third brief at 02:12.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

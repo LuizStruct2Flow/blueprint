@@ -184,6 +184,15 @@ batch uses. CI's ts-tests job runs the same function, not a copy of the command.
 A project without `tests/package.json` skips the stage with that reason; one
 whose compiler is not installed is blocked and told to run `npm ci`.
 
+**Just before that, it lints the shipped shell scripts with ShellCheck
+(TASK-033).** `sh_lint`, in the same file, runs `shellcheck --severity=warning`
+over every file git tracks under `scripts/` and `.githooks/` that is shell by
+extension or shebang, through the same `ts_scrubbed` scrub. CI's ts-tests job
+runs the same function. ShellCheck is required on every machine that pushes: the
+stage blocks when it is missing and prints `bash scripts/install-toolchain.sh`,
+which installs it on macOS (brew) and on Linux (a pinned release). Fix a finding,
+or disable it inline with a reason; never lower the severity.
+
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
 sets it at bootstrap, but a clone never runs bootstrap. This file previously

@@ -227,8 +227,15 @@ hangs off that root.
   into a symlink-to-directory writes into the referent and reports success; (3) S2 a Node
   range starting with `*` bypasses the rest (`* >=99.0.0` accepts 24.1.0); (4) S3 #37b's
   sub-runs lack independent red witnesses; (5) S3 no case for a missing
-  `blueprint_release_branch`. Alexey could not run vitest (read-only temp in his sandbox) —
-  **the orchestrator re-runs the full suite after the fixes.** ShellCheck is not installed, so
+  `blueprint_release_branch`. **All five fixed locally (2026-09-15), `0f488c6`..`c93bdb3`:**
+  wildcard is one comparator (`0f488c6`/`16ccc29`, `34bf260`); pulling `scripts/blueprint`
+  brings the libs it sources first (`bdd9177`/`02b9c1d`); #37b split into independent cases
+  (`0d3f3f5`, `c93bdb3`); replacement refuses a directory destination
+  (`3155921`/`8082719`); a missing release branch exits 5, no fallback to main (`86af5c7`).
+  **Now:** Alexey is confirming them (`.scratch/brief-alexey-025-c34-fix-review.md`) and
+  Christian is running the full TypeScript suite. Alexey could not run vitest last time
+  (read-only temp in his sandbox), so **the orchestrator runs the full suite itself before
+  the push.** ShellCheck is not installed, so
   the changed scripts are unlinted.
   A refused deletion of an agent's own scratch copy is not a stop condition: leave it and
   report it. **TASK-028 is review-complete and ready to push,

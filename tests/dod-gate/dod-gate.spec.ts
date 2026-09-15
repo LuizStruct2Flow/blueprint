@@ -119,6 +119,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const LIB = 'scripts/lib/dod-gate.sh'
+const SUBJECT_LIB = 'scripts/lib/commit-subject.sh'
 const HOOK = join(REPO_ROOT, '.githooks/pre-push-project')
 
 const BUGS_HEADER = '| # | Bug | Sev | Status | Detail |\n|---|---|---|---|---|\n'
@@ -145,10 +146,19 @@ async function git(s: Scenario, cwd: string, args: string[]) {
  * a missing `docs/done/BACKLOG.md` would make `dod_find_row` skip a folder, and
  * a skipped folder reads as "no row" — the vacuous direction.
  */
-async function build(s: Scenario, tag: string): Promise<Fixture> {
+/**
+ * TASK-039: `kind` is whose `tests/` this is. In the blueprint (`.blueprint-root`)
+ * it holds the repo's own regression tests. In a derived project it holds the
+ * suites the blueprint ships, which name the BLUEPRINT's bug numbers, so the
+ * bug-test stage must not count them. Every pre-TASK-039 case models the
+ * blueprint, which is the shape they were written against.
+ */
+async function build(s: Scenario, tag: string, kind: 'blueprint' | 'derived' = 'blueprint'): Promise<Fixture> {
   const dir = await s.workspace.dir(tag)
   await s.fs.copyIn(join(REPO_ROOT, LIB), join(dir, LIB))
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/state-dir.sh'), join(dir, 'scripts/lib/state-dir.sh'))
+  await s.fs.copyIn(join(REPO_ROOT, SUBJECT_LIB), join(dir, SUBJECT_LIB))
+  await s.fs.write(join(dir, kind === 'blueprint' ? '.blueprint-root' : '.blueprint-source'), `${kind}\n`)
   for (const state of LIFECYCLE) {
     await s.fs.write(join(dir, `docs/${state}/BUGS.md`), BUGS_HEADER)
     await s.fs.write(join(dir, `docs/${state}/BACKLOG.md`), BACKLOG_HEADER)
@@ -279,6 +289,9 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
 
   it('#4-tested adding a test that names BUG-042 satisfies it', async () => {
     await scenario('dod-gate-4-tested', async (s) => {
+      // TASK-039: this is also the blueprint's own default. No roots are
+      // declared, and in the blueprint `tests/` is this repo's own tests, so it
+      // must still count. Excluding `tests/` everywhere turns this red.
       const f = await build(s, 'r4')
       await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-042** | untested | S3 | open | d |\n')
       await commit(s, f, 'c.txt', 'BUG#42: a fix with a regression test')
@@ -431,6 +444,88 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
           'list while the gate prints PASSED',
       ).not.toEqual([])
       expect(items.sort(), `parsed, but not what it was given: ${r.stdout}`).toEqual(['BUG-40', 'TASK-7'])
+    })
+  })
+
+  it('#8b TASK-039: the gate reads subjects with the same rule the commit-msg hook applies', async () => {
+    await scenario('dod-gate-8b', async (s) => {
+      // `BUG#41:no space` is refused by commit_subject_ok, so the commit-msg hook
+      // would never have let it land. A private pattern that still extracts it
+      // is a second definition of the rule that disagrees with the first.
+      const f = await build(s, 'r8b')
+      await commit(s, f, 'x.txt', 'BUG#41:no space after the colon')
+      await commit(s, f, 'y.txt', 'TASK#7: a conforming subject')
+
+      const r = await s.run(
+        'bash',
+        ['-c', `. ./${LIB}\ndod_items_in_push "$1"\n`, 'dod-items', rangeOf(f)],
+        { cwd: f.dir },
+      )
+      expect(r.stdout.split('\n').filter(Boolean), r.output).toEqual(['TASK-7'])
+    })
+  })
+})
+
+describe('TASK-039 — a project bug is vouched for by the project, not by a blueprint suite', () => {
+  /** A derived project fixing BUG-042, with its row in doing/. */
+  async function derivedFix(s: Scenario, tag: string, roots?: string): Promise<Fixture> {
+    const f = await build(s, tag, 'derived')
+    await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-042** | project bug | S3 | open | d |\n')
+    if (roots !== undefined) {
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), `# Paths\n\n- BP_TEST_ROOTS: \`${roots}\`\n`)
+    }
+    await commit(s, f, 'c.txt', 'BUG#42: fix a project bug')
+    return f
+  }
+
+  /** What the blueprint ships into a derived project's tests/: a suite naming the blueprint's BUG-042. */
+  const SHIPPED_SUITE = 'tests/x/test.sh'
+  const SHIPPED_TEXT = 'echo "BUG-042: the blueprint\'s own bug"\n'
+
+  it('#9 a test under a declared root satisfies the stage', async () => {
+    await scenario('dod-gate-9', async (s) => {
+      const f = await derivedFix(s, 'r9', 'backend/src frontend/e2e')
+      await s.fs.write(join(f.dir, 'frontend/e2e/fix.spec.ts'), "it('BUG-042: regression', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a test under a declared root was not found:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#10 a blueprint-shipped suite naming the number does not count', async () => {
+    await scenario('dod-gate-10', async (s) => {
+      // The storm2flow defect: about 97 of its bug numbers are also named by
+      // blueprint suites, and each of those passed with no test of its own.
+      const f = await derivedFix(s, 'r10')
+      await s.fs.write(join(f.dir, SHIPPED_SUITE), SHIPPED_TEXT)
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a blueprint suite vouched for a project bug:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed but did not name the bug').toContain('BUG-42')
+    })
+  })
+
+  it('#10b a declared root that contains tests/ still skips the shipped suites', async () => {
+    await scenario('dod-gate-10b', async (s) => {
+      // Declaring `.` must not smuggle tests/ back in.
+      const f = await derivedFix(s, 'r10b', '.')
+      await s.fs.write(join(f.dir, SHIPPED_SUITE), SHIPPED_TEXT)
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a declared '.' root searched the blueprint's suites:\n${r.output}`).not.toBe(0)
+    })
+  })
+
+  it('#10c a declared root inside tests/ is the project\'s own and is searched', async () => {
+    await scenario('dod-gate-10c', async (s) => {
+      // CLAUDE.md puts a project's E2E suites under tests/e2e/. Declaring that
+      // directory is the project claiming it, so it counts. Only the undeclared
+      // bulk of tests/ is the blueprint's.
+      const f = await derivedFix(s, 'r10c', 'tests/e2e')
+      await s.fs.write(join(f.dir, 'tests/e2e/fix.spec.ts'), "it('BUG-042: regression', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a declared root under tests/ was not searched:\n${r.output}`).toBe(0)
     })
   })
 })

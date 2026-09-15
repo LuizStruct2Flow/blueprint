@@ -205,11 +205,14 @@ hangs off that root.
   type + option spreads), `exactOptionalPropertyTypes` on. **Jesko's review (2026-09-15): push after these fixes** →
   `.scratch/JESKO-task028-review.md` — BUG-110 shell fix, BUG-111, BUG-119 and H5 verified;
   (1) the preflight witness only plants the marker AT `TMPDIR`, so a base-only check passes
-  it — Philipp is adding below-`TMPDIR` cases for all three markers; (2) the five suites
+  it — **resolved by `74db453`**: three below-`TMPDIR` cases, one per marker; the base-only
+  mutant reddens all three, each missing-marker mutant reddens exactly its own case; (2) the five suites
   could not run inside his sandbox (its own `/tmp/.git`) — **resolved: re-run by the
   orchestrator with `TMPDIR=/home/luiz/.cache/bp-harness-tmp`, harness + state-root +
   state-dir + code-root + ts-bridge 96/96 green** (2026-09-15, on a tree that also held
-  Christian's uncommitted TASK-025 edits).
+  Christian's uncommitted TASK-025 edits). **TASK-028 is review-complete and ready to push,
+  but cannot go alone:** its commits interleave with TASK-025 commit 3 (`51654e8`, not yet
+  reviewed) — push everything together after Alexey reviews commits 3–4.
   **Gap found: no gate stage or CI job runs `tsc`** — rowed as **TASK-031** in
   `backlog/`, re-opened after TASK-025 commit 4 lands (same workflow and hook files). **While a Codex run is live, run suites with
   `TMPDIR=/home/luiz/.cache/bp-harness-tmp`.** Still in flight:

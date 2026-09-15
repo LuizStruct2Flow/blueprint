@@ -197,6 +197,13 @@ hangs off that root.
 
 ## 3. LIVE HAZARDS
 
+- **The activity feed can stop without leaving a trace.** On 2026-09-15 `--status` reported
+  "not running" around 11:37; the last line had been written at 10:35 and nothing in `logs/`
+  said why. Restarting it (`bash scripts/agent-activity.sh --daemon`) recreates
+  `logs/agent-activity.log`, so an open `tail -f` keeps following the deleted file and shows
+  nothing. **Watch with `tail -F`**, which reopens by name, and check `--status` whenever the
+  feed goes quiet while agents are working. Cause not yet determined.
+
 - **PUSHES ARE BLOCKED: `sync-by-address` #20c is red on 2 of 2 gate runs (BUG-120).** On
   2026-09-15 two consecutive docs-only pushes (08:00, 08:21) failed it — "a fetch started
   AFTER the run was signalled" — with the code byte-identical to `d984a45`, which had passed

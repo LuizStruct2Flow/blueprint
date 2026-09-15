@@ -343,7 +343,7 @@ describe('a2bp validates its destination and its inputs before anything leaves',
     })
   })
 
-  it('#9 an unmanaged file is refused, pointing at project_config_*.md', async () => {
+  it('#9 a root project_config_*.md is refused, pointing at project_config_*.md', async () => {
     await scenario('a2bp-inputs-9', async (s) => {
       const { proj, managed } = await project(s)
       const r = await call(s, 'bp_inputs_validate', [proj, managed, 'project_config_dod.md'])
@@ -385,6 +385,105 @@ describe('a2bp validates its destination and its inputs before anything leaves',
         'project_config_dod.md',
       ])
       expect(r.code, 'a mixed valid/invalid list SUCCEEDED — a partial request would be filed').not.toBe(0)
+    })
+  })
+
+  // =========================================================================
+  // PART 2b — unmanaged paths (TASK-037)
+  //
+  // a2bp proposes files the blueprint does not ship: a change to a blueprint-
+  // only file, or a new file. The managed-list check used to refuse them, and
+  // in doing so it was ALSO the only thing standing between a2bp and `.git/`
+  // or a gitignored secret. Each of those is now its own guard, named here.
+  // =========================================================================
+
+  /** A git work tree with unmanaged files, an ignored secret, and a `.git/`. */
+  async function repoProject(s: Scenario): Promise<{ proj: string; managed: string }> {
+    const repo = await s.gitRepo('rproj')
+    await s.fs.write('rproj/docs/DoD.md', 'dod\n')
+    await s.fs.write('rproj/templates/seed.md', 'seed\n')
+    await s.fs.write('rproj/docs/NEW.md', 'new\n')
+    await s.fs.write('rproj/.gitignore', '.env\nsecrets/\n')
+    await s.fs.write('rproj/.env', 'TOKEN=abc123\n')
+    await s.fs.write('rproj/secrets/key.md', 'key\n')
+    await s.fs.write('rproj/sub/.git/config', '[core]\n')
+    const managed = await s.fs.write('managed-r', 'docs/DoD.md\n')
+    return { proj: repo.dir, managed }
+  }
+
+  it('#14 TASK-037: unmanaged files that exist are accepted with modes attached', async () => {
+    await scenario('a2bp-inputs-14', async (s) => {
+      const { proj, managed } = await repoProject(s)
+      const r = await call(s, 'bp_inputs_validate', [proj, managed, 'templates/seed.md', 'docs/NEW.md'])
+      expect(r.code, `an unmanaged file was refused\n${r.output}`).toBe(0)
+      expect(captured(r)).toBe('docs/NEW.md:100644\ntemplates/seed.md:100644')
+    })
+  })
+
+  it('#15 TASK-037: a path inside a .git directory is refused, naming the reason', async () => {
+    await scenario('a2bp-inputs-15', async (s) => {
+      // `.git/config` carries remotes and sometimes credentials. Nothing inside a
+      // repository's own metadata is a proposal.
+      const { proj, managed } = await repoProject(s)
+      const problems: string[] = []
+      for (const bad of ['.git/config', 'sub/.git/config']) {
+        const r = await call(s, 'bp_inputs_validate', [proj, managed, bad])
+        if (r.code === 0) problems.push(`${bad} was accepted`)
+        else if (!r.output.includes('.git directory')) problems.push(`${bad} refused without naming .git`)
+      }
+      expect(problems).toEqual([])
+    })
+  })
+
+  it('#16 TASK-037: a gitignored file is refused, naming the reason', async () => {
+    await scenario('a2bp-inputs-16', async (s) => {
+      // The scan has no secret patterns. What keeps `.env` off a pushed branch is
+      // that an ignored file is, by the project's own declaration, not content.
+      const { proj, managed } = await repoProject(s)
+      const problems: string[] = []
+      for (const bad of ['.env', 'secrets/key.md']) {
+        const r = await call(s, 'bp_inputs_validate', [proj, managed, bad])
+        if (r.code === 0) problems.push(`${bad} was accepted`)
+        else if (!r.output.includes('gitignored')) problems.push(`${bad} refused without saying gitignored`)
+      }
+      expect(problems).toEqual([])
+    })
+  })
+
+  it('#17 TASK-037: the file-shape guards refuse an unmanaged path for their own reason', async () => {
+    await scenario('a2bp-inputs-17', async (s) => {
+      // Before TASK-037 these were refused as "not managed" before any of the
+      // shape checks ran, so none of them was ever exercised on such a path.
+      const { proj, managed } = await repoProject(s)
+      const elsewhere = await s.fs.write('elsewhere.md', 'x\n')
+      const link = await s.run('ln', ['-s', elsewhere, join(proj, 'docs/LINK.md')], {
+        cwd: s.workspace.root,
+      })
+      expect(link.code, link.output).toBe(0)
+
+      const problems: string[] = []
+      for (const [bad, reason] of [
+        ['docs/LINK.md', 'symlink'],
+        ['templates', 'is a directory'],
+        ['docs/NOPE.md', 'does not exist'],
+      ] as const) {
+        const r = await call(s, 'bp_inputs_validate', [proj, managed, bad])
+        if (r.code === 0) problems.push(`${bad} was accepted`)
+        else if (!r.output.includes(reason)) problems.push(`${bad} refused, but not with '${reason}'`)
+      }
+      expect(problems).toEqual([])
+    })
+  })
+
+  it('#18 TASK-037: an unmanaged file outside a git work tree is refused, not waved through', async () => {
+    await scenario('a2bp-inputs-18', async (s) => {
+      // Whether a file is ignored cannot be asked outside a repository, and an
+      // unanswered guard is not a guard that passed (BUG-003).
+      const { proj, managed } = await project(s)
+      await s.fs.write('proj/docs/NEW.md', 'new\n')
+      const r = await call(s, 'bp_inputs_validate', [proj, managed, 'docs/NEW.md'])
+      expect(r.code, 'an unmanaged file was accepted with the ignore check unanswered').not.toBe(0)
+      expect(r.output, 'refused without saying the ignore check could not run').toContain('git work tree')
     })
   })
 

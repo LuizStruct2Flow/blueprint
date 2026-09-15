@@ -137,6 +137,8 @@ async function setup(s: Scenario): Promise<E2E> {
   await s.fs.write('bp-work/CLAUDE.md', '# CLAUDE\noriginal line\n')
   await s.fs.write('bp-work/docs/DoD.md', '# DoD\noriginal dod\n')
   await s.fs.write('bp-work/docs/SECURITY.md', '# Security\noriginal sec\n')
+  // Blueprint-only: in the base, never in MANAGED_FILES (TASK-037).
+  await s.fs.write('bp-work/templates/seed.md', '# Seed\noriginal seed\n')
   await bp.commitAll('base')
 
   const remote = s.workspace.path('bp-remote.git')
@@ -371,7 +373,7 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     })
   })
 
-  it('#7 an unmanaged file is blocked before anything is pushed', async () => {
+  it('#7 a root project_config_*.md is blocked before anything is pushed', async () => {
     await scenario('a2bp-e2e-7', async (s) => {
       const e = await setup(s)
       await s.fs.write('acme-flow/project_config_dod.md', 'private\n')
@@ -537,6 +539,116 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
         parent.stdout.trim(),
         'the request was filed against a SUPERSEDED base — the pre-push re-check did not rebuild it',
       ).toBe(after)
+    })
+  })
+
+  // ===========================================================================
+  // TASK-037 — files the blueprint does not ship
+  //
+  // These run with a `gh` SHIM in front of the gh-free PATH, so the PR step is
+  // reached and `3` can be asserted: a request that is only a pushed branch is
+  // not the property. The shim answers `pr list` with nothing and `pr create`
+  // with a URL, recording the body it was given. Nothing leaves the workspace.
+  // ===========================================================================
+
+  /** Run the CLI with a recording gh; returns the result and the PR body. */
+  async function withGh(s: Scenario, e: E2E, args: string[]): Promise<{ r: RunResult; body: string }> {
+    const bodyFile = s.workspace.path('pr-body.txt')
+    const shims = await s.shimDir('gh-rec')
+    await shims.add(
+      'gh',
+      [
+        `if [ "$1 $2" = "pr list" ]; then exit 0; fi`,
+        `if [ "$1 $2" = "pr create" ]; then`,
+        `  while [ "$#" -gt 0 ]; do`,
+        `    if [ "$1" = --body ]; then printf '%s' "$2" > "${bodyFile}"; fi`,
+        `    shift`,
+        `  done`,
+        `  echo https://github.invalid/owner/bp/pull/1`,
+        `  exit 0`,
+        `fi`,
+        `exit 1`,
+      ].join('\n'),
+    )
+    const r = await s.run(CLI, args, { cwd: e.proj, env: { PATH: `${shims.dir}:${e.noGhPath}` } })
+    const body = await s.fs.read('pr-body.txt').catch(() => '')
+    return { r, body }
+  }
+
+  it('#13 TASK-037: a blueprint-only file that exists in the base files a request, marked not shipped', async () => {
+    await scenario('a2bp-e2e-13', async (s) => {
+      const e = await setup(s)
+      await s.fs.write('acme-flow/templates/seed.md', '# Seed\nIMPROVED seed\n')
+      const mainBefore = await e.sha('main')
+
+      const { r, body } = await withGh(s, e, ['a2bp', 'templates/seed.md'])
+
+      expect(r.code, `an unmanaged file did not file a request\n${r.output}`).toBe(RC.PENDING)
+      expect(r.output, 'the operator was not told the file is not shipped').toContain('not shipped')
+      expect(body, 'the reviewer was not told the file is not shipped').toContain('not shipped')
+      expect(await e.sha('main'), 'a request landed on main').toBe(mainBefore)
+
+      const refs = await e.requestRefs()
+      expect(refs, 'no request branch reached the remote').toHaveLength(1)
+      const changed = await e.git(['diff', '--name-only', 'main', refs[0] as string])
+      expect(changed.stdout.split('\n').filter(Boolean)).toEqual(['templates/seed.md'])
+      const shown = await e.git(['show', `${refs[0] as string}:templates/seed.md`])
+      expect(shown.stdout).toBe('# Seed\nIMPROVED seed\n')
+    })
+  })
+
+  it('#14 TASK-037: a new file files a request that creates it', async () => {
+    await scenario('a2bp-e2e-14', async (s) => {
+      const e = await setup(s)
+      await s.fs.write('acme-flow/docs/backlog/feature-requests.md', '# Feature requests\n')
+
+      const { r, body } = await withGh(s, e, ['a2bp', 'docs/backlog/feature-requests.md'])
+
+      expect(r.code, `a new file did not file a request\n${r.output}`).toBe(RC.PENDING)
+      expect(body).toContain('not shipped')
+      const refs = await e.requestRefs()
+      expect(refs, 'no request branch reached the remote').toHaveLength(1)
+      const changed = await e.git(['diff', '--name-status', 'main', refs[0] as string])
+      expect(changed.stdout.trim()).toBe('A\tdocs/backlog/feature-requests.md')
+    })
+  })
+
+  it('#15 TASK-037: a contaminated unmanaged file is refused, and nothing is pushed', async () => {
+    await scenario('a2bp-e2e-15', async (s) => {
+      // A new file has no base to align against, so nothing is restored and the
+      // project's own name blocks. That is the fail-closed direction: a literal
+      // name in a new file is either contamination or a placeholder the author
+      // has to write explicitly.
+      const e = await setup(s)
+      await s.fs.write('acme-flow/docs/NOTES.md', '# Notes\nsee the acme-flow runbook\n')
+      await s.fs.write('acme-flow/templates/seed.md', '# Seed\nlogs in /home/someone/dev/x/\n')
+
+      const before = await e.allRefs()
+      for (const f of ['docs/NOTES.md', 'templates/seed.md']) {
+        const { r } = await withGh(s, e, ['a2bp', f])
+        expect(r.code, `contamination in ${f} gave the wrong status\n${r.output}`).toBe(RC.BLOCKED)
+        expect(r.output).toContain('BLOCK')
+      }
+      expect(await e.allRefs(), 'A CONTAMINATED UNMANAGED FILE WAS PUSHED').toEqual(before)
+    })
+  })
+
+  it('#16 TASK-037: .git metadata and gitignored files are refused before anything is pushed', async () => {
+    await scenario('a2bp-e2e-16', async (s) => {
+      const e = await setup(s)
+      await s.fs.write('acme-flow/.gitignore', '.env\n')
+      await s.fs.write('acme-flow/.env', 'TOKEN=abc123\n')
+
+      const before = await e.allRefs()
+      for (const [f, reason] of [
+        ['.git/config', '.git directory'],
+        ['.env', 'gitignored'],
+      ] as const) {
+        const { r } = await withGh(s, e, ['a2bp', f])
+        expect(r.code, `${f} gave the wrong status\n${r.output}`).toBe(RC.BLOCKED)
+        expect(r.output, `${f} refused without naming the reason`).toContain(reason)
+      }
+      expect(await e.allRefs(), 'repository metadata or a secret reached the remote').toEqual(before)
     })
   })
 })

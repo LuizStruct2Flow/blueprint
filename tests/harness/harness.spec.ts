@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { appendFile, readFile, writeFile, stat, symlink } from 'node:fs/promises'
+import { appendFile, chmod, readFile, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
 import { RealStateCanary } from './canary.js'
@@ -1066,6 +1066,44 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
       )
       expect(message).toContain(join(home, '.git'))
       expect(message).toContain(REMEDY)
+    })
+  })
+
+  // mkdir(..., { mode: 0o700 }) sets nothing on a directory that already exists.
+  // The real default base on the machine that found this was 0775, so the base
+  // was only private if it happened to be created by this harness. The base here
+  // is planted inside the scenario, never the real ~/.cache.
+  it('BUG-121 an existing default base with loose permissions is tightened to 0700', async () => {
+    await scenario('bug121-loose-base', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      const home = await s.fs.mkdirp('home-real')
+      const base = await s.fs.mkdirp('home-real/.cache/bp-harness-tmp')
+      await chmod(base, 0o775)
+      const ws = await createWorkspace('bug121-loose', { env: { HOME: home }, systemTmp })
+      await ws.dispose()
+      expect((await stat(base)).mode & 0o777, 'the existing default base stayed loose').toBe(0o700)
+    })
+  })
+
+  // A symlink at the default base would move every workspace to wherever it
+  // points, which could be a shared directory, so the base must be the directory
+  // itself.
+  it('BUG-121 a symlink at the default base refuses, naming the path', async () => {
+    await scenario('bug121-symlink-base', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      const home = await s.fs.mkdirp('home-real')
+      await s.fs.mkdirp('home-real/.cache')
+      const base = join(home, '.cache', 'bp-harness-tmp')
+      await symlink(systemTmp, base)
+      const message = await createWorkspace('bug121-symlink', { env: { HOME: home }, systemTmp }).then(
+        async (ws) => {
+          await ws.dispose()
+          return ''
+        },
+        (err: Error) => err.message,
+      )
+      expect(message, 'a symlinked default base was used').toContain(base)
+      expect(message).toContain('not a symlink')
     })
   })
 })

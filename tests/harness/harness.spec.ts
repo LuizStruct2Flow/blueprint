@@ -981,6 +981,14 @@ describe('harness — a project marker above the workspace (BUG-110)', () => {
 // went red (52 of 55 suites on a docs-only push). The preflight was right; the
 // default base was wrong. The shared temp dir is a stand-in inside this
 // scenario, so no case here touches the real /tmp.
+//
+// MUTANTS of workspace.ts, applied to a copy and run, red set OBSERVED:
+//   the default reverts to os.tmpdir() (or to the seam's systemTmp)
+//     -> shared-tmp witness, precedence, private-base marker.
+//   the preflight removed -> private-base marker and all four BUG-110 cases.
+//   an explicit TMPDIR ignored -> precedence and all four BUG-110 cases.
+//   the base read from process.env at call time, not at load
+//     -> the environment-change case only.
 describe('harness — the default workspace base is private (BUG-121)', () => {
   it('BUG-121 a marker in the shared temp dir does not stop a workspace when TMPDIR is not set', async () => {
     await scenario('bug121-shared-tmp-marker', async (s) => {

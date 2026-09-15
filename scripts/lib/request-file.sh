@@ -135,13 +135,17 @@ bp_file_existing_pr() {
      --json state,url --jq '.[0] // empty | "\(.state)\t\(.url)"' 2>/dev/null
 }
 
-# --- bp_file_pr_body PROJECT BASE REMOTE BRANCH SPEC... ---------------------
+# --- bp_file_pr_body PROJECT BASE REMOTE BRANCH UNSHIPPED SPEC... -----------
 # The PR body. It records the BASE SHA deliberately: the base re-check narrows
 # the window between "base was current" and "push landed" but cannot close it,
 # so the residual is surfaced where a reviewer can see whether the base has
 # moved since.
+#
+# UNSHIPPED is a newline-delimited list of paths outside MANAGED_FILES
+# (TASK-037). Each is marked in the file list, so the reviewer judges it as a
+# blueprint-only change rather than one every project will pull.
 bp_file_pr_body() {
-  local project="$1" base="$2" remote="$3" branch="$4"; shift 4
+  local project="$1" base="$2" remote="$3" branch="$4" unshipped="$5"; shift 5
   local spec path
 
   printf 'A back-propagation **request** from `%s`.\n\n' "$project"
@@ -155,7 +159,11 @@ bp_file_pr_body() {
   printf '**Files:**\n\n'
   for spec in "$@"; do
     path=${spec%%:*}
-    printf -- '- `%s`\n' "$path"
+    case $'\n'"$unshipped" in
+      *$'\n'"$path"$'\n'*)
+        printf -- '- `%s` (**not shipped**: not in `MANAGED_FILES`, so no derived project receives it)\n' "$path" ;;
+      *) printf -- '- `%s`\n' "$path" ;;
+    esac
   done
   printf '\n---\n_Filed by `blueprint a2bp`. The contamination guard ran on the project\n'
   printf 'side; it is heuristic and advisory, so review the diff on its merits._\n'

@@ -191,6 +191,12 @@ bp_request_transport_env() {
 # a path neither half holds. There is nothing to align against, so it follows
 # the tree: if the base has a `scaffolding/` at all, a new managed file belongs
 # inside it.
+#
+# ponytail: since TASK-037 a CREATION may also be a new blueprint-only file,
+# which belongs at the root, and this guess puts it under `scaffolding/` once
+# that exists. Harmless while no base has `scaffolding/`; when TASK-021 moves,
+# pass cmd_a2bp's managed/unshipped answer in here and place unshipped
+# creations at the root.
 bp_base_path() {
   local bare="$1" base="$2" path="$3"
   if bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding/$path" 2>/dev/null; then

@@ -23,11 +23,19 @@
  * projects have already drifted on the spacing (storm2flow spells it
  * `put-approval-result*`, no space before the star), and a test that recognises
  * one spelling goes quietly green on the other.
+ *
+ * TASK-042 (#4-#9) — A PROJECT'S OWN RULES SURVIVE PULL, AND CANNOT UNDO BUG-118.
+ * `.claude/settings.json` is whole-file managed and JSON carries no markers, so
+ * every pull used to replace it and delete the project's rules. A project now
+ * keeps them in `.claude/settings.project.json`, which pull never writes; pull
+ * lands the blueprint's settings with the project's permission lists merged in,
+ * and drops any project `allow` that a blueprint `ask` or `deny` names. Those
+ * cases run pull against a fixture blueprint, one scenario workspace each.
  */
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { REPO_ROOT } from '../harness/index.js'
+import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const APPROVAL = 'put-approval-result'
 const BUCKETS = ['allow', 'ask', 'deny'] as const
@@ -67,5 +75,191 @@ describe('BUG-118 — approving a deployment is a decision, not a default', () =
       'a pattern in more than one bucket makes the effective decision depend on '
         + 'precedence nobody reads',
     ).toEqual(['ask'])
+  })
+})
+
+// --- TASK-042 ---------------------------------------------------------------
+
+const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const ASK = 'Bash(aws codepipeline put-approval-result *)'
+const DENY = 'Bash(sudo rm *)'
+const PROJECT_RULE = 'Bash(aws logs tail *)'
+const LAYER = '.claude/settings.project.json'
+
+interface Settings {
+  permissions: Required<Permissions> & { additionalDirectories?: string[] }
+  hooks?: unknown
+}
+
+const json = (v: unknown) => JSON.stringify(v, null, 2) + '\n'
+
+async function git(s: Scenario, cwd: string, args: string[]) {
+  return s.run('git', args, { cwd })
+}
+
+async function initRepo(s: Scenario, dir: string) {
+  await git(s, dir, ['init', '-q', '-b', 'main', '.'])
+  await git(s, dir, ['config', 'user.email', 't@local'])
+  await git(s, dir, ['config', 'user.name', 't'])
+  await git(s, dir, ['config', 'commit.gpgsign', 'false'])
+}
+
+function blueprintSettings(extraAllow: string[]): Settings {
+  return {
+    permissions: { allow: ['Bash(git status)', ...extraAllow], ask: [ASK], deny: [DENY] },
+    hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'guard' }] }] },
+  }
+}
+
+/**
+ * A blueprint whose settings.json gains one allow entry in its second commit,
+ * and a project bootstrapped from the first. `tests/fixture/test.sh` is there
+ * because `tests/` is a managed directory whose expansion fails closed.
+ */
+async function fixture(s: Scenario, tag: string, projectSettings: Settings, layer?: unknown) {
+  const bp = await s.workspace.dir(tag, 'bp')
+  await s.fs.write(join(bp, '.claude/settings.json'), json(blueprintSettings([])))
+  await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+  await s.fs.write(join(bp, '.blueprint-root'), '')
+  await initRepo(s, bp)
+  await git(s, bp, ['add', '-A'])
+  await git(s, bp, ['commit', '-q', '-m', 'one'])
+  const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+  await s.fs.write(join(bp, '.claude/settings.json'), json(blueprintSettings(['Bash(git log *)'])))
+  await git(s, bp, ['add', '-A'])
+  await git(s, bp, ['commit', '-q', '-m', 'two'])
+
+  const p = await s.workspace.dir(tag, 'proj')
+  await s.fs.write(join(p, '.claude/settings.json'), json(projectSettings))
+  if (layer !== undefined) await s.fs.write(join(p, LAYER), json(layer))
+  await s.fs.write(
+    join(p, '.blueprint-source'),
+    [
+      'config_version   = 2',
+      `blueprint_remote = ${bp}`,
+      'blueprint_branch = main',
+      `bootstrap_sha    = ${first}`,
+      'bootstrap_date   = 2026-01-01',
+      '',
+    ].join('\n'),
+  )
+  await initRepo(s, p)
+  await git(s, p, ['add', '-A'])
+  await git(s, p, ['commit', '-q', '-m', 'init'])
+  return p
+}
+
+async function settingsOf(p: string): Promise<Settings> {
+  return JSON.parse(await readFile(join(p, '.claude/settings.json'), 'utf8')) as Settings
+}
+
+/** Drift's verdict on settings.json: the line naming it, or none. */
+function driftLine(output: string): string | undefined {
+  return output.split('\n').find((l) => l.includes('.claude/settings.json'))
+}
+
+describe('TASK-042 — a project keeps its own permission rules across pull', () => {
+  const layered = {
+    permissions: { allow: [PROJECT_RULE, ASK, DENY], additionalDirectories: ['../shared'] },
+  }
+
+  it('#4 a full pull lands the blueprint update AND keeps the project file rules; the project file is untouched', async () => {
+    await scenario('permission-policy-4', async (s) => {
+      const p = await fixture(s, 'a', blueprintSettings([]), layered)
+      const layerBefore = await readFile(join(p, LAYER), 'utf8')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(0)
+
+      const got = await settingsOf(p)
+      expect(got.permissions.allow, 'the blueprint update did not land').toContain('Bash(git log *)')
+      expect(got.permissions.allow, 'the project rule was deleted by pull').toContain(PROJECT_RULE)
+      expect(got.permissions.additionalDirectories, 'project additionalDirectories lost').toEqual(['../shared'])
+      expect(got.hooks, 'hooks are the blueprint key, taken from the blueprint').toEqual(blueprintSettings([]).hooks)
+      expect(await readFile(join(p, LAYER), 'utf8'), 'pull wrote the project-owned file').toBe(layerBefore)
+    })
+  })
+
+  it('#5 a project allow cannot re-allow what the blueprint asks or denies', async () => {
+    await scenario('permission-policy-5', async (s) => {
+      const p = await fixture(s, 'b', blueprintSettings([]), layered)
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(0)
+
+      const got = await settingsOf(p)
+      expect(
+        got.permissions.allow.filter((e) => e === ASK || e === DENY),
+        'a project allow re-allowed a blueprint ask/deny entry (BUG-118 undone)',
+      ).toEqual([])
+      expect(got.permissions.ask, 'the blueprint ask entry was lost').toEqual([ASK])
+      expect(got.permissions.deny, 'the blueprint deny entry was lost').toEqual([DENY])
+    })
+  })
+
+  it('#6 drift judges the MERGED result: a pulled layered project is not drifted', async () => {
+    await scenario('permission-policy-6', async (s) => {
+      const p = await fixture(s, 'c', blueprintSettings([]), layered)
+
+      // Non-vacuity: before the pull the file really is behind.
+      const before = await s.run(CLI, ['drift'], { cwd: p })
+      expect(driftLine(before.output), before.output).toMatch(/~.*\.claude\/settings\.json/)
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(0)
+      const after = await s.run(CLI, ['drift'], { cwd: p })
+      expect(
+        driftLine(after.output),
+        `drift still reports settings.json after a pull — a project with its own rules would read as drifted forever:\n${after.output}`,
+      ).toBeUndefined()
+    })
+  })
+
+  it('#7 migration: settings.json with rules the blueprint does not ship and no project file is REFUSED, then pulls once the file exists', async () => {
+    await scenario('permission-policy-7', async (s) => {
+      const legacy = blueprintSettings([PROJECT_RULE])
+      const p = await fixture(s, 'd', legacy)
+      const before = await readFile(join(p, '.claude/settings.json'), 'utf8')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, `a refused settings.json must exit 4:\n${r.output}`).toBe(4)
+      expect(await readFile(join(p, '.claude/settings.json'), 'utf8'), 'the project rules were overwritten').toBe(
+        before,
+      )
+      expect(r.output, 'the refusal must show the rule and where it goes').toContain(PROJECT_RULE)
+      expect(r.output).toContain(LAYER)
+
+      const drift = await s.run(CLI, ['drift'], { cwd: p })
+      expect(driftLine(drift.output), drift.output).toMatch(/✗.*\.claude\/settings\.json/)
+
+      await s.fs.write(join(p, LAYER), json({ permissions: { allow: [PROJECT_RULE] } }))
+      const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(again.code, again.output).toBe(0)
+      const got = await settingsOf(p)
+      expect(got.permissions.allow).toContain(PROJECT_RULE)
+      expect(got.permissions.allow).toContain('Bash(git log *)')
+    })
+  })
+
+  it('#8 a project file that sets anything but permission lists is refused, not half-applied', async () => {
+    await scenario('permission-policy-8', async (s) => {
+      const p = await fixture(s, 'e', blueprintSettings([]), { hooks: {}, permissions: { allow: [PROJECT_RULE] } })
+      const before = await readFile(join(p, '.claude/settings.json'), 'utf8')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(4)
+      expect(r.output).toMatch(/settings\.project\.json must/)
+      expect(await readFile(join(p, '.claude/settings.json'), 'utf8')).toBe(before)
+    })
+  })
+
+  it('#9 a project with no rules of its own and no project file pulls exactly as before', async () => {
+    await scenario('permission-policy-9', async (s) => {
+      const p = await fixture(s, 'f', blueprintSettings([]))
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(0)
+      expect(await readFile(join(p, '.claude/settings.json'), 'utf8')).toBe(
+        json(blueprintSettings(['Bash(git log *)'])),
+      )
+    })
   })
 })

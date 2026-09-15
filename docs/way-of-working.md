@@ -349,7 +349,8 @@ whole `tests/` tree**, because a suite that guards managed machinery has to
 move forward with the machinery it guards.
 
 **What's NOT managed** — `project_config_*.md` (templates seeded once
-at bootstrap, then drift on purpose), `BUGS.md`, `HANDOVER.md`,
+at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so
+project rules reach every session), `BUGS.md`, `HANDOVER.md`,
 `AGENT_SIGNAL.md`, all source code.
 
 **Two things that only work together.** A managed *directory* syncs

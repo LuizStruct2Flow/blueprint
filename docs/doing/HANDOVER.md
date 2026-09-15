@@ -204,8 +204,12 @@ hangs off that root.
   load now exposes reliably. GitHub `main` (`d984a45`) is CI-green; the unpushed local
   commits are lifecycle docs. **Christian is fixing it now** (brief
   `.scratch/brief-christian-bug120.md`). Do not retry the push before his fix; if you ever
-  retry a red push on #20c, cite BUG-120. **In parallel:** Philipp on TASK-031 (typecheck
-  stage), Vitali on BUG-118 (PR #64 rebuild) — **reproducer committed as `6adfb8a`,
+  retry a red push on #20c, cite BUG-120. **In parallel:** Philipp's TASK-031 (typecheck
+  stage) is **done locally** — `897ab2a`/`beff7de`/`a6a6bb4`: one `ts_typecheck` in
+  `scripts/run-ts-suites.sh` through `ts_scrubbed`, a managed gate stage and a CI step; a
+  planted type error fails both; ts-bridge 14/14; full suite 822/826, where the 4 red are
+  BUG-118's reproducer and bootstrap-gate carrying it; the stage ran green (1.3 s) inside a
+  bootstrapped project. **Jesko (Codex) reviews it next.** Vitali on BUG-118 (PR #64 rebuild) — **reproducer committed as `6adfb8a`,
   3/3 red; waiting on the founder's edit to `.claude/settings.json`**: move
   `"Bash(aws codepipeline put-approval-result *)"` from `permissions.allow` to
   `permissions.ask`. Then commit that file as `BUG#118:`, and after the push close PR #64 and

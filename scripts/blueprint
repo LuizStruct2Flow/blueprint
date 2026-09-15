@@ -1855,6 +1855,11 @@ cmd_a2bp() {
     bp_inputs_is_managed "${vline%%:*}" "$managed_list" || unshipped="${unshipped}${vline%%:*}"$'\n'
   done <<< "$validated"
   rm -f "$managed_list"
+  # bp_base_path reads this so an unshipped creation stays at the root rather
+  # than being placed under scaffolding/ (see request.sh). Local, and so visible
+  # to every function this command calls and to their subshells.
+  # shellcheck disable=SC2034  # read by bp_base_path in scripts/lib/request.sh
+  local BP_REQUEST_UNSHIPPED="$unshipped"
   # shellcheck disable=SC2317
   _a2bp_unshipped() { case $'\n'"$unshipped" in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
 

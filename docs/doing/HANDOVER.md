@@ -202,8 +202,17 @@ hangs off that root.
   AFTER the run was signalled" — with the code byte-identical to `d984a45`, which had passed
   its own gate, CI and 816/816. A real race in TASK-025's signal handling that the gate's
   load now exposes reliably. GitHub `main` (`d984a45`) is CI-green; the unpushed local
-  commits are lifecycle docs. **Christian is fixing it now** (brief
-  `.scratch/brief-christian-bug120.md`). Do not retry the push before his fix; if you ever
+  commits are lifecycle docs. **Fixed locally 2026-09-15** — `c48855a`
+  promotion, `fcc5844` reproducer, `7981fcc` fix. Cause measured: CPU contention, not stage
+  order — pinned to one CPU #20c failed 40/40 on the old code; a TERM arriving together with
+  the child's release was recorded and then discarded by the exec. Fix: the launch writes a
+  token, a `sh -c` gate after the child's first exec runs the fetch only while it is
+  non-empty, and cleanup revokes it with the non-forking builtin `: >` before sending TERM.
+  After the fix, pinned and unpinned stress runs are 150/150 green; the old CLI fails 10/10.
+  Full suite 824/828: the 4 red are BUG-118's reproducer and bootstrap-gate carrying it.
+  **Alexey (Codex) is reviewing it.** **The push is still blocked by BUG-118**: the
+  bootstrapped project's gate runs its failing reproducer until the founder edits
+  `.claude/settings.json`. Do not retry the push before both are done; if you ever
   retry a red push on #20c, cite BUG-120. **In parallel:** Philipp's TASK-031 (typecheck
   stage) is **done locally** — `897ab2a`/`beff7de`/`a6a6bb4`: one `ts_typecheck` in
   `scripts/run-ts-suites.sh` through `ts_scrubbed`, a managed gate stage and a CI step; a

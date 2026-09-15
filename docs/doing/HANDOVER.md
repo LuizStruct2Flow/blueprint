@@ -213,11 +213,13 @@ hangs off that root.
   `.scratch/JESKO-task031-review.md`. His S1 (ts-bridge #5 red, empty compiler output) is
   **environmental**: the orchestrator re-ran ts-bridge outside the sandbox at 14/14 with both
   `TMPDIR=/home/luiz/.cache/bp-harness-tmp` and `TMPDIR=/dev/shm` — the Codex sandbox stops
-  the compiler from starting. Philipp is making #5 fail with a diagnostic (exit code, output,
-  command) instead of a bare assertion, re-running the three mutants from a green baseline
-  with logs kept in `.scratch/philipp-task031-mutants/`, and documenting the managed
-  typecheck stage and its order in CLAUDE.md §Before Every Push and DoD §4 (his S3, a real
-  gap). Vitali on BUG-118 (PR #64 rebuild) — **reproducer committed as `6adfb8a`,
+  the compiler from starting. **All three answered, 2026-09-15:** `835fb3f` (#4b/#5 fail with exit
+  code, signal, streams and commands; #5 states what it needs from its environment; mutants
+  re-run from a 14/14 baseline, logs in `.scratch/philipp-task031-mutants/`, sets unchanged)
+  and `f8f4102` (the managed typecheck stage and its order in CLAUDE.md §Before Every Push,
+  DoD §4 and the deck). ts-bridge + manifest 41/41. **TASK-031 is ready to push; no second
+  review** — the S1 finding was the sandbox, and S2/S3 now have logs and docs anyone can
+  check. Vitali on BUG-118 (PR #64 rebuild) — **reproducer committed as `6adfb8a`,
   3/3 red; waiting on the founder's edit to `.claude/settings.json`**: move
   `"Bash(aws codepipeline put-approval-result *)"` from `permissions.allow` to
   `permissions.ask`. Then commit that file as `BUG#118:`, and after the push close PR #64 and

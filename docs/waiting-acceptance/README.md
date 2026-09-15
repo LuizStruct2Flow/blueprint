@@ -9,10 +9,9 @@ Triggers:
 - **Founder acceptance** → move to `done/`.
 - **Founder rejection / regression** → move back to `doing/`.
 
-`BUGS.md` is always here. `BACKLOG.md` appears when a promoted row lands, and
-`CHANGES.md` on first use — it holds *forward features* and behaviour changes
-with no underlying defect (CLAUDE.md §Lifecycle). Absence means none yet, not a
-missing file.
+`BUGS.md` is always here. `BACKLOG.md` appears when a promoted row lands — it
+holds tasks, features and behaviour changes with no underlying defect. Absence
+means none yet, not a missing file.
 
 **Two record files travel the whole lifecycle**: `BACKLOG.md` and `BUGS.md`,
 `backlog/` → `doing/` → here → `done/`. Anything else in this folder is either a

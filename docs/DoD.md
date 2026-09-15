@@ -31,8 +31,8 @@ docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
 | State | What lives here | How items leave |
 |---|---|---|
 | `backlog/` | **Parked** work. Bugs, features, plans, decision records that exist but are not active. Every item carries a state: `KEEP` (will be pulled), `DEFER` (re-open trigger documented), or `OBSOLETE` (audit trail before deletion). | **Promotion** (move row / `PLAN-*.md` / folder into `doing/`) or **cancellation** (delete + one-line pointer in `docs/config/findings.md`). |
-| `doing/` | Active work being implemented. `BUGS.md` rows, `PLAN-*.md` files, `HANDOVER.md`, `CHANGES.md` rows for non-bug changes in flight. | **The PR merging to `main`** — not the branch push. An item whose PR is still open is waiting on review, not on the founder, and stays here. |
-| `waiting-acceptance/` | **Merged to `main`**, awaiting founder acceptance testing. Bug rows in `BUGS.md`, behavior changes in `CHANGES.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
+| `doing/` | Active work being implemented. `BUGS.md` rows, `BACKLOG.md` rows for tasks and features in flight, `PLAN-*.md` files, `HANDOVER.md`. | **The PR merging to `main`** — not the branch push. An item whose PR is still open is waiting on review, not on the founder, and stays here. |
+| `waiting-acceptance/` | **Merged to `main`**, awaiting founder acceptance testing. Bug rows in `BUGS.md`, task and feature rows in `BACKLOG.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
 | `done/` | Founder-accepted, fully delivered work. | Items don't leave; this is the source of truth for "what we have delivered". |
 
 **Reopen path**: if the founder rejects acceptance, finds a regression, or
@@ -659,18 +659,14 @@ Walk every box. If any is unchecked, finish it; do **not** flip
 - [ ] `doing/BUGS.md` row → moved to `waiting-acceptance/BUGS.md`
       for every shipped bug, with commit SHA(s) named
 - [ ] `doing/BACKLOG.md` row → moved to `waiting-acceptance/BACKLOG.md`
-      for every shipped backlog item
+      for every shipped backlog item (tasks, features, behaviour
+      changes with no underlying defect)
 - [ ] **Defect-shaped change** (founder observed a broken behavior,
       race, regression, UX break — anything that looks/feels like a
       bug from the user's POV) → file as a `BUG-XXX` row in
-      `BUGS.md`, not as a `CHANGES.md` row. The founder's mental
+      `BUGS.md`, never as a backlog row. The founder's mental
       model is "BUGS.md is what I test"; splitting defects across
-      two files hides them.
-- [ ] **Forward feature** (new slice, new module, founder-direction
-      addition with no underlying defect) → row in
-      `waiting-acceptance/CHANGES.md` with commit SHA + verification
-      path. This file is narrow on purpose; default-to-`BUGS.md` if
-      uncertain.
+      two files hides them. If uncertain, default to `BUGS.md`.
 - [ ] `PLAN-*.md` for any completed plan → moved from `doing/` to
       `waiting-acceptance/`. If the plan has open slices, it stays in
       `doing/`; mark shipped slices DONE inline.

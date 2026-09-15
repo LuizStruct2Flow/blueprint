@@ -92,6 +92,9 @@ They go out in one push with `6dba6b0` (BUG-121 → waiting-acceptance).
   - Alex: `.scratch/brief-alex-task034-036-review.md`
   - Jesko: `.scratch/brief-jesko-bug121-recheck.md`
   - Codex dispatches must pass `TMPDIR=/dev/shm` (no `~/.cache` write in its sandbox).
+- **TASK-038 (removes `CHANGES.md` from the lifecycle): promoted `f59af4d`, Christian is building
+  it.** The founder waived the cross-provider review for this item only, so it needs no Codex
+  review and goes out in the same push.
 - **After the reviews:**
   - fix any findings
   - one gate push

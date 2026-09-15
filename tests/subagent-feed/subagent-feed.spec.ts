@@ -623,14 +623,12 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
     expect(await code(FEED)).toMatch(/pump .*subagent|pump "\$f" jsonl-sub/)
   })
 
-  it('static: the feed resolves the persona through the roster lib', async () => {
-    expect(await code(FEED)).toMatch(/bp_roster_name_in_text/)
-  })
-
-  it('static: the hook has not grown its own persona derivation again', async () => {
-    // The BUG-010 shape: two copies of a rule are two rules.
-    expect(await code(HOOK)).toMatch(/bp_roster_name_in_text/)
+  it('static: the hook and the feed label a subagent through the one shared function', async () => {
+    // The BUG-010 shape: two copies of a rule are two rules. BUG-124 was exactly
+    // that — the hook derived its label apart from the feed, and they disagreed.
+    expect(await code(HOOK)).toMatch(/bp_roster_subagent_label/)
     expect(await code(HOOK)).toMatch(/ROSTER_LIB/)
+    expect(await code(FEED)).toMatch(/bp_roster_subagent_label/)
   })
 
   it('static: the hook resolves its timeout provider through scripts/lib/staleness.sh', async () => {

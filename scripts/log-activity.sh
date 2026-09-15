@@ -92,18 +92,29 @@ event="$(extract '.hook_event_name')"; [ -n "$event" ] || event="Subagent"
 summary="$(extract '.agent_description // .description // .prompt // .last_message // .reason')"
 summary="$(printf '%s' "$summary" | tr -d '\n' | cut -c1-110)"
 
-# Label by the roster persona named in the DISPATCH TEXT, else the agent type,
-# else env, else generic.
+# Label from the subagent's META FILE, through bp_roster_subagent_label — the
+# function agent-activity.sh labels the streamed lines with — else the agent
+# type, else env, else generic.
 #
-# BUG-027: this used to read `.subagent_type`, with a comment claiming it was
-# the roster persona. It is the agent TYPE — `general-purpose` for every persona
-# on this fleet — so every bookend line and every .subagent-map row carried the
-# same string, and the map is what the live feed labels streamed subagent output
-# from. The persona is in the description; bp_roster_name_in_text is the same
-# lookup agent-activity.sh uses on the transcript's meta file, so the bookends
-# and the streamed lines cannot disagree.
-plabel="$(extract '.subagent_type // .agent_type // .agent_name')"
-if [ -r "$ROSTER_LIB" ]; then
+# BUG-124. No hook payload names the persona. SubagentStart and SubagentStop
+# carry agent_id, agent_type and the SESSION's transcript_path, plus
+# agent_transcript_path on stop (recorded from a live dispatch, 2026-09-15). The
+# dispatch description is only in agent-<id>.meta.json beside the transcript.
+# BUG-027 read `.description` from the payload instead, which no real payload
+# has, so every bookend fell back to the agent type while the lines between the
+# bookends read the persona.
+aid="$(extract '.agent_id')"
+atype="$(extract '.agent_type // .subagent_type')"
+meta="$(extract '.agent_transcript_path')"
+if [ -n "$meta" ]; then
+  meta="${meta%.jsonl}.meta.json"
+else
+  tp="$(extract '.transcript_path')"
+  if [ -n "$tp" ] && [ -n "$aid" ]; then meta="${tp%.jsonl}/subagents/agent-$aid.meta.json"; fi
+fi
+
+tcmd=""
+if [ -r "$ROSTER_LIB" ] && [ -n "$meta" ]; then
   # The subshell is one guard and the timeout is the other; neither is style.
   #
   # The subshell keeps an `exit` inside the lib out of THIS process. It does not
@@ -138,30 +149,11 @@ if [ -r "$ROSTER_LIB" ]; then
     . "$repo_root/scripts/lib/staleness.sh" >/dev/null 2>&1 || exit 0
     bp_staleness_timeout_cmd 2>/dev/null || exit 0
   )"
-  if [ -n "${tcmd:-}" ]; then
-    persona="$("$tcmd" "$BP_ROSTER_LOOKUP_TIMEOUT" bash -c '
-        . "$1" 2>/dev/null || exit 0
-        bp_roster_name_in_text "$2" "$3" 2>/dev/null || exit 0
-      ' bp-roster-lookup "$ROSTER_LIB" "$BP_STATE_ROOT" "$summary" 2>/dev/null)"
-    [ -n "${persona:-}" ] && plabel="$persona"
-  else
+  if [ -z "$tcmd" ]; then
     printf '[log-activity] no timeout(1)/gtimeout(1) available — skipping the roster lookup; labelling by agent type\n' >&2
   fi
 fi
-label="${plabel:-${AGENT_FEED_LABEL:-subagent}}"
 
-# Map this subagent's id → persona so the live feed (agent-activity.sh's
-# subagent_feed) can label the STREAMED internal lines from
-# <session>/subagents/agent-<agent_id>.jsonl with the persona name, not just
-# bracket them with the dispatch/finish markers below. agent_id matches the
-# transcript filename. The value written is the persona resolved above, NOT the
-# agent type this comment used to claim it was (BUG-027). It is the fallback
-# path now: the feed reads the transcript's own meta file first, so the map only
-# matters for a transcript that has none. Best-effort, never fatal.
-aid="$(extract '.agent_id')"
-if [ -n "$aid" ] && [ -n "$plabel" ]; then
-  printf '%s %s\n' "$aid" "$plabel" >> "$repo_root/logs/.subagent-map" 2>/dev/null || true
-fi
 case "$event" in
   SubagentStart) marker="→ dispatched" ;;
   SubagentStop)  marker="← finished" ;;
@@ -171,5 +163,40 @@ esac
 # feed_append supplies the timestamp and owns the rotation, so this line no
 # longer computes either. A hook must NEVER fail the tool call it observes, and
 # feed_append returns 0 on every path by design.
-feed_append "[$label - Claude Code] $marker${summary:+: $summary}"
+#
+# No .subagent-map row any more (BUG-124). Its value would be derived from the
+# same meta file the feed reads for the streamed lines, so it could only repeat
+# that file, and for a name with a space it did not even do that.
+emit_bookend(){
+  label=""
+  if [ -n "$tcmd" ]; then
+    label="$("$tcmd" "$BP_ROSTER_LOOKUP_TIMEOUT" bash -c '
+        . "$1" 2>/dev/null || exit 0
+        bp_roster_subagent_label "$2" "$3" 2>/dev/null || exit 0
+      ' bp-roster-lookup "$ROSTER_LIB" "$BP_STATE_ROOT" "$meta" 2>/dev/null)"
+  fi
+  feed_append "[${label:-${atype:-${AGENT_FEED_LABEL:-subagent}} - Claude Code}] $marker${summary:+: $summary}"
+}
+
+# THE START BOOKEND IS WRITTEN AFTER THIS HOOK RETURNS. Claude Code writes the
+# meta file only once the SubagentStart hook has exited: measured absent across
+# a 2 s poll from inside the hook, and present about 100 ms after it returned.
+# Waiting in the hook therefore can never see it. So a detached child waits
+# instead, bounded by BP_SUBAGENT_META_WAIT seconds, and labels by agent type if
+# the meta never comes. All its descriptors are closed so the client is not held
+# waiting on it. On stop the meta is already there, so the line is written
+# directly.
+: "${BP_SUBAGENT_META_WAIT:=5}"
+if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
+  (
+    i=0
+    while [ ! -e "$meta" ] && [ "$i" -lt $((BP_SUBAGENT_META_WAIT * 10)) ]; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+    emit_bookend
+  ) </dev/null >/dev/null 2>&1 &
+else
+  emit_bookend
+fi
 exit 0

@@ -997,7 +997,7 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
     await scenario('bug121-shared-tmp-marker', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')
       await s.fs.write('shared-tmp/.git', '')
-      const home = await s.fs.mkdirp('home-real')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
       const ws = await createWorkspace('bug121', { env: { HOME: home }, systemTmp })
       try {
         const base = join(home, '.cache', 'bp-harness-tmp')
@@ -1012,8 +1012,8 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
   it('BUG-121 XDG_CACHE_HOME places the private base, and an explicitly set TMPDIR wins over it', async () => {
     await scenario('bug121-precedence', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')
-      const home = await s.fs.mkdirp('home-real')
-      const cache = await s.fs.mkdirp('xdg-cache')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
+      const cache = await trusted(await s.fs.mkdirp('xdg-cache'))
       const chosen = await s.fs.mkdirp('chosen-tmp')
 
       const xdg = await createWorkspace('bug121-xdg', { env: { HOME: home, XDG_CACHE_HOME: cache }, systemTmp })
@@ -1058,7 +1058,7 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
   it('BUG-121 a marker above the PRIVATE base still refuses, naming it', async () => {
     await scenario('bug121-private-marker', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')
-      const home = await s.fs.mkdirp('home-real')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
       await s.fs.write('home-real/.git', '')
       const message = await createWorkspace('bug121-refused', { env: { HOME: home }, systemTmp }).then(
         async (ws) => {
@@ -1079,7 +1079,8 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
   it('BUG-121 an existing default base with loose permissions is tightened to 0700', async () => {
     await scenario('bug121-loose-base', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')
-      const home = await s.fs.mkdirp('home-real')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
+      await trusted(await s.fs.mkdirp('home-real/.cache'))
       const base = await s.fs.mkdirp('home-real/.cache/bp-harness-tmp')
       await chmod(base, 0o775)
       const ws = await createWorkspace('bug121-loose', { env: { HOME: home }, systemTmp })
@@ -1094,8 +1095,8 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
   it('BUG-121 a symlink at the default base refuses, naming the path', async () => {
     await scenario('bug121-symlink-base', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')
-      const home = await s.fs.mkdirp('home-real')
-      await s.fs.mkdirp('home-real/.cache')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
+      await trusted(await s.fs.mkdirp('home-real/.cache'))
       const base = join(home, '.cache', 'bp-harness-tmp')
       await symlink(systemTmp, base)
       const message = await createWorkspace('bug121-symlink', { env: { HOME: home }, systemTmp }).then(
@@ -1109,7 +1110,52 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
       expect(message).toContain('not a symlink')
     })
   })
+
+  // lstat inspects the base, but chmod, realpath and mkdtemp look the path up
+  // again. Whoever can replace entries in a directory above the base can swap it
+  // for a symlink in between (Jesko, re-check). So a default base under a
+  // directory others can write to is refused, unless the sticky bit stops them
+  // replacing entries they do not own.
+  it('BUG-121 a default base under a directory others can write to refuses, naming it', async () => {
+    await scenario('bug121-open-parent', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
+      const cache = await s.fs.mkdirp('home-real/.cache')
+      await chmod(cache, 0o777)
+      const message = await createWorkspace('bug121-open', { env: { HOME: home }, systemTmp }).then(
+        async (ws) => {
+          await ws.dispose()
+          return ''
+        },
+        (err: Error) => err.message,
+      )
+      expect(message, 'a base under a 0777 parent was used').toContain(cache)
+      expect(message).toContain('writable by group or others')
+    })
+  })
+
+  it('BUG-121 a default base under a sticky 1777 directory is accepted', async () => {
+    await scenario('bug121-sticky-parent', async (s) => {
+      const systemTmp = await s.fs.mkdirp('shared-tmp')
+      const home = await trusted(await s.fs.mkdirp('home-real'))
+      const cache = await s.fs.mkdirp('home-real/.cache')
+      await chmod(cache, 0o1777)
+      const ws = await createWorkspace('bug121-sticky', { env: { HOME: home }, systemTmp })
+      await ws.dispose()
+      expect(ws.root.startsWith(join(cache, 'bp-harness-tmp') + '/'), ws.root).toBe(true)
+    })
+  })
 })
+
+/**
+ * Set a fixture directory to 0755 and return it. Fixture directories get the
+ * runner's umask, which can leave them group-writable, and a default base under
+ * a group-writable directory is refused (BUG-121).
+ */
+async function trusted(dir: string): Promise<string> {
+  await chmod(dir, 0o755)
+  return dir
+}
 
 /** The remedy the preflight's error must name, verbatim. */
 const REMEDY =

@@ -55,7 +55,7 @@ in the same handoff turn.
 "someday / maybe / depends on X" lives in `backlog/`. Work you're starting
 this session or the next lives in `doing/`. Movement between them happens
 in an explicit **grooming pass** — a founder-led session that triages
-parked items and pulls a handful into `doing/` (see storm2flow's
+parked items and pulls a handful into `doing/` (see storm2flow's <!-- a2bp-allow: the blueprint's own citation of a real precedent (CLAUDE.md cites the same plan); substituting the placeholder here would make every project claim it -->
 `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent for the format).
 
 ## §1b Work intake — the path every change takes
@@ -211,7 +211,7 @@ Every bug — minor or major — follows this:
 - **Minor bug** (cosmetic, clearly scoped, low-impact) → fix directly
   per the normal team workflow.
 - **Major bug** (affects a core USP path defined in
-  `project_config_dod.md`, or has already had a failed fix attempt) →
+  `project_config_overview.md`, or has already had a failed fix attempt) →
   **plan first**, do NOT jump to implementation. Create
   `docs/doing/PLAN-BUG-XXX.md` with root cause analysis, affected files,
   fix approach, tests needed, rollback strategy. **Wait for Codex +
@@ -724,9 +724,11 @@ Walk every box. If any is unchecked, finish it; do **not** flip
 > files is a useful backstop and not a substitute, because a repo often
 > holds legitimate unrelated edits and a generic warning gets normalised.
 
-### G. Signal + resume doc reflect reality (→ AGENT_SIGNAL.md + HANDOVER.md + §10)
-- [ ] `AGENT_SIGNAL.md` `Holder` / `State` / `Task` / `Last update` all
-      updated
+### G. Signal + resume doc reflect reality (→ live baton + HANDOVER.md + §10)
+- [ ] Live baton `logs/state/signal.md` published with
+      `scripts/signal-set.sh` (`Holder` / `State` / `Task` / `Last update`
+      in one atomic write — never hand-edited; `AGENT_SIGNAL.md` documents
+      the protocol and holds no live state)
 - [ ] `Task` names **what the next actor needs to do**, not just what
       I did
 - [ ] If state is `OVER_TO_USER`, the things the founder needs to test
@@ -824,7 +826,7 @@ already.
 
 ### The wake side
 On "wake" (or any new prompt), **read `HANDOVER.md` first**, then
-`AGENT_SIGNAL.md`, `CLAUDE.md`, `MEMORY.md`. Re-establish the ephemeral
+the live baton `logs/state/signal.md`, `CLAUDE.md`, `MEMORY.md`. Re-establish the ephemeral
 state §10.3 names before continuing.
 
 ---

@@ -132,6 +132,11 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     (`.scratch/brief-fr-d.md`). Both are recorded PROMOTED in the inbox. She was told TASK-042's
     pull refusal is coming for storm2flow's `settings.json`.
   - All three need Codex review too: add them to Alex's docs brief or a third brief at 02:12.
+  - **BUG-125** (`75a9a75`): doc-links passes a link that leaves the repo when the target
+    exists on local disk (`tests/doc-links/doc-links.ts:111`). Sylvia reported it under
+    storm2flow's founder rule "checks read only from the repository"; the inbox records it as
+    `FR-storm2flow-doc-links-escape` → BUG-125. Christian takes it after TASK-045.
+  - Codex brief for all four late items: `.scratch/brief-alex-fr-late-review.md`.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

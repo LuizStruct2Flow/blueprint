@@ -16,7 +16,7 @@ project. This file adds the rules that ONLY apply to {{PROJECT_NAME}}.
 |---|---|---|
 | Secret scan | `gitleaks protect --staged --redact` | zero findings |
 | SAST | `semgrep --config=p/owasp-top-ten --severity=WARNING --severity=ERROR --error --timeout=20` | zero `WARNING+` |
-| SCA | `osv-scanner --recursive --skip-git --fail-on-vuln .` | zero `HIGH+` CVE |
+| SCA | `osv-scanner scan source --recursive --format=json .` | zero `MEDIUM+` (CVSS >= 4.0); lower reported, not blocking |
 | IaC validate (Recipe A) | `cd infra && cdk synth --quiet` | synth clean |
 | IaC validate (Recipe B) | `cd infra && terraform fmt -check -recursive` + `terraform validate` | clean (init required for validate) |
 | IaC validate (Recipe C) | `helm lint infra/charts/*/` | each chart clean |

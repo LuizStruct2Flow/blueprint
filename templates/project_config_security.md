@@ -109,7 +109,7 @@ the defaults.
 | `gitleaks` | any finding | any finding | — |
 | `semgrep` (pre-push) | `WARNING+` | `WARNING+` | — |
 | `semgrep` (CI deep packs) | `HIGH+` | `HIGH+` | — |
-| `osv-scanner` | `HIGH+` CVE | `HIGH+` CVE | — |
+| `osv-scanner` | `MEDIUM+` (CVSS >= 4.0) | `MEDIUM+` (CVSS >= 4.0) | — |
 | `trivy config` | `HIGH+` | `HIGH+` | — |
 | `trivy image` | `HIGH+` | `HIGH+` | — |
 | ZAP baseline | `HIGH+` alert | `HIGH+` alert | — |
@@ -167,7 +167,7 @@ flag it at review and roll it back.
 |---|---|---|
 | `gitleaks` (CI on `main`) | `#sec-incidents` Slack | always pages |
 | `semgrep` (CI deep packs) | `#sec-findings` Slack | digest at HIGH+, page at CRITICAL |
-| `osv-scanner` (nightly) | `#sec-findings` Slack | digest at HIGH+ |
+| `osv-scanner` (nightly) | `#sec-findings` Slack | digest at MEDIUM+ |
 | ZAP baseline (CI) | `#sec-findings` Slack | digest at HIGH+ |
 | ZAP active (nightly prod) | `#sec-incidents` Slack | page at HIGH+ |
 | CloudWatch alarm — auth failures spike | `#sec-incidents` Slack + PagerDuty | page on threshold |

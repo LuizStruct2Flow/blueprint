@@ -32,7 +32,7 @@ bp_config_field() {
 # Validation order is fixed and checked before ANY remote contact, so a
 # misconfigured project cannot get as far as pushing a branch.
 bp_config_load() {
-  local file="$1" version remote branch
+  local file="$1" version remote branch read_branch
 
   if [ ! -f "$file" ]; then
     echo "no $file here — run a2bp from a struct2flow project root" >&2
@@ -120,7 +120,23 @@ bp_config_load() {
     return 1
   fi
 
+  # TASK-025 — the branch `drift` and `pull` READ, optional. `released` in a
+  # derived project: the newest main commit on which every CI job passed, which
+  # the blueprint's release job fast-forwards. Absent means blueprint_branch, so a
+  # project mid-migration keeps working. It is a separate field rather than a new
+  # value for blueprint_branch because blueprint_branch is a2bp's pull-request
+  # base, and requests must never be filed against the branch CI owns — so
+  # BP_CFG_BRANCH stays exactly what it was. The config version stays 2: a CLI
+  # that predates this field does not read the remote at all.
+  read_branch=$(bp_config_field "$file" blueprint_release_branch)
+  if [ -n "$read_branch" ] && ! git check-ref-format --branch "$read_branch" >/dev/null 2>&1; then
+    echo "$file has blueprint_release_branch = '$read_branch', which is not a valid branch name." >&2
+    return 1
+  fi
+  [ -n "$read_branch" ] || read_branch="$branch"
+
   printf 'BP_CFG_VERSION=%s\n' "$version"
   printf 'BP_CFG_REMOTE=%q\n' "$remote"
   printf 'BP_CFG_BRANCH=%q\n' "$branch"
+  printf 'BP_CFG_READ_BRANCH=%q\n' "$read_branch"
 }

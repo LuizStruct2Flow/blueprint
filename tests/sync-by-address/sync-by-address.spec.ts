@@ -87,6 +87,24 @@
  *        the child ignoring the signals is microseconds wide and runs no
  *        command, so #23b asserts the helper's text instead.
  *   F2   the exec bit mirrored after the shielded write  → #23c (mode left 644)
+ *
+ *   COMMIT 3 (the released branch), same method, same copy discipline:
+ *   R30a drift and pull read blueprint_branch regardless → #30 #32 #39
+ *   R30b blueprint_release_branch not validated         → #30
+ *   R31  bp_config_load emits the release branch as BP_CFG_BRANCH → #31. One
+ *        full-set run also showed #20c red; re-run alone the mutant reddened #31
+ *        only, and #20c does not read that value. Recorded as an intermittent
+ *        #20c failure, not as a red of this mutant.
+ *   R32  an absent bootstrap_sha printed as "? commits" → #14 #32
+ *   R33a a job left out of the release job's `needs`   → #33
+ *   R33b the push-event condition dropped               → #33
+ *   R33c contents: write granted to the whole workflow  → #33
+ *   R33d `shell: bash` dropped                          → #33
+ *   R33e the release push forced                        → #33b
+ *   R33f the ancestry check replaced by `true`          → #33b
+ *   R33g `refs/remotes/origin/main` pushed instead of the tested SHA → #33b
+ *   R33h revision 4's `origin/released` instead of FETCH_HEAD → #33b
+ *   R39  the rollback does not restore the workflow     → #39
  *   M24  cleanup deletes the cache                       → #5 #11 #26 #27a #27b #28 #28b —
  *        NOT #24: run A reads its history BEFORE it blocks in compare, so a
  *        deleted cache behind it changes nothing it prints. #24's reds are
@@ -113,6 +131,7 @@ import { closeSync, constants, existsSync, openSync, writeSync } from 'node:fs'
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { parseDocument } from 'yaml'
 
 const BLACKHOLE = 'ssh://git@127.0.0.1/blackhole.git'
 const WARNING =
@@ -403,6 +422,64 @@ function diedOf(d: Done, sig: Sig): boolean {
 }
 
 const show = (d: Done) => `code=${d.code} signal=${d.signal}\n${d.stdout}${d.stderr}`
+
+// --- the release job (PLAN §7.4) ---------------------------------------------
+
+interface WfStep {
+  name?: string
+  run?: string
+  shell?: string
+}
+interface WfJob {
+  if?: string
+  needs?: string[] | string
+  permissions?: Record<string, string>
+  steps?: WfStep[]
+}
+interface Workflow {
+  permissions?: unknown
+  jobs?: Record<string, WfJob>
+}
+
+/** The job and step that publish `released`, found by what the step does. */
+function releaseOf(text: string) {
+  const wf = parseDocument(text).toJS() as Workflow
+  for (const [id, job] of Object.entries(wf.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (typeof step.run === 'string' && step.run.includes('refs/heads/released')) {
+        return { wf, id, job, step }
+      }
+    }
+  }
+  return null
+}
+
+/** Run a release block the way a `shell: bash` step runs, with GITHUB_SHA set. */
+async function runReleaseBlock(s: Scenario, block: string, work: string, sha: string, tag: string) {
+  const file = await s.fs.write(`release-${tag}.sh`, block)
+  return s.run('bash', ['--noprofile', '--norc', '-eo', 'pipefail', file], {
+    cwd: work,
+    env: { GITHUB_SHA: sha },
+  })
+}
+
+async function bareRef(s: Scenario, bare: string, ref: string): Promise<string> {
+  const r = await s.run('git', ['--git-dir', bare, 'rev-parse', '-q', '--verify', ref], { cwd: s.workspace.root })
+  return r.code === 0 ? r.stdout.trim() : ''
+}
+
+const MINIMAL_WORKFLOW = [
+  'name: security',
+  'on:',
+  '  push:',
+  '    branches: [main]',
+  'jobs:',
+  '  noop:',
+  '    runs-on: ubuntu-latest',
+  '    steps:',
+  '      - run: "true"',
+  '',
+].join('\n')
 
 describe('TASK-025 — drift and pull read the blueprint by its address', () => {
   it('#1 drift reads the remote when NO local checkout exists, and says which commit it read', async () => {
@@ -1312,6 +1389,250 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
 
       expect(r.code, r.output).toBe(0)
       expect(existsSync(stray), 'the lost race left its temp in the cache').toBe(false)
+    })
+  })
+
+  it('#30 blueprint_release_branch is the branch drift and pull read, and it is validated', async () => {
+    await scenario('sync-by-address-30', async (s) => {
+      // `main` is one commit ahead of `released`, and that commit changes a
+      // managed file, so which branch was read is visible in the report itself.
+      const remote = await blueprintRemote(s, 'released-content')
+      await git(s, remote.dir, ['branch', 'released'])
+      const mainTip = await advance(s, remote.dir, 'main-only')
+      const cli = await cliCopy(s, 'cli')
+
+      const rel = await project(s, remote.dir, remote.head, 'OLD', {
+        tag: 'rel',
+        extra: ['blueprint_release_branch = released'],
+      })
+      const d1 = await run(s, cli, rel, ['drift'])
+      expect(d1.code, d1.output).toBe(0)
+      expect(d1.stdout).toContain(`blueprint:  ${remote.dir}  (released)`)
+      expect(d1.stdout).toMatch(fetched(remote.head))
+      const p1 = await run(s, cli, rel, ['pull', '--yes'])
+      expect(p1.code, p1.output).toBe(0)
+      expect(await readFile(join(rel, 'docs/DoD.md'), 'utf8')).toBe(dodText('proj', 'released-content'))
+      expect(await readFile(join(rel, '.blueprint-source'), 'utf8')).toMatch(
+        new RegExp(`^bootstrap_sha\\s*=\\s*${remote.head}$`, 'm'),
+      )
+
+      // Field absent: blueprint_branch, exactly as before commit 3.
+      const plain = await project(s, remote.dir, remote.head, 'OLD', { tag: 'plain' })
+      const d2 = await run(s, cli, plain, ['drift'])
+      expect(d2.code, d2.output).toBe(0)
+      expect(d2.stdout).toContain(`blueprint:  ${remote.dir}  (main)`)
+      expect(d2.stdout).toMatch(fetched(mainTip))
+      const p2 = await run(s, cli, plain, ['pull', '--yes'])
+      expect(p2.code, p2.output).toBe(0)
+      expect(await readFile(join(plain, 'docs/DoD.md'), 'utf8')).toBe(dodText('proj', 'main-only'))
+      expect(await readFile(join(plain, '.blueprint-source'), 'utf8')).toMatch(
+        new RegExp(`^bootstrap_sha\\s*=\\s*${mainTip}$`, 'm'),
+      )
+
+      // A name git would refuse is refused before any transport, naming the field.
+      const bad = await project(s, remote.dir, remote.head, 'OLD', {
+        tag: 'bad',
+        extra: ['blueprint_release_branch = bad..name'],
+      })
+      const d3 = await run(s, cli, bad, ['drift'])
+      expect(d3.code, d3.output).toBe(4)
+      expect(d3.stderr).toContain('blueprint_release_branch')
+      expectNoReport(d3)
+    })
+  })
+
+  it("#31 a2bp's base does not move: it still files against blueprint_branch", async () => {
+    await scenario('sync-by-address-31', async (s) => {
+      const remote = await blueprintRemote(s, 'released-content')
+      await git(s, remote.dir, ['branch', 'released'])
+      const mainTip = await advance(s, remote.dir, 'main-only')
+      const proj = await project(s, remote.dir, mainTip, 'a project improvement', {
+        extra: ['blueprint_release_branch = released'],
+      })
+      const cli = await cliCopy(s, 'cli')
+
+      const r = await run(s, cli, proj, ['a2bp', '--dry-run', 'docs/DoD.md'])
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout, 'a2bp filed against the release branch').toMatch(/branch:\s+main\s*$/m)
+      expect(r.stdout, "a2bp's base is not main's tip").toMatch(new RegExp(`base:\\s+${mainTip}\\b`))
+    })
+  })
+
+  it('#32 switched before released caught up: said so, then the normal list once it has', async () => {
+    await scenario('sync-by-address-32', async (s) => {
+      const remote = await blueprintRemote(s, 'r')
+      await git(s, remote.dir, ['branch', 'released'])
+      const mainOnly = await advance(s, remote.dir, 'main-one')
+      const mainTip = await advance(s, remote.dir, 'main-two')
+      // Synced to a commit released does not contain yet.
+      const proj = await project(s, remote.dir, mainOnly, 'main-two', {
+        extra: ['blueprint_release_branch = released'],
+      })
+      const cli = await cliCopy(s, 'cli')
+
+      const early = await run(s, cli, proj, ['drift'])
+      expect(early.code, early.output).toBe(0)
+      expect(early.stdout).toContain(`bootstrap_sha ${mainOnly} is not in ${remote.dir} released history`)
+      expect(early.stdout).toContain('not yet released')
+      expect(early.stdout).not.toContain('commit(s) since')
+
+      await git(s, remote.dir, ['branch', '-f', 'released', mainTip])
+      const later = await run(s, cli, proj, ['drift'])
+      expect(later.code, later.output).toBe(0)
+      expect(later.stdout).not.toContain('is not in')
+      expect(later.stdout).toContain('Blueprint has 1 commit(s) since this project was last synced')
+      expect(later.stdout).toContain('main-two')
+    })
+  })
+
+  it("#33 the release job's declared shape: bash, push events in this repository, after every other job, the only writer", async () => {
+    const text = await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8')
+    const found = releaseOf(text)
+    expect(found, 'no job publishes refs/heads/released').not.toBeNull()
+    if (!found) return
+    const { wf, id, job, step } = found
+
+    expect(step.shell, 'the release step does not declare shell: bash').toBe('bash')
+    expect(job.if ?? '', 'the release job can run for non-push events').toContain("github.event_name == 'push'")
+    expect(job.if ?? '', 'the release job runs in every repository the file ships to').toMatch(
+      /github\.repository\s*==\s*'[^']+'/,
+    )
+
+    // DERIVED, not listed: a job added later and left out of `needs` fails here.
+    const others = Object.keys(wf.jobs ?? {}).filter((j) => j !== id).sort()
+    const needs = (Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : []).slice().sort()
+    expect(needs, 'the release does not wait for every other job').toEqual(others)
+
+    expect(job.permissions?.contents, 'the release job cannot push').toBe('write')
+    expect(JSON.stringify(wf.permissions ?? {}), 'the whole workflow was granted write').not.toContain('write')
+    for (const other of others) {
+      expect(wf.jobs?.[other]?.permissions?.contents, `${other} was granted contents: write`).not.toBe('write')
+    }
+  })
+
+  it('#33b the release block, run: every state of released, with and without a fetch refspec', async () => {
+    await scenario('sync-by-address-33b', async (s) => {
+      const found = releaseOf(await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'))
+      expect(found, 'no release block to run').not.toBeNull()
+      const block = found?.step.run ?? ''
+
+      // A bare remote holding C1 <- C2 <- C3 on main, and X branching from C1.
+      const src = await s.workspace.dir('src')
+      await s.fs.write(join(src, 'f'), '1\n')
+      await initRepo(s, src)
+      const c1 = await commitAll(s, src, 'C1')
+      await s.fs.write(join(src, 'f'), '2\n')
+      const c2 = await commitAll(s, src, 'C2')
+      await s.fs.write(join(src, 'f'), '3\n')
+      const c3 = await commitAll(s, src, 'C3')
+      await git(s, src, ['checkout', '-q', '-b', 'x', c1])
+      await s.fs.write(join(src, 'f'), 'x\n')
+      const x = await commitAll(s, src, 'X')
+      const bare = s.workspace.path('origin.git')
+      await git(s, s.workspace.root, ['init', '-q', '--bare', '-b', 'main', bare])
+      await git(s, src, ['push', '-q', bare, `${c3}:refs/heads/main`, `${x}:refs/heads/x`])
+
+      const states: Array<{ tag: string; before: string; sha: string; code: 0 | 1; after: string }> = [
+        { tag: 'a-missing', before: '', sha: c2, code: 0, after: c2 },
+        { tag: 'b-newer-published', before: c3, sha: c2, code: 0, after: c3 },
+        { tag: 'c-diverged', before: x, sha: c3, code: 1, after: x },
+        { tag: 'd-older', before: c1, sha: c3, code: 0, after: c3 },
+      ]
+      for (const shape of ['refspec', 'url-only'] as const) {
+        for (const st of states) {
+          const tag = `${shape}-${st.tag}`
+          if (st.before) await git(s, s.workspace.root, ['--git-dir', bare, 'update-ref', 'refs/heads/released', st.before])
+          else await s.run('git', ['--git-dir', bare, 'update-ref', '-d', 'refs/heads/released'], { cwd: s.workspace.root })
+
+          // What the checkout action leaves: the tested commit's objects, and
+          // either a configured remote or only its URL.
+          const work = await s.workspace.dir(`work-${tag}`)
+          await git(s, work, ['init', '-q', '-b', 'main', '.'])
+          if (shape === 'refspec') {
+            await git(s, work, ['remote', 'add', 'origin', bare])
+            await git(s, work, ['fetch', '-q', 'origin'])
+          } else {
+            await git(s, work, ['config', 'remote.origin.url', bare])
+            await git(s, work, ['fetch', '-q', 'origin', 'main'])
+          }
+
+          const r = await runReleaseBlock(s, block, work, st.sha, tag)
+          expect(r.code === 0 ? 0 : 1, `${tag}: exit status\n${r.output}`).toBe(st.code)
+          expect(await bareRef(s, bare, 'refs/heads/released'), `${tag}: where released ended`).toBe(st.after)
+        }
+      }
+    })
+  })
+
+  it('#39 the rollback reaches migrated projects: published through the job, the job removed last', async () => {
+    await scenario('sync-by-address-39', async (s) => {
+      // "CI" is this function: after every push, if the workflow AT THE PUSHED
+      // SHA has the release job, run that SHA's own release block against the
+      // bare remote. That is how GitHub picks the workflow to run.
+      const bare = s.workspace.path('origin.git')
+      await git(s, s.workspace.root, ['init', '-q', '--bare', '-b', 'main', bare])
+      let ciRun = 0
+      const pushAndCi = async (sha: string) => {
+        await git(s, bp, ['push', '-q', 'origin', 'main'])
+        const shown = await s.run('git', ['--git-dir', bare, 'show', `${sha}:.github/workflows/security.yml`], {
+          cwd: s.workspace.root,
+        })
+        const found = shown.code === 0 ? releaseOf(shown.stdout) : null
+        if (!found?.step.run) return
+        ciRun += 1
+        const work = s.workspace.path(`ci-${ciRun}`)
+        await git(s, s.workspace.root, ['clone', '-q', bare, work])
+        await git(s, work, ['checkout', '-q', '--detach', sha])
+        const r = await runReleaseBlock(s, found.step.run, work, sha, `ci-${ciRun}`)
+        expect(r.code, `the release job failed at ${sha}\n${r.output}`).toBe(0)
+      }
+
+      const bp = await s.workspace.dir('bp')
+      await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\n')
+      await s.fs.write(join(bp, 'docs/DoD.md'), dodText('{{PROJECT_NAME}}', 'B-content'))
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(join(bp, '.github/workflows/security.yml'), MINIMAL_WORKFLOW)
+      await initRepo(s, bp)
+      const b = await commitAll(s, bp, 'B')
+      await git(s, bp, ['remote', 'add', 'origin', bare])
+      await pushAndCi(b)
+
+      const ta = await advance(s, bp, 'Ta-content')
+      await pushAndCi(ta)
+      await s.fs.write(
+        join(bp, '.github/workflows/security.yml'),
+        await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
+      )
+      const tb = await commitAll(s, bp, 'Tb: the release job')
+      await pushAndCi(tb)
+      expect(await bareRef(s, bare, 'refs/heads/released'), 'the job did not publish Tb').toBe(tb)
+
+      const cli = await cliCopy(s, 'cli')
+      const proj = await project(s, bare, tb, 'Ta-content', { extra: ['blueprint_release_branch = released'] })
+
+      // §10 step 1, verbatim in shape: revert every TASK commit, KEEP the workflow.
+      await git(s, bp, ['revert', '--no-commit', tb, ta])
+      await git(s, bp, ['checkout', 'HEAD', '--', '.github/workflows/security.yml'])
+      const rollback = await commitAll(s, bp, 'roll back, keeping the release job so released carries the rollback')
+      await pushAndCi(rollback)
+
+      const after1 = await run(s, cli, proj, ['drift'])
+      expect(after1.code, after1.output).toBe(0)
+      expect(after1.stdout, 'a migrated project does not see the rollback').toMatch(fetched(rollback))
+      expect(fixtureMarked(after1.output, '~'), after1.output).toContain('docs/DoD.md')
+      const pulled = await run(s, cli, proj, ['pull', 'docs/DoD.md', '--yes'])
+      expect(pulled.code, pulled.output).toBe(0)
+      expect(await readFile(join(proj, 'docs/DoD.md'), 'utf8')).toBe(dodText('proj', 'B-content'))
+
+      // §10 step 5: only then remove the job. Its run has none, so released stays.
+      await git(s, bp, ['checkout', b, '--', '.github/workflows/security.yml'])
+      const removal = await commitAll(s, bp, 'remove the release job')
+      await pushAndCi(removal)
+      expect(await bareRef(s, bare, 'refs/heads/released'), 'removing the job moved released').toBe(rollback)
+      const after5 = await run(s, cli, proj, ['drift'])
+      expect(after5.code, after5.output).toBe(0)
+      expect(after5.stdout).toMatch(fetched(rollback))
     })
   })
 

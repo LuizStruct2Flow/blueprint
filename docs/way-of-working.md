@@ -288,6 +288,8 @@ all eight concerns below, plus the agent infra, live in one git repo.
   improvements forward. Both read the blueprint **by its address**, fetched
   fresh on every run — never from whatever a folder on the machine happens to
   hold — and an unreachable blueprint is a loud exit 5, never a quiet "all clear".
+  Projects read **`released`**: the newest commit on which the blueprint's whole
+  CI passed, fast-forwarded by a CI job, so a broken `main` never fans out.
 - **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
   improvement lands in a project, it travels back to the blueprint
   so *every other project* inherits it next time they pull.

@@ -221,6 +221,14 @@ stage blocks when it is missing and prints `bash scripts/install-toolchain.sh`,
 which installs it on macOS (brew) and on Linux (a pinned release). Fix a finding,
 or disable it inline with a reason; never lower the severity.
 
+**CI's ts-tests job prepares its machine with that same installer (BUG-132)**,
+so the suites see there the tool set they see on yours. It used to install
+ShellCheck by name and nothing else, and when BUG-127 made `a2bp` refuse without
+gitleaks, six a2bp suites went red in CI only. A tool the suites come to need
+goes into `scripts/install-toolchain.sh`, which reaches both machines at once;
+`tests/ts-bridge` #9 runs the job's provisioning and requires the installer's
+`check` to pass.
+
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
 sets it at bootstrap, but a clone never runs bootstrap. This file previously

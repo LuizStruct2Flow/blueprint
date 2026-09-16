@@ -946,7 +946,11 @@ asking the founder to interpret raw output.
   `coverage/lcov.info`, then invokes `sonar-scanner`. Sources
   `SONAR_TOKEN` + `SONAR_HOST_URL` from gitignored `.env`. Skip
   the coverage regen with `--no-coverage` when you just ran the
-  pre-push gate and want to re-upload.
+  pre-push gate and want to re-upload. SonarQube has no shell analyser, so
+  it also runs ShellCheck over the files the gate lints and imports the
+  findings as external issues (`external_shellcheck:SC…`); SC2317 is left
+  out. Files under a dot-directory such as `.githooks/` are never indexed by
+  the scanner, so their findings stay with the gate's ShellCheck stage.
 - `scripts/sonar-api.sh` — calls SonarQube's REST API with auth
   from `.env`. Usage: `bash scripts/sonar-api.sh /api/<path>?<query>`.
   The wrapper exists so Claude can query the API without chaining

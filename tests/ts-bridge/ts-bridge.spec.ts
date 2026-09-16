@@ -63,11 +63,17 @@
  * observable from outside — by an outer vitest run watching an inner gate. What
  * remains unobservable is only a failure that takes down the OUTER run too.
  *
- * THE RESIDUE IS TASK-023, NOT AN INVENTION HERE. Closing (a) and (c) properly
- * needs an assertion executed by something that is not vitest. That is already
- * rowed and founder-pending as TASK-023, and it is deliberately NOT worked around
- * here: inventing a second runner kind on one agent's authority is how a test
- * stack acquires the exemption R5 spent a day removing.
+ * THE RESIDUE WAS TASK-023, AND IT IS NOW AN ACCEPTED LOSS. Closing (a) and (c)
+ * properly needs an assertion executed by something that is not vitest. The
+ * founder decided on 2026-09-16 to accept that loss rather than keep a rule with
+ * a silent exception (TASK-047): `tests/ts-bridge/test.sh` is retired, this spec
+ * is the whole of the suite, and TASK-023 is closed. What it costs is recorded
+ * in docs/config/findings.md F-003 — a silently dead bridge now produces no red
+ * case — rather than left in a commit body.
+ *
+ * Do not answer it by inventing a second runner kind on one agent's authority:
+ * that is how a test stack acquires the exemption R5 spent a day removing, and
+ * it is a decision rather than a stage.
  *
  * WHERE THE §3.3 LINE FALLS. `scripts/run-ts-suites.sh` is sourced by
  * `.githooks/pre-push-project`, on the shell side of the boundary

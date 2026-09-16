@@ -711,11 +711,24 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     return { r, contacted }
   }
 
-  /** A gitleaks that finds a leak in any file carrying a private-key header. */
+  /**
+   * A gitleaks that finds a leak in any file carrying a private-key header.
+   *
+   * BUG-127: it exits 7, not 1, because the scan now passes `--exit-code 7` and
+   * a finding is reported with THAT status. 1 is what a gitleaks too old for
+   * `dir` returns, and calling that a secret was the false attribution this bug
+   * fixes — so the shim has to honour the flag the way the real tool does.
+   */
   const FINDING_GITLEAKS = [
     `for a in "$@"; do f="$a"; done`,
-    `if grep -q 'PRIVATE KEY' "$f"; then echo "Finding: REDACTED"; exit 1; fi`,
+    `if grep -q 'PRIVATE KEY' "$f"; then echo "Finding: REDACTED"; exit 7; fi`,
     `exit 0`,
+  ].join('\n')
+
+  /** A gitleaks too old for the `dir` subcommand: it exits 1, like any other failure. */
+  const UNSUPPORTED_GITLEAKS = [
+    `echo "unknown command dir for gitleaks" >&2`,
+    `exit 1`,
   ].join('\n')
 
   it('#19 TASK-037: against a scaffolding/ base, an unshipped new file stays at the root and a managed one moves under scaffolding/', async () => {
@@ -790,17 +803,25 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     })
   })
 
-  it('#18 TASK-037: an absent gitleaks is skipped out loud, as the pre-push gate does; a failing one blocks before contact', async () => {
+  it('#18 BUG-127: an absent gitleaks BLOCKS the request; a failing one blocks before contact', async () => {
     await scenario('a2bp-e2e-18', async (s) => {
       const e = await setup(s)
 
-      // Absent: the pre-push gate skips the secret scan with a named reason
-      // rather than blocking a machine without the tool. a2bp matches it, and
-      // must SAY so: a silent skip reads as a clean scan.
+      // REVERSED. This asserted that a2bp skipped the scan like the pre-push
+      // gate. Alexey took gitleaks off PATH and both private-key probes reached
+      // the fetch; only his transport-denying shim stopped them. The gate's skip
+      // is defensible because nothing leaves the machine — a2bp PUSHES a branch
+      // to the blueprint's remote, and CI scanning the PR afterwards can refuse
+      // the merge but cannot un-disclose what the push carried.
       const without = await s.pathWithout(['gh', 'gitleaks'])
       const absent = await recorded(s, e, ['a2bp', '--dry-run', 'docs/DoD.md'], {}, without)
-      expect(absent.r.code, `a missing gitleaks blocked the request\n${absent.r.output}`).toBe(RC.OK)
-      expect(absent.r.output, 'the secret scan was skipped silently').toContain('gitleaks not installed')
+      expect(absent.r.code, `a missing gitleaks filed an unscanned request\n${absent.r.output}`).toBe(
+        RC.BLOCKED,
+      )
+      expect(absent.r.output, 'it blocked without naming the remedy').toContain(
+        'scripts/install-toolchain.sh',
+      )
+      expect(absent.contacted, 'the remote was contacted with no scanner installed').toEqual([])
 
       // Failing: exit >= 2 is a tool failure, not a clean scan (BUG-003).
       const failing = await recorded(s, e, ['a2bp', '--dry-run', 'docs/DoD.md'], {
@@ -809,6 +830,29 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
       expect(failing.r.code, `a failing gitleaks passed as clean\n${failing.r.output}`).toBe(RC.BLOCKED)
       expect(failing.r.output).toContain('could not complete')
       expect(failing.contacted, 'the remote was contacted after a failed scan').toEqual([])
+    })
+  })
+
+  it('#20 BUG-127: a scanner that cannot run is an INCOMPLETE SCAN, not a found secret', async () => {
+    await scenario('a2bp-e2e-20', async (s) => {
+      // Alexey's shim modelled a gitleaks too old for `dir`. Every exit 1 was
+      // read as a finding, so the operator was told a secret was found in a file
+      // that has none, and advised to rotate it. Both outcomes block, so this is
+      // false attribution rather than a bypass — and an operator who learns the
+      // tool cries wolf is an operator who stops believing the real finding.
+      const e = await setup(s)
+      const { r, contacted } = await recorded(s, e, ['a2bp', '--dry-run', 'docs/DoD.md'], {
+        gitleaks: UNSUPPORTED_GITLEAKS,
+      })
+
+      expect(r.code, `an unrunnable scanner did not block\n${r.output}`).toBe(RC.BLOCKED)
+      expect(r.output, 'a scanner that could not run was reported as a found secret').not.toMatch(
+        /found a secret/,
+      )
+      expect(r.output, 'it blocked without saying the scan did not run').toMatch(
+        /could not complete|did NOT run/,
+      )
+      expect(contacted, 'the remote was contacted after an incomplete scan').toEqual([])
     })
   })
 })

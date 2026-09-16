@@ -22,6 +22,7 @@ belong where the decision happens.
 
 | # | Bug | Severity | Status | What to test | Detail |
 |---|---|---|---|---|---|
+| **BUG-133** | **A signalled deferred bookend child leaves its `sleep 0.1` running for up to 0.1 s after it exits, and CI's harness caught it as a leftover process.** CI run 35141833622 on `b26c0db`, the first run with suites in parallel: `subagent-feed` #17 failed with "Scenario left 1 process(es) running". The child in `scripts/log-activity.sh` waited with a foreground `sleep 0.1`, so a TERM ran the handler only after the sleep returned, and the sleep outlived its parent. Harmless in production (a sleep living 100 ms), but it turned CI red on a loaded 4-core runner, where this 32-core machine never saw it. | S3 | **FIXED — landed `0752a4e`, pushed 2026-09-16, CI green** | Look at CI on any push: `subagent-feed` #17 (release tier) must pass. It failed on `b26c0db` with "Scenario left 1 process(es) running" and passes since the fix. | Found 2026-09-16 by Eto from the CI log. **Fix:** the sleep runs in the background and is waited on, so the signal interrupts the wait at once and the handler kills the sleep. **Regression test:** the existing `subagent-feed` #17, now titled with BUG-133; it is the test that went red in CI. **Re-open if** #17 reports a leftover process again. |
 
 
 The 2026-07-29 QA pass dispositioned the earlier bugs: BUG-001, BUG-002 and

@@ -610,6 +610,25 @@ describe('TASK-044 — #5 and #5b judge GitHub Actions only when the project run
     expect(said).toEqual(['SKIP-NOTE: a case: the declared CI is x'])
     expect(skippedWith).toBe('the declared CI is x')
   })
+
+  it('a newline in the title or the reason still emits ONE line, with the reason intact', () => {
+    // Alexey, finding 7. The gate keeps the LINES carrying the marker and deletes
+    // the rest of the run's output, so a notice split across two physical lines
+    // loses everything after the first — which is the reason. A wrapped test
+    // title alone is enough to push the reason onto the unmarked second line.
+    const said: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((m: string) => void said.push(m))
+    try {
+      skipNote('a case\nwith a wrapped title', 'the declared CI is aws-codepipeline\nso the workflow is inert')
+    } finally {
+      warn.mockRestore()
+    }
+
+    expect(said).toHaveLength(1)
+    expect(said[0], 'the notice spans more than one physical line').not.toContain('\n')
+    expect(said[0]).toContain('a case with a wrapped title')
+    expect(said[0]).toContain('the declared CI is aws-codepipeline so the workflow is inert')
+  })
 })
 
 describe('BUG-005 — THE REAL TREE', () => {

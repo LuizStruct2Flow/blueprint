@@ -49,27 +49,25 @@
 # bp_suite_runners ROOT — every runner file under tests/, as:
 #     suite<TAB>path-relative-to-ROOT
 #
-# A RUNNER is a `*.sh` or a `*.spec.ts`. Discovery is by EXTENSION, never by the
-# `test.sh` / `<suite>.spec.ts` naming convention: recognising only `test.sh` is
-# how renaming a runner once made a whole suite invisible to its own control
-# (Codex R2-F1a).
+# A RUNNER is a `*.spec.ts` or a `*.spec.tsx`. Discovery is by EXTENSION, never
+# by the `<suite>.spec.ts` naming convention: recognising only `test.sh` is how
+# renaming a runner once made a whole suite invisible to its own control
+# (Codex R2-F1a). The lesson outlived the extension it was learned on.
 #
-# THAT SENTENCE USED TO CITE `tests/staleness/` AS SHIPPING TWO SHELL RUNNERS.
-# It ships none: one `staleness.spec.ts`. Repo-wide exactly two `.sh` files are
-# left under `tests/` — `ts-bridge/test.sh`, a real runner, and
-# `helpers/proc-cwd.sh`, a helper a spec invokes rather than a test of its own.
-# The lesson the sentence carried is sound and stays; the evidence it cited had
-# rotted, which is the copy-that-drifts this file's own header is about.
+# TASK-047 — THE `*.sh` BRANCH IS GONE, and so is the hold this comment used to
+# describe. `tests/ts-bridge/test.sh` was the last shell runner; the founder
+# retired it (TASK-023), and it left with its `.githooks/pre-push-project` stage
+# and its CI job in the same push as this line. `tests/helpers/proc-cwd.sh` is
+# the only `.sh` left under `tests/`, and it is a helper a spec invokes rather
+# than a test of its own — the helpers exemption below already excludes it, so
+# no longer looking for `.sh` here loses nothing.
 #
-# TASK-047 — THE `*.sh` BRANCH IS HELD, NOT KEPT. The founder's decision is one
-# extension, and `dod-gate.sh` already accepts only `*.spec.ts` as evidence.
-# Discovery still recognises `*.sh` because `tests/ts-bridge/test.sh` is on disk:
-# dropping it first would leave a runner that discovery ignores — a silent
-# coverage cut, and a breach of the manifest invariant that every runner on disk
-# is invoked. Whether that file survives is TASK-023, because it is the only
-# assertion about the vitest bridge NOT run by the vitest it asserts about. The
-# branch goes in the same change as the file, its `.githooks/pre-push-project`
-# stage and its CI job — never before.
+# `.spec.tsx` IS DISCOVERED TOO, and it is not an exception (coordinator ruling,
+# 2026-09-16): a JSX component test cannot be written as `.ts`, and a runner this
+# function does not find is never declared to the batch — so an assertion about
+# "every runner" would pass over it in silence rather than fail. tests/dod-gate
+# #17 holds all three sides as ONE set: counted as evidence by `dod-gate.sh`,
+# discovered here, executed by `tests/vitest.config.ts`.
 #
 # A runner sitting directly in `tests/` belongs to no suite, and emits an EMPTY
 # suite field rather than being dropped — a discovery that silently ignores what
@@ -81,7 +79,7 @@
 # compensating control that stops the exemption becoming a place to hide code.
 bp_suite_runners() {
   _bsr_root="${1:-.}"
-  find "$_bsr_root/tests" -type f \( -name '*.sh' -o -name '*.spec.ts' \) 2>/dev/null \
+  find "$_bsr_root/tests" -type f \( -name '*.spec.ts' -o -name '*.spec.tsx' \) 2>/dev/null \
     | sed -e "s#^$_bsr_root/##" \
     | sort \
     | awk -F/ '
@@ -139,7 +137,7 @@ bp_suite_rows() {
   done
 }
 
-# bp_suites_with_spec ROOT — the suites that own a *.spec.ts.
+# bp_suites_with_spec ROOT — the suites that own a *.spec.ts or *.spec.tsx.
 #
 # This is what the vitest bridge declares to the pipeline before vitest runs.
 # See the header: it is read from the FILESYSTEM, never from vitest's own
@@ -147,7 +145,7 @@ bp_suite_rows() {
 # never reports rather than a suite that quietly stopped existing.
 bp_suites_with_spec() {
   bp_suite_runners "${1:-.}" \
-    | awk -F'\t' '$1 != "" && $2 ~ /\.spec\.ts$/ { print $1 }' \
+    | awk -F'\t' '$1 != "" && $2 ~ /\.spec\.tsx?$/ { print $1 }' \
     | sort -u
   # BUG-055: the one caller runs under `set -e`, where a non-zero status is
   # fatal however good the list on stdout is. There is deliberately no status

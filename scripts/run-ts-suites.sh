@@ -408,7 +408,16 @@ ts_suites_stage(){
   # (tests/helpers/project-config.ts). vitest's JSON records no skip reason, so
   # without this a case skipped because the project runs another CI would render
   # as a plain pass.
-  grep -F -e 'CANARY-NOTE:' -e 'SKIP-NOTE:' "$_ts_out" | sed 's/^/  ⚠ /' | head -20 || true
+  #
+  # TWO greps, and the SKIP notices are UNCAPPED. They shared one `head -20` with
+  # the canary notes, so twenty canary notes spent the whole budget and every
+  # later skip reason vanished with nothing saying so (Alex, TASK-044 finding 5) —
+  # the silence this marker exists to prevent, reintroduced by the cap that was
+  # meant to keep the gate readable. A skip is a COVERAGE statement and every one
+  # of them prints; a canary note is a repetition of one fact about the baton and
+  # keeps its cap.
+  grep -F 'SKIP-NOTE:' "$_ts_out" | sed 's/^/  – /' || true
+  grep -F 'CANARY-NOTE:' "$_ts_out" | sed 's/^/  ⚠ /' | head -20 || true
 
   rm -f "$_ts_out"
 

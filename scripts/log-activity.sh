@@ -186,9 +186,67 @@ emit_bookend(){
 # the meta never comes. All its descriptors are closed so the client is not held
 # waiting on it. On stop the meta is already there, so the line is written
 # directly.
-: "${BP_SUBAGENT_META_WAIT:=5}"
+# THE WAIT IS A NUMBER OF SECONDS, VALIDATED AND CAPPED. It reaches shell
+# arithmetic, where a non-numeric name is an error under `set -u`: the child died
+# before emitting anything and the dispatch went unlogged. A value out of range
+# is clamped rather than refused — this is a logging bound, and a hook must never
+# cost the call it observes (Alex's review, 2026-09-16, finding 4). The cap is
+# also the child's whole-life bound: the wait below plus the roster lookup, which
+# bp_staleness_timeout_cmd already bounds, is all it ever does.
+BP_SUBAGENT_META_WAIT_MAX=15
+case "${BP_SUBAGENT_META_WAIT:-}" in
+  '' | *[!0-9]*) BP_SUBAGENT_META_WAIT=5 ;;
+esac
+if [ "$BP_SUBAGENT_META_WAIT" -gt "$BP_SUBAGENT_META_WAIT_MAX" ]; then
+  BP_SUBAGENT_META_WAIT="$BP_SUBAGENT_META_WAIT_MAX"
+fi
+
+# AT MOST THIS MANY children may be waiting at once. Past the cap the bookend is
+# written IMMEDIATELY, labelled by agent type: a burst of dispatches then costs
+# labels, never processes and never the line itself.
+: "${BP_SUBAGENT_DEFER_MAX:=8}"
+case "$BP_SUBAGENT_DEFER_MAX" in
+  '' | *[!0-9]*) BP_SUBAGENT_DEFER_MAX=8 ;;
+esac
+defer_dir="$BP_STATE_ROOT/subagent-defer"
+
+# Slots left behind by a child that was killed are swept by age — a minute is
+# well past the capped life above — so a crash cannot silently use up the budget.
+defer_count() {
+  find "$defer_dir" -name '*.slot' -mmin +1 -exec rm -f {} + 2>/dev/null
+  set -- "$defer_dir"/*.slot
+  if [ "$#" -eq 1 ] && [ ! -e "$1" ]; then printf '0\n'; else printf '%s\n' "$#"; fi
+}
+
+# CLOSE EVERYTHING ABOVE 2 IN THE CHILD. Redirecting 0, 1 and 2 says nothing
+# about a caller's fd 9, so a flock held by whoever invoked the hook rode into
+# the child and stayed held for the whole wait — a dispatch or session lock kept
+# long after the hook returned. POSIX has no "close all", so the open ones are
+# read from the process's own descriptor directory where there is one.
+close_inherited() {
+  fdd=/proc/self/fd
+  [ -d "$fdd" ] || fdd=/dev/fd
+  [ -d "$fdd" ] || return 0
+  for fd in "$fdd"/*; do
+    fd=${fd##*/}
+    case "$fd" in 0 | 1 | 2 | *[!0-9]*) continue ;; esac
+    eval "exec $fd>&-" 2>/dev/null || true
+  done
+}
+
+defer_slot=""
 if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
+  mkdir -p "$defer_dir" 2>/dev/null || true
+  if [ -d "$defer_dir" ] && [ "$(defer_count)" -lt "$BP_SUBAGENT_DEFER_MAX" ]; then
+    defer_slot="$defer_dir/$$.slot"
+    : >"$defer_slot" 2>/dev/null || defer_slot=""
+  fi
+fi
+
+if [ -n "$defer_slot" ]; then
   (
+    trap 'rm -f "$defer_slot" 2>/dev/null' EXIT HUP INT TERM
+    close_inherited
     i=0
     while [ ! -e "$meta" ] && [ "$i" -lt $((BP_SUBAGENT_META_WAIT * 10)) ]; do
       sleep 0.1

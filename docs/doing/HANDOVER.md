@@ -587,6 +587,29 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       toolchain provide it, can `mkdir` (already the reservation primitive, atomic everywhere)
       carry the critical section instead, or must the degradation at least be announced once
       rather than silent? **Nothing pushes until that is answered.**
+    - **THE PUSH WAS ATTEMPTED AND REFUSED — 161 commits, `082a791`, and the gate was right.**
+      It failed at its FIRST DoD stage, `§1b·1 every item has a backlog row`:
+      `These items have NO backlog row anywhere: TASK-23`. Nothing in the suites failed; gitleaks,
+      semgrep (21 shell parse errors accepted) and osv all passed first.
+      - **The cause is a gap in the rule, and it is Eto's doing.** TASK-023 was cancelled exactly
+        as `docs/DoD.md:33` prescribes — *"cancellation (delete + one-line pointer in
+        `docs/config/findings.md`)"* — and `F-003` is that pointer, written on Eto's instruction.
+        But `dod_find_row` searches only the lifecycle row files, so a correctly cancelled item is
+        indistinguishable from work with no item at all. **Doing the closure right is what made
+        the closing push impossible.**
+      - The stage's own comment explains why it never came up: it asserts *existence* rather than
+        folder placement, "without guessing intent". Cancellation is a third state it does not
+        model.
+      - **Not a one-off:** A-13 was cancelled into `F-004` the same day and escaped only because
+        its number never appears in a commit subject. Any future cancellation whose closing commit
+        names its item hits this.
+      - **Filed as BUG-130** (`8f861e5`), with a fresh narrow-brief agent on it: teach
+        `dod_find_row` that a findings pointer is a valid record, report it as a note like a row
+        outside `doing/`, and keep failing an item with no record anywhere. Two witnesses, one of
+        which must be green before and after so the rule cannot be fixed into toothlessness.
+        Watch the number normalisation — the gate prints `TASK-23`, rows write `TASK-023`.
+      - **NOTHING ELSE IN THE BATCH IS IN QUESTION.** All seven review sections are closed; this
+        is a lifecycle bookkeeping gap standing in front of 161 otherwise-ready commits.
     - **Non-finding worth keeping:** the derived-project `subagent-feed #12` red that blocked this
       batch for hours **did not reproduce** — 34/34 here, and #12 passed in a fresh derived
       project. It was never a measured blueprint/derived difference.

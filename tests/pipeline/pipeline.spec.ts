@@ -93,8 +93,11 @@
  *       Red: #15 (and #14 under the no-mktemp PATH).
  *   M9  `_pipe_feed` uses the colourised `_pipe_line` text
  *       Red: #17.
- *   M10 feed rotation uses `mv` instead of `cat >`
- *       Red: #18.
+ *   M10 feed rotation trims in place (`tail`→`cat >`) instead of renaming
+ *       Red: #18 (no archive — the history is deleted), #18b (a concurrent
+ *       append inside the rewrite window is lost). This mutant is the code as
+ *       it stood before BUG-129's second half; the inverse mutant this line
+ *       used to describe rested on the false inode premise #18 now records.
  *   M11 the SLO branch `return 1`s
  *       Red: #20-never-blocks.
  *   M12 SLO defaults lowered to 1 ms
@@ -648,33 +651,110 @@ pipe_finish`),
     })
   })
 
-  it('#18 feed rotation trims the feed and preserves the inode', async () => {
+  it('#18 BUG-129: rotation MOVES the history, it does not delete it', async () => {
     await scenario('pipeline-18', async (s) => {
-      // `scripts/agent-activity.sh` tracks this file by offset on an OPEN
-      // HANDLE, so a rotation that replaces the inode leaves the supervisor
-      // writing into an unlinked file — the feed silently stops updating, which
-      // is the worst failure a log can have.
+      // THE INODE CLAIM THAT USED TO BE ASSERTED HERE WAS FALSE, and it was
+      // load-bearing: it is the reason `tail`→`cat >` looked mandatory. The
+      // supervisor does NOT hold this file open. `emit` is
+      // `printf '%s\n' "$1" >>"$out"` (scripts/agent-activity.sh:336), which
+      // reopens per line, and the only `exec N>` in that script targets the lock
+      // file. Nothing tracks the feed by descriptor, so replacing the inode
+      // orphans no writer — and rotation by rename becomes available.
       //
-      // The threshold knobs are set in the driver, not the scenario env: see the
+      // What IS load-bearing is the contract tests/harness/canary.ts enforces:
+      // the feed is append-only, so a rotation that DELETES the head reads as a
+      // fixture escape and turns an innocent suite red (BUG-129; the mechanism
+      // behind tests/subagent-feed #9). Rename keeps every byte — the history
+      // moves to `<feed>.1`, and archive+live still begins with what the canary
+      // captured.
+      //
+      // The threshold knob is set in the driver, not the scenario env: see the
       // docblock.
       const filler = Array.from({ length: 60 }, (_, i) => `filler line ${i}`).join('\n')
       await s.fs.write('logs/agent-activity.log', `${filler}\n`)
 
-      const before = (await stat(s.feedLog)).ino
-
       const r = await runPipe(
         s,
         'p18',
-        `AGENT_FEED_MAX_LINES=20\nAGENT_FEED_KEEP_LINES=10\nexport AGENT_FEED_MAX_LINES AGENT_FEED_KEEP_LINES\n` +
+        `AGENT_FEED_MAX_LINES=20\nexport AGENT_FEED_MAX_LINES\n` +
           `. ${JSON.stringify(FEED_LIB)}\nfeed_append 'trigger rotation'\n`,
       )
       expect(r.code, r.output).toBe(0)
 
-      const after = await stat(s.feedLog)
-      const lines = (await readFile(s.feedLog, 'utf8')).split('\n').filter(Boolean).length
+      expect(
+        await s.fs.exists('logs/agent-activity.log.1'),
+        'rotation left no archive — the trimmed history is simply GONE, which is ' +
+          'what the canary reads as a rewrite (BUG-129)',
+      ).toBe(true)
 
-      expect(after.ino, `rotation replaced the inode: ${before} -> ${after.ino}`).toBe(before)
-      expect(lines, `rotation did not trim: ${lines} lines`).toBeLessThanOrEqual(20)
+      const live = await readFile(s.feedLog, 'utf8')
+      const archive = await readFile(`${s.feedLog}.1`, 'utf8')
+
+      expect(
+        archive,
+        'the pre-rotation history did not survive into the archive',
+      ).toContain('filler line 0')
+      expect(
+        archive + live,
+        'the line that TRIGGERED the rotation was lost by it',
+      ).toContain('trigger rotation')
+      expect(
+        live,
+        'the new feed does not say where its history went — a reader following ' +
+          'the log sees it restart with no explanation',
+      ).toMatch(/rotated/)
+      expect(
+        live.split('\n').filter(Boolean).length,
+        'rotation did not cap the live feed',
+      ).toBeLessThanOrEqual(20)
+    })
+  })
+
+  it('#18b BUG-129: an append that RACES the rotation is not lost', async () => {
+    await scenario('pipeline-18b', async (s) => {
+      // CODEX'S PROBE, MADE DETERMINISTIC. `tail`→`cat >` has a window between
+      // the snapshot and the rewrite, and a line appended inside it is
+      // overwritten and gone — proved by hand against the real appender, and
+      // held open here by a `cat` shim that sleeps. Every hook and gate stage
+      // calls this appender on the same feed, so the racing writer is routine.
+      //
+      // A LOCK WAS NOT THE ANSWER. feed.sh is POSIX sh sourced by `#!/bin/sh`
+      // hooks, and `flock` is absent on macOS — coordinating every writer would
+      // mean a lock the platform may not have, on the one path that must never
+      // fail a push. Rename CLOSES the window instead of guarding it: the
+      // concurrent writer either appends before the rename (its bytes ride into
+      // the archive) or after it (they land in the new file). Nothing is lost,
+      // which is why this case does not care WHICH file the line ends up in.
+      const shims = await s.shimDir('slowcat')
+      await shims.add(
+        'cat',
+        'sleep 0.4\nfor p in /bin/cat /usr/bin/cat; do\n  [ -x "$p" ] && exec "$p" "$@"\ndone\nexit 127',
+      )
+
+      const filler = Array.from({ length: 60 }, (_, i) => `filler line ${i}`).join('\n')
+      await s.fs.write('logs/agent-activity.log', `${filler}\n`)
+
+      const r = await runPipe(
+        s,
+        'p18b',
+        `AGENT_FEED_MAX_LINES=20\nexport AGENT_FEED_MAX_LINES\n` +
+          `( sleep 0.2\n  printf '%s\\n' 'CONCURRENT-LINE' >>"$AGENT_FEED_LOG" ) &\n` +
+          `. ${JSON.stringify(FEED_LIB)}\nfeed_append 'trigger rotation'\nwait\n`,
+        { env: { PATH: shims.path() } },
+      )
+      expect(r.code, r.output).toBe(0)
+
+      const live = await readFile(s.feedLog, 'utf8')
+      let archive = ''
+      if (await s.fs.exists('logs/agent-activity.log.1')) {
+        archive = await readFile(`${s.feedLog}.1`, 'utf8')
+      }
+
+      expect(
+        archive + live,
+        'a line appended DURING the rotation was overwritten and lost — the feed ' +
+          'drops writes from any producer unlucky enough to hit the window (BUG-129)',
+      ).toContain('CONCURRENT-LINE')
     })
   })
 

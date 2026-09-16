@@ -337,6 +337,16 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       unchanged, and `suites.sh:55`'s stale claim corrected — `tests/staleness/` ships zero shell
       runners, it is one spec. All 55 TypeScript tests were already `*.spec.ts`, so narrowing
       dropped nothing that exists.
+  - **`.tsx` ruling (Eto, not the founder):** `*.spec.ts` and `*.spec.tsx` are ONE convention.
+    Vitali found that a JSX component test must be `*.spec.tsx`, which `**/*.spec.ts` does not
+    match, so a literal one-extension rule strands every React project. `.tsx` is TypeScript, so
+    this satisfies "spec-driven TS tests, no exceptions" rather than breaking it. Both must be
+    accepted as evidence, discovered AND executed — the same invariant. Vitali applies it to
+    `dod-gate.sh`, `vitest.config.ts` and DoD; Christian to CLAUDE.md and the templates.
+  - **Vitali's DoD table landed** (`886b5fb`): every layer ends in `.spec.ts`, with the reason
+    stated under the table. He is **blocked on Christian's deletion** for the `suites.sh`
+    one-liner — `tests/ts-bridge/test.sh` is still on disk. **Eto owns that ping**, not Vitali's
+    polling.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

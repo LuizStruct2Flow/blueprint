@@ -344,21 +344,21 @@ blueprint files            # list the blueprint-managed files (single source of 
 writes `blueprint`, which runs the CLI of the project you stand in — so moving the
 blueprint cannot break it, and it never overwrites a command it did not write.
 
-**What's managed** — `CLAUDE.md`, `STACK_DEFAULTS.md`,
-`scripts/install-toolchain.sh`, every
-recipe doc (`OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md`),
-`DoD.md`, the agent scripts, the pre-push hook, this deck itself — **and the
-whole `tests/` tree**, because a suite that guards managed machinery has to
+**What's managed** — **whatever the blueprint ships, and nobody lists it.** The
+managed set is derived from the blueprint's `git archive`, minus the seeds a
+project owns, so bootstrap and pull deliver the same files by construction and
+`.gitattributes` alone decides (TASK-021). That is `CLAUDE.md`, `DoD.md`, every
+recipe doc, the agent scripts, the pre-push hook, `AGENT_SIGNAL.md` — **and the
+shipped `tests/` suites**, because a suite that guards managed machinery has to
 move forward with the machinery it guards.
 
 **What's NOT managed** — `project_config_*.md` (templates seeded once
 at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so
 project rules reach every Claude Code session — agents on other providers read
-them by instruction), `BUGS.md`, `HANDOVER.md`,
-`AGENT_SIGNAL.md`, all source code.
+them by instruction), `README.md`, `.gitignore`, `BUGS.md`, `HANDOVER.md`, all
+source code.
 
-**Two things that only work together.** A managed *directory* syncs by
-creating and updating. The project alone cannot tell "the blueprint dropped
+**Two things that only work together.** Sync creates and updates. The project alone cannot tell "the blueprint dropped
 this" from "we wrote this", so deletion reads the *blueprint's* history instead:
 a full pull offers to **retire** a file the blueprint once shipped and no longer
 does, only when the project's copy is byte-identical to a shipped version, and

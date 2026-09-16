@@ -51,7 +51,7 @@ docs/backlog/README.md            -export-ignore
 # BUG-013 — the blueprint's self-identification marker must never reach a derived
 # project. `drift` uses its presence as positive proof of "this IS the blueprint";
 # if it shipped, every derived project would claim to be the source of truth and
-# compare nothing. Belt and braces with its absence from MANAGED_FILES.
+# compare nothing. Belt and braces with bp_managed_files subtracting it.
 .blueprint-root                    export-ignore
 
 # Agent scratch. Gitignored already, so nothing here is tracked — but the
@@ -116,22 +116,18 @@ tests/drift-in-blueprint/          export-ignore
 tests/pull-exec-bit/               export-ignore
 tests/bootstrap-gate/              export-ignore
 
-# TASK-021 — `blueprint-relocation` is the seventh, and it is here for the PHASE
-# 1 reason rather than the blueprint-only one: it is TypeScript, and no
-# TypeScript suite ships yet (the block below). Its subject — the shipped CLI
-# resolving against a blueprint whose tree has moved under `scaffolding/` — is
-# something a derived project would genuinely want to run, so this line is a
-# phase-1 consequence to REVISIT at phase 2, not a statement that the suite is
-# blueprint-only machinery. It is also, today, the only place the property is
-# checkable at all: the fixtures it needs are blueprints, and a derived project
-# has none.
-tests/blueprint-relocation/        export-ignore
-
-# BUG-114 — `managed-references` asks whether THE BLUEPRINT's MANAGED_FILES
+# BUG-114 — `managed-references` asks whether THE BLUEPRINT's managed set
 # names every script its managed files call. In a derived project a locally
 # edited managed file may name that project's own scripts, which would read as a
 # gap there is nothing to fix for — so this one is blueprint-only by subject.
 tests/managed-references/          export-ignore
+
+# TASK-021 — `env-namespace` scans the files THE BLUEPRINT manages, and the
+# managed set is now derived from the blueprint's archive. A derived project can
+# only answer that by fetching the blueprint, which its gate must not need (and a
+# fresh bootstrap cannot: its remote is FILL-ME-IN). Blueprint-only by subject,
+# like managed-references.
+tests/env-namespace/               export-ignore
 
 # --- TASK-018 PHASE 2: the TypeScript harness SHIPS -------------------------
 #
@@ -154,8 +150,8 @@ tests/managed-references/          export-ignore
 # line travels by BOTH:
 #
 #   bootstrap  ships the WHOLE archive (new-project.sh: git archive HEAD).
-#   pull       ships MANAGED_FILES only, and a managed DIRECTORY expands
-#              through `git archive HEAD <dir>`.
+#   pull       ships the managed set: what `git archive HEAD` ships, minus
+#              the project-owned seeds (TASK-021).
 #
 # Both answer the same query for anything under `tests/`, so the two paths
 # cannot disagree about the toolchain. That property is what made this move one
@@ -188,8 +184,12 @@ tests/managed-references/          export-ignore
 # ANNOUNCES the skip, because a job whose steps all skip renders green — now
 # goes quiet on its own.
 
-# This repo's own audit register. Same class as docs/doing/** above: it is a
-# real work item of THIS repo, not template material, and its ten relative links
-# point into docs/done/, which does not ship. A derived project inherited it and
-# failed `doc-links` on its first push with ten broken links it never wrote.
-docs/config/BLUEPRINT-AUDIT-2026-07-23.md  export-ignore
+# This repo's own records in docs/config/ — the audit register and findings.md.
+# Same class as docs/doing/** above: real records of THIS repo, not template
+# material. The audit's ten links point into docs/done/, which does not ship, so
+# a derived project once failed `doc-links` on links it never wrote. And since
+# the managed set is what ships (TASK-021), a shipped findings.md would be
+# MANAGED: pull would offer to overwrite every project's own findings register
+# with this one. The directory convention, so the next record needs no line.
+docs/config/**                     export-ignore
+docs/config/README.md             -export-ignore

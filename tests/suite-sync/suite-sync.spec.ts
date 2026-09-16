@@ -12,6 +12,14 @@
  * because it is an ABSENCE of updates rather than an error: A-22 and BUG-004's
  * shape once more.
  *
+ * TASK-021 STAGE 1 RETIRED `#7*` AND `#8`/`#8b`, recorded rather than silently
+ * absent. MANAGED_FILES is gone: the managed set is derived per file from the
+ * blueprint's archive, so there is no managed DIRECTORY for a2bp to prefix-match
+ * (#7*) and no directory expansion to come up empty (#8, #8b). The fail-closed
+ * property survives on the whole set — sync-by-address #11 drives an archive
+ * that ships nothing — and #1e pins the derivation itself. The mutant record
+ * below describes the list-era cases as they were measured.
+ *
  * WHY A SUITE IS TWO THINGS. `.githooks/pre-push-project` is managed for the same
  * reason `tests/` is: a suite is coherent only as the files PLUS its invocation
  * in the gate. Delivering the files alone leaves `tests/manifest` #4 failing
@@ -142,7 +150,6 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const CLI = join(REPO_ROOT, 'scripts/blueprint')
-const INPUTS_LIB = join(REPO_ROOT, 'scripts/lib/request-inputs.sh')
 
 /**
  * The blueprint-tier suites — the ones `.gitattributes` withholds from every
@@ -265,8 +272,8 @@ async function newProject(s: Scenario, tag: string, name: string, bp: string) {
  * `blueprint drift` renders `+ path` for new and `~ path` for drifted. Colour is
  * off with no tty, so the prefixes are literal.
  *
- * Reading them as one list is a trap — see tests/blueprint-relocation's `marked`
- * for the same argument: `!` (missing-in-blueprint) is what a MIS-RESOLVED path
+ * Reading them as one list is a trap, the same argument sync-by-address's `marked`
+ * makes: `!` (missing-in-blueprint) is what a MIS-RESOLVED path
  * produces, so an assertion that only asks "is this path mentioned?" passes on
  * the failure it exists to catch.
  */
@@ -537,173 +544,6 @@ describe('BUG-029 — a managed DIRECTORY syncs, additively, without eating proj
         merged,
         "the project's own guards after BLUEPRINT:END were destroyed by the pull",
       ).toContain('my project guard')
-    })
-  })
-})
-
-/**
- * `bp_inputs_validate ROOT MANAGED_LIST PATH` — does a2bp accept this input?
- *
- * `cmd_a2bp` deliberately never calls `read_blueprint_source`: it works against
- * the fetched REMOTE base, not a local checkout, so it has no HEAD to expand
- * `tests/` from and validates against the RAW MANAGED_FILES list. An exact
- * `grep -qxF` therefore refuses every suite. The prefix rule is what closes that,
- * and the prefix must not over-match a sibling like `testsuite/`.
- */
-async function validate(s: Scenario, root: string, managed: string, path: string) {
-  return s.run(
-    'bash',
-    ['-c', `set -u\n. "$1"\nbp_inputs_validate "$2" "$3" "$4"\n`, 'inputs', INPUTS_LIB, root, managed, path],
-    { cwd: s.workspace.root },
-  )
-}
-
-async function a2bpFixture(s: Scenario) {
-  const a = await s.workspace.dir('a2bp')
-  await s.fs.write(join(a, 'tests/pipeline/test.sh'), 'x\n')
-  await s.fs.write(join(a, 'testsuite/test.sh'), 'x\n')
-  await s.fs.write(join(a, 'CLAUDE.md'), 'x\n')
-  const managed = await s.fs.write(s.workspace.path('managed'), 'CLAUDE.md\ntests/\n')
-  return { a, managed }
-}
-
-describe('BUG-029 — a2bp accepts a file under a managed DIRECTORY, and only under it', () => {
-  it('#7 a file under the managed directory tests/ is accepted', async () => {
-    await scenario('suite-sync-7', async (s) => {
-      const { a, managed } = await a2bpFixture(s)
-      const r = await validate(s, a, managed, 'tests/pipeline/test.sh')
-      expect(
-        r.code,
-        `a file under the managed directory 'tests/' was refused — a2bp cannot back-propagate any suite:\n${r.output}`,
-      ).toBe(0)
-      // The accepted line, not merely the status: `<canonical>:<mode>` is what the
-      // request is built from, so a zero exit with no output would file nothing.
-      expect(r.stdout.trim()).toBe('tests/pipeline/test.sh:100644')
-    })
-  })
-
-  it('#7-absent a suite absent from this project is refused', async () => {
-    await scenario('suite-sync-7-absent', async (s) => {
-      // Otherwise a2bp would file bytes that are not there. The name has to be one
-      // the fixture does not contain — that is all this case needs of it, so no
-      // migration of the real tree can affect it.
-      const { a, managed } = await a2bpFixture(s)
-      const r = await validate(s, a, managed, 'tests/not-in-this-project/test.sh')
-      expect(r.code, 'a suite absent from this project was accepted').not.toBe(0)
-    })
-  })
-
-  it('#7-sibling the tests/ prefix does not match the sibling testsuite/', async () => {
-    await scenario('suite-sync-7-sibling', async (s) => {
-      const { a, managed } = await a2bpFixture(s)
-      const r = await validate(s, a, managed, 'testsuite/test.sh')
-      expect(r.code, "the 'tests/' prefix matched 'testsuite/' — a prefix rule must respect the separator").not.toBe(
-        0,
-      )
-    })
-  })
-
-  it('#7-bare the bare directory tests is not an input', async () => {
-    await scenario('suite-sync-7-bare', async (s) => {
-      const { a, managed } = await a2bpFixture(s)
-      const r = await validate(s, a, managed, 'tests')
-      expect(r.code, "the bare directory 'tests' was accepted as an input").not.toBe(0)
-    })
-  })
-})
-
-/**
- * An expansion that yields nothing must be a HARD FAILURE, not an empty list.
- *
- * The first fix for BUG-029 warned and carried on, which reproduced BUG-029
- * INSIDE ITS OWN FIX: `tests/` expands to nothing, drift compares zero suites,
- * prints "✓ All blueprint-managed files match the blueprint HEAD" and exits 0. A
- * mechanism that is present, reports nothing, and whose silence is
- * indistinguishable from success — A-22, BUG-004, BUG-018, BUG-028, and then the
- * door built to close them.
- *
- * All three properties are asserted, because any one alone can pass while the
- * defect stands: a non-zero exit with no message leaves the operator nothing to
- * act on, and a message with exit 0 is what every caller and CI job reads as
- * success.
- */
-async function expectExpandFails(s: Scenario, proj: string, why: string) {
-  const r = await s.run(CLI, ['drift'], { cwd: proj })
-
-  expect(
-    r.code,
-    `drift EXITED 0 with ${why} — a caller cannot tell that from a clean project ` +
-      `(this is BUG-029 inside its own fix):\n${r.output}`,
-  ).not.toBe(0)
-  expect(r.output, `drift reported the project CLEAN while syncing zero suites (${why})`).not.toContain(
-    'blueprint-managed files match',
-  )
-  expect(r.output, `the failure never names the managed entry, so nobody can act on it (${why})`).toContain(
-    'tests/',
-  )
-}
-
-/** A blueprint with NO `tests` path at HEAD at all. */
-async function blueprintWithoutTests(s: Scenario) {
-  const bp = await s.workspace.dir('bp8')
-  await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE for {{PROJECT_NAME}}\n')
-  await s.fs.write(join(bp, 'docs/DoD.md'), '# DoD\n')
-  await s.fs.copyIn(CLI, join(bp, 'scripts/blueprint'))
-  const cp = await s.run('cp', ['-r', join(REPO_ROOT, 'scripts/lib'), join(bp, 'scripts/lib')], { cwd: bp })
-  expect(cp.code, cp.output).toBe(0)
-  await initRepo(s, bp)
-  await commitAll(s, bp, 'a blueprint with no tests/ at HEAD')
-
-  const p = await s.workspace.dir('proj8')
-  await s.fs.write(join(p, 'CLAUDE.md'), '# CLAUDE for proj8\n')
-  await s.fs.write(join(p, 'docs/DoD.md'), '# DoD\n')
-  const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
-  await s.fs.write(
-    join(p, '.blueprint-source'),
-    [
-      'config_version   = 2',
-      `blueprint_remote = ${bp}`,
-      `bootstrap_sha    = ${sha}`,
-      'bootstrap_date   = 2026-01-01',
-      '',
-    ].join('\n'),
-  )
-  await initRepo(s, p)
-  await commitAll(s, p, 'init')
-  return { bp, p }
-}
-
-describe('BUG-029 — an expansion that yields nothing is a hard failure, not an empty list', () => {
-  it('#8 the managed directory absent from HEAD refuses loudly and names the entry', async () => {
-    await scenario('suite-sync-8', async (s) => {
-      // The pipeline-ERROR path: `git archive` itself fails. Its status is the one
-      // that disappears inside `$( a | b | c )` — c succeeds, so the failure is
-      // invisible unless the stages are checked apart from each other.
-      const { p } = await blueprintWithoutTests(s)
-      await expectExpandFails(s, p, "the managed directory is absent from HEAD ('git archive' fails)")
-    })
-  })
-
-  it('#8b a directory whose every file is export-ignore\'d refuses loudly too', async () => {
-    await scenario('suite-sync-8b', async (s) => {
-      // The EMPTY-RESULT path: the directory exists, the pipeline SUCCEEDS, and
-      // returns nothing. This is the case a status check alone would miss, which
-      // is why it is separate from #8.
-      const { bp, p } = await blueprintWithoutTests(s)
-      await s.fs.write(join(bp, 'tests/ghost/test.sh'), 'echo ghost\n')
-      await s.fs.write(join(bp, '.gitattributes'), 'tests/   export-ignore\n')
-      await commitAll(s, bp, "tests/ present but entirely export-ignore'd")
-
-      expect(
-        await archiveTests(s, bp),
-        'fixture is wrong — the archive still ships files under tests/, so the empty-result path is not exercised',
-      ).toEqual([])
-
-      await expectExpandFails(
-        s,
-        p,
-        "every file under it is export-ignore'd (the pipeline succeeds and yields nothing)",
-      )
     })
   })
 })

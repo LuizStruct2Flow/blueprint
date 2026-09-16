@@ -435,28 +435,6 @@ export function markerBalance(text: string, prefix: string): [number, number] {
   ]
 }
 
-/**
- * MANAGED_FILES, read TEXTUALLY out of `scripts/blueprint`.
- *
- * Never by running `blueprint files`: the CLI touches the real repo, and this
- * has to stay an inspection. A textual parse can go stale in silence, and stale
- * here would pass vacuously — so #2c asserts its own non-vacuity first.
- */
-export function parseManagedFiles(blueprintText: string): string[] {
-  const out: string[] = []
-  let inside = false
-  for (const line of blueprintText.split('\n')) {
-    if (!inside) {
-      if (/^MANAGED_FILES=\(/.test(line)) inside = true
-      continue
-    }
-    if (/^\)/.test(line)) break
-    const m = /^[ \t]*"([^"]*)"/.exec(line)
-    if (m?.[1]) out.push(m[1])
-  }
-  return out
-}
-
 interface Derivation {
   /** suite -> runner paths, relative to root. `''` is the no-suite bucket. */
   readonly runners: Array<{ suite: string; path: string }>
@@ -1064,79 +1042,22 @@ async function exportBoundary(
   //
   //       bootstrap  ships the WHOLE archive (new-project.sh: `git archive
   //                  HEAD`).
-  //       pull       ships MANAGED_FILES only — and a managed DIRECTORY
-  //                  expands through `git archive HEAD <dir>`, so anything
-  //                  export-ignore'd under it does not travel either.
+  //       pull       ships the managed set, which since TASK-021 IS that
+  //                  archive minus the project-owned seeds.
   //
-  //     The toolchain lives under `tests/`, which is already a managed
-  //     directory and which no derived project owns a copy of. Collision is
-  //     impossible rather than merely avoided, and ships ⟺ managed holds by
-  //     construction for every file under it. What is left to check is that the
-  //     construction is still standing.
+  //     So ships ⟺ managed holds by construction for every file, and the
+  //     checks that compared a hand-kept MANAGED_FILES against the archive (a
+  //     toolchain file outside tests/, a gate bridge that shipped unmanaged)
+  //     went with the list. tests/bootstrap-contents #10 checks the
+  //     construction itself. What is left here is that a toolchain ships whole
+  //     or not at all.
   //
   //     NOT checked, deliberately: a toolchain that ships while no spec ships
   //     yet — that is the sane ordering of the phase-2 move, and forbidding it
   //     would force the riskier order. (The phase-2 mirror IS checked; see
   //     below.)
-  //
-  //     THE SAME CLAIM COVERS THE GATE'S OWN DEPENDENCIES. `.githooks/pre-push`
-  //     and `.githooks/pre-push-project` are BOTH managed, so every file they
-  //     source has to travel by both paths too, or the hook arrives downstream
-  //     with half of itself. The failure is quiet and permanent — a hook whose
-  //     bridge never arrives takes its `else` branch on every push, a
-  //     `pipe_skip` with a reason that reads as deliberate, forever.
   // =====================================================================
-  const mf = parseManagedFiles(await readOr(join(root, 'scripts/blueprint')))
-  const managed = (p: string) => mf.includes(p)
-
-  // Every toolchain file must sit under a managed directory, or be managed by
-  // name. This keeps "ships ⟺ managed" structural: move one back to the repo
-  // root and it fails here rather than downstream.
-  const tsStray = TS_TOOLCHAIN.filter((f) => !f.startsWith('tests/') && !managed(f))
-
-  // Every file the managed hook sources must travel exactly as the hook does.
-  const gateText = liveCmds(
-    [
-      await readOr(join(root, '.githooks/pre-push-project')),
-      await readOr(join(root, '.githooks/pre-push')),
-    ].join('\n'),
-  )
-  const bridgeSplit: string[] = []
-  for (const b of await liveBridges(root, gateText)) {
-    const rel = b.slice(root.length + 1)
-    const bs = ships(rel) ? 1 : 0
-    const bm = managed(rel) ? 1 : 0
-    if (bs !== bm) bridgeSplit.push(`${rel}(ships=${bs},managed=${bm})`)
-  }
-
-  if (mf.length < 20 || !managed('tests/')) {
-    checks.push(
-      bad(
-        '#2c',
-        `#2c could not read MANAGED_FILES out of scripts/blueprint (parsed ${mf.length} entries, 'tests/' ${managed('tests/') ? 'present' : 'absent'}) — the phase check would pass vacuously, which is the failure mode it exists to prevent`,
-      ),
-    )
-  } else if (tsStray.length > 0) {
-    checks.push(
-      bad(
-        '#2c',
-        `#2c toolchain files live outside the managed 'tests/' directory and are not managed by name: ${tsStray.join(' ')}\n` +
-          '        Under tests/ the two propagation paths agree by construction. Outside it\n' +
-          '        they diverge silently, and MANAGED_FILES cannot be the fix for a JSON file.',
-      ),
-    )
-  } else if (bridgeSplit.length > 0) {
-    checks.push(
-      bad(
-        '#2c',
-        `#2c the gate sources files whose two propagation paths disagree: ${bridgeSplit.join(' ')}\n` +
-          '        .githooks/pre-push and .githooks/pre-push-project are managed, so a file\n' +
-          '        they source must be BOTH shipped and managed, or neither. ships=1,managed=0\n' +
-          '        means a NEW project gets it and then freezes it forever, while an EXISTING\n' +
-          '        project that pulls the hook never receives it at all.',
-      ),
-    )
-  } else if (!tsShips && tsShipping.length > 0) {
+  if (!tsShips && tsShipping.length > 0) {
     checks.push(
       bad(
         '#2c',
@@ -1196,14 +1117,14 @@ async function exportBoundary(
     checks.push(
       ok(
         '#2c',
-        `#2c BUG-073: phase 2 is whole — the TS toolchain ships from under the managed 'tests/' directory, so bootstrap and pull deliver the same thing (checked ${mf.length} MANAGED_FILES entries)`,
+        '#2c BUG-073: phase 2 is whole — the TS toolchain, its specs and the whole harness ship, and what ships is what pull delivers',
       ),
     )
   } else {
     checks.push(
       ok(
         '#2c',
-        `#2c phase 1 is whole — no spec ships, and the TS toolchain is export-ignore'd from under the managed 'tests/' directory, so neither path delivers it (checked ${mf.length} MANAGED_FILES entries)`,
+        "#2c phase 1 is whole — no spec ships, and the TS toolchain is export-ignore'd, so neither path delivers it",
       ),
     )
   }

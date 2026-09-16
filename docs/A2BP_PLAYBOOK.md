@@ -76,10 +76,11 @@ request is filed (A-07 — `scripts/lib/contamination.sh`). It does two things:
    A **new** file has no blueprint copy, so nothing in it is restored and the
    scan judges every line as the requester wrote it.
 
-   **A request may carry a file outside `MANAGED_FILES`** (TASK-037): a change
+   **A request may carry a file outside the managed set** (TASK-037): a change
    to a blueprint-only file, or a new file. The PR body marks each one **not
    shipped**. Decide first whether it belongs in the blueprint at all, and if it
-   should reach projects, whether `MANAGED_FILES` changes with it. Before
+   should reach projects, whether `.gitattributes` changes with it — the managed
+   set is what the archive ships (TASK-021). Before
    filing, `a2bp` already refused `.git` paths, symlinks and paths under them,
    a root `project_config_*.md` in any letter case, unmanaged files the project
    gitignores, files named like secrets, files `gitleaks` flags — and, since

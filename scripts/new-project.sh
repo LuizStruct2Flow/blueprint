@@ -106,7 +106,7 @@ rmdir "$_ident_probe" 2>/dev/null || true
 # reason the identity probe above is: a late check leaves a half-bootstrapped
 # directory whose presence then defeats the "fix it and re-run" advice. Each
 # stage runs and is checked on its own — never `a | b` — which is the same
-# correction bp_expand_managed_dirs needed in scripts/blueprint.
+# correction bp_managed_files makes in scripts/blueprint.
 _files_raw="$(mktemp)"
 if ! bash "$BLUEPRINT_ROOT/scripts/blueprint" files >"$_files_raw" 2>&1; then
   echo "❌ 'blueprint files' failed — nothing has been created." >&2

@@ -50,6 +50,8 @@ AGENT_ROSTER.md
 
 # Test coverage
 coverage/
+# SonarQube scanner work dir and the ShellCheck import scripts/sonar.sh writes
+.scannerwork/
 
 # ============================================================
 # PUBLIC-PUBLISHING PRIVACY BLOCK

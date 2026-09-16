@@ -60,4 +60,39 @@ else
   npm run test:coverage --silent
 fi
 
+# Shell: SonarQube has no shell analyser, so ShellCheck's findings on the files
+# the gate lints are imported as external issues. SC2317 is left out: functions
+# the gate calls by name (pipe_stage) read as unreachable, hundreds of times.
+# Files under a dot-directory (.githooks/) are never indexed by the scanner, so
+# their findings are dropped by Sonar; the gate's ShellCheck stage still covers them.
+if command -v shellcheck >/dev/null 2>&1; then
+  # shellcheck source=scripts/run-ts-suites.sh
+  . scripts/run-ts-suites.sh
+  sh_files=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && sh_files+=("$f")
+  done < <(sh_lint_files .)
+  if [[ ${#sh_files[@]} -gt 0 ]]; then
+    mkdir -p .scannerwork
+    # Exit 1 means ShellCheck had findings, which is the normal case.
+    shellcheck -f json -e SC2317 -- "${sh_files[@]}" >.scannerwork/shellcheck.json || true
+    jq '{
+      rules: (group_by(.code) | map(.[0] | {
+        id: "SC\(.code)", name: "ShellCheck SC\(.code)",
+        description: "https://www.shellcheck.net/wiki/SC\(.code)",
+        engineId: "shellcheck", cleanCodeAttribute: "CONVENTIONAL",
+        impacts: [if .level == "error" then {softwareQuality: "RELIABILITY", severity: "HIGH"}
+                  elif .level == "warning" then {softwareQuality: "RELIABILITY", severity: "MEDIUM"}
+                  else {softwareQuality: "MAINTAINABILITY", severity: "LOW"} end]
+      })),
+      issues: map({ruleId: "SC\(.code)",
+        primaryLocation: {message: .message, filePath: .file, textRange: {startLine: .line}}})
+    }' .scannerwork/shellcheck.json >.scannerwork/shellcheck-sonar.json
+    set -- -Dsonar.externalIssuesReportPaths=.scannerwork/shellcheck-sonar.json "$@"
+    echo "→ ShellCheck: ${#sh_files[@]} shell files, findings imported as external issues"
+  fi
+else
+  echo "⚠ shellcheck not found: shell scripts will not be analysed (bash scripts/install-toolchain.sh)" >&2
+fi
+
 exec sonar-scanner "$@"

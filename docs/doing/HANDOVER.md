@@ -521,8 +521,36 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       review — the evidence-search hole, the semgrep extraction, BUG-124's rework, TASK-042's
       stream fix, the retirement, BUG-129, TASK-047/048. **Codex quota is separate from the
       Claude session limit**, so it is unaffected.
-    - **THE PUSH IS WAITING ON THAT VERDICT ONLY.** DoD §1b rule 4: the code that would land has
-      never been reviewed. Nothing else blocks it.
+    - **THE VERDICT ARRIVED (`.scratch/CODEX-final-review.md`) AND THE PUSH IS NOT READY.**
+      258/259 across eleven suites (the one failure is ts-bridge #5, the reviewer's sandbox
+      again). Sections 2 and 4 pass as is. **Two are REWORK and three need fixes**, all dispatched
+      to three FRESH agents (not resumes — see the token note below):
+      - **§3 BUG-124 (S2, rework): atomic reservation, non-atomic reclamation.** `find` selects a
+        stale slot; before `rm` runs, another hook reserves that path; the first caller then
+        deletes the fresh reservation and takes the slot. Both return 0 with the identical path.
+        Also: `-mmin +1` rounds to ~2 minutes, age is not proof the owner is dead, and the signal
+        handler frees the slot without terminating the child.
+      - **§6 BUG-129 (S2, rework): the feed still truncates.** `scripts/lib/feed.sh:89-95` rotates
+        after 4,000 lines by `tail` → temp → `cat >`, and a concurrent append during that window
+        is **lost**. The claim recorded here that startup truncation was the only non-append
+        behaviour was FALSE, as is the row's "size-capped rotation is not built".
+      - **§5 TASK-047 (S3): #17 is a removal guard, not an equality check.** Adding `*.test.ts` to
+        any of the three sides left it green; removing `.spec.tsx` from each made it red.
+      - **§1 TASK-047 (S3): #18 passes with `-type f` removed**, so a spec-named symlink to
+        non-spec content would count. It has only negative fixtures, so it also cannot show
+        either extension is accepted. The production search itself probed clean.
+      - **§7 TASK-048 (S2/S3): the publishing recipes contradict the tracking decision.** §3a's
+        `PUBLIC_PATHS` omits the three root documents, so the documented flow cannot satisfy §5's
+        own expectation; and §3b keeps the handover tracked, drops it from the preflight, points
+        at §3a's redaction — which §3b never executes — and ends with "then push".
+    - **Non-finding worth keeping:** the derived-project `subagent-feed #12` red that blocked this
+      batch for hours **did not reproduce** — 34/34 here, and #12 passed in a fresh derived
+      project. It was never a measured blueprint/derived difference.
+    - **Token discipline, founder's instruction 2026-09-16:** resuming an agent re-sends its whole
+      transcript, so the long-lived agents ended at 580k-700k cumulative tokens each, ~2.7M in
+      total. **Spawn fresh agents with narrow briefs; resume only a young one to avoid a file
+      collision.** Cap agent reports at 200 words. Batch handover updates per milestone, not per
+      event.
     - **After the push, in order:** CI watch → move ~15 rows to `waiting-acceptance/` (five are
       fully prepared in `.scratch/`: BUG-122, TASK-040, TASK-041, TASK-045, BUG-125 — rows,
       test instructions and commit messages all written; the rest need their verdicts) → restart

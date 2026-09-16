@@ -69,6 +69,13 @@ work becomes untraceable, and it is exactly what happened the day this rule was
 written: two bugs found live were registered straight into `doing/`, which left
 no record that they had ever been triaged rather than merely noticed.
 
+A **cancelled** item satisfies this rule. §1 lets an item leave `backlog/` by
+cancellation — delete the row, leave a one-line pointer in
+`docs/config/findings.md` — so from then on the pointer *is* its record, and the
+gate reads the register alongside the row files (BUG-130: it read only the rows,
+and so refused the very push that performed a cancellation). What rule 1 refuses
+is work recorded **nowhere**.
+
 **2. Promote it to `doing/` BEFORE starting.** Not after, not at commit time.
 The folder answers "what is being worked on right now", and it can only answer
 that if the move precedes the work. If `doing/BACKLOG.md` does not exist yet,

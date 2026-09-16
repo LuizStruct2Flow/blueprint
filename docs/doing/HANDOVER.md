@@ -182,6 +182,34 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     (the last was deleted in `77c8f876`) and their E2E lives in `frontend/e2e` and `backend/e2e`,
     never `tests/e2e`. They will declare seven roots, three of which hold a single bug-naming
     file each — the easy ones to forget.
+  - **BUG-127 done** (Vitali, `8747b88`, `0217cbc`, docs `37e0f11`): a2bp refuses when gitleaks
+    is missing rather than filing unscanned bytes, and a scanner that cannot run is reported as
+    an incomplete scan, not as a found secret. The scan now uses `--exit-code 7`, so exit 1 no
+    longer means "secret"; the e2e finding shim moved to 7 with it, which is why #17 was red in
+    the reproducer commit by construction.
+  - **BUG-128 parked** in `docs/backlog/BUGS.md`: `paths.skipped` is classified nowhere. Philipp
+    measured it — the gate's invocation does not emit that key at all, and with `--verbose` its
+    21 analysis failures are exactly the paths already in `.errors`, so this repo cannot
+    currently exhibit the dangerous reasons. Closing it means changing the scan invocation, not
+    tightening a filter. **Cheap first step when it is picked up:** check whether dropping
+    `--quiet` alone surfaces `paths.skipped` without `--verbose`.
+  - **TASK-046 filed and promoted** on founder direction: `CLAUDE.md` imports a project-owned
+    `claude.internal.md`, and whether it is tracked is the project's decision. **Christian has
+    it.** The half that decides whether links resolve in a clone is the `.gitignore` methodology
+    block — he reports his evidence before touching it, including whether `.gitignore` is even
+    blueprint-managed.
+  - **THE BLOCKER, diagnosed (Philipp).** `bootstrap-gate` #2/#3 stays red because semgrep's own
+    rule `yaml.github-actions.security.gha-curl-pipe-shell` re-parses the `run:` block he added
+    in `6a08518` as Bash, and that snippet parser cannot handle it. The pre-change workflow
+    scanned with zero errors. Five rounds of construct rewrites did not converge (glob
+    alternation in a `case` pattern, a quoted glob pattern, `IFS=$'\t'`, command substitution
+    around a loop — each fixed, still failing, offender unidentified, parser resyncing on a
+    misleading line). **Decision taken by Eto, not the founder:** extract the classification into
+    a shipped `scripts/semgrep-verdict.sh`, leaving a two-line `run:` block. It removes the
+    unparseable content, deletes the hook/CI duplication that forced a sixty-line inline block,
+    and puts the logic where ShellCheck covers it. Philipp owns the one `MANAGED_FILES` line for
+    it. **Rejected:** excusing `PartialParsing` on `.github/workflows/*.yml`, which would leave
+    the workflow we ship to every project unanalysed by SAST.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

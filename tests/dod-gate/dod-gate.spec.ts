@@ -736,6 +736,70 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   })
 
+  /**
+   * Alexey finding 5: four lines that plainly SELECT `docs` and were ignored.
+   * Each returned 0 by searching the default `tests/` instead — so a malformed
+   * declaration slipped past the refusal and changed which evidence was read.
+   */
+  const NEAR_MISSES: ReadonlyArray<readonly [string, string]> = [
+    ['an indented bullet', ' - BP_TEST_ROOTS: `docs`\n'],
+    ['a tab after the dash', '-\tBP_TEST_ROOTS: `docs`\n'],
+    ['a Markdown table row', '| BP_TEST_ROOTS | `docs` |\n'],
+    ['an equals sign', '- BP_TEST_ROOTS = `docs`\n'],
+  ]
+
+  for (const [name, line] of NEAR_MISSES) {
+    it(`#15 Alexey finding 5: ${name} is a MALFORMED declaration, not an absent one`, async () => {
+      await scenario(`dod-gate-15-${name.replace(/\W+/g, '-')}`, async (s) => {
+        // The top-level snapshot is what makes this visible: the default root
+        // finds it, so the near-miss reads as a pass while the operator's text
+        // asked for something else entirely.
+        const f = await derivedFix(s, 'r15')
+        await s.fs.write(join(f.dir, 'project_config_paths.md'), `# Paths\n\n${line}`)
+        await s.fs.write(join(f.dir, 'tests/own.snap.test.ts'), "it('BUG-042: snapshot', () => {})\n")
+
+        const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+        expect(r.code, `a malformed declaration silently used the default root:\n${r.output}`).not.toBe(0)
+        expect(r.output, 'it refused without naming the malformed declaration').toMatch(/malformed/i)
+      })
+    })
+  }
+
+  it('#15e Alexey finding 5: an exact declaration beside a malformed one is a duplicate', async () => {
+    await scenario('dod-gate-15e', async (s) => {
+      const f = await derivedFix(s, 'r15e')
+      await s.fs.write(
+        join(f.dir, 'project_config_paths.md'),
+        '- BP_TEST_ROOTS: `backend`\n- BP_TEST_ROOTS = `docs`\n',
+      )
+      await s.fs.write(join(f.dir, 'backend/fix.test.ts'), "it('BUG-042: regression', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a malformed second declaration was ignored:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it refused without naming the duplicate').toMatch(/twice|2 times|more than one/i)
+    })
+  })
+
+  it('#15f PROSE IS NOT A DECLARATION: a bullet merely naming BP_TEST_ROOTS is inert', async () => {
+    await scenario('dod-gate-15f', async (s) => {
+      // The guard above must key on the declaration FORM, not on the string.
+      // templates/project_config_paths.md documents the rule in a bullet that
+      // names `BP_TEST_ROOTS`, and treating that as a second declaration would
+      // refuse every project that ships the documentation it was seeded with.
+      const f = await derivedFix(s, 'r15f')
+      await s.fs.write(
+        join(f.dir, 'project_config_paths.md'),
+        '- BP_TEST_ROOTS: `backend`\n\n' +
+          '- **Literal paths only.** No wildcards, and exactly one `BP_TEST_ROOTS` line.\n' +
+          'Prose may mention BP_TEST_ROOTS mid-sentence without declaring anything.\n',
+      )
+      await s.fs.write(join(f.dir, 'backend/fix.test.ts'), "it('BUG-042: regression', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `documentation prose was read as a declaration:\n${r.output}`).toBe(0)
+    })
+  })
+
   it('#14 GUARD: the blueprint ships no runner directly at the tests/ root', async (ctx) => {
     // THE RULE ABOVE RESTS ON THIS FACT, so it is asserted rather than assumed.
     // Only meaningful in the blueprint: in a derived project a runner at the

@@ -353,7 +353,8 @@ move forward with the machinery it guards.
 
 **What's NOT managed** — `project_config_*.md` (templates seeded once
 at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so
-project rules reach every session), `BUGS.md`, `HANDOVER.md`,
+project rules reach every Claude Code session — agents on other providers read
+them by instruction), `BUGS.md`, `HANDOVER.md`,
 `AGENT_SIGNAL.md`, all source code.
 
 **Two things that only work together.** A managed *directory* syncs

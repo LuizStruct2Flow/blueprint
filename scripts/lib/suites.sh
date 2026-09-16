@@ -52,7 +52,24 @@
 # A RUNNER is a `*.sh` or a `*.spec.ts`. Discovery is by EXTENSION, never by the
 # `test.sh` / `<suite>.spec.ts` naming convention: recognising only `test.sh` is
 # how renaming a runner once made a whole suite invisible to its own control
-# (Codex R2-F1a), and `tests/staleness/` already ships two shell runners.
+# (Codex R2-F1a).
+#
+# THAT SENTENCE USED TO CITE `tests/staleness/` AS SHIPPING TWO SHELL RUNNERS.
+# It ships none: one `staleness.spec.ts`. Repo-wide exactly two `.sh` files are
+# left under `tests/` — `ts-bridge/test.sh`, a real runner, and
+# `helpers/proc-cwd.sh`, a helper a spec invokes rather than a test of its own.
+# The lesson the sentence carried is sound and stays; the evidence it cited had
+# rotted, which is the copy-that-drifts this file's own header is about.
+#
+# TASK-047 — THE `*.sh` BRANCH IS HELD, NOT KEPT. The founder's decision is one
+# extension, and `dod-gate.sh` already accepts only `*.spec.ts` as evidence.
+# Discovery still recognises `*.sh` because `tests/ts-bridge/test.sh` is on disk:
+# dropping it first would leave a runner that discovery ignores — a silent
+# coverage cut, and a breach of the manifest invariant that every runner on disk
+# is invoked. Whether that file survives is TASK-023, because it is the only
+# assertion about the vitest bridge NOT run by the vitest it asserts about. The
+# branch goes in the same change as the file, its `.githooks/pre-push-project`
+# stage and its CI job — never before.
 #
 # A runner sitting directly in `tests/` belongs to no suite, and emits an EMPTY
 # suite field rather than being dropped — a discovery that silently ignores what

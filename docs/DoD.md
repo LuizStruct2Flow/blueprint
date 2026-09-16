@@ -108,6 +108,17 @@ findings, every one real, including four the implementer had looked straight at.
 Two of them were guards that passed because they watched the wrong thing, which
 is precisely the error the author cannot see by definition.
 
+**A finding becomes work only if it is real and practical** — it has happened
+(observed in a real run, project or incident), or it sits on a core path with a
+trigger someone would realistically hit. Anything else is recorded as one "known
+limit" line on the item and costs nothing more: no reproducer, no mutant, no
+re-review. The implementer judges each finding against this before acting on it;
+a reviewer's "push after these fixes" is input, not an order. **Founder decision
+2026-09-16**, after BUG-126 spent 16 commits guarding a parse failure that
+`tsc` and ESLint already catch, and BUG-127's hypothetical guard turned CI red.
+A reviewer asked for findings always returns some, so this filter is the
+implementer's job, every time.
+
 **5. All gates green.** The pre-push gate must pass in full — no demotions, no
 `--no-verify`, no "CI will catch it" (§4).
 

@@ -287,15 +287,24 @@ The shipped code is only as good as the tests that gate it.
    | Unit | `*.spec.ts` | pre-push |
    | Integration / wire | `*.integration.spec.ts` | pre-push |
    | Data snapshot | `*.snap.spec.ts` | pre-push |
+   | Component (JSX) | `*.spec.tsx` | pre-push |
    | Pixel snapshot | project-defined | manual + CI pipeline |
    | E2E / acceptance | project-defined | CI pipeline |
 
-   **One extension, `*.spec.ts`, in `src/` as well as `tests/`** (founder,
-   2026-09-16: *"migrate the tests to be spec driven ts tests, we don't need
-   exceptions"*). Every layer above ends in `.spec.ts`, so the files a runner
-   executes and the files the DoD gate counts as evidence are one set. That is
-   the whole point: a `*.test.ts` accepted as a regression test but never run is
-   a green standing in for a test (TASK-047, from Alexey's TASK-039 finding 6).
+   **One convention — `*.spec.ts` and `*.spec.tsx` — in `src/` as well as
+   `tests/`** (founder, 2026-09-16: *"migrate the tests to be spec driven ts
+   tests, we don't need exceptions"*). Every layer above ends in `.spec.ts` or
+   `.spec.tsx`, so the files a runner executes and the files the DoD gate counts
+   as evidence are one set. That is the whole point: a `*.test.ts` accepted as a
+   regression test but never run is a green standing in for a test (TASK-047,
+   from Alexey's TASK-039 finding 6).
+
+   **`.tsx` is not an exception to that rule.** It is the same TypeScript spec
+   with JSX syntax, and a React project cannot write a component test without
+   it — so excluding it would not enforce spec-driven tests, it would only make
+   component tests uncountable while they ran perfectly well. Both extensions
+   are accepted as evidence, both are discovered, and both are executed; a
+   project whose runner covers only one of them has a gap the gate cannot see.
 
 5. **Snapshot tests are approval-based.** A snapshot diff is a *change*,
    not necessarily a *break*. Update locally via the project's approve

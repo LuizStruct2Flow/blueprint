@@ -69,891 +69,54 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
-**PUSHED 2026-09-15 (`4267ac8`, gate green): TASK-034..038 and the BUG-121 hardening.** **The
-founder accepted every waiting task the same evening ("all tasks accepted"):** TASK-025..031,
-033 and 034..038 are in `docs/done/BACKLOG.md`, one commit each, and PLAN-TASK-025 moved with
-its row. **The founder then accepted every waiting bug too** ("I cannot test most of them, but in
-worst case we re-open them"): BUG-034, 077, 110, 111, 113, 115, 117–121 are in `docs/done/BUGS.md`,
-one commit each. Nothing waits for acceptance now.
+**State at handover, 2026-09-16.**
 
-**Now (2026-09-15 late): storm2flow's six feature requests, promoted and being built.** storm2flow
-pushed them on `fr/storm2flow/2026-09-15` with no PR. Their text is saved in
-`.scratch/fr-storm2flow-2026-09-15.diff` and the branch is deleted. All six are recorded as
-PROMOTED in `docs/backlog/feature-requests.md` (`e3ff859`..`fcc6756`).
+**Landed:** `1248230..71388b9`, 163 commits, gate green — TASK-039 through TASK-048 and
+BUG-122, 124, 125, 126, 127, 129, 130, 131. All eighteen rows are in
+`docs/waiting-acceptance/`, each carrying what to test, what its cross-provider review
+found, and when to re-open it. Read a row rather than this file: the rows are current and
+this section is deliberately short.
 
-**Founder decisions:**
-- MEDIUM+ everywhere for the vulnerability threshold.
-- Project permission rules go in a tracked project file merged in by pull; the blueprint's ask/deny
-  always win.
-- CLAUDE.md imports all five project config files.
-- Start all six now.
+**Not yet pushed: 19 local commits** — the eighteen row moves plus the handover note
+`01214b0`. They ride the next push, which runs the full ~900 s gate.
 
-**Three Claude agents, split by file ownership** (briefs: `.scratch/brief-fr-{a,b,c}.md`, common
-rules in `.scratch/brief-common-fr.md`):
-- **Vitali: TASK-039, then TASK-041.** Owns `scripts/lib/dod-gate.sh`, `docs/DoD.md` and the
-  paths/security config seeds.
-- **Philipp: BUG-122, then TASK-042.** Owns `scripts/blueprint` pull/drift, the settings merge and
-  `tests/permission-policy`.
-- **Christian: TASK-040, then TASK-043.** Owns `.githooks/pre-push`, `CLAUDE.md` and the
-  `templates/project_config_*` seeds.
+**CI on `71388b9` was still `in_progress`** when this was written. Check it first:
 
-Agents report text for files they do not own (deck, README, cross-owned docs) and Eto applies it.
-Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota returns after
-2026-09-16 02:10.
+```
+gh run list --repo LuizStruct2Flow/blueprint --commit 71388b9b11fd3aaa17afe2489d19513fe3124c86 --json name,status,conclusion
+```
 
-**Progress:**
-- **Philipp done.** BUG-122: `da4f7b2`, `f4b1c25`. TASK-042: `29aaa0f`, `1e62d68`. Eto added the
-  TASK-042 docs in `0df1fb8` (README, deck) and `e4c32be` (DoD). `.gitignore` was deliberately
-  not changed: `.claude/` stays ignored, and the project file is `git add -f`'d.
-  - **Pull impact:** the first pull after this ships refuses `settings.json` in every derived
-    project whose copy carries rules the blueprint does not ship (storm2flow certainly). It
-    prints them as a ready `.claude/settings.project.json` to save.
-- **Vitali done.** TASK-039: `e7e1d68`, `e25f4a7`. TASK-041: `d6fa8ca`, plus the root configs by
-  Eto in `bf8d37c`. His report of a `tsc` error in `permission-policy.spec.ts` was a mid-work
-  state; `tsc` is clean at `bf8d37c`.
-- **Christian done.** TASK-040: `9acffae`, `3682b53`. TASK-043: `981f045`, `9a1d0ae`.
-  - A project with both `infra/` and `infrastructure/` gets only `infra/` checked (a ponytail
-    comment in the hook).
-  - Claude Code skips a missing `@`-import silently (checked in its installed source).
-  - **Context cost, re-measured 2026-09-16 with `wc -l` after Alex found the first figures
-    wrong:** the five root configs are **997 lines** (167+175+204+194+257), the five templates
-    **989**. `CLAUDE.md` is 1319, so a blueprint session starts at **2316 lines**. The 976/947 in
-    `9a1d0ae`'s body and the `e72ba38` handover are wrong. This total is what TASK-024 argues with.
-  - **04:00 status of the reviews:**
-    - **Alex (TASK-040/041/043)** → `.scratch/ALEX-fr-docs-review.md`. TASK-041 **push as is**.
-      TASK-040 needs the mixed-layout fix (an empty `infra/` beside a populated
-      `infrastructure/` runs nothing, silently) — **with Christian**. TASK-043 needed the
-      README/deck claim scoped to Claude Code (**done, `8f6926a`**) and these counts.
-      His ts-bridge #5 failure is his sandbox: it passes 21/21 here.
-    - **Philipp fixed Alexey's TASK-042 findings** in `49ef420`/`dc9c496`: blueprint settings are
-      parsed on every path (the plain-copy path took `{broken` before), and the printed migration
-      proposal now only carries what a project file may hold, naming unsupported keys instead of
-      printing them.
-    - **Vitali fixed TASK-039 findings 1 and 2** in `47d6ce7`/`998b6cb`: containment is symmetric
-      (`scripts/` and `.githooks/` join `docs/` and `.git`), roots resolve with `cd -P` and must
-      land inside the project, and a malformed, duplicated or glob-bearing declaration is refused
-      rather than defaulting to `tests/`. **Finding 3 is with the founder** — see §5.
-    - **Alexey re-checked TASK-037** → `.scratch/ALEXEY-task037-recheck.md`: findings 2–5 closed,
-      but two remain. **TASK-037 is already accepted and pushed, so they are filed as BUG-127
-      rather than reopening it.**
-  - **FILE CONTENTION:** Christian's TASK-040 fix and Philipp's BUG-126 fix both touch
-    `.githooks/pre-push`. Philipp has reported, so the file is Christian's now.
-  - **BUG-121 re-check (Jesko): push as is** → `.scratch/JESKO-bug121-recheck2.md`. The chain
-    check closes the replacement window, and a foreign-owned sticky ancestor is still refused.
-    **Known limit worth remembering:** in his sandbox `/` is owned by uid 65534, so 7 harness
-    cases failed there on the intended foreign-ancestor refusal. On a host where `/` is not
-    root-owned, the default base is refused and `TMPDIR` must be set. That is the design, but it
-    will look like a bug the first time a container hits it.
-  - **BUG-127 filed** (from Alexey's TASK-037 re-check, which is otherwise closed): a2bp files a
-    request with NO secret scan when gitleaks is absent — both private-key probes reached the
-    fetch — and an unsupported scanner command (exit 1) is reported as "gitleaks found a secret".
-    TASK-037 is accepted and pushed, so this is a new row, not a reopening. **Unassigned: all
-    three agents are busy.**
-  - **Christian is done** — TASK-044, TASK-045, BUG-125 and TASK-040 (`2285f22`: both IaC
-    directories are read, each stage naming the directory it ran in). He corrected his own
-    `#iac-2` helm assertion rather than the hook: `_st_helm` lints from the repo root and names
-    the chart, while cdk and terraform `cd` in.
-  - **Vitali is done with TASK-039** (`4a926aa`, `f10eff3`) and is now on BUG-127. The rule: only
-    the TOP LEVEL of `tests/` counts in a derived project, depth 1 and runner files only; `#14`
-    fails this repo's own push if the blueprint ever ships a runner there. CLAUDE.md is updated
-    by Eto, table row and layout section included.
-  - **The doc-link privacy question, answered from `.gitignore:73-82`:** the exclusion is
-    deliberate and its stated reason is not the one Eto assumed. `/CLAUDE.md`, `/AGENTS.md`,
-    `/AGENT_SIGNAL.md`, `docs/DoD.md`, `docs/PUBLISHING.md` and `docs/doing/HANDOVER.md` are the
-    **multi-AI methodology files**: "These files reveal how the founder works with Codex +
-    Claude Code." Lifecycle artefacts under `docs/` stay public. So tracking them in a derived
-    project is not a formality — it publishes the methodology from every derived repo. **Founder
-    decision, not an agent's.**
-  - **Every fix made after a review needs its own cross-provider pass** (DoD §1b rule 4): the
-    reviewed code is not the code that would land. Brief `.scratch/brief-alexey-fix-review.md`,
-    dispatched 05:10, covering TASK-039, TASK-042, TASK-040, TASK-044, TASK-045, BUG-125 and
-    BUG-124 → `.scratch/ALEXEY-fix-review.md`. BUG-126 and BUG-127 are excluded, still in flight.
-    Codex quota came back (storm2flow ran three reviews in the half hour before 05:10).
-  - **CONFIRMED GAP, semgrep's `paths.skipped` is classified nowhere.** Reported by storm2flow's
-    orchestrator, then checked: `git grep -n "paths\.skipped" -- .githooks/pre-push
-    .github/workflows/security.yml` matches nothing, and every "skipped" hit in those files is
-    about a missing binary or a skipped CI job. A file semgrep never opened — too large, binary,
-    timed out, filtered out — appears there and produces **no error entry**, so BUG-126's fix,
-    which reads `.errors`, still calls that run clean. Same hole, one level over. Philipp has it;
-    if it is bigger than BUG-126 should carry, it becomes its own bug with storm2flow's evidence.
-    storm2flow's own stage excuses `PartialParsing`/`Syntax error` on a reviewed 22-path
-    allowlist and records `paths.skipped` as a known limit rather than claiming full coverage.
-  - **storm2flow confirmed TASK-039 costs them nothing:** their `tests/` holds no project files
-    (the last was deleted in `77c8f876`) and their E2E lives in `frontend/e2e` and `backend/e2e`,
-    never `tests/e2e`. They will declare seven roots, three of which hold a single bug-naming
-    file each — the easy ones to forget.
-  - **BUG-127 done** (Vitali, `8747b88`, `0217cbc`, docs `37e0f11`): a2bp refuses when gitleaks
-    is missing rather than filing unscanned bytes, and a scanner that cannot run is reported as
-    an incomplete scan, not as a found secret. The scan now uses `--exit-code 7`, so exit 1 no
-    longer means "secret"; the e2e finding shim moved to 7 with it, which is why #17 was red in
-    the reproducer commit by construction.
-  - **BUG-128 parked** in `docs/backlog/BUGS.md`: `paths.skipped` is classified nowhere. Philipp
-    measured it — the gate's invocation does not emit that key at all, and with `--verbose` its
-    21 analysis failures are exactly the paths already in `.errors`, so this repo cannot
-    currently exhibit the dangerous reasons. Closing it means changing the scan invocation, not
-    tightening a filter. **Cheap first step when it is picked up:** check whether dropping
-    `--quiet` alone surfaces `paths.skipped` without `--verbose`.
-  - **TASK-046 filed and promoted** on founder direction: `CLAUDE.md` imports a project-owned
-    `claude.internal.md`, and whether it is tracked is the project's decision. **Christian has
-    it.** The half that decides whether links resolve in a clone is the `.gitignore` methodology
-    block — he reports his evidence before touching it, including whether `.gitignore` is even
-    blueprint-managed.
-  - **THE BLOCKER, diagnosed (Philipp).** `bootstrap-gate` #2/#3 stays red because semgrep's own
-    rule `yaml.github-actions.security.gha-curl-pipe-shell` re-parses the `run:` block he added
-    in `6a08518` as Bash, and that snippet parser cannot handle it. The pre-change workflow
-    scanned with zero errors. Five rounds of construct rewrites did not converge (glob
-    alternation in a `case` pattern, a quoted glob pattern, `IFS=$'\t'`, command substitution
-    around a loop — each fixed, still failing, offender unidentified, parser resyncing on a
-    misleading line). **Decision taken by Eto, not the founder:** extract the classification into
-    a shipped `scripts/semgrep-verdict.sh`, leaving a two-line `run:` block. It removes the
-    unparseable content, deletes the hook/CI duplication that forced a sixty-line inline block,
-    and puts the logic where ShellCheck covers it. Philipp owns the one `MANAGED_FILES` line for
-    it. **Rejected:** excusing `PartialParsing` on `.github/workflows/*.yml`, which would leave
-    the workflow we ship to every project unanalysed by SAST.
-  - **Alexey reviewed the FIXES** (the reviewed code was not the code that would land) →
-    `.scratch/ALEXEY-fix-review.md`, baseline `53fffd0`, 149/150 in the seven suites (the one
-    failure is ts-bridge #5, his sandbox again; it passes here).
-    - **push as is:** TASK-040, TASK-045, BUG-125.
-    - **TASK-039** → Vitali: a declaration-shaped but malformed line (indented bullet, tab,
-      table row, `=`) is ignored rather than refused, so the stage silently searches the default
-      root; and the five accepted extensions disagree with what actually runs
-      (`suites.sh` finds `*.sh`/`*.spec.ts`, vitest runs `**/*.spec.ts`), so the blessed snapshot
-      counts as evidence but never executes. If aligning that is more than small, it comes to
-      the founder.
-    - **TASK-042** → Philipp: the project layer and legacy settings still take a JSON *stream*
-      and merge only `.[1]`, so a later object's permission rules vanish silently.
-    - **TASK-044** → Christian: `run-ts-suites.sh:419` keeps every LINE containing `SKIP-NOTE:`,
-      not every notice, so a multiline title or reason loses the reason.
-    - **BUG-124 → REWORK** → Philipp: the eight-child cap is a check/create race (twelve
-      concurrent hooks took twelve slots); `eval "exec 19>&-"` under dash execs a command named
-      `19`, killing the child so **no feed line is emitted at all**; and `08`/`0009`/24-digit
-      waits bypass the clamp, again losing the bookend. Over-cap dispatches also degrade the
-      label with no notice.
-  - **TASK-039 finding 5 fixed** (Vitali, `ef3ec3d`, `9e076e1`): a candidate is now the
-    declaration FORM — optional indent, optional list or table marker, key, separator — so a
-    malformed near-miss is refused instead of silently defaulting, and an exact declaration
-    beside a malformed one is a duplicate rather than first-wins. Prose stays inert
-    deliberately: the template documents the rule in a bullet containing the key, and #15f pins
-    that it is not matched.
-  - **TASK-039 finding 6 is WITH THE FOUNDER, not fixed.** The gate accepts five runner
-    extensions; only `*.spec.ts` and `*.sh` are discovered (`suites.sh:68-82`) and only
-    `**/*.spec.ts` executes (`tests/vitest.config.ts:22`). So the snapshot the founder's rule
-    blesses counts as evidence and never runs. Vitali stopped rather than widen: the decision
-    also touches `run-ts-suites.sh` (`:52`, `:55`, `:250`, `:304`) and `pipeline.sh:344`, neither
-    his, and widening only his two files would declare suites the runner never reports — the
-    vacuity the batch API exists to catch. Two coherent states: align execution up to five
-    extensions (and decide how a top-level runner, which belongs to no suite, is named in the
-    batch), or narrow the gate down to the two that execute, contradicting the rule just set.
-  - **TASK-046 done** (Christian, `86f3226`, `a5bd05a`): `CLAUDE.md` imports
-    `@claude.internal.md` and says what it is — the project's own file, never seeded, never
-    pulled, tracked or not at the project's choice, and read by nothing in the framework.
-    Nothing is seeded (zero `claude.internal` entries in the bootstrap archive).
-    `templates/` seeds no `CLAUDE.md`, so there was no second list to change. **The import list
-    had NO test at all** before `#3c`, which now pins against a real bootstrap that the import
-    arrives and the file does not.
-  - **TASK-044 finding 7 fixed** (`f8a8503`, `e700cf5`): `skipNote` collapses whitespace runs, so
-    a notice is always one physical line and the grep's assumption is now true. Fixed at
-    emission, not capture — a capture-side fix would re-guess where a notice ends, which is the
-    original defect. `#8c` derives its bytes from the real helper.
-  - **`.gitignore` EVIDENCE for the founder (Christian), no change made:**
-    - **It is project-owned:** not in `MANAGED_FILES`, but it IS in the bootstrap archive. So a
-      blueprint edit reaches **new projects only** — storm2flow and every existing project must
-      edit their own copy by hand. Any change lands as a blueprint commit PLUS an instruction.
-    - **None of the five generic files needs excluding:** `CLAUDE.md`, `AGENTS.md`,
-      `docs/DoD.md`, `docs/PUBLISHING.md` are managed and `AGENT_SIGNAL.md` is generic protocol —
-      managed means identical in every project by construction, project specifics being
-      forbidden in them. What they reveal is the methodology, a blueprint-level decision.
-    - **`docs/doing/HANDOVER.md` is NOT in that class:** seeded from `templates/`, project-owned,
-      live work notes — real project content. The block's own rule already says lifecycle
-      artefacts under `docs/` stay public, so excluding it is already inconsistent.
-    - **`docs/PUBLISHING.md` must travel in the same commit:** it encodes the exclusions in §0,
-      §1b's preflight (which greps the index and prints PRIVATE FILES STILL TRACKED) and
-      §3a/§3b's untrack commands. Unignoring without it makes the runbook fail a project for
-      tracking its own generic docs.
-    - **Do not sweep up `project_config_*.md`** — A-27 put the threat model and infra account IDs
-      there deliberately.
-  - **TASK-047 filed and promoted** (`dd5a934`), founder decision: *"migrate the tests to be
-    spec driven ts tests, we don't need exceptions"* — his answer to TASK-039 finding 6. One
-    extension, `*.spec.ts`, accepted AND discovered AND executed, with no set larger than
-    another. **Vitali** has `dod-gate.sh`, `suites.sh`, `vitest.config.ts`, guard #14 and DoD §2;
-    **Christian** has the port of `tests/ts-bridge/test.sh`, `run-ts-suites.sh`'s three checks,
-    `tests/manifest`, and the convention ripple in CLAUDE.md §"Test Layers" — which he reports
-    before rewriting, because whether co-located `src/` unit tests also become `*.spec.ts` is a
-    change for every project. `tests/helpers/proc-cwd.sh` stays shell: it is a helper, not a test.
-    **Ordering:** Vitali keeps `*.sh` discovery until Christian's port lands, so the gate never
-    declares a suite the runner cannot report.
-  - **TASK-048 filed and promoted**, founder decision "All six, no exceptions": derived projects
-    track `/CLAUDE.md`, `/AGENTS.md`, `/AGENT_SIGNAL.md`, `docs/DoD.md`, `docs/PUBLISHING.md`
-    **and** `docs/doing/HANDOVER.md`. The founder accepted publishing the live handover. It goes
-    to **Christian** after TASK-047. The evidence in its row is what makes it more than one
-    deletion: `.gitignore` is project-owned, so this reaches new projects only; `PUBLISHING.md`
-    encodes the exclusions in three places and must travel in the same commit; the reasoning
-    comment is replaced, not deleted, with wording shown to the founder; and
-    `project_config_*.md` stays ignored (A-27: threat model, infra account IDs).
-  - **TASK-047 hit two founder decisions; Christian committed NOTHING and is holding.**
-    - **The port is already done.** `tests/ts-bridge/ts-bridge.spec.ts` carries every assertion
-      `test.sh` makes (#0, #1/#1c, #1b, #1d, #2/#2b/#2c, plus #1e), with a measured equivalence
-      record in its header. What `test.sh` uniquely supplies is an execution mode: **the only
-      assertion about the vitest bridge that vitest does not run.** That is TASK-023, parked
-      `KEEP` with the trigger "the next time the TS toolchain's own shipping boundary changes" —
-      which is now. Five places say it survives on purpose, including
-      `security.yml:218-226` ("retiring it would answer a founder-pending question by
-      deletion"). **With the founder:** accept the loss and close TASK-023 explicitly, keep it as
-      the one exception, or replace it with another non-vitest runner (which reopens the same
-      question in a new spelling).
-    - **The `src/` convention is the second question.** CLAUDE.md's Test Layers rows govern a
-      derived project's own source tree. Renaming every project's co-located `*.test.ts`
-      invalidates their vitest includes, their eslint-boundaries config and every test file they
-      have, and the blueprint cannot migrate it for them. Christian's recommendation, and mine:
-      one extension inside `tests/` now, `src/` untouched unless the founder wants its own task.
-    - **Already satisfied, no work:** `run-ts-suites.sh`'s three checks already say `*.spec.ts`;
-      its remaining `*.sh` at `:142` is ShellCheck's target list (TASK-033), unrelated.
-    - **Deletion blast radius, if it is taken:** `.githooks/pre-push-project:246-258` (the
-      `ts-bridge · BUG-055` stage), `security.yml:218-226` (**Philipp's** — the whole shell-tests
-      job exists for that one line), and `tests/manifest` (`suitesWithSh`, `shInvoked`, the
-      `SHELL_SUITES` fixture, #2b). **All three must go in ONE change**: a deleted file with CI
-      still running `bash tests/ts-bridge/test.sh` fails CI immediately.
-    - **Stale justification found:** `suites.sh:55` says `tests/staleness/` ships two shell
-      runners. It does not — repo-wide there are exactly two `.sh` files under `tests/`, one of
-      them a helper. Vitali corrects it either way.
-  - **BOTH TASK-047 DECISIONS ANSWERED 2026-09-16.**
-    - **`tests/ts-bridge/test.sh` is retired, TASK-023 closed as an accepted loss.** What goes
-      with it: the only assertion about the vitest bridge not executed by the vitest it asserts
-      about — a silently dead bridge now produces no red case. That must be written into
-      `docs/config/findings.md` as the cancellation pointer, not just deleted.
-    - **`*.spec.ts` everywhere, including `src/`.** Co-located unit tests in a derived project's
-      source tree change convention too. The blueprint cannot rename their files, so a migration
-      note is part of the work.
-    - **THE RETIREMENT IS ONE PUSH ACROSS THREE AGENTS.** Christian: the file, the
-      `.githooks/pre-push-project:246-258` stage, `tests/manifest`'s `.sh` handling
-      (`suitesWithSh`, `shInvoked`, `SHELL_SUITES`, #2b), the findings pointer, CLAUDE.md's
-      convention rows and `templates/project_config_paths.md:38`. Philipp: the
-      `security.yml:218-226` job, which exists only for that runner. Vitali: the one-line `.sh`
-      removal from `suites.sh` discovery, **after** Christian's deletion. Different commits are
-      fine; a different push is not — a deleted file with CI still running
-      `bash tests/ts-bridge/test.sh` fails CI on arrival.
-    - **Vitali's half already landed** (`5e09d62`, `2c3ab19`, `212ca42`): the evidence set is
-      `*.spec.ts` only, guard #14 simplified, DoD §2 updated, `vitest.config.ts` confirmed
-      unchanged, and `suites.sh:55`'s stale claim corrected — `tests/staleness/` ships zero shell
-      runners, it is one spec. All 55 TypeScript tests were already `*.spec.ts`, so narrowing
-      dropped nothing that exists.
-  - **`.tsx` ruling (Eto, not the founder):** `*.spec.ts` and `*.spec.tsx` are ONE convention.
-    Vitali found that a JSX component test must be `*.spec.tsx`, which `**/*.spec.ts` does not
-    match, so a literal one-extension rule strands every React project. `.tsx` is TypeScript, so
-    this satisfies "spec-driven TS tests, no exceptions" rather than breaking it. Both must be
-    accepted as evidence, discovered AND executed — the same invariant. Vitali applies it to
-    `dod-gate.sh`, `vitest.config.ts` and DoD; Christian to CLAUDE.md and the templates.
-  - **Vitali's DoD table landed** (`886b5fb`): every layer ends in `.spec.ts`, with the reason
-    stated under the table. He is **blocked on Christian's deletion** for the `suites.sh`
-    one-liner — `tests/ts-bridge/test.sh` is still on disk. **Eto owns that ping**, not Vitali's
-    polling.
-  - **The `.tsx` ruling is implemented** (Vitali, `8c609e2`, `a305e8d`): `dod-gate.sh` accepts
-    both spec extensions, `tests/vitest.config.ts` includes both, and the DoD matrix gains a
-    Component (JSX) row saying why `.tsx` is not an exception.
-    - **New guard #17** extracts the extensions from the lib's `find` and from the vitest
-      `include` and requires the two sets to be EQUAL. It was green before and after, so it is a
-      guard, not a reproducer — and it exists because this invariant was restated three times by
-      three people (Alexey found five-versus-one, the founder collapsed it to one, Eto widened it
-      by `.tsx`) and checked by reading each time. Reading is what let the first drift live.
-  - **THE BLOCKER IS CLEARED** (Philipp, `b683eb9`). The semgrep classification moved into a
-    shipped `scripts/semgrep-verdict.sh` — the hook **sources** it, the workflow **executes** it,
-    one statement of the rule where there were two copies, and a `run:` block small enough for
-    semgrep's own GHA rule to parse. `bootstrap-gate` is **8/8, #2 and #3 included**. Verified in
-    the real `returntocorp/semgrep` image: 0 findings, 20 shell parse errors accepted.
-    - **But #2 now takes ~364 s against the suite's 320 s budget**, because it runs the entire
-      derived gate instead of dying at SAST in 3 s. **Philipp is raising it with headroom**, and
-      putting the reason in the code: the number now means "how long a full derived gate takes".
-    - BUG-124 rework landed (`f479e85`, `6df5c56`): slots are reserved by `mkdir` of a fixed
-      name, so the slot set IS the ceiling; the child re-executes under bash, because dash takes
-      only single-digit descriptors; digits are normalised before comparison. His fix briefly
-      reintroduced BUG-124 — the roster lookup lost its inputs — and the existing #4 caught it.
-    - TASK-042 finding 4 landed (`1c8ce26`): `_bp_one_object` decides "exactly one JSON object"
-      once, for the blueprint, the project layer and legacy settings alike.
-  - **BUG-129 — Eto's "four daemons" alarm was a MISREADING. Corrected by Vitali's evidence
-    (`0053592`), and the earlier text in this file was wrong.** The four PIDs are four
-    **repositories**, one supervisor each: 1154186 blueprint, 3275474 linkedin-watcher-agent,
-    3373642 storm2flow, 3423373 struct2flow-www — each holding its own
-    `$BP_STATE_ROOT/logs/.agent-activity.lock`, which is per-repository **by design** (the BUG-077
-    comment says so). `pgrep -af agent-activity.sh` spans repositories, so four projects means
-    four supervisors, exactly one each. `tests/agent-activity-bound` passes 36/36 including
-    **#1, 50 concurrent starts → exactly 1 supervisor**. **There is no guard defect and no
-    reproducer**; the daemons are untouched and none is a duplicate. All four are PPID 1 because
-    `start_daemon` uses `setsid`, so the process tree can never attribute them to a session.
-    - **What BUG-129 actually is, and it is the whole of it now:** the feed has exactly two
-      writers — `emit` appends, and `supervise_body` **truncates once at startup**. That is one
-      wipe per supervisor start, not ongoing rotation, and CLAUDE.md tells every wake to start the
-      feed, so a wake coinciding with a suite run turns `subagent-feed` #9 red for something the
-      pushed change never touched.
-    - **Approved fix (Vitali's inversion, better than the forwarded proposal): STOP TRUNCATING.**
-      A "feed restarted" banner instead of `: >"$out"`, so the append-only contract the canary
-      assumes becomes true. The canary then needs no new tolerance and keeps truncation as a hard
-      failure with no swallow risk. Size-capped rotation is explicitly NOT in scope (and a rename
-      trips the prefix check anyway); the banner-witness alternative stays recorded as the
-      fallback if the wipe ever returns.
-    - **Two live-state follow-ups:** PID 1154186 runs a **deleted inode** of
-      `scripts/agent-activity.sh`, so this repo's feed is executing pre-BUG-124 code — **restart
-      it after the push** (Eto's, not an agent's). And CLAUDE.md's idempotency claim should say
-      "per repository", which is what misled Eto; the wording goes to Christian with his other
-      CLAUDE.md work so the file takes one edit.
-  - **Discovery landed, and `tests/manifest` is KNOWINGLY RED** (Vitali, `79771e7`, `0a9ddb8`).
-    Discovery is spec-only and learned `*.spec.tsx` — `bp_suite_runners`' find and
-    `bp_suites_with_spec`' awk both — because a component-only suite would otherwise be
-    discovered and never declared to the batch, failing silently. **#17 now asserts three sides:
-    counted, discovered, executed.**
-    - **The red is measured, not inferred:** manifest is 37/37 at HEAD in a throwaway worktree
-      without his change and 27/37 with it. Its SYNTHETIC fixtures still build suites as
-      `tests/<suite>/test.sh`, so with `.sh` undiscovered the fixture derives 1 suite instead of
-      N and `#7`, the non-vacuity check, trips and takes its dependents down. `#live` already
-      expects the spec extensions. **Christian's half**, and he is visibly in `fixture.ts` now.
-    - He committed rather than sitting on it: the push is gated regardless, and an uncommitted
-      edit would have hidden the state from everyone. The commit message records the red and its
-      cause instead of claiming green.
-  - **BUG-129 assigned to Vitali.** Capture `ps -o pid,ppid,lstart,args` on the four PIDs into the
-    row **before** changing anything — those processes are the only record of how four came to
-    exist — and do not kill them without telling Eto.
-  - **The bootstrap-gate budget is raised** (Philipp, `4f23962`): `900_000` ms as a per-test
-    argument on #2, NOT `testTimeout` in `vitest.config.ts` — every other suite shares that
-    default and none boots a project, so widening it globally would hide slowness everywhere to
-    fix one case. Two reasons for the size, and the second is the load-bearing one: runs measured
-    364 s then 414.7 s (~14% swing on the same host), **and the derived gate's inner `s.run`
-    already allows 600 s**, so any outer budget below that makes the inner one unreachable — and
-    the inner one is what names *which* command hung. Verified 8/8 with no CLI override. The
-    comment says what to do on failure: read the per-stage timings first, because a gate that
-    grew a slow stage and a gate that hangs look identical from outside.
-  - **`tsc` is currently RED across the tests project, and it is not a regression:** every error
-    is in `tests/manifest/*` (`SHELL_SUITES`, `suitesWithSh`, `shInvoked` gone), which is
-    Christian mid-sequence on the `.sh` handling. It clears when he lands.
-  - **TASK-047's port half is done and TASK-023 is CLOSED** (Christian, `c5301c5`, `da73f36`,
-    `da352b6`, `ae7e634`, `072b80f`). The runner and its `ts-bridge · BUG-055` stage went in ONE
-    commit — removing either alone leaves manifest #4 red or the gate calling a missing path. The
-    red was put on the invariant the founder decided (every runner under `tests/` is a spec),
-    which failed naming exactly `tests/ts-bridge/test.sh`, rather than on removing dead code,
-    which would have been a false red. **F-003 in `docs/config/findings.md`** records what is
-    gone and says plainly that what replaces it is weaker; the spec header now agrees with it.
-    - **What the manifest conversion cost, recorded not absorbed:** two perturbations lost their
-      subject (a blanket vitest run has no per-suite line to remove). **One case had gone GREEN
-      WHILE ASSERTING NOTHING** — "a toolchain that ships with no spec to run" withheld one
-      suite's spec, but every suite owns a spec now, so the condition never arose. It now
-      withholds every suite's spec by `export-ignore`, since deleting would trip #7's vacuity
-      floor instead.
-    - Two widenings protect Vitali's change: `includeOk()` accepts `**/*.spec.{ts,tsx}` and
-      `specsShip` recognises a shipped `.spec.tsx` — without them a fully migrated tree would turn
-      #4/#5 red, a control failing because the tree got *more* correct.
-  - **ONE RED LEFT, and it is Philipp's.** Christian ran `bootstrap-gate` after the semgrep fix:
-    SAST no longer blocks, the nested gate reaches the vitest batch, and inside the derived
-    project it is **892 passed, 1 failed** — `subagent-feed #12 twelve SIMULTANEOUS dispatches
-    reserve at most the cap`, his own BUG-124 case. It passes in this repo and fails in a
-    bootstrapped one, which is the interesting part. **He must not weaken the assertion to get
-    green**; if the cap genuinely does not hold there, BUG-124 is not fixed.
-  - **A-13 is absorbed by TASK-048** (both record that `.gitignore` is not managed). Christian
-    cancels the parked row with a findings pointer as part of TASK-048, rather than leaving two
-    live records to drift.
-  - **Pre-existing, unowned:** `.githooks/pre-push-project` SC2034 on `AGENT_FEED_TAG` (:453,
-    :467). Christian proved it identical on HEAD. `sh_lint` blocks on warnings yet our pushes
-    pass, so the gate's invocation shape is not reporting it — worth understanding, not before
-    the push.
-  - **BUG-129's real defect is fixed** (Vitali, `a2d7ca1`, `65b0492`). `supervise_body` wiped the
-    log with `: >"$out"` once per supervisor start; it now emits **`feed restarted`** over a
-    non-empty log and `feed started` over an empty one. The feed is append-only across restarts,
-    so the canary needs no new tolerance and truncation stays a hard failure that still means
-    something — no excuse-path a real fixture escape could hide behind.
-    - **His first reproducer PASSED against the unfixed script, and he said so.** The fixture is
-      deterministic and fast, so both supervisors emitted the same banner inside the same second
-      and the rewritten bytes were byte-identical — the prefix check had nothing to see. Live, the
-      two starts are minutes apart, which is exactly why this wipe reds `subagent-feed` #9 on the
-      founder's host and redded nothing in a fixture. The case now appends a history marker a
-      restart cannot reproduce and asserts it before capturing, so it cannot go vacuous again.
-    - Not built, recorded as its own future item: size-capped rotation. The log now grows across
-      restarts, and rotation by rename trips the same prefix check, so it needs the canary
-      question answered alongside it.
-  - **TASK-047's knowingly-red manifest is GREEN.** With Christian's `072b80f` in, `manifest`,
-    `dod-gate`, `suite-sync` and `ts-bridge` pass together at **121**, exactly as his commit
-    message predicted. The extension rule is now one set on all four sides — counted, discovered,
-    executed, and asserted by #17.
-  - **TASK-048 part-landed** (Christian): `2010ffd` puts Vitali's per-repository sentence in
-    CLAUDE.md, `9b1e409` cancels A-13 with **F-004** in `docs/config/findings.md` naming TASK-048
-    as where it went — and F-004 says plainly the finding was NOT overturned (nothing syncs
-    `.gitignore`); it is cancelled because two live records of one fact drift.
-    - **Held pending wording approval, now given:** `.gitignore`, six `docs/PUBLISHING.md` sites
-      (not two — §0:34-35, §1b:46-54 and its index grep :60, §3a:147/:167/:172-177, §3b:218-223),
-      the existing-project instruction, and two doc-links comments. He held the doc-links comment
-      because it would have stated something false until `.gitignore` lands.
-    - **Also stale, which the brief missed:** the `.gitignore` HEADER (lines 54-71) says only four
-      methodology files inside `docs/` are private and calls `docs/PUBLISHING.md` "itself
-      gitignored below". Both become false.
-    - **ETO'S DECISION, overrulable by the founder: `docs/doing/HANDOVER.md` STAYS in §3a's
-      publish scrub.** Tracking and publishing are different acts — the founder decided the six
-      are tracked in a project's repo; §3a governs publishing that repo publicly. A private repo
-      tracking its live handover exposes nothing; publishing it exposes in-flight work, persona
-      names and review state. The other five come out of the scrub, and §3a gains a sentence
-      saying this is publish-time redaction, not the privacy block surviving by the back door.
-  - **THE BIGGEST FIND OF THE NIGHT, and it was hiding behind a passing test** (Vitali,
-    `a29c45e`, `8473a3d`). Christian's `tests/x/test.sh` pointer turned out to be **vacuous, not
-    stale**: `#4-tested` passed, and the fixture was not why. The one-extension rule was enforced
-    **only at the `tests/` top level** — shallow mode filtered on the spec extensions, while every
-    **declared root** (`backend/src`, `frontend/e2e`: where projects actually keep their tests)
-    was a recursive `grep -raqE` over **ANY FILE**. A README, a CHANGELOG, a commit note or a
-    retired `*.test.ts` each satisfied the gate. The rule everyone converged on all night was
-    false exactly where it matters most, while reading as enforced.
-    - **Fix:** one search, same extension filter in both modes, `-maxdepth 1` the only difference.
-      The `grep -raq` path is gone. Red at `65b0492` via `#18`, where a `NOTES.md` and a
-      `legacy.test.ts` under a declared `backend` root both counted.
-    - **Three fixtures were rotten, not one.** `#15f` he missed and the fix caught: it asserts a
-      PASS, so it went red for its fixture's FORM rather than its subject. **`#11b` and `#15f`
-      were themselves written in `*.test.ts`** — the form the founder's decision retired — and
-      passed only because declared roots accepted anything.
-    - One intermediate red explained rather than hidden: `bootstrap-gate` bootstraps from HEAD, so
-      between his two commits the derived project got the new spec against the old lib. He re-ran
-      after the fix: 8/8. dod-gate 46/46.
-  - **LANDED 2026-09-16: `1248230..71388b9`, 163 commits, gate green.** Eighteen rows moved to
-    `waiting-acceptance/` — TASK-039, 040, 041, 042, 043, 044, 045, 046, 047, 048 and BUG-122,
-    124, 125, 126, 127, 129, 130, 131 — each carrying what to test and what its review found.
-    `doing/` now holds 3 backlog rows and 46 bug rows; TASK-049 and BUG-128 stay parked.
-    **This repo's feed daemon was restarted** on the fixed code: it had been running a deleted
-    inode, so pre-BUG-124 labelling and pre-BUG-129 truncation.
-    - **THREE PUSHES WERE REFUSED FIRST, and each refusal was a real defect:**
-      1. `§1b·1` blocked on `TASK-23` having no row — because closing an item the way the DoD
-         prescribes (delete the row, leave a `findings.md` pointer) leaves no row. **BUG-130.**
-      2. An untracked `subagent-defer/` at the repo root: correct path, nothing ignored it, so
-         every derived project would have carried a permanently dirty status. **BUG-131.**
-      3. `template-source` #import-1 asserted the imports equal the five seeded configs, which
-         stopped being true when TASK-046 added `claude.internal.md` — two agents, hours apart,
-         neither updating the other's witness. Fixed as a witness, not as code (`71388b9`).
-    - **The rotation canary proved itself in production** during the failed run: it reported the
-      feed rotating mid-suite as a NOTE, history preserved in `agent-activity.log.1`, rather than
-      failing the suite — hours after BUG-129 landed.
-    - **Still local, riding the next push:** the eighteen move commits and this note.
-    - **Next:** CI on `71388b9` (watch armed, dies with the session), then tell storm2flow — its
-      four gating items (TASK-039, 040, 042, 043) are on `main`, and `released` fast-forwards when
-      CI is green.
-    - **`doing/BUGS.md` holds 46 rows (BUG-036..BUG-109).** They predate tonight and none was
-      touched by it. Whether they are genuinely open or rows whose fixes landed and never moved is
-      an `lcm` question for the founder, not an assumption to make here.
-  - **Superseded, kept for the trail — state at 17:20:**
-    - **The working tree is CLEAN and every item is committed.** `bootstrap-gate` is **8/8** at
-      HEAD (#2 in 402 s against the 900 s budget), so the batch's last red is gone. Christian's
-      `#5c` landed as `a2123b6` — Eto ran it (17/17) and committed it, because Christian wrote it
-      and then died mid-turn.
-    - **BOTH CLAUDE AGENTS ARE DEAD on the account's session limit, which resets 16:30 Berlin.**
-      Philipp and Christian both took HTTP 429. Neither has unfinished work that blocks the push.
-      Outstanding from them, for later: Philipp's probe into why `sh_lint`'s 46-file ShellCheck
-      invocation suppresses the `AGENT_FEED_TAG` SC2034 that a 2-file run reports (his leading
-      hypothesis: `scripts/lib/feed.sh` is in the 46 and uses it; his unchecked rival: absolute
-      vs relative paths), and Christian's own TASK-048 wrap-up.
-    - **A Codex review is RUNNING** (`.scratch/brief-codex-final-review.md` →
-      `.scratch/CODEX-final-review.md`). It covers everything that changed **after** its own
-      review — the evidence-search hole, the semgrep extraction, BUG-124's rework, TASK-042's
-      stream fix, the retirement, BUG-129, TASK-047/048. **Codex quota is separate from the
-      Claude session limit**, so it is unaffected.
-    - **THE VERDICT ARRIVED (`.scratch/CODEX-final-review.md`) AND THE PUSH IS NOT READY.**
-      258/259 across eleven suites (the one failure is ts-bridge #5, the reviewer's sandbox
-      again). Sections 2 and 4 pass as is. **Two are REWORK and three need fixes**, all dispatched
-      to three FRESH agents (not resumes — see the token note below):
-      - **§3 BUG-124 (S2, rework): atomic reservation, non-atomic reclamation.** `find` selects a
-        stale slot; before `rm` runs, another hook reserves that path; the first caller then
-        deletes the fresh reservation and takes the slot. Both return 0 with the identical path.
-        Also: `-mmin +1` rounds to ~2 minutes, age is not proof the owner is dead, and the signal
-        handler frees the slot without terminating the child.
-      - **§6 BUG-129 (S2, rework): the feed still truncates.** `scripts/lib/feed.sh:89-95` rotates
-        after 4,000 lines by `tail` → temp → `cat >`, and a concurrent append during that window
-        is **lost**. The claim recorded here that startup truncation was the only non-append
-        behaviour was FALSE, as is the row's "size-capped rotation is not built".
-      - **§5 TASK-047 (S3): #17 is a removal guard, not an equality check.** Adding `*.test.ts` to
-        any of the three sides left it green; removing `.spec.tsx` from each made it red.
-      - **§1 TASK-047 (S3): #18 passes with `-type f` removed**, so a spec-named symlink to
-        non-spec content would count. It has only negative fixtures, so it also cannot show
-        either extension is accepted. The production search itself probed clean.
-      - **§7 TASK-048 (S2/S3): the publishing recipes contradict the tracking decision.** §3a's
-        `PUBLIC_PATHS` omits the three root documents, so the documented flow cannot satisfy §5's
-        own expectation; and §3b keeps the handover tracked, drops it from the preflight, points
-        at §3a's redaction — which §3b never executes — and ends with "then push".
-    - **FIVE OF SEVEN SECTIONS ARE CLOSED (2026-09-16, fresh narrow-brief agents):**
-      - **§7 TASK-048** (`6937540`): §3a's `PUBLIC_PATHS` gains the three root documents, and §3b
-        redacts the handover itself — restore the shipped stub, add, gate, push — with the §3a
-        cross-reference reworded to say that scrub does NOT run on this path. **The agent caught
-        his own gate before it shipped:** his first version demanded ≤1 non-blank line, which
-        `templates/HANDOVER.md` (40 lines) would have failed in every fresh project; it now keys
-        on the §2 WIP placeholder, verified both ways. doc-links 27/27.
-      - **§6 BUG-129** (`8e9e21e`, `713d291`): rotation renames to `<feed>.1` plus a marker
-        instead of `tail`→`cat >`, so history survives and a racing writer lands in one file or
-        the other. **No lock, deliberately: `flock` is absent on macOS**, and rename needs no
-        coordination. The canary reads the archive — rotation is a CANARY-NOTE, lost or rewritten
-        history still fails, and the escape token is searched in the archive too.
-        **A FALSE PREMISE THIS FILE CARRIED IS CORRECTED:** "truncate-in-place preserves the inode
-        for `tail -F`" is wrong — `emit` reopens per line, only `exec N>` touches the lock file.
-        Fixed in `log-activity.sh`, `env-namespace.ts` and the BUGS row. `AGENT_FEED_KEEP_LINES`
-        is deleted.
-      - **§5 and §1 TASK-047** (`7c54cb4`): #17 now reads each side's COMPLETE pattern list with
-        comments stripped, plus three non-vacuity assertions; #17b witnesses discovery
-        behaviourally; #18 gains the symlink witness and paired positives across both extensions
-        and both root modes. Every mutant verified: `dod-gate.sh`→#17, `suites.sh`→#17/#17b,
-        vitest→#17, `-type f`→#18-symlink, removing `.spec.tsx`→#17/#16b/both positives.
-      - **§3 BUG-124** (`5abbd03`, `7f44bf2`): one bounded `flock -w 5` spans reclaim + reserve +
-        spawn; age is dropped as a liveness test for an owner pid written inside the lock;
-        `trap 'exit 143'` on HUP/INT/TERM. **He also caught his own vacuous test** — the
-        cwd-filtered `children()` helper reports an uninspectable process as gone, so #17 now
-        follows the owner by pid.
-    - **ANSWERED, and all seven sections are now closed** (`6285fbe`, `9af5e74`). The toolchain
-      **did not** provide `flock` — macOS installed coreutils and diffutils only; `flock` is
-      util-linux. It installs it now, keyed on the **capability** rather than the formula, because
-      util-linux is keg-only so `have flock` is false even after a good install; the resolver
-      mirrors `bp_staleness_timeout_cmd` (PATH, then keg paths) and lives in `watcher-lock.sh`,
-      the lib that already reasons about flock, so installer and hook cannot disagree.
-      **`mkdir` was rejected with a reason worth keeping:** it gives exclusion but no
-      release-on-death, so a holder killed mid-section wedges deferral permanently, and breaking a
-      stale mutex means judging its owner dead — which is the defect one level up. The
-      degradation is also loud now: it names `flock` and how to install it, once.
-    - **History of the question (resolved):** BUG-124's fix degrades to "no flock → no
-      deferral", and `install-toolchain.sh` installs coreutils for `gtimeout` only — it provides
-      no `flock`, and macOS ships none. On the founder's Mac that means type-labelled bookends:
-      **BUG-124's original symptom, on the machine that reported it.** The BUG-129 agent hit the
-      same gap and designed rotation to need no lock at all. Asked of the BUG-124 agent: does the
-      toolchain provide it, can `mkdir` (already the reservation primitive, atomic everywhere)
-      carry the critical section instead, or must the degradation at least be announced once
-      rather than silent? **Nothing pushes until that is answered.**
-    - **THE PUSH WAS ATTEMPTED AND REFUSED — 161 commits, `082a791`, and the gate was right.**
-      It failed at its FIRST DoD stage, `§1b·1 every item has a backlog row`:
-      `These items have NO backlog row anywhere: TASK-23`. Nothing in the suites failed; gitleaks,
-      semgrep (21 shell parse errors accepted) and osv all passed first.
-      - **The cause is a gap in the rule, and it is Eto's doing.** TASK-023 was cancelled exactly
-        as `docs/DoD.md:33` prescribes — *"cancellation (delete + one-line pointer in
-        `docs/config/findings.md`)"* — and `F-003` is that pointer, written on Eto's instruction.
-        But `dod_find_row` searches only the lifecycle row files, so a correctly cancelled item is
-        indistinguishable from work with no item at all. **Doing the closure right is what made
-        the closing push impossible.**
-      - The stage's own comment explains why it never came up: it asserts *existence* rather than
-        folder placement, "without guessing intent". Cancellation is a third state it does not
-        model.
-      - **Not a one-off:** A-13 was cancelled into `F-004` the same day and escaped only because
-        its number never appears in a commit subject. Any future cancellation whose closing commit
-        names its item hits this.
-      - **Filed as BUG-130** (`8f861e5`), with a fresh narrow-brief agent on it: teach
-        `dod_find_row` that a findings pointer is a valid record, report it as a note like a row
-        outside `doing/`, and keep failing an item with no record anywhere. Two witnesses, one of
-        which must be green before and after so the rule cannot be fixed into toothlessness.
-        Watch the number normalisation — the gate prints `TASK-23`, rows write `TASK-023`.
-      - **NOTHING ELSE IN THE BATCH IS IN QUESTION.** All seven review sections are closed; this
-        is a lifecycle bookkeeping gap standing in front of 161 otherwise-ready commits.
-    - **Non-finding worth keeping:** the derived-project `subagent-feed #12` red that blocked this
-      batch for hours **did not reproduce** — 34/34 here, and #12 passed in a fresh derived
-      project. It was never a measured blueprint/derived difference.
-    - **Token discipline, founder's instruction 2026-09-16:** resuming an agent re-sends its whole
-      transcript, so the long-lived agents ended at 580k-700k cumulative tokens each, ~2.7M in
-      total. **Spawn fresh agents with narrow briefs; resume only a young one to avoid a file
-      collision.** Cap agent reports at 200 words. Batch handover updates per milestone, not per
-      event.
-    - **After the push, in order:** CI watch → move ~15 rows to `waiting-acceptance/` (five are
-      fully prepared in `.scratch/`: BUG-122, TASK-040, TASK-041, TASK-045, BUG-125 — rows,
-      test instructions and commit messages all written; the rest need their verdicts) → restart
-      PID 1154186, which is running a **deleted inode** of `scripts/agent-activity.sh` and so
-      executes pre-BUG-124 labelling.
-  - **In flight right now:**
-    - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
-      `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic
-      narrowly; a broader exception comes back to the founder.
-    - **Christian:** the TASK-040 both-directories fix (`#iac-2` is red and waiting).
-    - **Vitali:** the founder's TASK-039 decision — a runner directly at the `tests/` root is the
-      project's own, with a blueprint-side guard that no shipped runner ever lands there.
-- **Vitali added storm2flow's rehearsal witnesses to TASK-039** in `cc74f6c`: a blueprint fixture
-  string cannot vouch for project BUG-200, and a `backend/` root counts. Both were red on the
-  pre-TASK-039 lib and are green now.
-- **Three more items promoted 2026-09-15 late, founder decisions:**
-  - **BUG-124** (`7242d8d`): the feed labels subagent start/finish markers and nested helpers by
-    agent type, so the founder could not see Christian. Philipp is fixing it; brief
-    `.scratch/brief-fr-e.md`.
-  - **TASK-044** (`32a1c59`): a project declares its CI; the GitHub-only suites skip visibly
-    otherwise.
-  - **TASK-045** (`18829a9`): doc-links gets a declared web root or allowlist.
-  - Both tasks came from storm2flow's orchestrator (Sylvia, session `storm2flow-3b`), who
-    messaged directly after rehearsing the pulled gate. **Christian** builds both
-    (`.scratch/brief-fr-d.md`). Both are recorded PROMOTED in the inbox. She was told TASK-042's
-    pull refusal is coming for storm2flow's `settings.json`.
-  - All three need Codex review too: add them to Alex's docs brief or a third brief at 02:12.
-  - **BUG-125** (`75a9a75`): doc-links passes a link that leaves the repo when the target
-    exists on local disk (`tests/doc-links/doc-links.ts:111`). Sylvia reported it under
-    storm2flow's founder rule "checks read only from the repository"; the inbox records it as
-    `FR-storm2flow-doc-links-escape` → BUG-125. Christian takes it after TASK-045.
-  - Codex brief for all four late items: `.scratch/brief-alex-fr-late-review.md`.
-  - **BUG-124 fixed by Philipp** (`51d4978`, `fc64966`, verified live).
-    - Real SubagentStart/Stop payloads carry no description; it lives only in
-      `agent-<id>.meta.json`, which appears just after the start hook returns.
-    - Labels now come from one lookup, `bp_roster_subagent_label`: the persona in the
-      description, or `<parent> › <type>` via `parentAgentId`.
-    - The start marker is written by a detached, 5 s-bounded background process. **Codex must
-      check that it cannot accumulate** (BUG-001 history).
-    - `logs/.subagent-map` is removed.
-    - Each helper still gets two finish lines, because Claude Code fires the stop hook twice.
-      That behaviour predates the fix and is left alone.
-  - **Christian finished TASK-044, TASK-045 and BUG-125** (`d3b9a25`..`3a07a46`, 177 tests
-    green). Eto applied his doc text: `88ebe90` (TASK-044) plus the TASK-045 CLAUDE.md and deck
-    commit.
-    - `BP_CI`, `BP_WEB_ROOT` and `BP_WEB_PATHS` are declared in `project_config_paths.md`, read
-      by `tests/helpers/project-config.ts`.
-    - Skips print `SKIP-NOTE:`, which the gate surfaces through a one-line change in
-      `scripts/run-ts-suites.sh`.
-    - BUG-125 first accepted tracked files only (`f4fe83d`). That broke every fresh bootstrap,
-      because managed docs link gitignored privacy-block files (`CLAUDE.md`, `AGENTS.md`, …).
-      So `3a07a46` checks "inside the repo and exists" instead.
-    - **Open, founder's call:** a doc linking a gitignored file passes locally and is dead in a
-      clone. Closing that means deciding whether derived projects track those files.
-  - **BUG-126 [SEC], promoted 2026-09-16.** The pre-push `_st_semgrep` stage never reads
-    semgrep's `.errors`, so a `PartialParsing` run (exit 0, `results: []`) is called clean. CI's
-    `semgrep scan --error` likely has the same hole. Reported by Sylvia from Jesko's review of
-    storm2flow's CodeBuild copy. Started without asking, under the security concern's
-    capability 4. **Fixed by Philipp** (`ab38a96`, `6a08518`).
-    - Unaccepted semgrep errors now make a run incomplete, in the gate and in CI. The gate
-      keeps its `--jobs 1` retry, then blocks.
-    - **One accepted class:** Syntax error / PartialParsing on shell scripts. Semgrep throws 18
-      of those on this repo's shellcheck-clean scripts. Accepted errors are counted visibly.
-    - CI carries a copy of the policy; test `#ci` runs the real workflow step so the copies
-      cannot drift.
-    - Verified in the real `returntocorp/semgrep` image; not yet on a live GitHub run.
-- **ALL AGENTS DONE (00:23, 2026-09-16).** Everything waits for the 02:12 Codex reviews:
-  - Alexey: `.scratch/brief-alexey-fr-code-review.md`
-  - Alex: `.scratch/brief-alex-fr-docs-review.md`
-  - Alex: `.scratch/brief-alex-fr-late-review.md`
-  - Alexey: `.scratch/brief-alexey-task037-recheck.md`
-  - Jesko: `.scratch/brief-jesko-bug121-recheck2.md`
+### Do these, in order
 
-  Dispatch the three new-work reviews first. Codex quota ran out after ~3 runs last time.
-  - **02:12 attempt: all three were refused on the spot** — "usage limit … try again at 3:22 AM".
-    The 02:10 reset the earlier message named was a different window. **Dispatch ONE review at a
-    time** from now on, so one window is not spent on refusals.
-  - **03:24, Alexey done** → `.scratch/ALEXEY-fr-code-review.md`. **BUG-122: push as is.**
-    **TASK-042: push after two fixes** (blueprint JSON unvalidated on the new-file `cp` path;
-    the printed migration proposal can carry unsupported keys) — **with Philipp**.
-    **TASK-039: rework** — **with Vitali**:
-    - exclusions cover ancestors but not descendants (`tests/shipped`, `docs/doing`, `scripts`
-      and a symlink root all certified a bug)
-    - declarations word-split and glob-expand, so `*`, `../outside` and absolute paths widen
-      the search outside the project
-    - the documented snapshot layout (`tests/` root, CLAUDE.md:466) is now rejected. The honest
-      fix is provenance: a file under `tests/` the blueprint does not ship is the project's.
-      **If no reliable provenance check exists at gate time, Vitali stops and the layout
-      decision goes to the founder.**
-  - **03:35, the five late items reviewed** → `.scratch/ALEX-fr-late-review.md` (written by Jesko
-    against Alex's brief, so the header names Alex). **All five: push after fixes.**
-    - **BUG-126** (S2 ×2, **Philipp**): `{"results":[],"errors":[42]}` passes — jq cannot index the
-      entry, empty stdout reads as "no unaccepted errors", and the gate even claims 1 accepted.
-      CI rejects it, so the copies disagree. And the shebang test matches
-      `#!/usr/bin/env -S node --require /tmp/bash`, so a Node file is accepted as shell.
-    - **BUG-124** (S2, **Philipp**): the detached child inherits descriptors — only 0/1/2 are
-      redirected — so an inherited flock stays held until it exits. No whole-child deadline, no
-      burst cap, and tests bound marker arrival rather than process exit.
-    - **TASK-044** (S3, **Christian**): `scripts/run-ts-suites.sh:411` caps notices at
-      `head -20`, so later skip reasons vanish behind twenty canary notes.
-    - **TASK-045 / BUG-125** (S3, **Christian**): `stat` follows symlinks, so `repo/escape ->
-      ../outside` and a symlinked `BP_WEB_ROOT` both pass containment.
-    - Also noted: the accepted shell exception leaves unanalysed shell that ShellCheck does not
-      cover (it only reads tracked `scripts/`+`.githooks/`); state that risk in the security
-      policy. And doc-sync landed in separate commits from the implementation, which is not the
-      DoD's same-commit rule — an artefact of agents not owning those files.
-  - **Alex is reviewing TASK-040/041/043 now.**
-- **All cross-owned doc text is applied:**
-  - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
-  - README and deck import lines: `0fcfe40` (TASK-043)
-- **Codex reviews after 02:10**, briefs ready:
-  - `.scratch/brief-alexey-fr-code-review.md` (BUG-122, TASK-042, TASK-039)
-  - `.scratch/brief-alex-fr-docs-review.md` (TASK-040, 041, 043)
-  - then the two older re-checks (`brief-alexey-task037-recheck.md`, `brief-jesko-bug121-recheck2.md`)
-  - **Nothing from this batch is pushed until those verdicts are in.** The bug and task
-    acceptances are committed locally and ride the same push. PRs #71–#74 are closed with comments
-naming their tasks, and their branches are deleted. The row moves (`92a5cf5`..) and this note are
-local, for the next push. **Still open:**
-- **CI** for `4267ac8`: a Monitor was armed at push time and dies with the session. Check with
-  `gh run list --repo LuizStruct2Flow/blueprint --commit 4267ac8e6ebbd4ed69503e5e21b9717a11eb4a98`.
-- **Two Codex re-checks, after 2026-09-16 02:10** (usage limit). Both reviewed items are already
-  pushed, and TASK-037 is accepted. A real finding reopens the item: move its row back to
-  `doing/` and tell the founder.
-  - **Jesko on BUG-121:** `.scratch/brief-jesko-bug121-recheck2.md` covers the chain check
-    `2ec249e`/`e61436f` and the umask fix `9a89e54`/`4267ac8`.
-  - **Alexey on TASK-037's fixes** `f1b1f93`..`f23e7cb`: `.scratch/brief-alexey-task037-recheck.md`,
-    with the secret refusal weighted most heavily.
-  - Dispatch both with the usual `codex exec` line (§4). Output goes to
-    `.scratch/JESKO-bug121-recheck2.md` and `.scratch/ALEXEY-task037-recheck.md`.
+1. **Read the CI result above.** `released` fast-forwards only on a green `main`.
+2. **Push the 19 local commits.** One gate run carries them all.
+3. **Tell storm2flow** (Sylvia, session `storm2flow-3b`) that their four gating items —
+   TASK-039, TASK-040, TASK-042, TASK-043 — are on `main`, once `released` has moved.
+   **TASK-042's pull refusal reaches them with it:** the first pull after this refuses
+   `settings.json` in any project whose copy carries rules the blueprint does not ship,
+   and prints them as a ready `.claude/settings.project.json`.
+4. **Nothing else is in flight.** No agent is running, the working tree is clean, and this
+   repo's feed daemon was restarted on the fixed code (it had been executing a deleted
+   inode, so pre-BUG-124 labelling and pre-BUG-129 truncation).
 
-History of how it got here (safe to delete once the re-checks are in):
-- **Christian (Claude): TASK-034, TASK-035, TASK-036**
-  - TASK-034: acceptance and any delegation of it are the founder's. Removes the QA-2 rule in
-    four places, including `templates/`.
-  - TASK-035: AGENTS.md rule, link plus a plain line (#73).
-  - TASK-036: three DoD pointers (#74).
-- **Philipp (Claude): TASK-037.** `blueprint a2bp` accepts paths the blueprint does not ship,
-  with the guard kept, tests first. Also adds `docs/backlog/feature-requests.md` from #72 as the
-  request inbox, plus doc sync. The two agents commit to disjoint files with pathspec commits.
-- **BOTH BUILT, NOT PUSHED.**
-  - Christian: `dfd3cd9`, `e135324`, `8ae253a`; Eto added `d6faf8d` and `83492f3` (§10 pointer,
-    deck line).
-  - Philipp: `0c47b5b`..`6b3dc95`. a2bp now proposes unshipped and new files. It newly refuses
-    `.git` paths, gitignored paths, paths outside a work tree, and root `project_config_*.md`;
-    that last one is Philipp's call, keeping CLAUDE.md's "never back-propagated" rule.
-- **Cross-provider reviews dispatched 21:10.** Codex dispatches must pass `TMPDIR=/dev/shm` (no
-  `~/.cache` write in its sandbox).
-  - **Jesko (BUG-121 re-check):** `.scratch/JESKO-bug121-recheck.md`, push after one fix. chmod,
-    realpath and mkdtemp re-resolve the path after lstat, so an untrusted parent chain lets
-    another user swap it. **Fixed by Philipp in `2ec249e`/`e61436f`:** an ancestor trust check.
-    Jesko's confirmation (`.scratch/brief-jesko-bug121-recheck2.md`) **did NOT run: Codex's
-    usage limit is out again until 2026-09-16 02:10.** Eto reads the diff before the push;
-    re-dispatch the brief after 02:10.
-    - **The chain check blocked the 22:14 push.** `bootstrap-gate` #2/#3 runs a fresh project's
-      gate inside a scenario. The harness creates the scenario `tmp` under umask 0002, so it is
-      0775, and the chain walk refuses it: all six BUG-121 cases failed in the nested run.
-      Philipp is making harness-created scenario dirs 0700 regardless of umask. Nothing from that
-      push reached origin; the rows and PR comments are still prepared in `.scratch/`
-      (`trig-03*.md`, `msg-wa-03*.txt`, `pr7*-close-comment.md`).
-  - **Alex (TASK-034..036):** `.scratch/ALEX-task034-036-review.md`. **Fixed by Christian** in
-    `5c4c5ba` (deck bullet for the link rule) and `3c13c6a` (roster example, publishing guide).
-    The TASK-034 finding was declined; the reason is in its row (`cd4c373`).
-  - **Alexey (TASK-037):** `.scratch/ALEXEY-task037-review.md`, push after fixes. **Vitali is
-    fixing:**
-    - P1: secret files are now proposable. A tracked `.env` and an untracked private key both
-      passed a dry run. Fix: reuse the A-03 secret scanner over every input before transport.
-    - P1: the root `project_config_*.md` refusal is case-sensitive.
-    - P2: a new path can collide with a base path by case.
-    - P2: a new unshipped file is relocated under `scaffolding/`.
-    - P2: inputs test #9 is not an independent witness.
-    - **TASK-037 must not be pushed before Vitali's fixes land.**
-    - P1, P2, P3 and P5 are fixed in `f1b1f93`..`1facf18`. Those commits were **rebuilt with the
-      founder's OK on 2026-09-15**: the original `31fd1d2` test held a literal fake private key
-      that the push gate's gitleaks scan would block. The permission classifier refused the
-      rebuild for the agent, and the founder chose rebuilding over an ignore entry. The old SHAs
-      `31fd1d2`..`c214123` no longer exist.
-    - P4 (unshipped new files placed under `scaffolding/`) and the e2e header comment are still
-      being finished by Vitali.
-    - Alexey's re-check waits for Codex, after 2026-09-16 02:10.
-- **TASK-038 (removes `CHANGES.md` from the lifecycle): promoted `f59af4d`, Christian is building
-  it.** The founder waived the cross-provider review for this item only, so it needs no Codex
-  review and goes out in the same push.
-- **After the reviews:**
-  - fix any findings
-  - one gate push
-  - CI watch
-  - rows → waiting-acceptance
-  - close #71–#74 with a comment naming each task, and delete their branches
+### What is open, and whose call it is
 
-**TASK-026 (PR #66) is DONE and waiting for acceptance** — all six changes pushed
-2026-09-14, PR closed with a comment linking the commits, its branch deleted. The shared
-comparison it built is `bp_prospective_pull` / `bp_prospective_for` in
-`scripts/blueprint`; TASK-025 swaps only the latter.
+- **`doing/BUGS.md` holds 46 rows, BUG-036..BUG-109** — see §5. This is an `lcm` pass and
+  the founder triggers it.
+- **TASK-049 and BUG-128 are parked** in `docs/backlog/` with their re-open triggers.
 
-**Derived projects and pulling:** struct2flow-www may pull freely; storm2flow file by
-file (its `settings.json` is ~5 months old). **linkedin-watcher-agent already pulled,
-deliberately** (its TASK#7, file by file, re-applying its own change; it took the
-blueprint's `security.yml`). It does not use `agent-exchange` (only a historical doc
-mentions it), so losing those permissions cost nothing. Pull only while this checkout
-has no unpushed commits (`git log origin/main..main` empty).
+### Token discipline — founder's instruction, 2026-09-16
 
-**Now: TASK-025 — `drift` and `pull` read the blueprint by its repository
-address.** Founder chose **option A, git fetch, now**; the npm package (option B)
-is deferred until after Stage B. Plan: `docs/done/PLAN-TASK-025.md`.
-**First review (Alexey, Codex): build A with changes** —
-`.scratch/ALEXEY-plan025-review.md`. **Revised by Christian in `b4983f3`** (2026-09-14):
-six findings adopted with probes, one rejected with evidence; he also found SIGINT
-truncating a mid-write file, which today's `pull` shares. **Re-review (Alexey, 2026-09-14): build with
-these changes** → `.scratch/ALEXEY-plan025-rereview.md` — 5 of 7 original findings
-resolved, the added write-shield and cache-race designs sound. Both technical changes
-are in revision 3 (`90fa82a`: H5 scrubs undeclared `GIT_*`/`AGENT_*` in direct runs;
-case #23 runs group INT and group TERM). **The only blocker left is the founder's:**
-record T ("matches the newest blueprint") or P ("matches the version last pulled, plus
-a newer-exists line") — plan §2.2 lists what changes under P. Build nothing before that.
-**Founder decisions recorded 2026-09-14:** **T** — `drift` means "matches the newest
-blueprint" (unblocks implementation); adopt the `released` branch — yes; a leftover
-`blueprint_source` field — warn on every run (no cut-off date); the toolchain installer
-writes the per-machine `blueprint` command — yes. **All four are in plan revision 4
-(`6caced7`) and the backlog row (`6f24650`).** Consequences found against the code:
-projects read `released` through a NEW optional field `blueprint_release_branch`
-(`blueprint_branch` stays `main`, because `a2bp` uses it as every PR's base); the
-release job in the shipped `security.yml` names `LuizStruct2Flow/blueprint`; migration
-is 9 steps and no project switches before the first green run creates `released`.
-Implementation order: (1) reproducer + harness scrubs, (2) drift/pull by address,
-(3) `released` job + field + bootstrap, (4) installer writes the command. **Review of the
-revision-4 additions (Alexey, 2026-09-14): revise again** →
-`.scratch/ALEXEY-plan025-rev4-review.md` — installer ownership is forgeable by a marker
-line; migration step 8 deletes the working command before installing; rollback cannot
-reach projects already on `released`; the release job's cases never run it. **Revision 5
-(`cb18a17`, Philipp) adopts all four**, with measurements in its §R4 table, and found two
-more: a SIGINT to the installer alone was absorbed and the command swap went ahead, and
-revision 4's release job wrongly failed an old-run rerun (`origin/released` vs
-`FETCH_HEAD`). **Re-review of revision 5 (Alexey): build with one change** →
-`.scratch/ALEXEY-plan025-rev5-review.md` — all four findings resolved (probes re-run);
-the one change: `--replace-blueprint-command` must validate the new command from the
-invoking migrated project, not from the installer's own checkout. Folded in as
-revision 6 (`12b59b5`: records the invoking directory, adds `--project=<dir>`, #37b keeps
-installer checkout and project apart). **The plan is buildable.** **Commits 1–2 landed locally,
-not pushed** — `6ed93b1` (reproducer + harness scrubs) and `21e2803` (drift and pull read
-the blueprint by its address). **Implementation review (Alexey, 2026-09-14): push after
-these fixes** → `.scratch/ALEXEY-025-impl-review.md` — cache, history, `BLUEPRINT_ROOT`,
-H5 and BUG-110 PASS; to fix: (S1) the refresh subshell can spawn its fetch after cleanup
-looked for it; (S1) the exec-bit `chmod` runs outside the write shield; (S2) the
-ignore-before-redirect ordering has no red witness (M23c); (S3) the mutant catalogue names
-the wrong cases. **All four fixed locally, reproducer-first** (`83dfcd7`/`6c024f1` the
-refresh runs as one process; `3c4fe46`/`4683167` exec bit inside the shield; `b27eadd`
-redirect ordering pinned structurally; `b9473ed` catalogue corrected, #24 narrowed).
-**Fix confirmation (Alexey, 2026-09-14):** exec-bit, redirect ordering and catalogue
-RESOLVED, 126/126 focused tests; **the spawn race is PARTLY** — the behavioural half of #20b
-was green before the fix too, so push only after a witness that goes red on the pre-fix
-launch, or a proof that the residual is only bash's fork-to-exec window. **Resolved by
-`c6d9bd2` (#20c):** a FIFO at the refresh child's `fetch.err` holds it forked-but-not-fetching;
-red on the pre-fix launch, green now (sync-by-address 35/35). Residual, documented and
-unwitnessed: a TERM in bash's fork-to-handler-reset microseconds can wait out the 30 s
-budget. (Alexey's review file was not written; his verdict is `.scratch/alexey-025-fix-last.md`.) **Christian's report of where the plan met the code** (verify in review): four
-listed mutants do not redden their case (M1→#1h instead, M22b→#11/#20, **M23c reddens
-nothing**, **M24 leaves #24 green**); killing the refresh subshell orphaned the fetch
-(fixed with `pkill -P`, #20 now time-bounded); a damaged cache usually self-heals, exit 5
-only with a leftover ref (#27a); a2bp-contamination #24 and bootstrap-gate #4/#6 needed
-changes. **Live consequence of commit 2:** derived projects run this checkout's CLI
-through the wrapper, so their `blueprint drift` now reads GitHub `main`, warns about
-`blueprint_source`, and exits 5 offline (`BLUEPRINT_ROOT=<checkout>` is the override).
-BUG-116 adopts the handler by replacing its trap with `_bp_terminating_traps _a2bp_cleanup`. **Commit 3 waits only for** linkedin's #67/#69 to be decided (they
-touch the same files).
-**Open for the founder:** does `drift` mean "matches the latest blueprint" (what
-the plan is written for) or "matches the version this project recorded"? Also: adopt a
-`released` branch; retire `blueprint_source` by warning or by date; should the
-toolchain installer write the per-machine `blueprint` command.
-**BUG-116 (parked) waits on this task:** `a2bp` has the same non-stopping trap and
-pushes after it — adopt TASK-025's handler, reproducer first.
+Resuming an agent **re-sends its entire transcript**, which is what took the long-lived
+agents to 580k–700k cumulative tokens each, ~2.7M in total. So: **spawn fresh agents with
+narrow briefs**, resume only a young one to avoid a file collision, cap agent reports at
+200 words, and batch handover updates per milestone rather than per event. The same rule
+applies to this file — it is read by every waking session, so it carries what is open, not
+what happened.
 
-**Live now, and a reason to push promptly:** unpushed commits in this checkout show
-up in every derived project's `drift` as "commits since last sync", so a `pull`
-there could record a commit that exists on one machine only. TASK-025 removes this.
-
-**Then: TASK-021 Stage B** — the `scaffolding/` + `forge/` move.
-
-TASK-018 (the TypeScript test migration) is **finished and accepted**. 35 shell
-suites were retired; **one survives on purpose**: `tests/ts-bridge/test.sh`, the
-last assertion not run through vitest, held pending TASK-023 (founder decision).
-
-**Stage B's preconditions, as of 2026-09-14:**
-
-| | state |
-|---|---|
-| Stage A (code root / state root split) | landed |
-| Stage A′ (compatibility release in the CLI) | landed |
-| gate finds its suites after the move (BUG-066) | landed — the **runtime-assertion half is still open** |
-| feed does not split in two (BUG-077) | landed |
-| linkedin-watcher-agent, struct2flow-www | carry the compatibility release |
-| storm2flow | no local CLI — runs `blueprint` from PATH, which is covered |
-
-**One hazard the plan does not contain yet — add it before moving.**
-`~/.local/bin/blueprint` is a per-machine wrapper that `exec`s the hard-coded path
-`…/blueprint/scripts/blueprint`. Stage B moves that file into `scaffolding/`. The
-moment it moves, `blueprint` breaks for **every project on this machine**, and no
-commit fixes it because the wrapper is outside git. It must change in the same step
-as the move (or learn to look in both places).
-
-**Read `docs/doing/PLAN-TASK-021-RESTRUCTURE.md` against the tree as it is now.**
-It predates most of the work above and has been corrected repeatedly — atomicity
-twice, the site inventory once, one piece of arithmetic three times. Re-measure its
-claims; do not re-read them.
-
-**The one ordering rule that survived every correction:** `scripts/`, `tests/` and
-the scaffolding-bound half of `docs/` move in **one commit**, because the hook
-derives its code root from where `scripts/lib/pipeline.sh` is and every suite path
-hangs off that root.
-
-**After the restructure:** internals component by component (TARGET §3.2) —
-`state-dir`, `commit-subject`, `placeholders`, `suites`, `signal-set`, then
-`pipeline`, the `blueprint` CLI, `new-project`, and `agent-activity` last.
+**The trail is in git, not here.** `git log 1248230..71388b9` carries the reasoning in the
+commit bodies; each item's row carries what its fix taught. Nine hundred lines of narrative
+were removed from this section on 2026-09-16 for exactly that reason.
 
 ---
 
@@ -1214,6 +377,36 @@ independent checking in one session. Re-measure a number before repeating it.
 
 ## 5. OPEN FOR THE FOUNDER
 
+### Live, as of 2026-09-16 — these three need you
+
+- **`doing/BUGS.md` holds 46 bug rows, BUG-036..BUG-109.** They predate the September 16
+  landing and none was touched by it. Some are genuinely open; at least one is finished
+  work that never moved. **This is an `lcm` pass and you trigger it** — an agent moving
+  another agent's rows on its own judgement is the thing the lifecycle exists to prevent.
+  - **BUG-109 is the worked example, and it vindicates the discipline.** It predicted six
+    controls would go red "the moment the TASK-018 shell runners retire". Christian fixed
+    all six on 2026-09-11 **without performing the retirement**, green on that day's tree
+    and on a rebuilt end-state copy (84/84 both sides). The retirement happened on
+    2026-09-16 under TASK-047, and `vitest run manifest git-isolation live-state-canary`
+    is 53/53. The cost was paid months before the benefit, and nothing would have noticed
+    if it had not been.
+
+- **TASK-049 (parked, `docs/backlog/`) needs a placement ruling.** `docs/PUBLISHING.md`
+  §3b now redacts the live handover before a public push, but prose is not enforcement. A
+  guard that refuses to publish a live handover has to live either in the managed set
+  (every project inherits it, nobody can opt out) or in the project's own
+  `.githooks/pre-push-project` (each project decides, and most will never add it).
+  **Which?**
+
+- **BUG-128 (parked, `docs/backlog/`) is a known hole in the SAST gate.** Semgrep's
+  `paths.skipped` is classified nowhere, so a file semgrep never opened — too large,
+  binary, timed out, filtered — produces no error entry and the run still reads clean.
+  This repo cannot currently exhibit the dangerous reasons; closing it means changing the
+  scan invocation, not tightening a filter. **Cheap first step when it is picked up:**
+  check whether dropping `--quiet` alone surfaces `paths.skipped` without `--verbose`.
+
+### Older, still unanswered
+
 - **Founder decisions 2026-09-15 on #71–#74 (from struct2flow-www and storm2flow):**
   - **#71:** "an agent may not delegate acceptance to another agent without consulting me. I'm
     responsible for the acceptance or its delegation." This is TASK-034.
@@ -1266,9 +459,11 @@ independent checking in one session. Re-measure a number before repeating it.
   untriaged. Treat like #66: cross-provider review first, then a founder decision. #67
   and #69 touch files TASK-025 is changing — decide them before commit 3.
 
-- **TASK-023** — `tests/manifest` #9 (the control proving itself independent of
-  the toolchain) could not be ported; `tests/ts-bridge/test.sh` is held back until
-  this is decided.
+- **TASK-023 is CLOSED** (founder, 2026-09-16) as an accepted loss, and
+  `tests/ts-bridge/test.sh` is retired with it. `F-003` in `docs/config/findings.md` is
+  the cancellation pointer and says plainly that what replaces it is weaker: a silently
+  dead vitest bridge now produces no red case. **Cancelling an item correctly is what
+  broke the closing push** — see BUG-130 in `waiting-acceptance/`.
 - **BUG-034 (S1, parked)** — `blueprint pull` can lose a project's content on
   inverted markers **while printing that it preserved it**.
 - **BUG-083** — the gate prints its colour codes as literal text (`[2m`, `[32m`);

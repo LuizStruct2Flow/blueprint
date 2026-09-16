@@ -448,6 +448,45 @@ describe('TASK-040 — the IaC stages find infrastructure/ as well as infra/', (
       )
     })
   })
+
+  it('#iac-2 an EMPTY infra/ does not hide the recipes in infrastructure/', async () => {
+    await scenario('scanners-iac-2', async (s) => {
+      // The layout Alex ran: both directories exist, only one holds anything.
+      // Detection took the first that existed, so every recipe went unchecked
+      // and the gate exited 0 without a skip line — the silence TASK-040 closes.
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['clean'])
+      await s.fs.mkdirp('repo/infra')
+      await s.fs.write('repo/infrastructure/cdk.json', '{}\n')
+      await s.fs.write('repo/infrastructure/main.tf', 'terraform {\n}\n')
+      await s.fs.mkdirp('repo/infrastructure/.terraform')
+      await s.fs.write('repo/infrastructure/charts/demo/Chart.yaml', 'name: demo\n')
+
+      const logs: Record<string, string> = {}
+      for (const tool of ['cdk', 'terraform', 'helm']) {
+        logs[tool] = s.workspace.path(`${tool}-cwd`)
+        await f.shims.add(tool, `pwd >>${JSON.stringify(logs[tool])}\nexit 0`)
+      }
+
+      const r = await f.runHook()
+
+      expect(r.code, `the gate failed on a valid mixed layout\n${r.output}`).toBe(0)
+      for (const tool of ['cdk', 'terraform', 'helm']) {
+        expect(
+          await s.fs.exists(`${tool}-cwd`),
+          `${tool} never ran: an empty infra/ hid infrastructure/\n${r.output}`,
+        ).toBe(true)
+        expect(
+          (await readFile(logs[tool] as string, 'utf8')).trim().split('\n'),
+          `${tool} ran outside infrastructure/`,
+        ).not.toContain(join(f.dir, 'infra'))
+        expect((await readFile(logs[tool] as string, 'utf8')).trim(), `${tool} ran outside infrastructure/`).toMatch(
+          /\/infrastructure$/m,
+        )
+      }
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

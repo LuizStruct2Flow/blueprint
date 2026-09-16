@@ -136,8 +136,26 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     - **Alexey re-checked TASK-037** → `.scratch/ALEXEY-task037-recheck.md`: findings 2–5 closed,
       but two remain. **TASK-037 is already accepted and pushed, so they are filed as BUG-127
       rather than reopening it.**
-  - **FILE CONTENTION, watch it:** Christian's TASK-040 fix and Philipp's BUG-126 fix both touch
-    `.githooks/pre-push`. Christian was told to hold that file until Philipp reports.
+  - **FILE CONTENTION:** Christian's TASK-040 fix and Philipp's BUG-126 fix both touch
+    `.githooks/pre-push`. Philipp has reported, so the file is Christian's now.
+  - **BUG-121 re-check (Jesko): push as is** → `.scratch/JESKO-bug121-recheck2.md`. The chain
+    check closes the replacement window, and a foreign-owned sticky ancestor is still refused.
+    **Known limit worth remembering:** in his sandbox `/` is owned by uid 65534, so 7 harness
+    cases failed there on the intended foreign-ancestor refusal. On a host where `/` is not
+    root-owned, the default base is refused and `TMPDIR` must be set. That is the design, but it
+    will look like a bug the first time a container hits it.
+  - **BUG-127 filed** (from Alexey's TASK-037 re-check, which is otherwise closed): a2bp files a
+    request with NO secret scan when gitleaks is absent — both private-key probes reached the
+    fetch — and an unsupported scanner command (exit 1) is reported as "gitleaks found a secret".
+    TASK-037 is accepted and pushed, so this is a new row, not a reopening. **Unassigned: all
+    three agents are busy.**
+  - **In flight right now:**
+    - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
+      `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic
+      narrowly; a broader exception comes back to the founder.
+    - **Christian:** the TASK-040 both-directories fix (`#iac-2` is red and waiting).
+    - **Vitali:** the founder's TASK-039 decision — a runner directly at the `tests/` root is the
+      project's own, with a blueprint-side guard that no shipped runner ever lands there.
 - **Vitali added storm2flow's rehearsal witnesses to TASK-039** in `cc74f6c`: a blueprint fixture
   string cannot vouch for project BUG-200, and a `backend/` root counts. Both were red on the
   pre-TASK-039 lib and are green now.

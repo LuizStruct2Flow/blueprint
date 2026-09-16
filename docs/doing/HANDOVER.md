@@ -347,6 +347,14 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     stated under the table. He is **blocked on Christian's deletion** for the `suites.sh`
     one-liner — `tests/ts-bridge/test.sh` is still on disk. **Eto owns that ping**, not Vitali's
     polling.
+  - **The `.tsx` ruling is implemented** (Vitali, `8c609e2`, `a305e8d`): `dod-gate.sh` accepts
+    both spec extensions, `tests/vitest.config.ts` includes both, and the DoD matrix gains a
+    Component (JSX) row saying why `.tsx` is not an exception.
+    - **New guard #17** extracts the extensions from the lib's `find` and from the vitest
+      `include` and requires the two sets to be EQUAL. It was green before and after, so it is a
+      guard, not a reproducer — and it exists because this invariant was restated three times by
+      three people (Alexey found five-versus-one, the founder collapsed it to one, Eto widened it
+      by `.tsx`) and checked by reading each time. Reading is what let the first drift live.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

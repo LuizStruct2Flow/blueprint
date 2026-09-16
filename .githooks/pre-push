@@ -196,18 +196,31 @@ push_log_opts() {
 # skip with a "text-only push:" reason. Founder decision 2026-09-16, and it
 # includes root files such as CLAUDE.md.
 #
-# FAIL-SAFE: an unknown range, an empty file list, or any path not ending in
-# `.md` gives the FULL gate. `--no-renames` lists a rename as delete + add, so
-# renaming a script to `.md` still names the script. `-m` lists a merge's
+# FAIL-SAFE: every ref must qualify ON ITS OWN, or the push takes the FULL gate.
+# A ref fails when it is a deletion, a new branch (zero remote sha), a
+# non-fast-forward update (the remote sha is unknown or not an ancestor, so a
+# rewrite can drop code without listing it), or its range lists no files or any
+# path not ending in `.md` (git quotes odd paths, so they fail too).
+# Ranges are never joined into one `git log`: one ref's lower bound would
+# exclude another ref's commits. `--no-renames` lists a rename as delete + add,
+# so renaming a script to `.md` still names the script. `-m` lists a merge's
 # changes too.
 bp_push_is_text_only() {
-  _to_ranges="$(push_log_opts)"
-  [ -n "$_to_ranges" ] || return 1
-  # shellcheck disable=SC2086  # one selector per line, split on purpose
-  _to_files="$(git log -m --no-renames --name-only --format= $_to_ranges 2>/dev/null)" || return 1
-  _to_files="$(printf '%s\n' "$_to_files" | grep -v '^$' || true)"
-  [ -n "$_to_files" ] || return 1
-  ! printf '%s\n' "$_to_files" | grep -qv '\.md$'
+  printf '%s\n' "$_PUSH_REFS" | (
+    _to_ok=0
+    while read -r _lref _lsha _rref _rsha; do
+      [ -n "${_lsha:-}" ] || continue
+      [ "$_lsha" != "$_ZERO" ] || exit 1
+      [ "${_rsha:-$_ZERO}" != "$_ZERO" ] || exit 1
+      git merge-base --is-ancestor "$_rsha" "$_lsha" 2>/dev/null || exit 1
+      _to_files="$(git log -m --no-renames --name-only --format= "$_rsha..$_lsha" 2>/dev/null)" || exit 1
+      _to_files="$(printf '%s\n' "$_to_files" | grep -v '^$' || true)"
+      [ -n "$_to_files" ] || exit 1
+      if printf '%s\n' "$_to_files" | grep -qv '\.md$'; then exit 1; fi
+      _to_ok=1
+    done
+    [ "$_to_ok" = 1 ]
+  )
 }
 _PP_TEXT_ONLY=0
 if bp_push_is_text_only; then _PP_TEXT_ONLY=1; fi

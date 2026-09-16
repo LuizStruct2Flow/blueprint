@@ -518,6 +518,24 @@ describe('TASK-053 — a push that changes only .md files skips the code stages'
    * line for that range, so the hook decides from what is actually pushed.
    */
   async function pushOf(s: Scenario, files: Record<string, string>) {
+    return pushWith(s, async (git, commit) => {
+      const base = await git('rev-parse', 'HEAD')
+      const head = await commit(files)
+      return `refs/heads/main ${head} refs/heads/main ${base}\n`
+    })
+  }
+
+  /**
+   * Commit the fixture as a base, let `build` shape history, and run the hook
+   * with the ref lines `build` returns.
+   */
+  async function pushWith(
+    s: Scenario,
+    build: (
+      git: (...args: string[]) => Promise<string>,
+      commit: (files: Record<string, string>) => Promise<string>,
+    ) => Promise<string>,
+  ) {
     const f = await fixture(s)
     await f.gitleaks([0])
     await f.semgrep(['clean'])
@@ -526,15 +544,16 @@ describe('TASK-053 — a push that changes only .md files skips the code stages'
       expect(r.code, `git ${args.join(' ')}\n${r.output}`).toBe(0)
       return r.stdout.trim()
     }
+    const commit = async (files: Record<string, string>) => {
+      for (const [path, body] of Object.entries(files)) await s.fs.write(`repo/${path}`, body)
+      await git('add', '--', ...Object.keys(files))
+      await git('commit', '-q', '-m', 'change')
+      return git('rev-parse', 'HEAD')
+    }
     await git('add', '-A')
     await git('commit', '-q', '-m', 'base')
-    const base = await git('rev-parse', 'HEAD')
-    for (const [path, body] of Object.entries(files)) await s.fs.write(`repo/${path}`, body)
-    await git('add', '-A')
-    await git('commit', '-q', '-m', 'change')
-    const head = await git('rev-parse', 'HEAD')
 
-    const refs = await s.fs.write('refs.txt', `refs/heads/main ${head} refs/heads/main ${base}\n`)
+    const refs = await s.fs.write('refs.txt', await build(git, commit))
     const driver = await s.fs.write(
       'run-hook.sh',
       `exec sh .githooks/pre-push origin git@example.com:x/y.git < ${JSON.stringify(refs)}\n`,
@@ -561,6 +580,49 @@ describe('TASK-053 — a push that changes only .md files skips the code stages'
       expect(r.code, r.output).toBe(0)
       expect(r.semgrep, `a push changing a script skipped semgrep\n${r.output}`).toBe(1)
       expect(r.output).not.toContain('text-only push')
+    })
+  })
+
+  const expectFull = (r: { code: number | null; output: string; semgrep: number }, why: string) => {
+    expect(r.code, r.output).toBe(0)
+    expect(r.semgrep, `${why}\n${r.output}`).toBe(1)
+    expect(r.output).not.toContain('text-only push')
+  }
+
+  it('#text-3 two refs in one push: one ref range cannot hide the other ref code commit', async () => {
+    await scenario('scanners-text-3', async (s) => {
+      const r = await pushWith(s, async (git, commit) => {
+        const a = await git('rev-parse', 'HEAD')
+        const b = await commit({ 'app.js': 'new\n' })
+        const c = await commit({ 'README.md': 'docs\n' })
+        return `refs/heads/one ${b} refs/heads/one ${a}\nrefs/heads/two ${c} refs/heads/two ${b}\n`
+      })
+      expectFull(r, 'the A..B code range was hidden by the B..C lower bound')
+    })
+  })
+
+  it('#text-4 a non-fast-forward update takes the FULL gate', async () => {
+    await scenario('scanners-text-4', async (s) => {
+      const r = await pushWith(s, async (git, commit) => {
+        const a = await git('rev-parse', 'HEAD')
+        const b = await commit({ 'app.js': 'new\n' })
+        await git('checkout', '-q', a)
+        const c = await commit({ 'README.md': 'docs\n' })
+        return `refs/heads/main ${c} refs/heads/main ${b}\n`
+      })
+      expectFull(r, 'a force push dropping app.js was classified text-only')
+    })
+  })
+
+  it('#text-5 a new branch takes the FULL gate, even with only .md in its history', async () => {
+    await scenario('scanners-text-5', async (s) => {
+      const r = await pushWith(s, async (git, commit) => {
+        await git('checkout', '-q', '--orphan', 'docs')
+        await git('rm', '-r', '-q', '--cached', '.')
+        const c = await commit({ 'README.md': 'docs\n' })
+        return `refs/heads/docs ${c} refs/heads/docs ${'0'.repeat(40)}\n`
+      })
+      expectFull(r, 'a new branch was classified text-only')
     })
   })
 })

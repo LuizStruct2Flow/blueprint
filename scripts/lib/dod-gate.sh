@@ -148,12 +148,20 @@ dod_stage_rows() {
 # material. Declaring a directory is not evidence of who wrote it.
 #
 # THE ONE EXCEPTION IS DEPTH, and it is a founder decision (2026-09-16) resolving
-# Alexey finding 3. A runner sitting DIRECTLY in `tests/` is the project's own,
+# Alexey finding 3. A spec sitting DIRECTLY in `tests/` is the project's own,
 # because the blueprint ships none there — only package.json, tsconfig.json,
 # vitest.config.ts and package-lock.json. So the shipped `tests/` is searched
-# SHALLOW: depth 1, runner files only. That restores CLAUDE.md's snapshot layout
-# (`tests/*.snap.test.ts`) without opening the suites one level down, which is
+# SHALLOW: depth 1, `*.spec.ts` only. That restores CLAUDE.md's snapshot layout
+# (`tests/*.snap.spec.ts`) without opening the suites one level down, which is
 # where every shipped suite lives. `tests/e2e` therefore still does not count.
+#
+# ONE EXTENSION, AND IT IS THE ONE THAT RUNS (TASK-047; founder, 2026-09-16:
+# "migrate the tests to be spec driven ts tests, we don't need exceptions").
+# WHAT THIS STAGE COUNTS AND WHAT VITEST EXECUTES ARE ONE SET: tests/vitest.config.ts
+# includes `**/*.spec.ts` and nothing else. Accepting `*.test.ts` or a `.js` form
+# would certify a bug with a file the runner never runs — a green standing in for
+# a test, which is the failure this stage exists to prevent. Alexey found exactly
+# that: the snapshot the depth rule blessed was evidence and was never executed.
 #
 # THE RULE RESTS ON A FACT ABOUT THIS REPO, so the fact is asserted rather than
 # assumed: tests/dod-gate #14 fails the blueprint's own push if a runner ever
@@ -345,9 +353,7 @@ EOF
       if [ "$_dg_mode" = shallow ]; then
         # -maxdepth 1 IS the guarantee. One level down is where every shipped
         # suite lives, so this must never become a recursive search.
-        if [ -n "$(find "$_dg_r" -maxdepth 1 -type f \
-                     \( -name '*.spec.ts' -o -name '*.spec.js' \
-                        -o -name '*.test.ts' -o -name '*.test.js' -o -name '*.sh' \) \
+        if [ -n "$(find "$_dg_r" -maxdepth 1 -type f -name '*.spec.ts' \
                      -exec grep -laE "BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
           _dg_hit=1
           break

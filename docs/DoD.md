@@ -218,12 +218,16 @@ Every bug — minor or major — follows this:
      does a root that contains one or sits inside one. `docs/` holds the bug's
      own backlog row, so declaring `.` would pass every bug; the other two are
      blueprint-managed code naming *blueprint* bug numbers.
-   - **Outside the blueprint, only the TOP LEVEL of `tests/` counts.** A runner
-     sitting directly in `tests/` — `tests/own.snap.test.ts`, the snapshot
-     layout — is the project's own, because the blueprint ships no runner
-     there. Everything in a subdirectory is a shipped suite, so `tests/e2e`
-     does **not** count in a derived project: put E2E tests in a root of their
-     own and declare it.
+   - **Only a `*.spec.ts` counts**, because that is the only thing the shipped
+     `tests/vitest.config.ts` runs (TASK-047). A `*.test.ts` or a `.js` test is
+     not evidence: accepting a file the runner never executes would certify a
+     bug with a test that cannot fail.
+   - **Outside the blueprint, only the TOP LEVEL of `tests/` counts.** A spec
+     sitting directly in `tests/` — `tests/own.snap.spec.ts`, the snapshot
+     layout — is the project's own, because the blueprint ships none there.
+     Everything in a subdirectory is a shipped suite, so `tests/e2e` does
+     **not** count in a derived project: put E2E tests in a root of their own
+     and declare it.
    - **A root must resolve inside the project.** `../elsewhere`, an absolute
      path outside it, and a symlink pointing away are refused. Roots resolve
      physically, so a symlink is judged by the directory it reaches.

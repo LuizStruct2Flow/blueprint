@@ -90,64 +90,22 @@ jobs:
             echo "::error::semgrep found $findings WARNING+ finding(s)."
             exit 1
           fi
-          # Decoding is its own step whose status decides: an entry the filter
-          # cannot read (`errors: [42]`) once printed nothing, which read as
-          # "nothing unaccepted" (Alex, finding 1).
-          errs=$(mktemp)
-          if ! jq -r '
-                .errors[]
-                | if type != "object" then error("entry") else . end
-                | [ (.type
-                     | if type == "array" then (.[0] | if type == "string" then . else error("type") end)
-                       elif type == "string" then .
-                       elif . == null then "unknown"
-                       else error("type") end),
-                    (.path | if . == null then "" elif type == "string" then . else error("path") end) ]
-                | @tsv' "$out" > "$errs" 2>/dev/null; then
-            echo "::error::semgrep reported an error entry this check cannot read, so the scan is incomplete, not clean."
+          # THE VERDICT COMES FROM scripts/semgrep-verdict.sh — the one statement
+          # of the policy, sourced by .githooks/pre-push and executed here. It was
+          # inline until semgrep's own gha-curl-pipe-shell rule, which re-parses
+          # every run: block as Bash, could not read it: the workflow this
+          # repository SHIPS became unparseable, so every derived project's first
+          # gate refused its own checkout as an incomplete scan (bootstrap-gate #2).
+          bad=$(mktemp)
+          verdict=0
+          sh scripts/semgrep-verdict.sh "$out" > "$bad" || verdict=$?
+          if [ "$verdict" -eq 2 ]; then
+            echo "::error::semgrep's error list could not be read, so the scan is incomplete, not clean."
             exit 1
           fi
-          # The interpreter a shebang NAMES, parsed rather than searched for:
-          # `#!/usr/bin/env -S node --require /tmp/bash` is a node script
-          # (Alex, finding 2). Kept in step with _sg_is_shell in .githooks/pre-push.
-          is_shell() {
-            case "$1" in *.sh|*.bash) return 0 ;; esac
-            [ -f "$1" ] || return 1
-            IFS= read -r line < "$1" 2>/dev/null || return 1
-            case "$line" in '#!'*) ;; *) return 1 ;; esac
-            line="${line#\#!}"
-            set -- $line
-            [ "$#" -gt 0 ] || return 1
-            cmd="$1"; shift
-            if [ "${cmd##*/}" = env ]; then
-              cmd=""
-              while [ "$#" -gt 0 ]; do
-                case "$1" in
-                  -S|--split-string) cmd="${2:-}"; break ;;
-                  --split-string=*) cmd="${1#--split-string=}"; break ;;
-                  -S*) cmd="${1#-S}"; break ;;
-                  -u|--unset) shift 2 2>/dev/null || return 1 ;;
-                  -*) shift ;;
-                  *=*) shift ;;
-                  *) cmd="$1"; break ;;
-                esac
-              done
-              set -- $cmd
-              cmd="${1:-}"
-            fi
-            case "${cmd##*/}" in sh|bash|dash) return 0 ;; esac
-            return 1
-          }
-          unaccepted=$(while IFS=$'\t' read -r t p; do
-              case "$t" in
-                "Syntax error"|PartialParsing)
-                  if [ -n "$p" ] && is_shell "$p"; then continue; fi ;;
-              esac
-              printf '  %s  %s\n' "$t" "${p:-<no path>}"
-            done < "$errs")
-          if [ "$rc" -ne 0 ] || [ -n "$unaccepted" ]; then
+          if [ "$rc" -ne 0 ] || [ "$verdict" -ne 0 ]; then
             echo "semgrep reported these errors (type, path):"
-            printf '%s\n' "$unaccepted"
+            cat "$bad"
             echo "::error::semgrep exited $rc and reported errors it could not recover from: the SAST scan is incomplete, not clean."
             exit 1
           fi

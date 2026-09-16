@@ -657,6 +657,10 @@ async function fixture(s: Scenario): Promise<ScannerFixture> {
   // every case into "the hook could not start", which is what happened when this
   // was first wired: seventeen assertions failed for one missing file.
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/pipeline.sh'), 'repo/scripts/lib/pipeline.sh')
+  // BUG-126: the SAST stage sources the verdict policy, and the #ci case runs
+  // the workflow step in this same directory, which EXECUTES it. Without it the
+  // stage fails closed and every case here blocks for the wrong reason.
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/semgrep-verdict.sh'), 'repo/scripts/semgrep-verdict.sh')
   await s.fs.write('repo/.claude/settings.json', '{\n  "permissions": {\n    "allow": []\n  }\n}\n')
 
   // A NEUTRAL osv-scanner, EMITTING WHAT A CLEAN SCAN ACTUALLY LOOKS LIKE.

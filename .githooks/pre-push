@@ -367,7 +367,7 @@ _st_semgrep(){
     return 1
   fi
 
-  _sg_json="$(mktemp)"; _sg_err="$(mktemp)"; _sg_errtsv="$(mktemp)"
+  _sg_json="$(mktemp)"; _sg_err="$(mktemp)"
 
   # $1 = extra args (word-split intentionally, e.g. "--jobs 1"); sets _sg_class
   # (finding|incomplete|clean), _sg_findings, _sg_rc.
@@ -386,92 +386,24 @@ _st_semgrep(){
   # Only the exit code and `.errors` prove completeness; only the results array
   # proves findings. Neither is inferred from the other.
   #
-  # BUG-126 — THE PARSE-ERROR POLICY, reviewed 2026-09-16. Exactly one class of
-  # error is accepted: a "Syntax error" or "PartialParsing" on a SHELL script
-  # (*.sh, *.bash, or an sh/bash/dash shebang, which is how semgrep itself picks
-  # bash for an extensionless file). semgrep's bash parser rejects valid scripts:
-  # 18 shellcheck-clean files in the blueprint alone, so blocking on them would
-  # block every push. Shell is linted by shellcheck (sh_lint) instead. Every other
-  # error blocks: any other type, any other language, an error with no path.
-  # Accepted errors are counted in a note, never dropped silently.
-  # .github/workflows/security.yml's sast job applies the same policy, and
-  # tests/pre-push-scanners BUG-126 #ci executes it over this stage's payloads.
+  # BUG-126 — THE PARSE-ERROR POLICY LIVES IN ONE FILE, and this stage sources
+  # it: scripts/semgrep-verdict.sh decides which diagnostics a scan may carry and
+  # still be called clean, and .github/workflows/security.yml EXECUTES the same
+  # file. The two used to carry separate copies kept in step only by a test.
+  # The policy itself, and why shell parse errors are the one accepted class, is
+  # documented there rather than restated here.
   #
-  # Alex's review, 2026-09-16, found two ways this could still call a scan clean
-  # without having read it:
-  #   - AN ENTRY IT COULD NOT DECODE. `errors: [42]` cannot be indexed, so jq
-  #     printed nothing and failed; the empty output read as "nothing
-  #     unaccepted" and jq's status was dropped. Decoding is now its own step and
-  #     its status decides (finding 1). An unreadable diagnostic is not an absent
-  #     one.
-  #   - A SHEBANG READ BY SEARCH. `#!/usr/bin/env -S node --require /tmp/bash`
-  #     matched a search for sh/bash/dash — on the require ARGUMENT — so a node
-  #     file was accepted as shell, outside the policy stated above. The
-  #     interpreter is parsed now (finding 2).
-
-  # `.errors` → "<type>\t<path>" lines. Every entry must be an object, its type a
-  # string or a [name, …] pair or absent, its path a string or absent. Anything
-  # else is a shape this gate was never taught to read, and it returns non-zero:
-  # "could not decode", which is never "no errors".
-  _sg_decode_errors() {
-    jq -r '
-      .errors[]
-      | if type != "object" then error("entry") else . end
-      | [ (.type
-           | if type == "array" then (.[0] | if type == "string" then . else error("type") end)
-             elif type == "string" then .
-             elif . == null then "unknown"
-             else error("type") end),
-          (.path | if . == null then "" elif type == "string" then . else error("path") end) ]
-      | @tsv' "$_sg_json" >"$_sg_errtsv" 2>/dev/null
-  }
-
-  # Is this a shell script? The extension, else the interpreter the shebang
-  # NAMES — parsed rather than searched for. env's own options are stepped over
-  # (`-S cmd`, `-Scmd`, `--split-string=cmd`, `-u NAME`) along with NAME=VALUE
-  # assignments, and what remains is the interpreter. Only sh, bash and dash.
-  _sg_is_shell() {
-    case "$1" in *.sh | *.bash) return 0 ;; esac
-    [ -f "$1" ] || return 1
-    IFS= read -r _sg_line <"$1" 2>/dev/null || return 1
-    case "$_sg_line" in '#!'*) ;; *) return 1 ;; esac
-    _sg_line="${_sg_line#\#!}"
-    # shellcheck disable=SC2086  # a shebang is split on whitespace, by definition
-    set -- $_sg_line
-    [ "$#" -gt 0 ] || return 1
-    _sg_cmd="$1"; shift
-    if [ "${_sg_cmd##*/}" = env ]; then
-      _sg_cmd=""
-      while [ "$#" -gt 0 ]; do
-        case "$1" in
-          -S | --split-string) _sg_cmd="${2:-}"; break ;;
-          --split-string=*) _sg_cmd="${1#--split-string=}"; break ;;
-          -S*) _sg_cmd="${1#-S}"; break ;;
-          -u | --unset) shift 2 2>/dev/null || return 1 ;;
-          -*) shift ;;
-          *=*) shift ;;
-          *) _sg_cmd="$1"; break ;;
-        esac
-      done
-      # -S / --split-string can carry the whole command in one word.
-      # shellcheck disable=SC2086
-      set -- $_sg_cmd
-      _sg_cmd="${1:-}"
-    fi
-    case "${_sg_cmd##*/}" in sh | bash | dash) return 0 ;; esac
+  # FAILS CLOSED when the file is absent, exactly as the renderer above does: a
+  # gate that cannot compute its verdict has not produced a clean one.
+  if [ -r "$BP_CODE_ROOT/scripts/semgrep-verdict.sh" ]; then
+    # shellcheck source=scripts/semgrep-verdict.sh
+    . "$BP_CODE_ROOT/scripts/semgrep-verdict.sh"
+  else
+    echo "❌ $BP_CODE_ROOT/scripts/semgrep-verdict.sh is missing — the SAST verdict"
+    echo "   cannot be computed, so this is not a clean scan."
+    echo "   Run: blueprint pull scripts/semgrep-verdict.sh"
     return 1
-  }
-
-  # Prints "  <type>  <path>" for each decoded error the policy does not accept.
-  _sg_unaccepted_errors() {
-    while IFS="$(printf '\t')" read -r _sg_t _sg_p; do
-      case "$_sg_t" in
-        "Syntax error" | PartialParsing)
-          if [ -n "$_sg_p" ] && _sg_is_shell "$_sg_p"; then continue; fi ;;
-      esac
-      printf '  %s  %s\n' "$_sg_t" "${_sg_p:-<no path>}"
-    done <"$_sg_errtsv"
-  }
+  fi
 
   _sg_classify() {
     _sg_rc=0; _sg_unaccepted=''; _sg_undecodable=''
@@ -491,13 +423,15 @@ _st_semgrep(){
       _sg_class=finding                        # real results, regardless of exit
       return
     fi
-    # Decode first, and believe its status: an error list that cannot be read
-    # says nothing about whether code went unanalysed (Alex, finding 1).
-    if ! _sg_decode_errors; then
+    # The verdict, from the one shared policy. Exit 2 is "could not decode",
+    # which says nothing about whether code went unanalysed (Alex, finding 1),
+    # so it is incomplete rather than clean.
+    _sgv_rc=0
+    _sg_unaccepted="$(sgv_unaccepted "$_sg_json")" || _sgv_rc=$?
+    if [ "$_sgv_rc" -eq 2 ]; then
       _sg_undecodable=1; _sg_class=incomplete; return
     fi
-    _sg_unaccepted="$(_sg_unaccepted_errors)"
-    if [ "$_sg_rc" -ne 0 ] || [ -n "$_sg_unaccepted" ]; then
+    if [ "$_sg_rc" -ne 0 ] || [ "$_sgv_rc" -ne 0 ]; then
       _sg_class=incomplete                     # a non-zero exit, or errors not accepted
     else
       _sg_class=clean                          # zero results, clean exit, no unaccepted error
@@ -520,7 +454,7 @@ _st_semgrep(){
 
   if [ "$_sg_class" = "finding" ]; then
     jq -r '.results[] | "  \(.check_id)  \(.path):\(.start.line)"' "$_sg_json" 2>/dev/null | head -40
-    rm -f "$_sg_json" "$_sg_err" "$_sg_errtsv"
+    rm -f "$_sg_json" "$_sg_err"
     echo "❌ Semgrep found ${_sg_findings} WARNING+ finding(s)."
     echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
     echo "   naming the threat-model entry in project_config_security.md that makes it safe."
@@ -535,7 +469,7 @@ _st_semgrep(){
       echo "   the error list semgrep emitted, truncated:"
       jq -c '.errors' "$_sg_json" 2>/dev/null | cut -c1-400
     fi
-    rm -f "$_sg_json" "$_sg_err" "$_sg_errtsv"
+    rm -f "$_sg_json" "$_sg_err"
     if [ -n "${_sg_undecodable:-}" ]; then
       echo "❌ semgrep's error list could not be read — the SAST scan is INCOMPLETE, not clean."
       echo "   An entry is not a shape this gate knows how to classify, so whether"
@@ -549,8 +483,7 @@ _st_semgrep(){
       echo "   Code semgrep could not parse was NOT analysed, so the push is blocked."
       echo "   Fix the syntax, or exclude the path in .semgrepignore if it is not source."
       echo "   If semgrep is wrong about valid code, extend the reviewed policy in"
-      echo "   _sg_unaccepted_errors (.githooks/pre-push) AND the sast job in"
-      echo "   .github/workflows/security.yml, by error type and path."
+      echo "   scripts/semgrep-verdict.sh — the one file both this gate and CI read."
       return 1
     fi
     echo "❌ semgrep could not complete (exit $_sg_rc) — the SAST gate did NOT run."
@@ -566,7 +499,7 @@ _st_semgrep(){
     if [ -n "${_sg_retried:-}" ]; then _sg_note="; $_sg_note"; fi
     pipe_note "$_sg_note"
   fi
-  rm -f "$_sg_json" "$_sg_err" "$_sg_errtsv"
+  rm -f "$_sg_json" "$_sg_err"
   return 0
 }
 if command -v semgrep >/dev/null 2>&1; then

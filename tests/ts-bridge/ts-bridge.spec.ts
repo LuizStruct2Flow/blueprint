@@ -433,6 +433,27 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
       expect(r.output, `the skip reason never reached the gate\n${r.output}`).toContain(note)
     })
   })
+
+  it('#8b every skip notice survives, however many canary notes precede it', async () => {
+    await scenario('tsbridge-8b', async (s) => {
+      // The notices shared one `head -20` budget, so canary notes could spend it
+      // all and every later skip reason was dropped — while #8 still passed on
+      // its single note. A skip nobody can see is the silence TASK-044 refuses.
+      const canary = Array.from({ length: 25 }, (_, i) => `CANARY-NOTE: the baton moved (${i})`)
+      const skips = [
+        'SKIP-NOTE: #live (#5): the declared CI is aws-codepipeline',
+        'SKIP-NOTE: #live (#5b): the declared CI is aws-codepipeline',
+      ]
+      const f = await fixture(s)
+      await f.npx(0, [...canary, ...skips])
+
+      const r = await f.runBridge()
+
+      for (const skip of skips) {
+        expect(r.output, `a skip notice was dropped behind the canary notes\n${r.output}`).toContain(skip)
+      }
+    })
+  })
 })
 
 interface WorkflowStep {
@@ -639,8 +660,8 @@ interface BridgeFixture {
   readonly dir: string
   /** PATH with the stub `npx` first. */
   readonly shimPath: string
-  /** A stub `npx` that records the environment it was handed, prints `say`, then exits `code`. */
-  npx(code: number, say?: string): Promise<void>
+  /** A stub `npx` that records the environment it was handed, prints `say` (one line each), then exits `code`. */
+  npx(code: number, say?: string | string[]): Promise<void>
   /** The GIT_ / AGENT_ prefixed names the stub saw, or null if it never ran. */
   seenEnv(): Promise<{ names: string[] } | null>
   runBridge(options?: { inject?: string }): Promise<{ code: number | null; output: string }>
@@ -682,7 +703,10 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
     dir,
     shimPath: shims.path(),
 
-    async npx(code: number, say = ''): Promise<void> {
+    async npx(code: number, say: string | string[] = []): Promise<void> {
+      // One printf per line: POSIX printf does not expand `\n` inside an
+      // ARGUMENT, so a single embedded newline would print literally.
+      const lines = typeof say === 'string' ? (say ? [say] : []) : say
       // The recording path is HARD-CODED rather than passed through the
       // environment: the bridge unsets every GIT_*/AGENT_* name before invoking
       // the runner, which is the behaviour under test, so a variable is exactly
@@ -695,7 +719,7 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
         `env | sed -nE 's/^(${recorded})=.*/\\1/p' | sort > ${JSON.stringify(seenPath)}\n` +
           `printf 'ran\\n' >> ${JSON.stringify(seenPath)}\n` +
           `echo "stub npx: pretending to be vitest"\n` +
-          (say ? `printf '%s\\n' ${JSON.stringify(say)}\n` : '') +
+          lines.map((l) => `printf '%s\\n' ${JSON.stringify(l)}\n`).join('') +
           `for a in "$@"; do\n` +
           `  case "$a" in --outputFile=*) out="\${a#--outputFile=}" ;; esac\n` +
           `done\n` +

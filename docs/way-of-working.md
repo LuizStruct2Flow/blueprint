@@ -440,7 +440,7 @@ Eight rules, each the gate to the next (`docs/DoD.md` §1b):
 1. **All work refers to a backlog item** — `TASK-`, `FEATURE-` or `BUG-`. No exceptions, including a defect found mid-session
 2. **Promote to `doing/` BEFORE starting** — the folder answers "what is being worked on", which only works if the move precedes the work
 3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`)
-4. **A review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude
+4. **A review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude. A finding becomes work only if it is real and practical; a hypothetical is one "known limit" line
 5. **All gates green** — no demotions, no bypass flags
 6. **Land it** — trunk-based push, for a product repo and for the blueprint alike. A branch is a tool for a change you want isolated, not a rule
 7. **Landing moves it to `waiting-acceptance/`**

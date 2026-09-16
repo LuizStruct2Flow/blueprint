@@ -487,6 +487,24 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       tracking its live handover exposes nothing; publishing it exposes in-flight work, persona
       names and review state. The other five come out of the scrub, and §3a gains a sentence
       saying this is publish-time redaction, not the privacy block surviving by the back door.
+  - **THE BIGGEST FIND OF THE NIGHT, and it was hiding behind a passing test** (Vitali,
+    `a29c45e`, `8473a3d`). Christian's `tests/x/test.sh` pointer turned out to be **vacuous, not
+    stale**: `#4-tested` passed, and the fixture was not why. The one-extension rule was enforced
+    **only at the `tests/` top level** — shallow mode filtered on the spec extensions, while every
+    **declared root** (`backend/src`, `frontend/e2e`: where projects actually keep their tests)
+    was a recursive `grep -raqE` over **ANY FILE**. A README, a CHANGELOG, a commit note or a
+    retired `*.test.ts` each satisfied the gate. The rule everyone converged on all night was
+    false exactly where it matters most, while reading as enforced.
+    - **Fix:** one search, same extension filter in both modes, `-maxdepth 1` the only difference.
+      The `grep -raq` path is gone. Red at `65b0492` via `#18`, where a `NOTES.md` and a
+      `legacy.test.ts` under a declared `backend` root both counted.
+    - **Three fixtures were rotten, not one.** `#15f` he missed and the fix caught: it asserts a
+      PASS, so it went red for its fixture's FORM rather than its subject. **`#11b` and `#15f`
+      were themselves written in `*.test.ts`** — the form the founder's decision retired — and
+      passed only because declared roots accepted anything.
+    - One intermediate red explained rather than hidden: `bootstrap-gate` bootstraps from HEAD, so
+      between his two commits the derived project got the new spec against the old lib. He re-ran
+      after the fix: 8/8. dod-gate 46/46.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

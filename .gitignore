@@ -126,6 +126,14 @@ scripts/new-project.sh
 # Agent activity feed logs (scripts/agent-activity.sh)
 logs/
 
+# Subagent deferral slots (scripts/log-activity.sh) — one directory per in-flight
+# deferred bookend, plus the lock they are reserved under. At the project root
+# because `bp_state_root` resolves there and the slot set must not follow
+# AGENT_STATE_HOME. Transient: a slot is reclaimed when its owner dies, never
+# content. Unignored, it left every project that dispatched a subagent with a
+# permanently dirty `git status` (BUG-131).
+subagent-defer/
+
 # Agent scratch space — throwaway probes, debug harnesses, commit-message
 # drafts. Kept INSIDE the repo so the work is visible next to the code that
 # prompted it, rather than hidden in a system temp dir. Never committed.

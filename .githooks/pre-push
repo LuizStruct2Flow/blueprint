@@ -367,7 +367,7 @@ _st_semgrep(){
     return 1
   fi
 
-  _sg_json="$(mktemp)"; _sg_err="$(mktemp)"
+  _sg_json="$(mktemp)"; _sg_err="$(mktemp)"; _sg_errtsv="$(mktemp)"
 
   # $1 = extra args (word-split intentionally, e.g. "--jobs 1"); sets _sg_class
   # (finding|incomplete|clean), _sg_findings, _sg_rc.
@@ -397,23 +397,84 @@ _st_semgrep(){
   # .github/workflows/security.yml's sast job applies the same policy, and
   # tests/pre-push-scanners BUG-126 #ci executes it over this stage's payloads.
   #
-  # Prints "  <type>  <path>" for each error the policy does not accept.
-  _sg_unaccepted_errors() {
-    jq -r '.errors[] | [(.type | if type == "array" then .[0] else . end // "unknown" | tostring), (.path // "")] | @tsv' "$_sg_json" |
-      while IFS="$(printf '\t')" read -r _sg_t _sg_p; do
-        case "$_sg_t" in
-          "Syntax error"|PartialParsing)
-            case "$_sg_p" in *.sh|*.bash) continue ;; esac
-            if [ -f "$_sg_p" ] && head -n 1 <"$_sg_p" | grep -Eq '^#!.*[/ ](ba|da)?sh([[:space:]]|$)'; then
-              continue
-            fi ;;
+  # Alex's review, 2026-09-16, found two ways this could still call a scan clean
+  # without having read it:
+  #   - AN ENTRY IT COULD NOT DECODE. `errors: [42]` cannot be indexed, so jq
+  #     printed nothing and failed; the empty output read as "nothing
+  #     unaccepted" and jq's status was dropped. Decoding is now its own step and
+  #     its status decides (finding 1). An unreadable diagnostic is not an absent
+  #     one.
+  #   - A SHEBANG READ BY SEARCH. `#!/usr/bin/env -S node --require /tmp/bash`
+  #     matched a search for sh/bash/dash — on the require ARGUMENT — so a node
+  #     file was accepted as shell, outside the policy stated above. The
+  #     interpreter is parsed now (finding 2).
+
+  # `.errors` → "<type>\t<path>" lines. Every entry must be an object, its type a
+  # string or a [name, …] pair or absent, its path a string or absent. Anything
+  # else is a shape this gate was never taught to read, and it returns non-zero:
+  # "could not decode", which is never "no errors".
+  _sg_decode_errors() {
+    jq -r '
+      .errors[]
+      | if type != "object" then error("entry") else . end
+      | [ (.type
+           | if type == "array" then (.[0] | if type == "string" then . else error("type") end)
+             elif type == "string" then .
+             elif . == null then "unknown"
+             else error("type") end),
+          (.path | if . == null then "" elif type == "string" then . else error("path") end) ]
+      | @tsv' "$_sg_json" >"$_sg_errtsv" 2>/dev/null
+  }
+
+  # Is this a shell script? The extension, else the interpreter the shebang
+  # NAMES — parsed rather than searched for. env's own options are stepped over
+  # (`-S cmd`, `-Scmd`, `--split-string=cmd`, `-u NAME`) along with NAME=VALUE
+  # assignments, and what remains is the interpreter. Only sh, bash and dash.
+  _sg_is_shell() {
+    case "$1" in *.sh | *.bash) return 0 ;; esac
+    [ -f "$1" ] || return 1
+    IFS= read -r _sg_line <"$1" 2>/dev/null || return 1
+    case "$_sg_line" in '#!'*) ;; *) return 1 ;; esac
+    _sg_line="${_sg_line#\#!}"
+    # shellcheck disable=SC2086  # a shebang is split on whitespace, by definition
+    set -- $_sg_line
+    [ "$#" -gt 0 ] || return 1
+    _sg_cmd="$1"; shift
+    if [ "${_sg_cmd##*/}" = env ]; then
+      _sg_cmd=""
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          -S | --split-string) _sg_cmd="${2:-}"; break ;;
+          --split-string=*) _sg_cmd="${1#--split-string=}"; break ;;
+          -S*) _sg_cmd="${1#-S}"; break ;;
+          -u | --unset) shift 2 2>/dev/null || return 1 ;;
+          -*) shift ;;
+          *=*) shift ;;
+          *) _sg_cmd="$1"; break ;;
         esac
-        printf '  %s  %s\n' "$_sg_t" "${_sg_p:-<no path>}"
       done
+      # -S / --split-string can carry the whole command in one word.
+      # shellcheck disable=SC2086
+      set -- $_sg_cmd
+      _sg_cmd="${1:-}"
+    fi
+    case "${_sg_cmd##*/}" in sh | bash | dash) return 0 ;; esac
+    return 1
+  }
+
+  # Prints "  <type>  <path>" for each decoded error the policy does not accept.
+  _sg_unaccepted_errors() {
+    while IFS="$(printf '\t')" read -r _sg_t _sg_p; do
+      case "$_sg_t" in
+        "Syntax error" | PartialParsing)
+          if [ -n "$_sg_p" ] && _sg_is_shell "$_sg_p"; then continue; fi ;;
+      esac
+      printf '  %s  %s\n' "$_sg_t" "${_sg_p:-<no path>}"
+    done <"$_sg_errtsv"
   }
 
   _sg_classify() {
-    _sg_rc=0; _sg_unaccepted=''
+    _sg_rc=0; _sg_unaccepted=''; _sg_undecodable=''
     # shellcheck disable=SC2086
     semgrep $1 --json \
       --config=p/owasp-top-ten \
@@ -426,10 +487,17 @@ _st_semgrep(){
       _sg_class=incomplete; return
     fi
     _sg_findings="$(jq '.results | length' "$_sg_json")"
-    _sg_unaccepted="$(_sg_unaccepted_errors)"
     if [ "${_sg_findings:-0}" -gt 0 ]; then
-      _sg_class=finding                       # real results, regardless of exit
-    elif [ "$_sg_rc" -ne 0 ] || [ -n "$_sg_unaccepted" ]; then
+      _sg_class=finding                        # real results, regardless of exit
+      return
+    fi
+    # Decode first, and believe its status: an error list that cannot be read
+    # says nothing about whether code went unanalysed (Alex, finding 1).
+    if ! _sg_decode_errors; then
+      _sg_undecodable=1; _sg_class=incomplete; return
+    fi
+    _sg_unaccepted="$(_sg_unaccepted_errors)"
+    if [ "$_sg_rc" -ne 0 ] || [ -n "$_sg_unaccepted" ]; then
       _sg_class=incomplete                     # a non-zero exit, or errors not accepted
     else
       _sg_class=clean                          # zero results, clean exit, no unaccepted error
@@ -452,7 +520,7 @@ _st_semgrep(){
 
   if [ "$_sg_class" = "finding" ]; then
     jq -r '.results[] | "  \(.check_id)  \(.path):\(.start.line)"' "$_sg_json" 2>/dev/null | head -40
-    rm -f "$_sg_json" "$_sg_err"
+    rm -f "$_sg_json" "$_sg_err" "$_sg_errtsv"
     echo "❌ Semgrep found ${_sg_findings} WARNING+ finding(s)."
     echo "   Fix the finding, or suppress with '// nosemgrep: <rule-id> — <justification>'"
     echo "   naming the threat-model entry in project_config_security.md that makes it safe."
@@ -463,7 +531,19 @@ _st_semgrep(){
       echo "   semgrep reported these errors (type, path):"
       printf '%s\n' "$_sg_unaccepted" | head -40
     fi
-    rm -f "$_sg_json" "$_sg_err"
+    if [ -n "${_sg_undecodable:-}" ]; then
+      echo "   the error list semgrep emitted, truncated:"
+      jq -c '.errors' "$_sg_json" 2>/dev/null | cut -c1-400
+    fi
+    rm -f "$_sg_json" "$_sg_err" "$_sg_errtsv"
+    if [ -n "${_sg_undecodable:-}" ]; then
+      echo "❌ semgrep's error list could not be read — the SAST scan is INCOMPLETE, not clean."
+      echo "   An entry is not a shape this gate knows how to classify, so whether"
+      echo "   code went unanalysed cannot be decided. Blocked rather than guessed."
+      echo "   If semgrep's schema changed, teach _sg_decode_errors the new shape"
+      echo "   in .githooks/pre-push AND the sast job in .github/workflows/security.yml."
+      return 1
+    fi
     if [ "$_sg_rc" -eq 0 ] && [ -n "$_sg_unaccepted" ]; then
       echo "❌ semgrep exited 0 but reported errors — the SAST scan is INCOMPLETE, not clean."
       echo "   Code semgrep could not parse was NOT analysed, so the push is blocked."
@@ -486,7 +566,7 @@ _st_semgrep(){
     if [ -n "${_sg_retried:-}" ]; then _sg_note="; $_sg_note"; fi
     pipe_note "$_sg_note"
   fi
-  rm -f "$_sg_json" "$_sg_err"
+  rm -f "$_sg_json" "$_sg_err" "$_sg_errtsv"
   return 0
 }
 if command -v semgrep >/dev/null 2>&1; then

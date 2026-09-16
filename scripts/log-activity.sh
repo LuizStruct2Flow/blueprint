@@ -57,6 +57,12 @@ BP_CODE_ROOT="$repo_root"
 . "$repo_root/scripts/lib/state-dir.sh"
 BP_STATE_ROOT="$(bp_state_root)" || exit 0
 . "$repo_root/scripts/lib/feed.sh"
+# The flock provider is resolved by the ONE resolver, shared with the watcher
+# liveness oracle that already reasons about flock — never a second
+# `command -v flock` here that disagrees with it on macOS, where the tool exists
+# but is not on PATH.
+# shellcheck source=scripts/lib/watcher-lock.sh
+. "$repo_root/scripts/lib/watcher-lock.sh"
 
 # BUG-027 — the persona is resolved through the ONE roster parser, shared with
 # scripts/agent-activity.sh. Sourced only if readable: a hook must never fail the
@@ -254,11 +260,23 @@ defer_dir="$BP_STATE_ROOT/subagent-defer"
 # nobody is alive to hold it. The residual is pid reuse, the standard ceiling of
 # every pid-based check, and it is bounded by the capped life of the child.
 #
-# NO FLOCK, NO DEFERRAL — the same degradation as no bash, for the same reason:
-# a bookend labelled by agent type is a small, legible loss, while a cap that
-# cannot be enforced is not a cap. macOS ships no flock(1).
+# NO FLOCK, NO DEFERRAL, AND THE FEED SAYS SO. A cap that cannot be enforced is
+# not a cap, so the deferral is off without it — but silence there costs the
+# whole feature on the machine most likely to lack it. macOS ships no flock(1),
+# and a type-labelled bookend IS the BUG-124 symptom, so `defer_notice` below
+# explains it once rather than leaving a mystery. scripts/install-toolchain.sh
+# installs util-linux on macOS so this path is not reached on a set-up machine.
+#
+# WHY NOT A `mkdir` MUTEX, which would need no flock on any platform: `mkdir`
+# gives mutual exclusion but no release-on-death. A holder killed mid-section
+# leaves the mutex held forever and deferral wedged permanently — strictly worse
+# than the bug being fixed — and breaking a stale one means deciding its owner
+# is dead and deleting it, which is THIS defect one level up: the breaker can
+# delete a mutex a live caller has just taken. flock's kernel release is the
+# property that makes the fix correct, so it is a dependency rather than a
+# preference.
 defer_spawn() {
-  command -v flock >/dev/null 2>&1 || return 1
+  _ds_flock="$(bp_flock_cmd)" || return 1
   mkdir -p "$defer_dir" 2>/dev/null || return 1
   : >>"$defer_dir/.lock" 2>/dev/null || return 1
 
@@ -266,7 +284,7 @@ defer_spawn() {
     # BOUNDED, never a bare `flock 9`. A hook must never stall the tool call it
     # only observes, so a mutex this hook cannot take in time means "do not
     # defer" — the same trade the roster lookup's timeout makes.
-    flock -w 5 9 || exit 1
+    "$_ds_flock" -w 5 9 || exit 1
     _ds_n=0
     while [ "$_ds_n" -lt "$BP_SUBAGENT_DEFER_MAX" ]; do
       _ds_slot="$defer_dir/slot-$_ds_n"
@@ -299,6 +317,36 @@ defer_spawn() {
     done
     exit 1
   ) 9>>"$defer_dir/.lock"
+}
+
+# SAY WHICH MECHANISM IS MISSING. The single notice used to blame the cap for
+# everything — "no deferred slot free (cap 8)" — which names the one thing that
+# demonstrably did not go wrong and hides the one that did. That is the
+# BUG-041/042 misdirection class, and it cost a diagnosis there too.
+defer_notice() {
+  if bp_flock_cmd >/dev/null 2>&1; then
+    # Past the cap the line is kept but the persona is not, and a degraded label
+    # with no notice reads exactly like a subagent that never had one (Alexey's
+    # informational 8). stderr, because Claude Code surfaces hook stderr under
+    # --debug and discards it otherwise — one line per overflow, never one per
+    # dispatch.
+    printf '[log-activity] no deferred slot free (cap %s) — labelling this dispatch by agent type\n' \
+      "$BP_SUBAGENT_DEFER_MAX" >&2
+    return 0
+  fi
+
+  printf '[log-activity] no flock(1) — subagent bookends are labelled by agent type, not by persona. Install it: bash scripts/install-toolchain.sh\n' >&2
+
+  # ONCE, IN THE FEED. stderr is discarded outside --debug, and the feed is
+  # where the founder is actually looking when they ask why a persona's name is
+  # missing — which is the question BUG-124 exists to answer. A line per
+  # dispatch would be noise, and noise gets muted, which leaves them exactly as
+  # blind as saying nothing. The marker makes it one line per state dir.
+  _dn_marker="$defer_dir/.no-flock-notice"
+  mkdir -p "$defer_dir" 2>/dev/null || return 0
+  [ -e "$_dn_marker" ] && return 0
+  : >"$_dn_marker" 2>/dev/null || return 0
+  feed_append "[log-activity - Claude Code] subagent bookends are labelled by agent type, not by persona: no flock(1) on this machine, so the persona lookup cannot be deferred. Install it with scripts/install-toolchain.sh"
 }
 
 # CLOSE EVERYTHING ABOVE 2 IN THE CHILD. Redirecting 0, 1 and 2 says nothing
@@ -356,15 +404,7 @@ if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
   # wrong label beats a lost one, and beats holding a caller's descriptor.
   bashcmd="$(command -v bash 2>/dev/null)" || bashcmd=""
   if [ -n "$bashcmd" ] && defer_spawn; then deferred=1; fi
-  if [ "$deferred" = 0 ]; then
-    # SAY SO. Past the cap the line is kept but the persona is not, and a
-    # degraded label with no notice reads exactly like a subagent that never had
-    # one (Alexey's informational 8). stderr, because Claude Code surfaces hook
-    # stderr under --debug and discards it otherwise — one line per overflow,
-    # never one per dispatch.
-    printf '[log-activity] no deferred slot free (cap %s) — labelling this dispatch by agent type\n' \
-      "$BP_SUBAGENT_DEFER_MAX" >&2
-  fi
+  if [ "$deferred" = 0 ]; then defer_notice; fi
 fi
 
 if [ "$deferred" = 0 ]; then emit_bookend; fi

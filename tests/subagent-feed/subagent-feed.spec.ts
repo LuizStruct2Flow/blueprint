@@ -761,6 +761,18 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       )
       expect(r.code, `a hook must always exit 0\n${r.output}`).toBe(0)
       await f.expectLine('→ dispatched', 15_000)
+      // THE LINE LANDS MICROSECONDS BEFORE THE CHILD EXITS, so waiting for the
+      // line alone leaves a live process at teardown — a survivor fails the
+      // scenario, and this case was the only deferring one not to wait for it
+      // (#9, #13 and #14 all do). Latent until the child's startup grew a source
+      // and shifted the race; the gap was always here.
+      await vi.waitFor(
+        async () => {
+          const alive = await children(s, f.repo)
+          if (alive.length > 0) throw new Error(`still running:\n${alive.join('\n')}`)
+        },
+        { timeout: 20_000, interval: 250 },
+      )
     })
   })
 

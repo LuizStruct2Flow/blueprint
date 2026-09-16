@@ -64,6 +64,40 @@
 # Deriving from the baton's own directory makes isolation fall out rather than
 # being bolted on: a fixture pointing `--file` at its own baton gets its own
 # lock, with nothing to remember and no env var to set.
+# bp_flock_cmd — prints the flock(1) provider, or nothing when there is none.
+#
+# WHY A RESOLVER RATHER THAN `command -v flock`. macOS ships no flock in the
+# base system, and Homebrew's util-linux — the formula that provides it — is
+# KEG-ONLY: `brew install util-linux` deliberately does not symlink its binaries
+# onto PATH. So the command name alone finds nothing on the very machine that
+# just installed it, and the platform that needs the probe is the only one where
+# the answer is neither a plain yes nor a plain no.
+#
+# Same shape as bp_staleness_timeout_cmd's `timeout` → `gtimeout` fallback:
+# prefer the plain name, fall back to where the platform actually put it, and
+# print NOTHING rather than guess when neither is there. An oracle that cannot
+# run must not answer.
+#
+# ONE RESOLVER, because two would disagree exactly where it matters. The hook
+# that defers subagent bookends and the installer that claims to have satisfied
+# it both call this; an installer deciding "present" by a different rule would
+# report success for a machine the hook still cannot defer on (A-09's lesson:
+# two independent derivations of one fact is two facts).
+#
+# BP_FLOCK_FALLBACKS is the seam the suites set (tests/subagent-feed #18) so a
+# PATH without flock is genuinely a host without flock, on a Mac as much as on
+# Linux. `=` and not `:=`, so an explicitly EMPTY value is preserved rather than
+# refilled with the defaults. Production never sets it.
+: "${BP_FLOCK_FALLBACKS=/opt/homebrew/opt/util-linux/bin/flock /usr/local/opt/util-linux/bin/flock}"
+bp_flock_cmd() {
+  if command -v flock >/dev/null 2>&1; then printf 'flock\n'; return 0; fi
+  # shellcheck disable=SC2086 # deliberate split: the seam is a space-separated path list
+  for _fc_c in $BP_FLOCK_FALLBACKS; do
+    if [ -x "$_fc_c" ]; then printf '%s\n' "$_fc_c"; return 0; fi
+  done
+  return 1
+}
+
 bp_watch_lock_path() {
   _wl_dir="${1:-.}"
   _wl_state="$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '_')"

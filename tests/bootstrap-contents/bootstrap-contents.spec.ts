@@ -473,3 +473,71 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 })
+
+/** The two sections `blueprint files` prints, run by `root`'s own CLI from `root`. */
+async function filesOf(s: Scenario, root: string): Promise<{ managed: string[]; owned: string[] }> {
+  const r = await s.run('bash', [join(root, 'scripts/blueprint'), 'files'], { cwd: root })
+  expect(r.code, `blueprint files failed, so nothing below would be a comparison:\n${r.output}`).toBe(0)
+  const managed: string[] = []
+  const owned: string[] = []
+  let into: string[] | null = null
+  for (const line of r.stdout.split('\n')) {
+    if (line.startsWith('Blueprint-managed files')) into = managed
+    else if (line.startsWith('Template files')) into = owned
+    else if (/^ {2}\S/.test(line)) into?.push(line.trim())
+  }
+  expect(managed.length, 'blueprint files listed no managed files').toBeGreaterThan(20)
+  expect(owned.length, 'blueprint files listed no project-owned files').toBeGreaterThan(0)
+  return { managed, owned }
+}
+
+/**
+ * TASK-021 Stage 1 — the BOOTSTRAP/SYNC CONSISTENCY CHECK (Alexey, plan review
+ * finding 3). Bootstrap delivers `git archive HEAD` plus the template seeds; pull
+ * delivers the managed set. They have to be the same fact, so the managed set is
+ * the archive minus what the project owns once seeded.
+ *
+ * Not an audience classifier: a blueprint document that should not ship still
+ * ships, and is managed, until `.gitattributes` says otherwise.
+ */
+describe('TASK-021 — bootstrap and sync deliver the same set', () => {
+  it('#10 archive = managed ∪ (archive ∩ project-owned), with ownership disjoint', async () => {
+    await scenario('bootstrap-contents-10', async (s) => {
+      const { managed, owned } = await filesOf(s, REPO_ROOT)
+
+      const listing = await s.run(
+        'bash',
+        ['-c', 'git -C "$1" archive --format=tar HEAD | tar -t', '_', REPO_ROOT],
+        { cwd: s.workspace.root },
+      )
+      expect(listing.code, listing.output).toBe(0)
+      const archive = listing.stdout.split('\n').filter((l) => l && !l.endsWith('/')).sort()
+
+      expect(managed.filter((f) => owned.includes(f)), 'a file is both managed and project-owned').toEqual([])
+      expect(
+        [...new Set([...managed, ...archive.filter((f) => owned.includes(f))])].sort(),
+        'what pull keeps current is not what bootstrap ships',
+      ).toEqual(archive)
+    })
+  })
+
+  it('#10b every file a real bootstrap delivers is managed or project-owned, and every seed arrives', async () => {
+    await scenario('bootstrap-contents-10b', async (s) => {
+      const { blueprint, derived } = await build(s)
+      const { managed, owned } = await filesOf(s, blueprint)
+
+      const tracked = (await s.run('git', ['ls-files'], { cwd: derived })).stdout.split('\n').filter(Boolean)
+      expect(tracked.length, 'the derived project has no index to read').toBeGreaterThan(20)
+
+      // .blueprint-source is bootstrap's own record of where the project came from.
+      expect(
+        tracked.filter((f) => f !== '.blueprint-source' && !managed.includes(f) && !owned.includes(f)),
+        'bootstrap delivered files that neither pull keeps current nor the project owns',
+      ).toEqual([])
+
+      const missing: string[] = []
+      for (const f of owned) if (!(await s.fs.exists(join(derived, f)))) missing.push(f)
+      expect(missing, 'project-owned files bootstrap did not seed').toEqual([])
+    })
+  })
+})

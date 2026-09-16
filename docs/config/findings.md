@@ -215,3 +215,25 @@ this register exists at all.
 **Re-open when** `.gitignore` becomes managed, or when a project reports its
 privacy block diverging from the blueprint's in a way TASK-048's instruction did
 not fix.
+
+---
+
+## F-005 — eight review-found bugs and TASK-024 cancelled as known limits
+
+**Cancelled 2026-09-16, founder-approved** (TASK-058), under docs/DoD.md §1b rule 4:
+a finding becomes work only if it is real and practical. Each is recorded here
+as a known limit, not a verdict that the observation was wrong.
+
+- **BUG-069** — the DoD gate's baton check reads Holder, State and Task, while its comment says four rows (`Last update` is not checked).
+- **BUG-070** — the DoD stages pass silently when the push range is empty; a real `git push` always supplies ref lines.
+- **BUG-087** — `tests/git-isolation`'s `new-project.sh` pattern misses path-qualified calls; no suite remains that could contain one.
+- **BUG-091** — a same-size roster edit within the same second is not seen by a running feed (whole-second mtime).
+- **BUG-092** — nothing renders the label the Codex launcher actually prints; the spec greps the launcher source.
+- **BUG-094** — four `agent-activity-bound` assertions cannot fail on the defect they are named for; they are pinned.
+- **BUG-101** — assertions in `proc-cwd` and `commit-msg-gate` without their own negative proof remain pinned, not fixed.
+- **BUG-108** — an unreachable remote skips a2bp's immediate pre-push base re-check; the push itself fails right after.
+- **TASK-024** — the procedure/skills layer. It was blocked on TASK-021 and is process about process, which the founder judged the circle to stop.
+
+**Re-open when** one of these is observed causing a wrong result in real use
+(a wrong gate verdict, a lost feed line, a wrong a2bp base), not when a review
+re-derives it.

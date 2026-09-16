@@ -85,6 +85,27 @@ const ASK = 'Bash(aws codepipeline put-approval-result *)'
 const DENY = 'Bash(sudo rm *)'
 const PROJECT_RULE = 'Bash(aws logs tail *)'
 const LAYER = '.claude/settings.project.json'
+const PERMISSION_KEYS = ['allow', 'ask', 'deny', 'additionalDirectories']
+
+interface Proposal {
+  permissions: Record<string, string[]>
+}
+
+/**
+ * The project file a migration refusal prints, parsed back out of the output.
+ *
+ * Parsed rather than eyeballed because the guarantee under test is that what
+ * pull PRINTS is a file the next pull accepts — a substring check would pass on
+ * a proposal that is merely close.
+ */
+function proposalFrom(output: string): Proposal {
+  const lines = output.split('\n')
+  const start = lines.findIndex((l) => /^ {8}\{$/.test(l))
+  const end = lines.findIndex((l) => /^ {8}\}$/.test(l))
+  expect(start, `no proposal block in:\n${output}`).toBeGreaterThanOrEqual(0)
+  expect(end, `unterminated proposal block in:\n${output}`).toBeGreaterThan(start)
+  return JSON.parse(lines.slice(start, end + 1).join('\n')) as Proposal
+}
 
 interface Settings {
   permissions: Required<Permissions> & { additionalDirectories?: string[] }
@@ -116,21 +137,32 @@ function blueprintSettings(extraAllow: string[]): Settings {
  * and a project bootstrapped from the first. `tests/fixture/test.sh` is there
  * because `tests/` is a managed directory whose expansion fails closed.
  */
-async function fixture(s: Scenario, tag: string, projectSettings: Settings, layer?: unknown) {
+async function fixture(
+  s: Scenario,
+  tag: string,
+  // null: the project has NO settings.json — the ordinary new-managed-file path.
+  projectSettings: Settings | null,
+  layer?: unknown,
+  // Raw blueprint bytes, for the case where they are not JSON at all.
+  blueprintRaw?: string,
+) {
   const bp = await s.workspace.dir(tag, 'bp')
-  await s.fs.write(join(bp, '.claude/settings.json'), json(blueprintSettings([])))
+  await s.fs.write(join(bp, '.claude/settings.json'), blueprintRaw ?? json(blueprintSettings([])))
   await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
   await s.fs.write(join(bp, '.blueprint-root'), '')
   await initRepo(s, bp)
   await git(s, bp, ['add', '-A'])
   await git(s, bp, ['commit', '-q', '-m', 'one'])
   const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
-  await s.fs.write(join(bp, '.claude/settings.json'), json(blueprintSettings(['Bash(git log *)'])))
+  await s.fs.write(
+    join(bp, '.claude/settings.json'),
+    blueprintRaw ?? json(blueprintSettings(['Bash(git log *)'])),
+  )
   await git(s, bp, ['add', '-A'])
   await git(s, bp, ['commit', '-q', '-m', 'two'])
 
   const p = await s.workspace.dir(tag, 'proj')
-  await s.fs.write(join(p, '.claude/settings.json'), json(projectSettings))
+  if (projectSettings) await s.fs.write(join(p, '.claude/settings.json'), json(projectSettings))
   if (layer !== undefined) await s.fs.write(join(p, LAYER), json(layer))
   await s.fs.write(
     join(p, '.blueprint-source'),
@@ -260,6 +292,61 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       expect(await readFile(join(p, '.claude/settings.json'), 'utf8')).toBe(
         json(blueprintSettings(['Bash(git log *)'])),
       )
+    })
+  })
+
+  // --- Alexey's cross-provider review, 2026-09-16 --------------------------
+
+  it('#10 blueprint settings that are not JSON are refused even when the project has no settings.json', async () => {
+    await scenario('permission-policy-10', async (s) => {
+      // The ordinary NEW-managed-file path: nothing to merge, nothing to
+      // migrate, so the copy used to run with no parse at all and land
+      // `{broken` in a project. Nothing downstream validates it either.
+      const p = await fixture(s, 'g', null, undefined, '{broken\n')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, `malformed blueprint settings must be refused:\n${r.output}`).toBe(4)
+      await expect(
+        readFile(join(p, '.claude/settings.json'), 'utf8'),
+        'pull landed blueprint bytes that are not JSON',
+      ).rejects.toThrow()
+    })
+  })
+
+  it('#11 the printed migration proposal is a valid project file, and unsupported legacy keys are named', async () => {
+    await scenario('permission-policy-11', async (s) => {
+      // `permissions.otherList` is legacy and the project file cannot carry it.
+      // Printing it into the proposal made the next pull reject the very file
+      // the refusal told the operator to write.
+      const legacy = {
+        permissions: { ...blueprintSettings([PROJECT_RULE]).permissions, otherList: ['foo'] },
+        hooks: blueprintSettings([]).hooks,
+      } as unknown as Settings
+      const p = await fixture(s, 'h', legacy)
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(4)
+      expect(r.output, 'an unsupported legacy key was neither carried nor named').toContain(
+        'permissions.otherList',
+      )
+
+      const proposal = proposalFrom(r.output)
+      expect(Object.keys(proposal), 'the proposal is not shaped like a project file').toEqual([
+        'permissions',
+      ])
+      expect(
+        Object.keys(proposal.permissions).filter((k) => !PERMISSION_KEYS.includes(k)),
+        'the proposal holds a key the project file schema rejects, so saving it fails the next pull',
+      ).toEqual([])
+      expect(proposal.permissions.allow).toContain(PROJECT_RULE)
+
+      // The guarantee itself: saving what was printed ends the migration.
+      await s.fs.write(join(p, LAYER), json(proposal))
+      const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(again.code, `the printed proposal was rejected as a project file:\n${again.output}`).toBe(0)
+      const got = await settingsOf(p)
+      expect(got.permissions.allow).toContain(PROJECT_RULE)
+      expect(got.permissions.allow).toContain('Bash(git log *)')
     })
   })
 })

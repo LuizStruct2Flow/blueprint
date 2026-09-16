@@ -41,6 +41,9 @@ export async function notGithubActions(root: string): Promise<string | null> {
   return `skipped: the declared CI is ${ci} (BP_CI in project_config_paths.md), so .github/workflows is not this project's pipeline`
 }
 
+/** Whitespace runs collapsed, so a value cannot carry a line break of its own. */
+const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
+
 /**
  * Say a skip where the gate shows it.
  *
@@ -48,9 +51,19 @@ export async function notGithubActions(root: string): Promise<string | null> {
  * only lines carrying a marker, and vitest's JSON records no skip reason. A skip
  * that is not printed with `SKIP-NOTE:` is therefore invisible in the gate, and
  * a suite skipped in silence is the failure tests/manifest exists to refuse.
+ *
+ * ONE PHYSICAL LINE, ALWAYS. The gate preserves marked LINES, not notices, so a
+ * newline anywhere in the title or the reason strands everything after it — in
+ * practice the reason, which is the half saying why a check did not run. A
+ * wrapped test title alone is enough to do it (Alexey, finding 7).
+ *
+ * Normalised HERE, at emission, rather than at capture: this is the one function
+ * every caller routes through, including skipVisibly, while a capture-side fix
+ * would have to re-derive where a notice ends — the same guess the line-wise
+ * grep already makes, which is what went wrong.
  */
 export function skipNote(where: string, reason: string): void {
-  console.warn(`SKIP-NOTE: ${where}: ${reason}`)
+  console.warn(`SKIP-NOTE: ${oneLine(where)}: ${oneLine(reason)}`)
 }
 
 /** Skip the whole case, visibly: vitest counts it skipped and the gate prints why. */

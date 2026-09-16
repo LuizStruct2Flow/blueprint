@@ -189,3 +189,29 @@ too.
 needed again — that is the condition TASK-023 named, and it is now a deliberate
 gap rather than an oversight. Restoring it means accepting a second runner kind,
 which is a founder decision, not an agent's.
+
+---
+
+## F-004 — A-13 (the privacy block never updates) is absorbed by TASK-048
+
+**Cancelled as a backlog row, 2026-09-16**, and pointed here so it is not raised
+a third time. A-13 recorded that `.gitignore` is **not** in `MANAGED_FILES` while
+its privacy block told the reader not to edit between the blueprint markers
+"because they'd come back on next sync" — an instruction describing a mechanism
+that does not exist, so a derived project's privacy block silently never updated.
+
+**Where it went: TASK-048**, which covers the same ground and more. That work
+removes the six methodology files from the block, replaces the block's comment
+rather than deleting it, updates `docs/PUBLISHING.md` in the same commit, and —
+the part A-13 was actually about — ships the instruction that **existing**
+projects must run themselves, because a blueprint edit to a seeded-not-managed
+file reaches new projects only.
+
+**Not a verdict on the finding.** A-13 was right, and its mechanism claim is
+still true: nothing syncs `.gitignore`. It is cancelled because two live records
+of one fact drift, which is the reason `INDEX.md` went (TASK-005) and the reason
+this register exists at all.
+
+**Re-open when** `.gitignore` becomes managed, or when a project reports its
+privacy block diverging from the blueprint's in a way TASK-048's instruction did
+not fix.

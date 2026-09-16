@@ -229,25 +229,78 @@ BP_SUBAGENT_DEFER_MAX="$(bp_clamp_int "${BP_SUBAGENT_DEFER_MAX:-}" 8 8)"
 
 defer_dir="$BP_STATE_ROOT/subagent-defer"
 
-# RESERVE ATOMICALLY. Counting slots and then creating one is a race, not a
-# limit: twelve simultaneous dispatches each saw fewer than eight and each
-# claimed one, with no two sharing a name (finding 1). `mkdir` of a FIXED name
-# succeeds for exactly one caller, so the slot set IS the ceiling.
+# RESERVE ATOMICALLY, AND RECLAIM UNDER THE SAME LOCK.
 #
-# Slots left by a child that died before releasing its own are swept by age —
-# a minute is well past the capped life above — so a crash cannot wedge the cap.
-defer_reserve() {
+# `mkdir` of a FIXED name succeeds for exactly one caller, so the slot set IS
+# the ceiling: twelve simultaneous dispatches each saw fewer than eight and each
+# claimed one, with no two sharing a name (finding 1).
+#
+# THAT ALONE IS NOT A CAP. Reclaiming a slot left by a dead child used to be a
+# separate, non-atomic step — `find` selected the stale directories, then `rm`
+# removed them. Between those two instants another hook can replace a selected
+# directory with a FRESH reservation, which the first caller then deletes and
+# takes for itself: both return 0 with the identical path, and the cap is undone
+# by the very sweep meant to keep it honest (Codex's S2, test #16).
+#
+# So reclamation, reservation and the spawn that owns the slot happen under ONE
+# lock. `flock` is released by the KERNEL on death, including SIGKILL, so the
+# mutex has no stale state of its own to sweep — the oracle
+# scripts/lib/watcher-lock.sh already reasons with, reused rather than a second
+# one invented here.
+#
+# AGE IS NOT A LIVENESS TEST, and is no longer used as one. `-mmin +1` rounds to
+# whole minutes, so reclamation was after roughly two rather than one; and more
+# importantly a delayed or blocked child outlives any threshold, so age could
+# retire a slot whose owner was still running. The slot records its OWNER's pid
+# instead, written before the lock is dropped, so a slot is free exactly when
+# nobody is alive to hold it. The residual is pid reuse, the standard ceiling of
+# every pid-based check, and it is bounded by the capped life of the child.
+#
+# NO FLOCK, NO DEFERRAL — the same degradation as no bash, for the same reason:
+# a bookend labelled by agent type is a small, legible loss, while a cap that
+# cannot be enforced is not a cap. macOS ships no flock(1).
+defer_spawn() {
+  command -v flock >/dev/null 2>&1 || return 1
   mkdir -p "$defer_dir" 2>/dev/null || return 1
-  find "$defer_dir" -maxdepth 1 -type d -name 'slot-*' -mmin +1 -exec rm -rf {} + 2>/dev/null
-  _dr_n=0
-  while [ "$_dr_n" -lt "$BP_SUBAGENT_DEFER_MAX" ]; do
-    if mkdir "$defer_dir/slot-$_dr_n" 2>/dev/null; then
-      printf '%s\n' "$defer_dir/slot-$_dr_n"
-      return 0
-    fi
-    _dr_n=$((_dr_n + 1))
-  done
-  return 1
+  : >>"$defer_dir/.lock" 2>/dev/null || return 1
+
+  (
+    # BOUNDED, never a bare `flock 9`. A hook must never stall the tool call it
+    # only observes, so a mutex this hook cannot take in time means "do not
+    # defer" — the same trade the roster lookup's timeout makes.
+    flock -w 5 9 || exit 1
+    _ds_n=0
+    while [ "$_ds_n" -lt "$BP_SUBAGENT_DEFER_MAX" ]; do
+      _ds_slot="$defer_dir/slot-$_ds_n"
+      if [ -d "$_ds_slot" ]; then
+        _ds_pid="$(cat "$_ds_slot/pid" 2>/dev/null)" || _ds_pid=""
+        if [ -n "$_ds_pid" ] && kill -0 "$_ds_pid" 2>/dev/null; then
+          _ds_n=$((_ds_n + 1))
+          continue
+        fi
+        # SAFE ONLY UNDER THE LOCK. No other caller can create or delete a slot
+        # while we hold it, so this cannot remove a replacement generation.
+        rm -rf "$_ds_slot" 2>/dev/null
+      fi
+      mkdir "$_ds_slot" 2>/dev/null || { _ds_n=$((_ds_n + 1)); continue; }
+      # `9>&-` so the child does not inherit the mutex: it would hold it for its
+      # whole wait, and every later dispatch would block out its own timeout.
+      BP_SUBAGENT_DEFER_CHILD=1 \
+      BP_DEFER_SLOT="$_ds_slot" \
+      BP_DEFER_META="$meta" \
+      BP_DEFER_EVENT="$event" \
+      BP_DEFER_SUMMARY="$summary" \
+      BP_DEFER_ATYPE="$atype" \
+      BP_DEFER_WAIT="$BP_SUBAGENT_META_WAIT" \
+        "$bashcmd" "$0" </dev/null >/dev/null 2>&1 9>&- &
+      # THE OWNER, recorded before the lock is dropped. A slot whose pid is not
+      # yet written reads as reclaimable to the next caller, which is the same
+      # double-ownership one level down.
+      printf '%s\n' "$!" >"$_ds_slot/pid" 2>/dev/null
+      exit 0
+    done
+    exit 1
+  ) 9>>"$defer_dir/.lock"
 }
 
 # CLOSE EVERYTHING ABOVE 2 IN THE CHILD. Redirecting 0, 1 and 2 says nothing
@@ -275,7 +328,15 @@ close_inherited() {
 # THE CHILD ITSELF. It is this script again, so the bookend is written by the
 # one function that writes bookends.
 if [ "${BP_SUBAGENT_DEFER_CHILD:-}" = 1 ]; then
-  trap 'rm -rf "${BP_DEFER_SLOT:-}" 2>/dev/null' EXIT HUP INT TERM
+  trap 'rm -rf "${BP_DEFER_SLOT:-}" 2>/dev/null' EXIT
+  # AN EXPLICIT EXIT ON EVERY SIGNAL PATH, so releasing the slot and ending its
+  # owner are one act. A shell RESUMES after a handler that does not exit, so
+  # the single combined trap released the slot and let the child run on for the
+  # rest of its wait — the slot was reusable while its owner was alive, and
+  # cleanup was therefore never a bound on the child's lifetime (Codex's S2,
+  # test #17). 143 is the conventional 128+SIGTERM; the EXIT trap above does the
+  # one removal, on this path as on every other.
+  trap 'exit 143' HUP INT TERM
   close_inherited
   _w="$(bp_clamp_int "${BP_DEFER_WAIT:-}" 5 15)"
   i=0
@@ -287,28 +348,17 @@ if [ "${BP_SUBAGENT_DEFER_CHILD:-}" = 1 ]; then
   exit 0
 fi
 
-defer_slot=""
+# THE SPAWN IS PART OF THE RESERVATION, not a step after it. Reserving here and
+# forking below would put the fork outside the lock, leaving a window in which
+# the slot names no living owner and the next caller may reclaim it.
+deferred=0
 bashcmd=""
 if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
   # No bash, no deferral: the line is written NOW, labelled by agent type. A
   # wrong label beats a lost one, and beats holding a caller's descriptor.
   bashcmd="$(command -v bash 2>/dev/null)" || bashcmd=""
-  if [ -n "$bashcmd" ]; then
-    defer_slot="$(defer_reserve)" || defer_slot=""
-  fi
-fi
-
-if [ -n "$defer_slot" ]; then
-  BP_SUBAGENT_DEFER_CHILD=1 \
-  BP_DEFER_SLOT="$defer_slot" \
-  BP_DEFER_META="$meta" \
-  BP_DEFER_EVENT="$event" \
-  BP_DEFER_SUMMARY="$summary" \
-  BP_DEFER_ATYPE="$atype" \
-  BP_DEFER_WAIT="$BP_SUBAGENT_META_WAIT" \
-    "$bashcmd" "$0" </dev/null >/dev/null 2>&1 &
-else
-  if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
+  if [ -n "$bashcmd" ] && defer_spawn; then deferred=1; fi
+  if [ "$deferred" = 0 ]; then
     # SAY SO. Past the cap the line is kept but the persona is not, and a
     # degraded label with no notice reads exactly like a subagent that never had
     # one (Alexey's informational 8). stderr, because Claude Code surfaces hook
@@ -317,6 +367,7 @@ else
     printf '[log-activity] no deferred slot free (cap %s) — labelling this dispatch by agent type\n' \
       "$BP_SUBAGENT_DEFER_MAX" >&2
   fi
-  emit_bookend
 fi
+
+if [ "$deferred" = 0 ]; then emit_bookend; fi
 exit 0

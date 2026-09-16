@@ -202,6 +202,17 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
+  it("#2b TASK-021: the blueprint's own docs/config records do not ship, and the folder README does", async () => {
+    await scenario('bootstrap-contents-2b', async (s) => {
+      const { derived } = await build(s)
+
+      // What ships is managed now. A shipped findings.md would have pull offer to
+      // overwrite every project's own findings register with this repo's.
+      expect(await s.fs.exists(join(derived, 'docs/config/findings.md')), 'this repo\'s findings shipped').toBe(false)
+      expect(await s.fs.exists(join(derived, 'docs/config/README.md')), 'the folder convention did not ship').toBe(true)
+    })
+  })
+
   it('#3 the lifecycle structure and templates still ship', async () => {
     await scenario('bootstrap-contents-3', async (s) => {
       const { derived } = await build(s)

@@ -210,6 +210,25 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
     })
   })
 
+  // THIS CASE'S BUDGET IS THE DURATION OF A WHOLE DERIVED GATE, and that is a
+  // different measurement from the one the shared 320 s default was chosen for.
+  // Until BUG-126 the case died at the SAST stage in about 3 s — the derived
+  // project's semgrep refused the workflow this repository ships — so the rest
+  // of the gate never ran and no budget was ever approached. With that fixed the
+  // gate runs to the end and this case times it: 364 s observed on this host.
+  //
+  // 900 s, not 365. The observed number moves with machine load, and a budget
+  // that fails at p95 teaches people to re-run rather than to look. It must also
+  // exceed the 600 s on the inner `s.run` below: the smaller of the two always
+  // fires first, so an outer budget under it would make the inner one — the once
+  // that can say WHICH command hung — unreachable.
+  //
+  // WHEN IT FAILS, read the per-stage timings the derived gate prints before
+  // raising this again. A gate that grew a slow stage and a gate that hangs look
+  // identical from out here, and only one of them is fixed by a bigger number.
+  // The per-test argument is deliberate: the shared testTimeout in
+  // vitest.config.ts belongs to every other suite, none of which boots a project
+  // and runs its whole gate.
   it('#2 and #3 a freshly bootstrapped project passes its own pre-push gate, non-vacuously', async () => {
     await scenario('bootstrap-gate-2', async (s) => {
       const { target } = await bootstrapped(s)
@@ -288,7 +307,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
         'the derived gate is green because it runs almost nothing, which is the A-22 defect',
       ).toBeGreaterThanOrEqual(25)
     })
-  })
+  }, 900_000)
 
   it('#3c a bootstrapped project that has NOT run npm ci is told so, and does not reach the registry', async () => {
     await scenario('bootstrap-gate-3c', async (s) => {

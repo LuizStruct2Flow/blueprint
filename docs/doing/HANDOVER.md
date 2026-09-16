@@ -149,6 +149,21 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     fetch — and an unsupported scanner command (exit 1) is reported as "gitleaks found a secret".
     TASK-037 is accepted and pushed, so this is a new row, not a reopening. **Unassigned: all
     three agents are busy.**
+  - **Christian is done** — TASK-044, TASK-045, BUG-125 and TASK-040 (`2285f22`: both IaC
+    directories are read, each stage naming the directory it ran in). He corrected his own
+    `#iac-2` helm assertion rather than the hook: `_st_helm` lints from the repo root and names
+    the chart, while cdk and terraform `cd` in.
+  - **Vitali is done with TASK-039** (`4a926aa`, `f10eff3`) and is now on BUG-127. The rule: only
+    the TOP LEVEL of `tests/` counts in a derived project, depth 1 and runner files only; `#14`
+    fails this repo's own push if the blueprint ever ships a runner there. CLAUDE.md is updated
+    by Eto, table row and layout section included.
+  - **The doc-link privacy question, answered from `.gitignore:73-82`:** the exclusion is
+    deliberate and its stated reason is not the one Eto assumed. `/CLAUDE.md`, `/AGENTS.md`,
+    `/AGENT_SIGNAL.md`, `docs/DoD.md`, `docs/PUBLISHING.md` and `docs/doing/HANDOVER.md` are the
+    **multi-AI methodology files**: "These files reveal how the founder works with Codex +
+    Claude Code." Lifecycle artefacts under `docs/` stay public. So tracking them in a derived
+    project is not a formality — it publishes the methodology from every derived repo. **Founder
+    decision, not an agent's.**
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

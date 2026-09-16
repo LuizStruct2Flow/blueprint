@@ -82,7 +82,11 @@ the **Orchestrator**. The moment you wake as this session, before anything else:
    worked, which made renaming a persona appear to do nothing).
 2. **Ensure the live team feed is running.** Run
    `bash scripts/agent-activity.sh --daemon`. This is *"ensure running"*, not
-   *"run"*: it is idempotent (a `flock` makes a second call a no-op) and returns
+   *"run"*: it is idempotent **per repository** — the lock lives at
+   `$BP_STATE_ROOT/logs/.agent-activity.lock`, so a second call in this project
+   is a no-op, while each project you have checked out legitimately runs its own
+   supervisor (so `pgrep -af agent-activity.sh` showing several is normal, and
+   counts them across repositories rather than within one). It returns
    immediately. It cleans the activity log and streams the one
    `[Persona - Backing Agent]` feed of every agent's work. **Watch it with
    `tail -f logs/agent-activity.log`** — the feed does not open a terminal for

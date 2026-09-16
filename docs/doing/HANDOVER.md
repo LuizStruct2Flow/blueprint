@@ -376,6 +376,22 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     the gate: `subagent-feed` #9 fails because the team's own feed rotates the log mid-scenario
     and the canary hard-fails on truncation while only noting baton writes. **Do not kill the
     daemons before capturing what started them.**
+  - **Discovery landed, and `tests/manifest` is KNOWINGLY RED** (Vitali, `79771e7`, `0a9ddb8`).
+    Discovery is spec-only and learned `*.spec.tsx` — `bp_suite_runners`' find and
+    `bp_suites_with_spec`' awk both — because a component-only suite would otherwise be
+    discovered and never declared to the batch, failing silently. **#17 now asserts three sides:
+    counted, discovered, executed.**
+    - **The red is measured, not inferred:** manifest is 37/37 at HEAD in a throwaway worktree
+      without his change and 27/37 with it. Its SYNTHETIC fixtures still build suites as
+      `tests/<suite>/test.sh`, so with `.sh` undiscovered the fixture derives 1 suite instead of
+      N and `#7`, the non-vacuity check, trips and takes its dependents down. `#live` already
+      expects the spec extensions. **Christian's half**, and he is visibly in `fixture.ts` now.
+    - He committed rather than sitting on it: the push is gated regardless, and an uncommitted
+      edit would have hidden the state from everyone. The commit message records the red and its
+      cause instead of claiming green.
+  - **BUG-129 assigned to Vitali.** Capture `ps -o pid,ppid,lstart,args` on the four PIDs into the
+    row **before** changing anything — those processes are the only record of how four came to
+    exist — and do not kill them without telling Eto.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

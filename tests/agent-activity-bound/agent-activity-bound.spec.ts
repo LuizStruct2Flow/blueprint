@@ -479,7 +479,8 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const b = await bound(s)
       await b.f.withDaemon(async () => {
         // THE SUBTLETY THAT MADE THIS THE MOST FREQUENT FAILURE IN THE SHELL SUITE
-        // (5 of 8 runs): a new supervisor TRUNCATES the log, emits "feed started",
+        // (5 of 8 runs): a new supervisor emits its banner ("feed started", or
+        // "feed restarted" over an existing log since BUG-129 removed the wipe),
         // emits the baton line ONCE, and only then seeds the run log. Sampling the
         // baseline between the truncate and that baton line reads 0, the startup
         // line then lands inside the sampling window, and the case reports

@@ -554,8 +554,28 @@ supervise_body(){
   # no orphan sweep — there are no long-lived children to orphan.
   trap 'stop=1' INT TERM
 
-  : >"$out"
-  emit "$(ts) [agent-activity] feed started → $out"
+  # BUG-129 — THE FEED IS APPEND-ONLY, INCLUDING ACROSS RESTARTS. This was
+  # `: >"$out"`, one wipe per supervisor start. `emit` is the only other writer, so
+  # that single line was the whole of the feed's non-append behaviour — and
+  # tests/harness/canary.ts is built on the feed being append-only, reading a
+  # truncation as a fixture escape. CLAUDE.md tells every wake to start the feed,
+  # so any suite running when a wake landed went red for something the change
+  # under test never touched (tests/subagent-feed #9). A guard that reds for
+  # innocent reasons gets muted, which costs more than it protects.
+  #
+  # Fixed HERE rather than by teaching the canary to excuse truncation: the
+  # canary's model was right and this line was wrong. Feed truncation therefore
+  # stays a hard failure that still means something. Regression:
+  # tests/agent-activity-bound #20.
+  #
+  # The log now grows across restarts. Capping it is deliberately NOT done here —
+  # rotation by rename trips the same prefix check, so it needs the canary
+  # question answered with it, and that is its own item (BUG-129's row records it).
+  if [ -s "$out" ]; then
+    emit "$(ts) [agent-activity] feed restarted → $out"
+  else
+    emit "$(ts) [agent-activity] feed started → $out"
+  fi
 
   local sig_last="" sig_now proj newest ros_last ros_now prev_label
   proj="$HOME/.claude/projects/$(printf '%s' "$repo_root" | sed 's#/#-#g')"

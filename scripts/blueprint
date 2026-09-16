@@ -95,9 +95,9 @@ fi
 #     into settings.json by pull — TASK-042, BP_SETTINGS_LAYER below)
 #
 # An entry ending in `/` names a DIRECTORY, and stands for every file the
-# blueprint SHIPS under it (bp_expand_managed_dirs below). Sync of a directory
-# is ADDITIVE ONLY: files the blueprint has are created and updated, and nothing
-# is ever deleted — see the "no delete path" note on that function.
+# blueprint SHIPS under it (bp_expand_managed_dirs below). The expansion only
+# creates and updates. A file the blueprint stops shipping is retired by a full
+# pull, and only when unedited (_bp_retire).
 
 MANAGED_FILES=(
   # Top-level agent protocol
@@ -300,6 +300,13 @@ TEMPLATE_FILES=(
   "project_config_security.md"
   "project_config_infra.md"
   "sonar-project.properties"
+  # Seeded by new-project.sh too. Listed so retirement (_bp_retire) never offers
+  # them: each once shipped from this repo, and a seed can be byte-identical to
+  # a version that did.
+  "docs/doing/HANDOVER.md"
+  "docs/backlog/BACKLOG.md"
+  "docs/backlog/BUGS.md"
+  "AGENT_ROSTER.md"
 )
 
 # --- ANSI ---
@@ -1285,13 +1292,12 @@ _bp_config_value() {
 # So the expansion is precisely "the files a bootstrap would have received",
 # which is the set a pull has to keep current.
 #
-# THERE IS NO DELETE PATH, deliberately. The information that distinguishes
-# "the blueprint dropped this suite" from "the project wrote this suite" does
-# not exist in the project, and a prefix-based delete would take out
-# project-authored suites — the one failure mode worse than the bug. The
-# announcement already exists and is fail-closed: when the blueprint drops a
-# suite it also drops that suite's stage from .githooks/pre-push-project, and
-# tests/manifest #4 fails the derived push naming the runner nothing invokes.
+# THE EXPANSION NEVER DELETES. The project alone cannot tell "the blueprint
+# dropped this suite" from "the project wrote this suite", and a prefix-based
+# delete would take out project-authored suites. Removal is _bp_retire's job,
+# which reads that distinction from the blueprint's history and deletes only
+# unedited copies. An edited orphan stays, and tests/manifest #4 fails the
+# derived push naming the runner nothing invokes.
 # IT FAILS CLOSED (BUG-029 R2-S1). An expansion that errors, or that yields
 # nothing, is a HARD failure — never an empty list.
 #
@@ -1724,6 +1730,83 @@ _bp_cli_libs() {
       done
 }
 
+# --- TASK-021 §4.2: retire files the blueprint stopped shipping ---------------
+#
+# _bp_retire AUTO_YES — run by a FULL pull only. A path is a candidate when the
+# blueprint's history shipped it, the fetched tip's archive no longer does
+# (deleted, or a new export-ignore), the project still has it, and it is not a
+# TEMPLATE_FILES seed the project owns.
+#
+# FROM HISTORY, NOT FROM bootstrap_sha. That is a moving sync checkpoint: an
+# older CLI's full pull advances it past a removal, and an endpoint difference
+# then loses the candidate for good (Alexey, plan review finding 2). No hand-kept
+# list of retired files either — the archive at each commit is the record.
+#
+# CONTENT PROOF. Deleted only when the project's bytes equal a version the
+# blueprint shipped, substituted for this project, and only after pull's y/N
+# prompt (or --yes). Anything else is the project's now: one line, never deleted.
+#
+# Known limit: a kept candidate is asked about, or reported, on every full pull.
+# Sets refused_no_tty in cmd_pull's scope when it could not ask.
+_bp_retire() {
+  local auto_yes="$1" cur hist blob name p c ans
+  local same=() edited=()
+  cur=$(mktemp) hist=$(mktemp) blob=$(mktemp)
+  name=${PWD##*/}
+
+  _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD | tar -t | grep -v '/$' | LC_ALL=C sort -u > "$cur" \
+    || die "could not list the blueprint archive to look for retired files"
+  _bp_git -C "$BLUEPRINT_ROOT" log --format= --name-only --no-renames HEAD | { grep -v '^$' || true; } \
+    | LC_ALL=C sort -u > "$hist" || die "could not read the blueprint history to look for retired files"
+
+  while IFS= read -r p; do
+    [ -f "$p" ] || continue
+    case " ${TEMPLATE_FILES[*]} " in *" $p "*) continue ;; esac
+    local shipped=0 match=0
+    while IFS= read -r c; do
+      # Shipped at c? An export-ignored or deleted path archives nothing.
+      _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar "$c" -- ":(literal)$p" 2>/dev/null \
+        | tar -t 2>/dev/null | grep -xF "$p" >/dev/null || continue
+      shipped=1
+      _bp_git -C "$BLUEPRINT_ROOT" show "$c:$p" > "$blob" 2>/dev/null || continue
+      if bp_should_substitute "$p"; then
+        bp_substitute_stream "$blob" "$name" > "$blob.s" 2>/dev/null || continue
+        mv "$blob.s" "$blob"
+      fi
+      if cmp -s "$blob" "$p"; then match=1; break; fi
+    done < <(_bp_git -C "$BLUEPRINT_ROOT" log --format=%H --no-renames HEAD -- ":(literal)$p")
+    if [ "$match" -eq 1 ]; then same+=("$p")
+    elif [ "$shipped" -eq 1 ]; then edited+=("$p"); fi
+  done < <(LC_ALL=C comm -23 "$hist" "$cur")
+  rm -f "$cur" "$hist" "$blob" "$blob.s"
+
+  for p in ${edited[@]+"${edited[@]}"}; do
+    echo "  ${C_DIM}yours now${C_RESET} $p  (the blueprint stopped shipping it; this copy differs from every version it shipped, so it stays)"
+  done
+  for p in ${same[@]+"${same[@]}"}; do
+    echo
+    echo "${C_BOLD}── $p${C_RESET}"
+    echo "  ${C_YELLOW}retire${C_RESET} — the blueprint no longer ships it, and this copy is unedited"
+    if [ "$auto_yes" -eq 0 ]; then
+      if [ ! -t 0 ]; then
+        echo "  ${C_YELLOW}not interactive${C_RESET} — cannot prompt, so nothing is retired."
+        echo "  ${C_DIM}Re-run with --yes to accept without prompting, or run from a terminal.${C_RESET}"
+        refused_no_tty=1
+        return 0
+      fi
+      printf "  Delete this file? [y/N/q] "
+      read -r ans || ans=""
+      case "$ans" in
+        y|Y) ;;
+        q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; return 0 ;;
+        *) echo "  ${C_DIM}kept${C_RESET}"; continue ;;
+      esac
+    fi
+    rm -f "$p"
+    echo "  ${C_GREEN}retired${C_RESET} $p"
+  done
+}
+
 cmd_pull() {
   read_blueprint_source
 
@@ -1762,6 +1845,8 @@ cmd_pull() {
 
   if [ ${#files[@]} -eq 0 ]; then
     echo "${C_GREEN}✓ Nothing to pull. Project matches blueprint HEAD.${C_RESET}"
+    _bp_retire "$auto_yes"
+    if [ "${refused_no_tty:-0}" -eq 1 ]; then return 7; fi
     return 0
   fi
 
@@ -1891,7 +1976,7 @@ cmd_pull() {
       read -r ans || ans=""
       case "$ans" in
         y|Y) ;;
-        q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; held="$held $f(aborted-here)"; break ;;
+        q|Q) echo "  ${C_YELLOW}aborted${C_RESET}"; held="$held $f(aborted-here)"; aborted=1; break ;;
         *)
           echo "  ${C_DIM}skipped${C_RESET}"
           held="$held $f"
@@ -1955,6 +2040,10 @@ cmd_pull() {
     echo "${C_GREEN}✓ Pulled $pulled file(s). Review with 'git diff' and commit.${C_RESET}"
   else
     echo "${C_DIM}Nothing pulled.${C_RESET}"
+  fi
+
+  if [ "$partial" -eq 0 ] && [ "${aborted:-0}" -eq 0 ] && [ "${refused_no_tty:-0}" -eq 0 ]; then
+    _bp_retire "$auto_yes"
   fi
 
   # Non-zero ONLY when we declined to act. "Nothing pulled because nothing

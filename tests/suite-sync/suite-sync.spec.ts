@@ -455,13 +455,15 @@ describe('BUG-029 — a managed DIRECTORY syncs, additively, without eating proj
     })
   })
 
-  it('#5 a dropped suite keeps its files while its gate stage goes', async () => {
+  it('#5 a dropped suite is retired, unedited, while its gate stage goes', async () => {
     await scenario('suite-sync-5', async (s) => {
-      // There is deliberately NO delete path. The information that distinguishes
-      // "the blueprint deleted this" from "the project wrote this" does not exist
-      // in the project, and a prefix-based delete would take out #4's file. So the
-      // orphan stays, and the control that already exists names it: tests/manifest
-      // #4 fails the derived push on a suite the gate does not invoke.
+      // This used to pin "no delete path": the project alone cannot tell "the
+      // blueprint deleted this" from "the project wrote this", and a prefix-based
+      // delete would take out #4's file. TASK-021 §4.2 reads the distinction from
+      // the BLUEPRINT's history instead — shipped once, not shipped now, and
+      // byte-identical to a shipped version — so the unedited orphan is retired
+      // and #4's project-authored suite still survives. An edited orphan stays,
+      // and tests/manifest #4 still names it on the derived push.
       //
       // TASK-018 SPLIT THAT CLAIM IN TWO AND THIS SUITE KEEPS ONLY ITS HALF.
       // What suite-sync owns is what PULL does: the orphan survives, and the
@@ -482,8 +484,8 @@ describe('BUG-029 — a managed DIRECTORY syncs, additively, without eating proj
       const hook = await readFile(join(p, '.githooks/pre-push-project'), 'utf8')
       expect(
         await s.fs.exists(join(p, 'tests/alpha/test.sh')),
-        'pull deleted a suite the blueprint dropped — it cannot tell that from deleting a project\'s own',
-      ).toBe(true)
+        'pull kept an unedited suite the blueprint dropped — retirement did not offer it',
+      ).toBe(false)
       expect(
         hook,
         'the dropped suite\'s stage survived the pull — the gate would still invoke a suite the blueprint no longer ships',

@@ -357,10 +357,12 @@ project rules reach every Claude Code session — agents on other providers read
 them by instruction), `BUGS.md`, `HANDOVER.md`,
 `AGENT_SIGNAL.md`, all source code.
 
-**Two things that only work together.** A managed *directory* syncs
-**additively** — created and updated, never deleted, because the project cannot
-tell "the blueprint dropped this" from "we wrote this", and a sync that guesses
-wrong deletes the project's own tests. And a file can be **half-managed**:
+**Two things that only work together.** A managed *directory* syncs by
+creating and updating. The project alone cannot tell "the blueprint dropped
+this" from "we wrote this", so deletion reads the *blueprint's* history instead:
+a full pull offers to **retire** a file the blueprint once shipped and no longer
+does, only when the project's copy is byte-identical to a shipped version, and
+an edited copy stays (TASK-021). And a file can be **half-managed**:
 `BLUEPRINT:BEGIN`/`END` markers split `.githooks/pre-push-project` into a
 blueprint region the pull replaces and a project region it preserves
 byte-for-byte. Without that split, a suite arrives with nothing to invoke it —

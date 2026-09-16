@@ -296,7 +296,11 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
       const f = await build(s, 'r4')
       await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-042** | untested | S3 | open | d |\n')
       await commit(s, f, 'c.txt', 'BUG#42: a fix with a regression test')
-      await s.fs.write(join(f.dir, 'tests/x/test.sh'), 'echo "BUG-042: regression"\n')
+      // TASK-047/#18: this fixture was `tests/x/test.sh`. It kept passing after a
+      // shell runner stopped being evidence, because full-mode search was a
+      // recursive grep over EVERY file — so the case proved "some file contains
+      // the string", not "a test names the bug". Christian caught it.
+      await s.fs.write(join(f.dir, 'tests/x/x.spec.ts'), "it('BUG-042: regression', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `a test naming the bug did not satisfy the stage:\n${r.output}`).toBe(0)
@@ -466,7 +470,12 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     const config = await readFile(join(REPO_ROOT, 'tests/vitest.config.ts'), 'utf8')
     const suites = await readFile(join(REPO_ROOT, 'scripts/lib/suites.sh'), 'utf8')
 
-    const exts = (text: string, re: RegExp) => [...text.matchAll(re)].map((m) => m[1]).sort()
+    // DEDUPED, because the lib now names the extensions TWICE — once for the
+    // shallow top-level search and once for the recursive one (#18). Without this
+    // the comparison fails on multiplicity while all three sides agree, which is a
+    // guard reporting a defect it invented.
+    const exts = (text: string, re: RegExp) =>
+      [...new Set([...text.matchAll(re)].map((m) => m[1]))].sort()
     const counted = exts(lib, /-name '\*(\.spec\.tsx?)'/g)
     const executed = exts(config, /'\*\*\/\*(\.spec\.tsx?)'/g)
     const discovered = exts(suites, /-name '\*(\.spec\.tsx?)'/g)
@@ -589,7 +598,10 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
       const f = await build(s, 'r11b', 'derived')
       await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-188** | project bug | S3 | open | d |\n')
       await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: `backend frontend infrastructure`\n')
-      await s.fs.write(join(f.dir, 'backend/src/handler.test.ts'), "it('BUG-188: regression', () => {})\n")
+      // A spec, not `handler.test.ts`: `.test.ts` is exactly what the founder's
+      // one-extension decision retired, and a witness written in the retired form
+      // would pass only while declared roots still accepted anything (#18).
+      await s.fs.write(join(f.dir, 'backend/src/handler.spec.ts'), "it('BUG-188: regression', () => {})\n")
       await commit(s, f, 'c.txt', 'BUG#188: a project fix tested under backend/')
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
@@ -738,6 +750,26 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `a malformed declaration fell back to the blueprint's tests/:\n${r.output}`).not.toBe(0)
       expect(r.output, 'it failed without naming the malformed declaration').toMatch(/malformed|backtick/i)
+    })
+  })
+
+  it('#18 TASK-047: a NON-spec file under a declared root is not evidence either', async () => {
+    await scenario('dod-gate-18', async (s) => {
+      // THE HOLE CHRISTIAN'S FINDING EXPOSED. The one-extension rule was enforced
+      // only at the tests/ top level: every declared project root — where projects
+      // actually keep their tests — was searched with a recursive grep over ANY
+      // file, so a README, a CHANGELOG or a commit note mentioning the number
+      // satisfied the gate. "What the gate counts and what vitest runs are one
+      // set" was false exactly where it mattered most.
+      const f = await derivedFix(s, 'r18', 'backend')
+      await s.fs.write(join(f.dir, 'backend/NOTES.md'), 'Fixed BUG-042 in the parser.\n')
+      await s.fs.write(join(f.dir, 'backend/legacy.test.ts'), "it('BUG-042: retired form', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(
+        r.code,
+        `prose or a retired test form counted as the regression test:\n${r.output}`,
+      ).not.toBe(0)
     })
   })
 

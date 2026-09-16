@@ -246,6 +246,34 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
+  it('#3c TASK-046: the claude.internal.md import ships, and no bootstrap seeds the file', async () => {
+    await scenario('bootstrap-contents-3c', async (s) => {
+      const { derived } = await build(s)
+
+      // The two halves of the contract, and they pull in opposite directions.
+      // The IMPORT must arrive, because it is what makes a project-private file
+      // load without the project editing the managed CLAUDE.md.
+      const claudeMd = await readFile(join(derived, 'CLAUDE.md'), 'utf8')
+      expect(claudeMd, 'a derived project does not import claude.internal.md').toContain(
+        '@claude.internal.md',
+      )
+
+      // The FILE must not, because the project owns it. Seeding one would make
+      // the blueprint the author of a file it promises never to write, and the
+      // first `blueprint pull` would then be expected to maintain it.
+      expect(
+        await s.fs.exists(join(derived, 'claude.internal.md')),
+        'bootstrap seeded claude.internal.md — the project owns that file, not the blueprint',
+      ).toBe(false)
+
+      // HONEST LIMIT. That Claude Code SKIPS an import whose file is missing is a
+      // property of its loader, verified for TASK-043 and not executable from a
+      // vitest spec. What this case pins is the blueprint's half of it: the
+      // import is delivered and the file deliberately is not, which is exactly
+      // the state a fresh project starts in.
+    })
+  })
+
   it('#4 the roster is seeded from the example, not inherited', async () => {
     await scenario('bootstrap-contents-4', async (s) => {
       const { derived } = await build(s)

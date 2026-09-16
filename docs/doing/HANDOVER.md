@@ -290,6 +290,53 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     encodes the exclusions in three places and must travel in the same commit; the reasoning
     comment is replaced, not deleted, with wording shown to the founder; and
     `project_config_*.md` stays ignored (A-27: threat model, infra account IDs).
+  - **TASK-047 hit two founder decisions; Christian committed NOTHING and is holding.**
+    - **The port is already done.** `tests/ts-bridge/ts-bridge.spec.ts` carries every assertion
+      `test.sh` makes (#0, #1/#1c, #1b, #1d, #2/#2b/#2c, plus #1e), with a measured equivalence
+      record in its header. What `test.sh` uniquely supplies is an execution mode: **the only
+      assertion about the vitest bridge that vitest does not run.** That is TASK-023, parked
+      `KEEP` with the trigger "the next time the TS toolchain's own shipping boundary changes" —
+      which is now. Five places say it survives on purpose, including
+      `security.yml:218-226` ("retiring it would answer a founder-pending question by
+      deletion"). **With the founder:** accept the loss and close TASK-023 explicitly, keep it as
+      the one exception, or replace it with another non-vitest runner (which reopens the same
+      question in a new spelling).
+    - **The `src/` convention is the second question.** CLAUDE.md's Test Layers rows govern a
+      derived project's own source tree. Renaming every project's co-located `*.test.ts`
+      invalidates their vitest includes, their eslint-boundaries config and every test file they
+      have, and the blueprint cannot migrate it for them. Christian's recommendation, and mine:
+      one extension inside `tests/` now, `src/` untouched unless the founder wants its own task.
+    - **Already satisfied, no work:** `run-ts-suites.sh`'s three checks already say `*.spec.ts`;
+      its remaining `*.sh` at `:142` is ShellCheck's target list (TASK-033), unrelated.
+    - **Deletion blast radius, if it is taken:** `.githooks/pre-push-project:246-258` (the
+      `ts-bridge · BUG-055` stage), `security.yml:218-226` (**Philipp's** — the whole shell-tests
+      job exists for that one line), and `tests/manifest` (`suitesWithSh`, `shInvoked`, the
+      `SHELL_SUITES` fixture, #2b). **All three must go in ONE change**: a deleted file with CI
+      still running `bash tests/ts-bridge/test.sh` fails CI immediately.
+    - **Stale justification found:** `suites.sh:55` says `tests/staleness/` ships two shell
+      runners. It does not — repo-wide there are exactly two `.sh` files under `tests/`, one of
+      them a helper. Vitali corrects it either way.
+  - **BOTH TASK-047 DECISIONS ANSWERED 2026-09-16.**
+    - **`tests/ts-bridge/test.sh` is retired, TASK-023 closed as an accepted loss.** What goes
+      with it: the only assertion about the vitest bridge not executed by the vitest it asserts
+      about — a silently dead bridge now produces no red case. That must be written into
+      `docs/config/findings.md` as the cancellation pointer, not just deleted.
+    - **`*.spec.ts` everywhere, including `src/`.** Co-located unit tests in a derived project's
+      source tree change convention too. The blueprint cannot rename their files, so a migration
+      note is part of the work.
+    - **THE RETIREMENT IS ONE PUSH ACROSS THREE AGENTS.** Christian: the file, the
+      `.githooks/pre-push-project:246-258` stage, `tests/manifest`'s `.sh` handling
+      (`suitesWithSh`, `shInvoked`, `SHELL_SUITES`, #2b), the findings pointer, CLAUDE.md's
+      convention rows and `templates/project_config_paths.md:38`. Philipp: the
+      `security.yml:218-226` job, which exists only for that runner. Vitali: the one-line `.sh`
+      removal from `suites.sh` discovery, **after** Christian's deletion. Different commits are
+      fine; a different push is not — a deleted file with CI still running
+      `bash tests/ts-bridge/test.sh` fails CI on arrival.
+    - **Vitali's half already landed** (`5e09d62`, `2c3ab19`, `212ca42`): the evidence set is
+      `*.spec.ts` only, guard #14 simplified, DoD §2 updated, `vitest.config.ts` confirmed
+      unchanged, and `suites.sh:55`'s stale claim corrected — `tests/staleness/` ships zero shell
+      runners, it is one spec. All 55 TypeScript tests were already `*.spec.ts`, so narrowing
+      dropped nothing that exists.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

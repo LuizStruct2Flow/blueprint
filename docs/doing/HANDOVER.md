@@ -115,8 +115,29 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
   - A project with both `infra/` and `infrastructure/` gets only `infra/` checked (a ponytail
     comment in the hook).
   - Claude Code skips a missing `@`-import silently (checked in its installed source).
-  - **The imports add ~976 lines / 43.5 KB to always-on context** here (CLAUDE.md is 1276),
-    ~947 lines in a fresh project. That matters for TASK-024.
+  - **Context cost, re-measured 2026-09-16 with `wc -l` after Alex found the first figures
+    wrong:** the five root configs are **997 lines** (167+175+204+194+257), the five templates
+    **989**. `CLAUDE.md` is 1319, so a blueprint session starts at **2316 lines**. The 976/947 in
+    `9a1d0ae`'s body and the `e72ba38` handover are wrong. This total is what TASK-024 argues with.
+  - **04:00 status of the reviews:**
+    - **Alex (TASK-040/041/043)** → `.scratch/ALEX-fr-docs-review.md`. TASK-041 **push as is**.
+      TASK-040 needs the mixed-layout fix (an empty `infra/` beside a populated
+      `infrastructure/` runs nothing, silently) — **with Christian**. TASK-043 needed the
+      README/deck claim scoped to Claude Code (**done, `8f6926a`**) and these counts.
+      His ts-bridge #5 failure is his sandbox: it passes 21/21 here.
+    - **Philipp fixed Alexey's TASK-042 findings** in `49ef420`/`dc9c496`: blueprint settings are
+      parsed on every path (the plain-copy path took `{broken` before), and the printed migration
+      proposal now only carries what a project file may hold, naming unsupported keys instead of
+      printing them.
+    - **Vitali fixed TASK-039 findings 1 and 2** in `47d6ce7`/`998b6cb`: containment is symmetric
+      (`scripts/` and `.githooks/` join `docs/` and `.git`), roots resolve with `cd -P` and must
+      land inside the project, and a malformed, duplicated or glob-bearing declaration is refused
+      rather than defaulting to `tests/`. **Finding 3 is with the founder** — see §5.
+    - **Alexey re-checked TASK-037** → `.scratch/ALEXEY-task037-recheck.md`: findings 2–5 closed,
+      but two remain. **TASK-037 is already accepted and pushed, so they are filed as BUG-127
+      rather than reopening it.**
+  - **FILE CONTENTION, watch it:** Christian's TASK-040 fix and Philipp's BUG-126 fix both touch
+    `.githooks/pre-push`. Christian was told to hold that file until Philipp reports.
 - **Vitali added storm2flow's rehearsal witnesses to TASK-039** in `cc74f6c`: a blueprint fixture
   string cannot vouch for project BUG-200, and a `backend/` root counts. Both were red on the
   pre-TASK-039 lib and are green now.

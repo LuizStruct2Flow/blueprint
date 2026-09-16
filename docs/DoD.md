@@ -386,7 +386,9 @@ struct2flow convention — the project's exact targets are wired in
      the same scrub. CI's ts-tests job runs the same function. ShellCheck is
      required: a missing one blocks the push and names
      `bash scripts/install-toolchain.sh`. A finding is fixed, or disabled inline
-     with a reason; the severity is never lowered.
+     with a reason; the severity is never lowered. The ts-tests job prepares
+     its machine with that installer (BUG-132), so a tool the suites need is
+     declared there once and reaches CI and every developer machine together.
    - **TypeScript typecheck of `tests/`** (TASK-031): `ts_typecheck` from
      `scripts/run-ts-suites.sh`, which runs the pinned
      `tests/node_modules/.bin/tsc --noEmit -p tests` through `ts_scrubbed`,

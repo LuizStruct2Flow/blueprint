@@ -264,18 +264,20 @@ jobs:
         if: hashFiles('tests/package.json') != ''
         working-directory: tests
         run: npm ci
-      # TASK-033 — SHELLCHECK IS REQUIRED IN THIS JOB, by two callers: the lint
-      # step below, and the pre-push gate that tests/bootstrap-gate runs inside a
-      # bootstrapped project, whose shell lint stage blocks without it. GitHub's
-      # Ubuntu runner images normally include it. This installs it only when it is
-      # absent, rather than trusting that, and prints the version either way.
-      - name: ShellCheck present
+      # BUG-132 — THIS MACHINE IS PREPARED BY THE INSTALLER EVERY DEVELOPER RUNS,
+      # so the suites see the tool set they see locally. It replaced a step that
+      # installed ShellCheck by name (TASK-033) and nothing else: BUG-127 made
+      # a2bp refuse without gitleaks, developer machines had it, this job did not,
+      # and six a2bp files were red here only. A tool list kept per step catches
+      # the tools someone remembered. tests/ts-bridge #9 executes this job's
+      # provisioning steps and requires `install-toolchain.sh check` to pass.
+      # Guarded like its neighbours: the installer's Node check reads
+      # tests/package.json, and Node is only set up when that file exists.
+      - name: Gate toolchain
+        if: hashFiles('tests/package.json') != ''
         run: |
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            sudo apt-get update -q
-            sudo apt-get install -y -q shellcheck
-          fi
-          shellcheck --version
+          bash scripts/install-toolchain.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # TASK-033 — THE SHELL LINT, through the function the pre-push gate's shell
       # lint stage calls, so the two modes run one command. tests/ts-bridge #7
       # executes this block.

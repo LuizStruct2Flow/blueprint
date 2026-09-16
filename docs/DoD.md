@@ -346,18 +346,19 @@ The shipped code is only as good as the tests that gate it.
    exclusions. The exact `--coverage` invocation + per-layer globs live
    in `project_config_dod.md`. The pre-push gate fails the push if any
    tier's threshold isn't met.
-7. **Pre-push coverage is decided on risk, never on the clock.** There is
-   no wall-clock ceiling. A suite worth blocking a push stays in the gate
-   however long it takes; move one to CI only when *risk* justifies it —
-   it guards something off the push path, where a regression cannot reach
-   a commit. **This is enforced, not merely stated:** `tests/manifest/`
-   derives the suite set from the runners on disk and fails the push on a
-   runner the gate or CI never invokes, or on an export boundary that does
-   not behave as `.gitattributes` declares. A non-blocking SLO warns past 120 s
-   total / 45 s per stage and can demote nothing. A ≤30 s ceiling was
-   removed on 2026-08-02 (BUG-005) after it demoted a 41-assertion
-   contamination suite to CI-only for growing by 3.7 s; the first version
-   of its replacement was a rule with no control, which Codex rejected.
+7. **Expensive suites run in CI, and the tier is in the file name.** There is
+   no wall-clock ceiling. A suite named `*.release.spec.ts` runs in CI only
+   (TASK-054, founder decision 2026-09-16, reversing BUG-005's "never CI-only").
+   CI gates what ships: derived projects pull `released`, which moves only to a
+   commit on which every CI job passed. The gate names every release suite it
+   skips. **This is enforced, not merely stated:** `tests/manifest/` derives the
+   suite set from the runners on disk and fails the push when CI does not run
+   every suite, when the gate does not run every non-release suite, or when the
+   export boundary does not behave as `.gitattributes` declares. A non-blocking
+   SLO warns past 120 s total / 45 s per stage. A ≤30 s ceiling was removed on
+   2026-08-02 (BUG-005) after it silently moved a 41-assertion suite out of the
+   gate for growing by 3.7 s; the release tier differs because it is visible in
+   the file name and checked in CI.
 
 ## §4 Pre-push gate (fail-fast)
 
@@ -728,8 +729,8 @@ Walk every box. If any is unchecked, finish it; do **not** flip
 - [ ] No new tests call a live non-deterministic service in pre-push
       (e.g. live-LLM tests belong in a nightly eval suite)
 - [ ] Coverage report run; no surprise regression in coverage
-- [ ] No suite was demoted to CI-only to save time (risk may justify it;
-      the clock may not — §3.7). Any exclusion names its number and reason.
+- [ ] A suite moved to CI only is renamed `*.release.spec.ts` (§3.7), never
+      excluded any other way.
 - [ ] If snapshots changed: locally approved + committed; diff
       reviewed; CI was NOT run with `-u`
 

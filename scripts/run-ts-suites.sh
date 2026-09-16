@@ -69,6 +69,17 @@ ts_declared_suites(){
   fi
 }
 
+# ts_release_suites ROOT — the release-tier suites (TASK-054), from the same
+# library.
+ts_release_suites(){
+  _tsr_root="${1:-.}"
+  if [ -r "$_tsr_root/scripts/lib/suites.sh" ]; then
+    # shellcheck source=scripts/lib/suites.sh
+    . "$_tsr_root/scripts/lib/suites.sh"
+    bp_release_suites "$_tsr_root"
+  fi
+}
+
 # ts_scrubbed CMD... — run CMD in a subshell with the population the TypeScript
 # harness refuses removed: every GIT_*, AGENT_* and BP_* name, and BLUEPRINT_ROOT.
 #
@@ -305,6 +316,21 @@ ts_suites_stage(){
     return 0
   fi
 
+  # TASK-054 — THE RELEASE TIER. A suite whose specs are all `*.release.spec.ts`
+  # runs in CI only; CI and the `released` branch gate what reaches derived
+  # projects. The gate drops them from the expected set and names each one, so
+  # the skip is visible here and in the file name, never silent. tests/manifest
+  # #4 and #5 check that the gate runs every other suite and CI runs all of them.
+  _ts_release="$(ts_release_suites "$_ts_root")"
+  for _s in $_ts_release; do
+    pipe_skip "$_s" "release tier (*.release.spec.ts): runs in CI only, which gates the released branch"
+  done
+  _ts_expect="$(printf '%s\n' "$_ts_expect" | grep -vxF "$_ts_release" || true)"
+  if [ -z "$_ts_expect" ]; then
+    pipe_skip "vitest · TASK-018" "every suite is release tier, so CI runs them all"
+    return 0
+  fi
+
   _ts_json="$(mktemp)"
   _ts_out="$(mktemp)"
   # No positional path filter, deliberately: tests/manifest #4 proves the gate
@@ -357,7 +383,10 @@ ts_suites_stage(){
     # With json alone the captured output is a path to a file this function
     # deletes seconds later — BUG-055 fixed the silence and left the
     # uselessness, which cost three ~200s re-runs to notice.
-    ts_scrubbed npx vitest run --reporter=default --reporter=json --outputFile="$_ts_json"
+    # `--exclude` is ADDITIVE to the config's excludes, and it names the release
+    # glob and nothing else: tests/manifest reads any other exclude as a narrowed
+    # run.
+    ts_scrubbed npx vitest run --exclude='**/*.release.spec.*' --reporter=default --reporter=json --outputFile="$_ts_json"
   ) >"$_ts_out" 2>&1
   then
     _ts_rc=0

@@ -1,5 +1,5 @@
 /**
- * tests/bootstrap-gate/bootstrap-gate.spec.ts — BUG-028 regression, TypeScript.
+ * tests/bootstrap-gate/bootstrap-gate.release.spec.ts — BUG-028 regression, TypeScript.
  *
  * A freshly bootstrapped project must pass its OWN pre-push gate, and be
  * drift-clean against its own source. Those are the first two commands an

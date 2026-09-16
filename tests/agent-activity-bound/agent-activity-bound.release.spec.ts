@@ -1,5 +1,5 @@
 /**
- * tests/agent-activity-bound/agent-activity-bound.spec.ts — BUG-001.
+ * tests/agent-activity-bound/agent-activity-bound.release.spec.ts — BUG-001.
  *
  * `agent-activity.sh` holds ONE instance with a BOUNDED process set. On a founder
  * host the old design reached ~17,400 script instances and ~8,700 `tail` processes,

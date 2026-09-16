@@ -583,36 +583,45 @@ The only path to update a snapshot is local approve + commit + PR review
 of the diff. This turns "snapshot changed" into a visible decision instead
 of silent re-baseline.
 
-## Pre-push tolerance — coverage is decided on risk, never on the clock
+## Pre-push tolerance — the gate is fast, CI is the release gate
 
 There is **no hard wall-clock ceiling** on the pre-push gate (founder decision,
-2026-08-02, closing BUG-005). The gate is allowed to take the time it needs.
+2026-08-02, closing BUG-005). There used to be a 30 s one, and it failed in a
+specific way: **it started deciding what was tested.** `tests/a2bp-contamination/`
+(41 assertions) left the gate for growing from 2.3 s to 6.0 s, and nothing about
+it was visible — the gate still said "all checks passed", just over less.
 
-There used to be a 30 s ceiling, and it failed in a specific and instructive
-way: **it started deciding what was tested.** When a suite grew past the budget,
-the cheapest response was to demote it to CI-only — so `tests/a2bp-contamination/`
-(41 assertions, guarding the very door BUG-002 and A-09 came through) left the
-gate because it grew from 2.3 s to 6.0 s. That is a coverage decision made on
-budget rather than risk, and nothing about it was visible: the gate still said
-"all checks passed", just over less.
+**The release tier (founder decision, 2026-09-16, TASK-054) reverses BUG-005's
+"never demote a suite to CI-only to fit a time budget".** The gate had reached
+~940 s, and five suites were ~720 s of it. Those five are now
+`*.release.spec.ts` and run only in CI.
 
-The rules that replace it, and the two **controls** that make them checkable:
+- **Why this is safe.** Nothing reaches a derived project from `main`: projects
+  pull `released`, which CI fast-forwards only to a commit on which every job,
+  including every suite, passed. So CI and `released` gate what ships. The cost
+  is a red `main` that is fixed forward.
+- **Why this is not the silent demotion BUG-005 warned about.** The tier is in
+  the file name, not in a budget someone applied quietly. The gate prints a skip
+  line naming every release suite on every run. And `tests/manifest/` still fails
+  the push if CI stops running a release suite, or if the gate stops running any
+  other suite.
+- **Put a suite in the release tier only when it is expensive**, and rename it
+  with `git mv`. A cheap suite belongs in the gate.
 
-- **Never demote a suite to CI-only to fit a time budget.** If a suite is worth
-  blocking a push, it stays. Move it out only when *risk* says so — it guards
-  something off the push path, where a regression cannot reach a commit.
+The **controls** that keep this checkable:
+
 - **The suite set is the filesystem, and `tests/manifest/` fails the push** if
-  a runner under `tests/` is not actually invoked by the gate and by CI, or if
-  the export boundary does not behave the way `.gitattributes` declares. There
-  is deliberately **no tier table**: a suite is the `*.sh` / `*.spec.ts` files on
-  disk, and its tier — does it ship, or is it blueprint-only — is the
-  `export-ignore` line that already decides shipping. A catalogue describing the
-  tests a second time is a copy that drifts, and the one that existed drifted
-  twice in one afternoon.
+  CI does not run every suite, if the gate does not run every non-release suite,
+  or if the export boundary does not behave the way `.gitattributes` declares.
+  The gate's one allowed narrowing is `--exclude='**/*.release.spec.*'`; any
+  other exclude or path filter counts as not running the suites it leaves out.
+  There is deliberately **no tier table**: a suite is the `*.spec.ts` files on
+  disk, whether it ships is its `export-ignore` line, and whether it is release
+  tier is its file name. A catalogue describing the tests a second time is a
+  copy that drifts, and the one that existed drifted twice in one afternoon.
 - **The gate reports its total and its slowest stage every run**, and a
   **non-blocking SLO** warns past 120 s total / 45 s per stage. It warns and
-  points at optimising; it has no power to demote anything. The old rule blocked,
-  which is precisely what made moving a suite out the cheapest way to satisfy it.
+  points at optimising; it has no power to move a suite anywhere.
 - **If it becomes painful, fix the slow suite** — the timings name it.
   `signal-dispatch` went **125.4 s → 37.5 s** with every assertion intact once
   someone asked *why* it was slow instead of *where to put it*.

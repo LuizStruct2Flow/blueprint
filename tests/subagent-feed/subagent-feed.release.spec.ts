@@ -1,5 +1,5 @@
 /**
- * tests/subagent-feed/subagent-feed.spec.ts — BUG-027.
+ * tests/subagent-feed/subagent-feed.release.spec.ts — BUG-027.
  *
  * The feed goes dark for the whole duration of any Claude-persona run. Measured
  * 2026-08-18: 28 tool calls over 4 minutes produced two lines, while 165 KB and

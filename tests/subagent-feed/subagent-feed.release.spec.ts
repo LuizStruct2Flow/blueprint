@@ -1047,7 +1047,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
     })
   })
 
-  it('#17 a signalled child dies with its slot, rather than outliving the reservation it released', async () => {
+  it('#17 BUG-133: a signalled child dies with its slot, and leaves no sleep behind', async () => {
     await scenario('sf-17', async (s) => {
       // The handler removed the slot on HUP/INT/TERM with no explicit exit, and
       // a shell RESUMES after such a handler — measured: the child kept running

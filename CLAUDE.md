@@ -225,9 +225,14 @@ or disable it inline with a reason; never lower the severity.
 so the suites see there the tool set they see on yours. It used to install
 ShellCheck by name and nothing else, and when BUG-127 made `a2bp` refuse without
 gitleaks, six a2bp suites went red in CI only. A tool the suites come to need
-goes into `scripts/install-toolchain.sh`, which reaches both machines at once;
-`tests/ts-bridge` #9 runs the job's provisioning and requires the installer's
-`check` to pass.
+goes into `scripts/install-toolchain.sh`, which reaches both machines at once.
+`tests/ts-bridge` #9 runs the job's provisioning steps **offline**, honouring
+each step's `hashFiles` guard and failing on a step that exits nonzero, with
+downloads and package commands stubbed, and requires the installer's `check` to
+pass. It proves the wiring, not a real install: downloads, archive contents and
+scanner versions are unverified, and semgrep's install is not pinned. A checkout
+without `tests/package.json` skips the installer, so the job still ensures
+ShellCheck for the shell lint.
 
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`

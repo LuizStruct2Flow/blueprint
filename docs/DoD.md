@@ -389,6 +389,10 @@ struct2flow convention — the project's exact targets are wired in
      with a reason; the severity is never lowered. The ts-tests job prepares
      its machine with that installer (BUG-132), so a tool the suites need is
      declared there once and reaches CI and every developer machine together.
+     `tests/ts-bridge` #9 runs those provisioning steps offline, with downloads
+     and package commands stubbed: it checks the wiring (guards, step exit
+     codes, the declared tool set), and it is not a real install smoke test.
+     semgrep's install is not pinned.
    - **TypeScript typecheck of `tests/`** (TASK-031): `ts_typecheck` from
      `scripts/run-ts-suites.sh`, which runs the pinned
      `tests/node_modules/.bin/tsc --noEmit -p tests` through `ts_scrubbed`,

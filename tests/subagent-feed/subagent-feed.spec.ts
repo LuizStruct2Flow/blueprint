@@ -648,19 +648,23 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
   const deferFixture = (s: Scenario) =>
     feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren', withHook: true })
 
-  /** Deferred children of THIS scenario, by cwd — never machine-wide (BUG-089). */
-  async function children(s: Scenario, repo: string): Promise<number> {
+  /**
+   * Deferred children of THIS scenario, by cwd — never machine-wide (BUG-089).
+   *
+   * Returns the matching `ps` lines rather than a bare count: a cap assertion
+   * that fails with "expected 9 to be <= 8" cannot say WHICH ninth process it
+   * counted, and that number is the whole evidence.
+   */
+  async function children(s: Scenario, repo: string): Promise<string[]> {
     const r = await s.run(
       'sh',
       [
         '-c',
         `. "${join(REPO_ROOT, 'tests', 'helpers', 'proc-cwd.sh')}"
          bp_proc_cwd_available || { echo NO-PROC-CWD-MECHANISM; exit 1; }
-         n=0
-         for p in $(ps -eo pid,args 2>/dev/null | grep '[l]og-activity.sh' | awk '{print $1}'); do
-           case "$(bp_proc_cwd "$p")" in "$1"*) n=$((n+1)) ;; esac
-         done
-         printf '%s\\n' "$n"`,
+         ps -eo pid,args 2>/dev/null | grep '[l]og-activity.sh' | while read -r p rest; do
+           case "$(bp_proc_cwd "$p")" in "$1"*) printf '%s %s\\n' "$p" "$rest" ;; esac
+         done`,
         'x',
         repo,
       ],
@@ -673,7 +677,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
           'to answer rather than reporting clean over nothing (BUG-089).',
       )
     }
-    return Number(r.stdout.trim())
+    return r.stdout.split('\n').filter((l) => l.trim() !== '')
   }
 
   const start = (s: Scenario, f: FeedFixture, id: string): string =>
@@ -708,6 +712,13 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         'the lock was still held after the hook returned — the deferred child inherited it',
       ).toBe(0)
       await f.expectLine('→ dispatched', 15_000)
+      await vi.waitFor(
+        async () => {
+          const alive = await children(s, f.repo)
+          if (alive.length > 0) throw new Error(`still running:\n${alive.join('\n')}`)
+        },
+        { timeout: 20_000, interval: 250 },
+      )
     })
   })
 
@@ -720,14 +731,17 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '999999' } },
       )
       expect(r.code, r.output).toBe(0)
-      expect(await children(s, f.repo), 'no child was deferred, so this case proves nothing').toBeGreaterThan(0)
+      expect(
+        (await children(s, f.repo)).length,
+        'no child was deferred, so this case proves nothing',
+      ).toBeGreaterThan(0)
 
       // PROCESS EXIT, not marker arrival: the bookend lands on the way out, so a
       // case that waits for the line says nothing about the process behind it.
       await vi.waitFor(
         async () => {
-          const n = await children(s, f.repo)
-          if (n > 0) throw new Error(`${n} deferred child(ren) still running`)
+          const alive = await children(s, f.repo)
+          if (alive.length > 0) throw new Error(`still running:\n${alive.join('\n')}`)
         },
         { timeout: 30_000, interval: 250 },
       )
@@ -765,9 +779,10 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
 
       // Unbounded, all twelve sit waiting for twenty seconds each. The cap makes
       // the surplus emit at once instead — labelled by agent type, never dropped.
+      const waiting = await children(s, f.repo)
       expect(
-        await children(s, f.repo),
-        'every dispatch in the burst deferred a waiting child; nothing caps them',
+        waiting.length,
+        `every dispatch in the burst deferred a waiting child; nothing caps them:\n${waiting.join('\n')}`,
       ).toBeLessThanOrEqual(8)
       await vi.waitFor(
         async () => {
@@ -812,9 +827,10 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       await s.fs.write('go', '')
       for (const r of await Promise.all(runs)) expect(r.code, r.output).toBe(0)
 
+      const alive = await children(s, f.repo)
       expect(
-        await children(s, f.repo),
-        'more children than the cap: counting slots and then creating one is a race, not a limit',
+        alive.length,
+        `more children than the cap — counting slots and then creating one is a race, not a limit:\n${alive.join('\n')}`,
       ).toBeLessThanOrEqual(8)
       await vi.waitFor(
         async () => {
@@ -856,6 +872,16 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         const probe = await s.run('flock', ['-w', '2', lock, 'true'], { cwd: f.repo })
         expect(probe.code, 'fd 19 was still held after the hook returned').toBe(0)
         await f.expectLine('→ dispatched', 15_000)
+        // The child is a real process now, not a subshell of the hook, so the
+        // bookend can land a moment before it exits. The harness reaps nothing
+        // at ppid 1, and a survivor there is a failure in its own right.
+        await vi.waitFor(
+          async () => {
+            const alive = await children(s, f.repo)
+            if (alive.length > 0) throw new Error(`still running:\n${alive.join('\n')}`)
+          },
+          { timeout: 20_000, interval: 250 },
+        )
       })
     })
   }
@@ -882,8 +908,8 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         await f.expectLine('→ dispatched', 20_000)
         await vi.waitFor(
           async () => {
-            const n = await children(s, f.repo)
-            if (n > 0) throw new Error(`${n} deferred child(ren) still running`)
+            const alive = await children(s, f.repo)
+            if (alive.length > 0) throw new Error(`still running:\n${alive.join('\n')}`)
           },
           { timeout: 30_000, interval: 250 },
         )

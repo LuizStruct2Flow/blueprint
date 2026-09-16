@@ -631,6 +631,46 @@ describe('TASK-044 — #5 and #5b judge GitHub Actions only when the project run
   })
 })
 
+describe('TASK-047 — one runner convention, no exceptions', () => {
+  it('#live every runner under tests/ is a *.spec.ts or *.spec.tsx', async () => {
+    await scenario('manifest-live-extensions', async (s) => {
+      // Founder decision, 2026-09-16: "migrate the tests to be spec driven ts
+      // tests, we don't need exceptions". The gate accepted five runner
+      // extensions while only *.spec.ts ever executed, so what it COUNTED and
+      // what it RAN were two sets — and a suite in the gap is one the gate
+      // vouches for and vitest never runs.
+      //
+      // `.spec.tsx` IS THE SAME CONVENTION, NOT AN EXCEPTION: `.tsx` is
+      // TypeScript, and a JSX component test cannot be written as `.ts` — so a
+      // literal single-extension rule would strand every React project, which is
+      // the opposite of what "no exceptions" is for.
+      //
+      // Derived through scripts/lib/suites.sh, the same library the gate uses,
+      // rather than by walking the tree here: a second derivation would assert
+      // something about its own `find` instead of about what runs. That library
+      // must therefore discover BOTH extensions, or a `.spec.tsx` runner is
+      // undiscovered and this assertion passes vacuously over it.
+      const script = ['set -u', '. "$1/scripts/lib/suites.sh" || exit 1', 'bp_suite_runners "$1"'].join('\n')
+      const r = await s.run('sh', ['-c', script, 'sh', REPO_ROOT], { cwd: REPO_ROOT })
+      expect(r.code, r.output).toBe(0)
+
+      const paths = r.stdout
+        .split('\n')
+        .filter((l) => l !== '')
+        .map((l) => l.split('\t')[1] ?? '')
+
+      // Non-vacuity first: an empty derivation would pass the assertion below
+      // while proving nothing, which is the BUG-005 shape this suite exists for.
+      expect(paths.length, 'the derivation found no runners, so this proves nothing').toBeGreaterThan(20)
+
+      expect(
+        paths.filter((p) => !p.endsWith('.spec.ts') && !p.endsWith('.spec.tsx')),
+        'these runners are neither *.spec.ts nor *.spec.tsx, so the gate counts what vitest cannot run',
+      ).toEqual([])
+    })
+  })
+})
+
 describe('BUG-005 — THE REAL TREE', () => {
   it('#live every check passes over this checkout, over a non-vacuous suite set', async (ctx) => {
     await scenario('manifest-live', async (s) => {

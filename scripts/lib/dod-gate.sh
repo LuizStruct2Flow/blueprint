@@ -175,21 +175,36 @@ dod_test_roots() {
     printf '%s\n' "${BP_CODE_ROOT:-.}/tests"
     return 0
   fi
-  _dg_count="$(grep -c '^- BP_TEST_ROOTS:' "$_dg_cfg" 2>/dev/null || true)"
+  # "ABSENT" AND "MALFORMED" ARE DIFFERENT ANSWERS (Alexey finding 5). Counting
+  # only the exact form made every near-miss look like no declaration at all, so
+  # an indented bullet, a tab after the dash, a table row and `BP_TEST_ROOTS =`
+  # were each IGNORED — the stage then searched the default tests/ while the
+  # operator's text selected something else. The refusal below never saw them.
+  #
+  # A CANDIDATE is the declaration FORM, not the string: optional indent, an
+  # optional list or table marker, the key, then a separator. Prose that merely
+  # names the key mid-sentence is not a candidate, and must not become one —
+  # templates/project_config_paths.md documents the rule in a bullet reading
+  # "exactly one `BP_TEST_ROOTS` line", and refusing that would block every
+  # project seeded with its own documentation. tests/dod-gate #15f pins it.
+  _dg_cand='^[[:space:]]*([-*+|][[:space:]]*)?BP_TEST_ROOTS[[:space:]]*[:=|]'
+  _dg_count="$(grep -cE "$_dg_cand" "$_dg_cfg" 2>/dev/null || true)"
   [ -n "$_dg_count" ] || _dg_count=0
   if [ "$_dg_count" -eq 0 ]; then
     printf '%s\n' "${BP_CODE_ROOT:-.}/tests"
     return 0
   fi
   if [ "$_dg_count" -gt 1 ]; then
-    echo "project_config_paths.md declares BP_TEST_ROOTS $_dg_count times (more than one)."
+    echo "project_config_paths.md has $_dg_count lines that declare BP_TEST_ROOTS (more than one)."
     echo "Keep exactly one declaration — the gate will not guess which is current."
+    echo "A malformed line counts: it still says which roots were meant."
     return 1
   fi
   _dg_decl="$(sed -n 's/^- BP_TEST_ROOTS: `\([^`]*\)`[[:space:]]*$/\1/p' "$_dg_cfg")"
   if [ -z "$(printf '%s' "$_dg_decl" | tr -d '[:space:]')" ]; then
     echo "the BP_TEST_ROOTS declaration in project_config_paths.md is malformed."
-    echo "Expected one backtick-quoted, space-separated list of directories:"
+    echo "Expected one backtick-quoted, space-separated list of directories,"
+    echo "as a top-level bullet with a single space after the dash and colon:"
     echo '  - BP_TEST_ROOTS: `backend/src frontend/e2e`'
     echo "Refusing rather than defaulting to tests/, which holds the blueprint's suites."
     return 1

@@ -111,7 +111,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { REPO_ROOT, RealStateCanary, scenario, type Scenario } from '../harness/index.js'
 import { feedFixture, type FeedFixture } from '../helpers/feed-fixture.js'
 
 /**
@@ -518,6 +518,60 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
 
         await b.f.expectLine('BBBB')
       })
+    })
+  })
+
+  it('#20 BUG-129: a supervisor restart APPENDS to the feed, it does not truncate it', async () => {
+    await scenario('aab-20', async (s) => {
+      // THE HONEST REPRODUCER, staged rather than asserted about. It runs the real
+      // script, a real second supervisor start, and the REAL canary — the same
+      // class that turns `tests/subagent-feed` #9 red in the push gate when a wake
+      // coincides with a suite run. Nothing real is touched: the canary watches
+      // this fixture's own feed under the label the live one uses.
+      //
+      // The feed's contract is append-only — `tests/harness/canary.ts` is built on
+      // it, and `emit` is the only other writer. `supervise_body` broke it once per
+      // start with `: >"$out"`, so a restart looked exactly like a fixture escape.
+      const f = await feedFixture(s, 'fx')
+
+      await f.withFeed(async () => {
+        await f.expectLine('[agent-activity] feed')
+      })
+
+      // THE FEED NEEDS HISTORY THE RESTART CANNOT REPRODUCE, and this is measured
+      // rather than defensive: without it this case PASSED against the unfixed
+      // script. The fixture is deterministic and fast, so both supervisors emit the
+      // same banner and the same baton line inside the same second — the rewritten
+      // content came out BYTE-IDENTICAL, the prefix check saw nothing, and the
+      // truncation was invisible. Live, the two starts are minutes apart, which is
+      // why the same wipe turns `tests/subagent-feed` #9 red on the founder's host
+      // and turned nothing red here.
+      const HISTORY = 'PRIOR-HISTORY-A-RESTART-CANNOT-REPRODUCE\n'
+      await s.fs.write('fx/logs/agent-activity.log', HISTORY, { append: true })
+
+      const before = await f.read()
+      expect(before, 'the first supervisor wrote nothing, so this case would be vacuous').not.toBe('')
+      expect(before, 'the history marker is what makes the truncation observable').toContain(HISTORY.trim())
+
+      const canary = await RealStateCanary.capture([{ label: 'activity feed', path: f.log }])
+
+      await f.withFeed(async () => {
+        // The condition that holds in BOTH worlds, so the red lands on the canary
+        // rather than on a wait for a line that cannot exist yet: the second
+        // supervisor has touched the feed. Before the fix that is the truncation;
+        // after it, the appended restart banner.
+        await vi.waitFor(
+          async () => {
+            expect(await f.read(), 'the second supervisor never wrote to the feed').not.toBe(before)
+          },
+          { timeout: 8_000, interval: 100 },
+        )
+      })
+
+      // Throws "activity feed was rewritten or truncated, not appended to" while
+      // the wipe is there. A restart must be indistinguishable from any other
+      // append, or every suite running under a live feed is a coin toss.
+      await canary.assertUnchanged()
     })
   })
 

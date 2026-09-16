@@ -941,4 +941,157 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       ).toMatch(/cap|label/i)
     })
   })
+
+  // --- Codex's review of the fix, 2026-09-16 (S2) ---------------------------
+
+  it('#16 two SIMULTANEOUS callers cannot both reclaim one stale slot', async () => {
+    await scenario('sf-16', async (s) => {
+      // #12 proves `mkdir` of a fixed name admits one caller. It says nothing
+      // about RECLAMATION, which was a separate, non-atomic step: select the
+      // stale directories, then remove them. Between those two instants another
+      // hook can replace a selected directory with a FRESH reservation, which
+      // the first caller then deletes — and reserves the same slot itself. Both
+      // return 0 with the identical path, and the cap is undone by the very
+      // sweep that exists to keep it honest.
+      //
+      // The defer dir comes from the PROJECT root (`bp_state_root`), never from
+      // AGENT_STATE_HOME — so it is <repo>/subagent-defer.
+      const f = await deferFixture(s)
+      await s.fs.mkdirp('repo/subagent-defer/slot-0')
+      // Aged well past any whole-minute rounding, so the stale sweep selects it.
+      // `-t` rather than `-d`: BSD touch has no `-d '-10 minutes'`.
+      await s.run('touch', ['-t', '202001010000', join(f.repo, 'subagent-defer', 'slot-0')], {
+        cwd: f.repo,
+      })
+
+      // THE INTERLEAVING IS INSTRUMENTED, THE HOOK IS NOT. The first removal of a
+      // stale slot pauses; every later one runs at once. That makes the race a
+      // schedule rather than a coin toss — the same witness by hand is a flake.
+      const gate = s.workspace.path('rm-gate')
+      const shims = await s.shimDir('repo/shims')
+      await shims.add(
+        'rm',
+        `case "$*" in\n` +
+          `  *subagent-defer*)\n` +
+          `    if [ ! -e ${JSON.stringify(gate)} ]; then\n` +
+          `      : >${JSON.stringify(gate)}\n` +
+          `      sleep 3\n` +
+          `    fi\n` +
+          `    ;;\n` +
+          `esac\n` +
+          `exec /bin/rm "$@"`,
+      )
+
+      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))
+      const env = {
+        ...f.env,
+        AGENT_FEED_LOG: f.log,
+        BP_SUBAGENT_META_WAIT: '10',
+        // ONE slot, so "both reclaimed it" is the only way to get two children.
+        BP_SUBAGENT_DEFER_MAX: '1',
+        PATH: shims.path(),
+      }
+      const call = (id: string) =>
+        s.run('sh', ['-c', `printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, id)], {
+          cwd: f.repo,
+          env,
+        })
+
+      const a = call('aaaa00000000')
+      await vi.waitFor(
+        async () => {
+          if (!(await s.fs.exists('rm-gate'))) {
+            throw new Error(
+              'caller A never reached a removal of the stale slot. If reclamation no ' +
+                'longer runs an external `rm`, this case needs a different pause point — ' +
+                'it must not silently stop being a race.',
+            )
+          }
+        },
+        { timeout: 15_000, interval: 50 },
+      )
+      // B runs while A is held inside its reclamation.
+      const rb = await call('bbbb00000000')
+      expect(rb.code, rb.output).toBe(0)
+      const ra = await a
+      expect(ra.code, ra.output).toBe(0)
+
+      const alive = await children(s, f.repo)
+      expect(alive.length, 'nothing was deferred at all, so this case proves nothing').toBeGreaterThan(0)
+      expect(
+        alive.length,
+        `two callers own one slot — the stale sweep deleted the other's fresh ` +
+          `reservation and took the name for itself:\n${alive.join('\n')}`,
+      ).toBeLessThanOrEqual(1)
+
+      // The cap degrades the LABEL, never the line: both bookends still land.
+      await vi.waitFor(
+        async () => {
+          const n = await f.count('→ dispatched')
+          if (n !== 2) throw new Error(`${n} of 2 bookends have landed`)
+        },
+        { timeout: 40_000, interval: 250 },
+      )
+    })
+  })
+
+  it('#17 a signalled child dies with its slot, rather than outliving the reservation it released', async () => {
+    await scenario('sf-17', async (s) => {
+      // The handler removed the slot on HUP/INT/TERM with no explicit exit, and
+      // a shell RESUMES after such a handler — measured: the child kept running
+      // its full wait with its slot already gone. So the slot was reusable while
+      // its owner was still alive, and cleanup was never a lifetime bound.
+      const f = await deferFixture(s)
+      const r = await s.run(
+        'sh',
+        [
+          '-c',
+          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+          'x',
+          start(s, f, 'abc123def456'),
+        ],
+        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '15' } },
+      )
+      expect(r.code, r.output).toBe(0)
+
+      let pid = ''
+      await vi.waitFor(
+        async () => {
+          const deferred = await children(s, f.repo)
+          if (deferred.length !== 1) {
+            throw new Error(`expected one deferred child, saw ${deferred.length}`)
+          }
+          pid = deferred[0]!.split(' ')[0]!
+        },
+        { timeout: 10_000, interval: 100 },
+      )
+
+      // THE OWNER IS FOLLOWED BY PID, never through the cwd-filtered listing.
+      // The question is whether THIS process is still running, and a helper that
+      // answers "not one of mine" for a process it cannot inspect would answer
+      // "gone" — which is the assertion this case exists to make. Measured: it
+      // does exactly that here, and the first version of this case passed
+      // against a child that was demonstrably still alive.
+      const running = async (): Promise<boolean> =>
+        (
+          await s.run('sh', ['-c', 'kill -0 "$1" 2>/dev/null && echo YES || echo NO', 'x', pid], {
+            cwd: f.repo,
+          })
+        ).stdout.includes('YES')
+
+      expect(await running(), `pid ${pid} was already gone before the signal`).toBe(true)
+      await s.run('kill', ['-TERM', pid], { cwd: f.repo })
+
+      // WELL INSIDE THE 15 s WAIT, so "it is gone" means the signal ended it
+      // rather than the wait expiring on its own.
+      await vi.waitFor(
+        async () => {
+          if (await running()) {
+            throw new Error(`pid ${pid} released its slot and kept running`)
+          }
+        },
+        { timeout: 5_000, interval: 100 },
+      )
+    })
+  })
 })

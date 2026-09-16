@@ -218,7 +218,6 @@ MANAGED_FILES=(
   "scripts/no-chain-guard.sh"
   "scripts/session-resume.sh"
   "scripts/wait-mic.sh"
-  "scripts/new-project.sh"
   "scripts/blueprint"
   "scripts/build-deck.sh"
   "scripts/sonar.sh"

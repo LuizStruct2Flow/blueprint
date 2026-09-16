@@ -581,7 +581,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
   it('#6 substitution-implementing files are exempt from reverse-substitution', async () => {
     await scenario('a2bp-contam-6', async (s) => {
-      // scripts/blueprint and scripts/new-project.sh carry the placeholder tokens
+      // scripts/blueprint and the placeholder libs carry the placeholder tokens
       // as CODE; the CLI already exempts them on the pull side via
       // _should_substitute. The a2bp side must honour the SAME exemption, or
       // back-propagating the CLI corrupts the CLI.
@@ -596,7 +596,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       // of the project's line 2; its extra final line is what "was this filed at
       // all?" reads.
       const f = await fixture(s)
-      const rel = 'scripts/new-project.sh'
+      const rel = 'scripts/blueprint'
       await f.writeBp(
         rel,
         '#!/bin/bash\n' +
@@ -614,7 +614,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
       const r = await f.a2bp(f.proj, [rel])
       const copy = await f.readBp(rel)
-      expect(copy, `scripts/new-project.sh was not filed\n${r.out}`).not.toMatch(/^SENTINEL/m)
+      expect(copy, `scripts/blueprint was not filed\n${r.out}`).not.toMatch(/^SENTINEL/m)
       expect(
         copy,
         'BUG-064: it WAS reverse-substituted — the pull-side _should_substitute exemption is not mirrored on the a2bp side, so back-propagating the CLI would corrupt it',

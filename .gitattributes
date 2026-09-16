@@ -78,6 +78,13 @@ project_config_security.md         export-ignore
 project_config_infra.md            export-ignore
 templates/                         export-ignore
 
+# TASK-021 Stage 0 — bootstrapping is the one thing a derived project never
+# does, so the bootstrapper does not ship. LICENSE names this repo's copyright
+# holder, and a project writes its own. Copies already in projects are offered
+# for retirement by `blueprint pull`, which reads these removals from history.
+scripts/new-project.sh             export-ignore
+LICENSE                            export-ignore
+
 # BUG-028 — blueprint-ONLY machinery must not ship, and the suites that test it
 # must not ship either.
 #

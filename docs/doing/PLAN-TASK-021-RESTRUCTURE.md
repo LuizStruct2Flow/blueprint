@@ -33,13 +33,13 @@ first, and short.
 | 1 | `ROOT_SHIPPED` class and a root CLAUDE.md stub | Moot if Stage 3 is dropped |
 | 2 | `new-project.sh` stops shipping, and `scripts/blueprint` ships | Stands. It is Stage 0(b) |
 | 3 | Split `docs/` by audience | Stands. It is Stage 2, now split by **responsibility** |
-| 4 | `LICENSE` as a template with a `{{COPYRIGHT_HOLDER}}` token | **PROPOSED, pending founder approval: ship no LICENSE.** A second token would need the placeholder guard, the a2bp restore, a bootstrap prompt and a test default, all for a file the owner writes once. Both reviewers agree |
+| 4 | `LICENSE` as a template with a `{{COPYRIGHT_HOLDER}}` token | **APPROVED by the founder 2026-09-16: ship no LICENSE.** A second token would need the placeholder guard, the a2bp restore, a bootstrap prompt and a test default, all for a file the owner writes once. Both reviewers agree |
 | 5 | Delete `scripts/accept-bug-022.sh` | Stands. It is Stage 0(d) |
 | 6 | `docs/assets/brand/` resolved by #3 | Stands. It is Stage 2 |
-| 7 | `MANAGED_FILES` derived from `scaffolding/` | **PROPOSED, pending founder approval: derive it from the export archive instead.** That keeps the whole value, with no hand-kept array and nothing shipped unmanaged, and needs no file moves. Both reviewers agree |
+| 7 | `MANAGED_FILES` derived from `scaffolding/` | **APPROVED by the founder 2026-09-16: derive it from the export archive instead.** That keeps the whole value, with no hand-kept array and nothing shipped unmanaged, and needs no file moves. Both reviewers agree |
 | 8 | Stage A′ per-path resolver | Done |
-| 9 | Retire files that stop shipping | **PROPOSED, pending founder approval: the corrected design in §4.2** |
-| — | Stage 3, the physical `scaffolding/` + `forge/` move | **PROPOSED, pending founder approval: drop it (§5).** Both reviewers agree |
+| 9 | Retire files that stop shipping | **APPROVED by the founder 2026-09-16: the corrected design in §4.2** |
+| — | Stage 3, the physical `scaffolding/` + `forge/` move | **APPROVED by the founder 2026-09-16: drop it (§5).** Both reviewers agree |
 
 ## 3. Stage 0 — defect fixes, no moves
 
@@ -152,7 +152,7 @@ it, with no classification of prose.
   root `CLAUDE.md` and `README.md` against the bootstrapped tree. `bootstrap-gate`
   #2/#3 still cover `docs/`.
 
-### Stage 3 — the physical move: PROPOSED to drop, pending founder approval
+### Stage 3 — the physical move: DROPPED, approved by the founder 2026-09-16
 
 It would take about 180 path moves and link rewrites. It would also need
 permanent source-to-project coordinate translation in sync and a2bp, a prefix in
@@ -202,7 +202,4 @@ the end.
 
 ## 9. Founder questions
 
-1. **Decision 4:** ship no LICENSE, and drop the README badge?
-2. **Decision 7:** derive the managed set from the export archive, not a `scaffolding/` directory?
-3. **Decision 9:** retire files from export removals in history, with the content proof, and no manifest?
-4. **Stage 3:** drop the physical move, record the replacement in TARGET §2 and the backlog, and remove the A′ scaffolding branches and `tests/blueprint-relocation`?
+All four answered **yes** by the founder on 2026-09-16: ship no LICENSE, derive the managed set from the export archive, retire files from export removals in history with the content proof, and drop the physical move.

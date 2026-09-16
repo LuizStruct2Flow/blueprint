@@ -244,6 +244,34 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     vacuity the batch API exists to catch. Two coherent states: align execution up to five
     extensions (and decide how a top-level runner, which belongs to no suite, is named in the
     batch), or narrow the gate down to the two that execute, contradicting the rule just set.
+  - **TASK-046 done** (Christian, `86f3226`, `a5bd05a`): `CLAUDE.md` imports
+    `@claude.internal.md` and says what it is — the project's own file, never seeded, never
+    pulled, tracked or not at the project's choice, and read by nothing in the framework.
+    Nothing is seeded (zero `claude.internal` entries in the bootstrap archive).
+    `templates/` seeds no `CLAUDE.md`, so there was no second list to change. **The import list
+    had NO test at all** before `#3c`, which now pins against a real bootstrap that the import
+    arrives and the file does not.
+  - **TASK-044 finding 7 fixed** (`f8a8503`, `e700cf5`): `skipNote` collapses whitespace runs, so
+    a notice is always one physical line and the grep's assumption is now true. Fixed at
+    emission, not capture — a capture-side fix would re-guess where a notice ends, which is the
+    original defect. `#8c` derives its bytes from the real helper.
+  - **`.gitignore` EVIDENCE for the founder (Christian), no change made:**
+    - **It is project-owned:** not in `MANAGED_FILES`, but it IS in the bootstrap archive. So a
+      blueprint edit reaches **new projects only** — storm2flow and every existing project must
+      edit their own copy by hand. Any change lands as a blueprint commit PLUS an instruction.
+    - **None of the five generic files needs excluding:** `CLAUDE.md`, `AGENTS.md`,
+      `docs/DoD.md`, `docs/PUBLISHING.md` are managed and `AGENT_SIGNAL.md` is generic protocol —
+      managed means identical in every project by construction, project specifics being
+      forbidden in them. What they reveal is the methodology, a blueprint-level decision.
+    - **`docs/doing/HANDOVER.md` is NOT in that class:** seeded from `templates/`, project-owned,
+      live work notes — real project content. The block's own rule already says lifecycle
+      artefacts under `docs/` stay public, so excluding it is already inconsistent.
+    - **`docs/PUBLISHING.md` must travel in the same commit:** it encodes the exclusions in §0,
+      §1b's preflight (which greps the index and prints PRIVATE FILES STILL TRACKED) and
+      §3a/§3b's untrack commands. Unignoring without it makes the runbook fail a project for
+      tracking its own generic docs.
+    - **Do not sweep up `project_config_*.md`** — A-27 put the threat model and infra account IDs
+      there deliberately.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

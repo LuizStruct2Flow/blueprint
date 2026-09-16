@@ -69,11 +69,38 @@ dod_items_in_push() {
     | sort -u
 }
 
-# dod_find_row ITEM  →  prints the lifecycle folder holding its row, or nothing.
+# dod_find_row ITEM  →  prints where the item is recorded, or nothing.
+#
+# One of the four lifecycle folders, or `cancelled` — which is NOT a folder, and
+# is why this prints a state rather than a path.
 #
 # Numeric, not textual: commits say BUG#19 and rows say **BUG-019**, so a string
 # compare would silently match nothing and every check above it would pass
 # vacuously. Zero-padding is stripped from both sides.
+#
+# BUG-130 — CANCELLATION IS THE THIRD STATE. docs/DoD.md §1 says an item leaves
+# backlog/ by promotion or by CANCELLATION: delete the row, leave a one-line
+# pointer in docs/config/findings.md. So a cancelled item HAS an item — recorded
+# exactly where the rule says to record it — while having no row anywhere. The
+# commit performing the cancellation deletes the row and names the item in its
+# subject, so reading only the row files refused the very push that obeyed the
+# rule (TASK-023, closed by F-003, blocked a 161-commit push).
+#
+# KEYED ON THE ITEM NUMBER, normalised exactly as rows are, matched ANYWHERE in
+# the register. Deliberately not on prose: F-003 writes `**Closes TASK-023**`
+# and F-004 writes `absorbed by TASK-048` with the cancelled item only in its
+# heading, so any "Closes"-shaped pattern would match one and refuse the other —
+# re-breaking this bug for the next entry written in the other style.
+#
+# THE COST, stated rather than discovered later: an item merely DISCUSSED in the
+# register is exempted from §1b rule 1. That is accepted because findings.md is
+# a curated register — a number appears there only because someone wrote it
+# there deliberately — and because the alternative is a prose match that is
+# wrong half the time. Rule 1's teeth are unchanged where they matter: an item
+# with no record in any row file AND no mention in the register still fails.
+#
+# -a for the reason spelled out in dod_stage_bugtests: one NUL byte makes grep
+# call a file binary and print nothing, which is indistinguishable from "absent".
 dod_find_row() {
   _dg_type="${1%%-*}"
   _dg_num="${1##*-}"
@@ -87,6 +114,11 @@ dod_find_row() {
       fi
     done
   done
+  if [ -f docs/config/findings.md ] &&
+    grep -qaE "(^|[^A-Za-z0-9])${_dg_type}-0*${_dg_num}([^0-9]|$)" docs/config/findings.md; then
+    printf 'cancelled\n'
+    return 0
+  fi
   return 1
 }
 
@@ -106,10 +138,19 @@ dod_stage_rows() {
   fi
   _dg_missing=""
   _dg_elsewhere=""
+  _dg_cancelled=""
   for _dg_i in $_dg_items; do
     _dg_where="$(dod_find_row "$_dg_i")" || { _dg_missing="$_dg_missing $_dg_i"; continue; }
-    [ "$_dg_where" = doing ] || _dg_elsewhere="$_dg_elsewhere $_dg_i($_dg_where)"
+    case "$_dg_where" in
+      doing) ;;
+      # BUG-130: reported like a row outside doing/ — a note, not a failure —
+      # but with its own wording, because "rows outside doing/: TASK-23" would
+      # name a row that by definition no longer exists.
+      cancelled) _dg_cancelled="$_dg_cancelled $_dg_i" ;;
+      *) _dg_elsewhere="$_dg_elsewhere $_dg_i($_dg_where)" ;;
+    esac
   done
+  [ -n "$_dg_cancelled" ] && pipe_note "cancelled, recorded in docs/config/findings.md:$_dg_cancelled"
   [ -n "$_dg_elsewhere" ] && pipe_note "rows outside doing/:$_dg_elsewhere"
   if [ -n "$_dg_missing" ]; then
     echo "These items have NO backlog row anywhere:$_dg_missing"
@@ -340,10 +381,16 @@ EOF
     # A bug PARKED in backlog/ has no fix yet, so it can have no regression
     # test — the test arrives with the fix. Demanding one here would make
     # FILING a bug impossible, which trains people not to file them.
-    if [ "$(dod_find_row "BUG-$_dg_n" 2>/dev/null)" = backlog ]; then
-      _dg_parked="$_dg_parked BUG-$_dg_n"
-      continue
-    fi
+    # BUG-130 extends this to `cancelled` for the identical reason: a cancelled
+    # bug has no fix either, so it can carry no test naming one. Teaching only
+    # dod_stage_rows about cancellation would have moved the refusal one stage
+    # down rather than removing it.
+    case "$(dod_find_row "BUG-$_dg_n" 2>/dev/null)" in
+      backlog | cancelled)
+        _dg_parked="$_dg_parked BUG-$_dg_n"
+        continue
+        ;;
+    esac
     # -a is load-bearing, not tidiness. A file containing a NUL byte is
     # classified BINARY by grep, which then prints NOTHING for it: no match,
     # no error, and an exit status identical to "the pattern is absent". One

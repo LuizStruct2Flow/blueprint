@@ -448,6 +448,30 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     })
   })
 
+  it('#17 TASK-047: what the gate COUNTS and what vitest RUNS are one set', async () => {
+    // THE INVARIANT, ASSERTED INSTEAD OF RE-DERIVED BY HAND. It has now been
+    // restated three times by three people — Alexey found the gate accepting
+    // five extensions while vitest ran one, the founder collapsed it, and the
+    // coordinator widened it by `.tsx` — and each time the two sides were
+    // checked by reading them. A file accepted as evidence but never executed
+    // is a green standing in for a test; a file executed but not accepted
+    // silently fails to satisfy the gate. Either drift is a defect, and this is
+    // the only case that can see it.
+    const lib = await readFile(join(REPO_ROOT, LIB), 'utf8')
+    const config = await readFile(join(REPO_ROOT, 'tests/vitest.config.ts'), 'utf8')
+
+    const counted = [...lib.matchAll(/-name '\*(\.spec\.tsx?)'/g)].map((m) => m[1]).sort()
+    const executed = [...config.matchAll(/'\*\*\/\*(\.spec\.tsx?)'/g)].map((m) => m[1]).sort()
+
+    expect(counted, `${LIB} accepts no *.spec.ts* evidence at all — the extraction below is blind`).not.toEqual([])
+    expect(
+      counted,
+      `the DoD gate counts ${JSON.stringify(counted)} but vitest runs ${JSON.stringify(executed)}.\n` +
+        'Whatever is accepted as a regression test must be a file the shipped runner\n' +
+        'executes, or the gate certifies bugs with tests that never ran (TASK-047).',
+    ).toEqual(executed)
+  })
+
   it('#8b TASK-039: the gate reads subjects with the same rule the commit-msg hook applies', async () => {
     await scenario('dod-gate-8b', async (s) => {
       // `BUG#41:no space` is refused by commit_subject_ok, so the commit-msg hook
@@ -750,6 +774,22 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   }
 
+  it('#16b TASK-047: a *.spec.tsx IS evidence — a component test is the same TypeScript spec', async () => {
+    await scenario('dod-gate-16b', async (s) => {
+      // Coordinator ruling, 2026-09-16: `.spec.ts` and `.spec.tsx` are ONE
+      // convention, not an exception to the founder's rule. `.tsx` is
+      // TypeScript, and a React project cannot write a component test without
+      // it — so refusing it would not enforce "spec-driven TS tests", it would
+      // just make component tests uncountable. The invariant is unchanged and
+      // #17 holds it: whatever counts here must also be what vitest runs.
+      const f = await derivedFix(s, 'r16b', 'tests')
+      await s.fs.write(join(f.dir, 'tests/widget.spec.tsx'), "it('BUG-042: renders', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a component spec did not count as a regression test:\n${r.output}`).toBe(0)
+    })
+  })
+
   it('#13b FOUNDER RULE: a blueprint suite in a SUBDIRECTORY of tests/ still does not count', async () => {
     await scenario('dod-gate-13b', async (s) => {
       // The other half of the rule, and what keeps it safe: depth is the whole
@@ -843,7 +883,7 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     // the bug-test stage, because neither is evidence any more.
     const entries = await readdir(join(REPO_ROOT, 'tests'), { withFileTypes: true })
     const runners = entries
-      .filter((e) => e.isFile() && e.name.endsWith('.spec.ts'))
+      .filter((e) => e.isFile() && /\.spec\.tsx?$/.test(e.name))
       .map((e) => e.name)
       .sort()
 

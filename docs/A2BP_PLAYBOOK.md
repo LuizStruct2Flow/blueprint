@@ -82,8 +82,9 @@ request is filed (A-07 — `scripts/lib/contamination.sh`). It does two things:
    should reach projects, whether `MANAGED_FILES` changes with it. Before
    filing, `a2bp` already refused `.git` paths, symlinks and paths under them,
    a root `project_config_*.md` in any letter case, unmanaged files the project
-   gitignores, files named like secrets, files `gitleaks` flags (unless
-   `gitleaks` was not installed, which it warns about), and new paths that
+   gitignores, files named like secrets, files `gitleaks` flags — and, since
+   BUG-127, it refuses outright when `gitleaks` is missing or cannot run, rather
+   than filing bytes nothing scanned — and new paths that
    differ from a blueprint path only by letter case.
 2. **Contamination scan.** Host home paths, literal per-project state dirs,
    and any project name that survived step 1 **stop the request** and exit

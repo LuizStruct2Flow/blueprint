@@ -211,17 +211,27 @@ Every bug — minor or major — follows this:
    - BP_TEST_ROOTS: `backend/src frontend/e2e`
    ```
 
-   The list is space-separated and relative to the project root. With no
-   declaration, the gate searches `tests/`. Two rules keep the match honest:
-   - **Outside the blueprint, `tests/` never counts.** There it holds the
-     suites the blueprint ships, and they name the *blueprint's* bug numbers.
-     A blueprint suite that mentions `BUG-042` is not your BUG-042's test.
-   - **A root that is, or contains, `docs/`, `.git`, or that `tests/` is
-     refused.** For example, `docs/` holds the bug's own backlog row, so
-     declaring `.` would pass every bug.
+   The list is literal and relative to the project root, and exactly one
+   `BP_TEST_ROOTS` line may exist. With no declaration, the gate searches
+   `tests/`. The rules that keep the match honest:
+   - **`docs/`, `.git/`, `scripts/` and `.githooks/` never count**, and neither
+     does a root that contains one or sits inside one. `docs/` holds the bug's
+     own backlog row, so declaring `.` would pass every bug; the other two are
+     blueprint-managed code naming *blueprint* bug numbers.
+   - **Outside the blueprint, only the TOP LEVEL of `tests/` counts.** A runner
+     sitting directly in `tests/` — `tests/own.snap.test.ts`, the snapshot
+     layout — is the project's own, because the blueprint ships no runner
+     there. Everything in a subdirectory is a shipped suite, so `tests/e2e`
+     does **not** count in a derived project: put E2E tests in a root of their
+     own and declare it.
+   - **A root must resolve inside the project.** `../elsewhere`, an absolute
+     path outside it, and a symlink pointing away are refused. Roots resolve
+     physically, so a symlink is judged by the directory it reaches.
+   - **A malformed, duplicated or glob-bearing declaration is refused**, not
+     guessed at and not defaulted — defaulting would search the blueprint's
+     own suites.
 
-   A declared root strictly inside `tests/`, such as `tests/e2e`, is the
-   project's own and is searched. A parked bug in `backlog/` needs no test yet.
+   A parked bug in `backlog/` needs no test yet.
 4. **No recurring bugs**: if it's fixed, it stays fixed. A bug coming
    back means the regression test was wrong, not "oh well, refile it".
 

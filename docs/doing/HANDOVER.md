@@ -179,6 +179,9 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
   - Jesko: `.scratch/brief-jesko-bug121-recheck2.md`
 
   Dispatch the three new-work reviews first. Codex quota ran out after ~3 runs last time.
+  - **02:12 attempt: all three were refused on the spot** — "usage limit … try again at 3:22 AM".
+    The 02:10 reset the earlier message named was a different window. **Dispatch ONE review at a
+    time** from now on, so one window is not spent on refusals. Next attempt 03:24.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

@@ -683,13 +683,39 @@ BP_SETTINGS_MERGE='def uniq: reduce .[] as $x ([]; if any(.[]; . == $x) then . e
                  | uniq)
       else . end)'
 
+# The four keys a project file may carry. Named once: the proposal below must
+# emit only these, because BP_SETTINGS_SHAPE accepts only these. A proposal
+# holding anything else is a file pull tells the operator to write and then
+# rejects on the next run (Alexey's review, finding 5).
+BP_SETTINGS_KEYS='["allow", "ask", "deny", "additionalDirectories"]'
+
 # .[0] the blueprint's settings, .[1] the project's settings.json. The project's
 # permission entries the blueprint does not ship, shaped as a project file, or
-# null when there are none.
-BP_SETTINGS_EXTRA='(.[0].permissions // {}) as $b
-  | [(.[1].permissions // {}) | to_entries[] | select(.value | type == "array")
-     | {key, value: (.value - ($b[.key] // []))} | select(.value != [])]
+# null when there are none. Restricted to the supported keys and to string
+# elements, so every proposal this prints satisfies BP_SETTINGS_SHAPE.
+BP_SETTINGS_EXTRA="$BP_SETTINGS_KEYS"' as $keys
+  | (.[0].permissions // {}) as $b | (.[1].permissions // {}) as $p
+  | [ $keys[] | . as $k
+      | {key: $k, value: (if ($p[$k] | type) == "array"
+                          then ($p[$k] | map(select(type == "string"))) - ($b[$k] // [])
+                          else [] end)}
+      | select(.value != []) ]
   | if . == [] then null else {permissions: from_entries} end'
+
+# What the project file CANNOT carry, named rather than silently dropped: a
+# permissions key that is neither one of the four nor in the blueprint (where the
+# blueprint has it, pull lands the blueprint's value and nothing is lost), and a
+# supported key whose value is not a list of strings. Each `. as $k` binding is
+# load-bearing — after a `|` the `.` is the piped value, not the key, and the
+# first version of this silently matched nothing at all.
+BP_SETTINGS_UNSUPPORTED="$BP_SETTINGS_KEYS"' as $keys
+  | (.[0].permissions // {}) as $b | (.[1].permissions // {}) as $p
+  | [ ($p | keys_unsorted[] | . as $k
+       | select(($keys | index($k)) == null) | select(($b | has($k)) | not) | $k),
+      ($keys[] | . as $k | select($p | has($k))
+       | select(if ($p[$k] | type) != "array" then true
+                else ($p[$k] | any(.[]; type != "string")) end)) ]
+  | unique | map("permissions." + .) | join(", ")'
 
 # _bp_settings_layer BP_JSON OUT — OUT receives the blueprint's settings with the
 # project layer applied. Returns 1 with BP_PP_WHY (and maybe BP_PP_DETAIL) set
@@ -703,9 +729,19 @@ BP_SETTINGS_EXTRA='(.[0].permissions // {}) as $b
 # reviewed file, once: pull prints the entries as a ready project file, and the
 # file's existence (even `{}`) is what ends the check.
 _bp_settings_layer() {
-  local bp="$1" out="$2" proposal
+  local bp="$1" out="$2" proposal unsupported
   if ! command -v jq >/dev/null 2>&1; then
     BP_PP_WHY="jq is not on PATH, so pull cannot keep this project's permission rules (bash scripts/install-toolchain.sh)"
+    return 1
+  fi
+  # UNCONDITIONAL, and before every branch — including the plain copy onto a
+  # project that has no settings.json yet. That path parsed nothing at all, so
+  # blueprint bytes that are not JSON landed in a project with nothing
+  # downstream to catch them (Alexey's review, finding 4). ONE object, not a
+  # stream: two concatenated objects are not a settings file either, and `jq .`
+  # would accept them silently.
+  if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "$bp" >/dev/null 2>&1; then
+    BP_PP_WHY="the blueprint's .claude/settings.json is not a single JSON object, so there is nothing safe to land"
     return 1
   fi
   if [ -f "$BP_SETTINGS_LAYER" ]; then
@@ -714,21 +750,38 @@ _bp_settings_layer() {
       return 1
     fi
     if ! jq -s "$BP_SETTINGS_MERGE" "$bp" "$BP_SETTINGS_LAYER" >"$out" 2>/dev/null; then
-      BP_PP_WHY="the blueprint's settings.json is not valid JSON, so $BP_SETTINGS_LAYER cannot be merged into it"
+      BP_PP_WHY="$BP_SETTINGS_LAYER could not be merged into the blueprint's settings.json"
       return 1
     fi
     return 0
   fi
   if [ -f .claude/settings.json ]; then
     if ! proposal=$(jq -s "$BP_SETTINGS_EXTRA" "$bp" .claude/settings.json 2>/dev/null); then
-      BP_PP_WHY="this project's settings.json (or the blueprint's) is not valid JSON"
+      BP_PP_WHY="this project's .claude/settings.json is not valid JSON, so its own rules cannot be told from the blueprint's"
       return 1
     fi
-    if [ "$proposal" != null ]; then
-      BP_PP_WHY="it holds permission rules the blueprint does not ship, and there is no $BP_SETTINGS_LAYER to keep them (run 'blueprint pull .claude/settings.json' to see them)"
-      BP_PP_DETAIL="      Save the entries that are this project's own as $BP_SETTINGS_LAYER, then pull again.
-      Delete any the blueprint removed on purpose; if none are yours, write {}.
+    unsupported=$(jq -r -s "$BP_SETTINGS_UNSUPPORTED" "$bp" .claude/settings.json 2>/dev/null) || unsupported=""
+    # Either one refuses. A project file cannot carry the unsupported keys, so
+    # saying nothing would replace them with the blueprint's values silently —
+    # the same "looks kept and is not" failure the shape check exists to stop.
+    if [ "$proposal" != null ] || [ -n "$unsupported" ]; then
+      BP_PP_WHY="this project's settings.json carries permission rules of its own, and there is no $BP_SETTINGS_LAYER to keep them (run 'blueprint pull .claude/settings.json' to see them)"
+      BP_PP_DETAIL=""
+      if [ "$proposal" != null ]; then
+        # PERMISSION LISTS ONLY, and the wording says so: this proposal is the
+        # whole of what a project file can hold, not a migration of settings.json.
+        BP_PP_DETAIL="      Save the permission rules that are this project's own as $BP_SETTINGS_LAYER,
+      then pull again. Delete any the blueprint removed on purpose; if none are
+      yours, write {}. A project file carries permission lists and nothing else:
 $(printf '%s\n' "$proposal" | sed 's/^/        /')"
+      fi
+      if [ -n "$unsupported" ]; then
+        BP_PP_DETAIL="${BP_PP_DETAIL:+$BP_PP_DETAIL
+}      A project file CANNOT carry these, so a pull replaces them with the
+      blueprint's: $unsupported
+      Keep them in .claude/settings.local.json (host-only), or propose them to
+      the blueprint; then remove them from settings.json and pull again."
+      fi
       return 1
     fi
   fi

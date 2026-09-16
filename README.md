@@ -350,10 +350,13 @@ it. Current contents:
   (BUG-029). The regression suites guard blueprint-managed machinery your
   project runs, so they have to move forward with it. The blueprint's own
   TypeScript harness manifest lives here too and is `export-ignore`d, so it
-  reaches no project until the migration ships it. Sync here is **additive
-  only** — files the blueprint ships are
-  created and updated, and nothing is ever deleted, because the project has no
-  way to tell "the blueprint dropped this" from "we wrote this"
+  reaches no project until the migration ships it. Files the blueprint ships
+  are created and updated
+- **Retirement** — a full `blueprint pull` offers to delete a file the
+  blueprint used to ship and no longer does, but only when your copy is
+  byte-identical to a version it shipped. An edited copy is reported as yours
+  and kept. The candidates come from the blueprint's history, so the order you
+  pulled in does not matter
 - **`.githooks/`:** `pre-push`, `commit-msg`,
   `pre-push-project.example`, and `pre-push-project` **between its
   `BLUEPRINT:BEGIN`/`END` markers** (it wires the suites, so it must travel

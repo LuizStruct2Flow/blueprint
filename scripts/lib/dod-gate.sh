@@ -155,13 +155,21 @@ dod_stage_rows() {
 # (`tests/*.snap.spec.ts`) without opening the suites one level down, which is
 # where every shipped suite lives. `tests/e2e` therefore still does not count.
 #
-# ONE EXTENSION, AND IT IS THE ONE THAT RUNS (TASK-047; founder, 2026-09-16:
+# SPEC-DRIVEN TYPESCRIPT, AND IT IS WHAT RUNS (TASK-047; founder, 2026-09-16:
 # "migrate the tests to be spec driven ts tests, we don't need exceptions").
-# WHAT THIS STAGE COUNTS AND WHAT VITEST EXECUTES ARE ONE SET: tests/vitest.config.ts
-# includes `**/*.spec.ts` and nothing else. Accepting `*.test.ts` or a `.js` form
-# would certify a bug with a file the runner never runs — a green standing in for
-# a test, which is the failure this stage exists to prevent. Alexey found exactly
-# that: the snapshot the depth rule blessed was evidence and was never executed.
+# WHAT THIS STAGE COUNTS AND WHAT VITEST EXECUTES ARE ONE SET: `*.spec.ts` and
+# `*.spec.tsx`, matched here and included by tests/vitest.config.ts. Accepting
+# `*.test.ts` or a `.js` form would certify a bug with a file the runner never
+# runs — a green standing in for a test, which is the failure this stage exists
+# to prevent. Alexey found exactly that: the snapshot the depth rule blessed was
+# evidence and was never executed.
+#
+# `.tsx` IS NOT AN EXCEPTION TO THAT RULE, it is the same TypeScript spec with
+# JSX syntax (coordinator ruling, 2026-09-16). A React project cannot write a
+# component test without it, so excluding it would not enforce spec-driven tests
+# — it would make component tests uncountable while they ran perfectly well.
+# tests/dod-gate #17 asserts the two sides stay one set, because this invariant
+# has now been restated three times and checked by reading every time.
 #
 # THE RULE RESTS ON A FACT ABOUT THIS REPO, so the fact is asserted rather than
 # assumed: tests/dod-gate #14 fails the blueprint's own push if a runner ever
@@ -353,7 +361,8 @@ EOF
       if [ "$_dg_mode" = shallow ]; then
         # -maxdepth 1 IS the guarantee. One level down is where every shipped
         # suite lives, so this must never become a recursive search.
-        if [ -n "$(find "$_dg_r" -maxdepth 1 -type f -name '*.spec.ts' \
+        if [ -n "$(find "$_dg_r" -maxdepth 1 -type f \
+                     \( -name '*.spec.ts' -o -name '*.spec.tsx' \) \
                      -exec grep -laE "BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
           _dg_hit=1
           break

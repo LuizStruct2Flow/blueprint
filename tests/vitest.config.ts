@@ -19,7 +19,13 @@ import { defineConfig } from 'vitest/config'
 // hazards with better syntax (PLAN-TASK-018 §4.2).
 export default defineConfig({
   test: {
-    include: ['**/*.spec.ts'],
+    // TASK-047 — the evidence set and the run set are ONE SET. `scripts/lib/
+    // dod-gate.sh` counts a `*.spec.ts` / `*.spec.tsx` as a regression test, so
+    // both must be executed here: a file the gate accepts but vitest never runs
+    // is a green standing in for a test. `tests/dod-gate` #17 fails if these two
+    // lists drift apart. `.tsx` costs nothing in this repo (it has no JSX) and
+    // is what stops a React project's component test counting without running.
+    include: ['**/*.spec.ts', '**/*.spec.tsx'],
 
     // Forks, not threads: these suites spawn real processes and mutate real
     // environment variables. Worker threads share a process and therefore share

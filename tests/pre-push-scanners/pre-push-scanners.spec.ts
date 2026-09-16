@@ -548,28 +548,40 @@ describe('TASK-040 — the IaC stages find infrastructure/ as well as infra/', (
       await s.fs.mkdirp('repo/infrastructure/.terraform')
       await s.fs.write('repo/infrastructure/charts/demo/Chart.yaml', 'name: demo\n')
 
+      // Each shim records its working directory AND its arguments, because the
+      // three stages address the tree differently: cdk and terraform `cd` into
+      // it, while helm stays at the repo root and passes the chart path.
       const logs: Record<string, string> = {}
       for (const tool of ['cdk', 'terraform', 'helm']) {
-        logs[tool] = s.workspace.path(`${tool}-cwd`)
-        await f.shims.add(tool, `pwd >>${JSON.stringify(logs[tool])}\nexit 0`)
+        logs[tool] = s.workspace.path(`${tool}-log`)
+        await f.shims.add(
+          tool,
+          `pwd >>${JSON.stringify(logs[tool])}\nprintf '%s\\n' "$@" >>${JSON.stringify(logs[tool])}\nexit 0`,
+        )
       }
+      const logOf = async (tool: string): Promise<string> => readFile(logs[tool] as string, 'utf8')
 
       const r = await f.runHook()
 
       expect(r.code, `the gate failed on a valid mixed layout\n${r.output}`).toBe(0)
       for (const tool of ['cdk', 'terraform', 'helm']) {
         expect(
-          await s.fs.exists(`${tool}-cwd`),
+          await s.fs.exists(`${tool}-log`),
           `${tool} never ran: an empty infra/ hid infrastructure/\n${r.output}`,
         ).toBe(true)
-        expect(
-          (await readFile(logs[tool] as string, 'utf8')).trim().split('\n'),
-          `${tool} ran outside infrastructure/`,
-        ).not.toContain(join(f.dir, 'infra'))
-        expect((await readFile(logs[tool] as string, 'utf8')).trim(), `${tool} ran outside infrastructure/`).toMatch(
-          /\/infrastructure$/m,
+        expect((await logOf(tool)).split('\n'), `${tool} ran against the empty infra/`).not.toContain(
+          join(f.dir, 'infra'),
         )
       }
+      // cdk and terraform run INSIDE the tree.
+      for (const tool of ['cdk', 'terraform']) {
+        expect((await logOf(tool)).trim(), `${tool} ran outside infrastructure/`).toMatch(/\/infrastructure$/m)
+      }
+      // helm lints from the repo root, naming the chart — the working directories
+      // Alex confirmed as correct, so this asserts the argument instead.
+      expect(await logOf('helm'), 'helm linted a chart outside infrastructure/').toMatch(
+        /infrastructure\/charts\/demo/,
+      )
     })
   })
 })

@@ -714,13 +714,20 @@ fi
 # tool is installed. Missing tool prints a hint and skips — CI re-runs as
 # the backstop. Same UX pattern as the security gate above.
 
-# The IaC tree is infra/ or infrastructure/, resolved once for all three recipes.
-# ponytail: first match wins; a project with both only gets infra/ checked.
-_iac=""
-for _d in infra infrastructure; do
-  if [ -d "$_d" ]; then _iac="$_d"; break; fi
-done
-
+# The IaC tree is infra/ or infrastructure/, and BOTH are checked.
+#
+# TASK-040. Detection used to take the first that EXISTED and stop, before asking
+# whether it held a recipe. So an empty infra/ beside a populated infrastructure/
+# — cdk.json, main.tf, .terraform/, charts/ — ran no CDK, no Terraform and no
+# Helm, exited 0, and printed no skip either: the gate said PASSED over an IaC
+# tree it had never looked at. A stray empty directory is an ordinary accident,
+# and it silently disabled the whole section.
+#
+# Checking both is preferred over refusing the ambiguous layout: blocking a push
+# because an empty directory exists punishes a project for a naming guess, while
+# reading both finds the recipes wherever they actually live. Each stage names
+# the directory it ran in, so a project carrying two trees gets two readable
+# stage lines rather than two identical ones.
 _st_cdk(){
   ( cd "$_iac" && cdk synth --quiet >/dev/null ) || {
     echo "❌ cdk synth failed. Fix the IaC errors before pushing."
@@ -749,34 +756,42 @@ _st_helm(){
   done
 }
 
-if [ -n "$_iac" ]; then
+# `_iac` is the LOOP variable, and the stage functions above read it when they
+# run, which is inside this loop. Each existing tree is examined on its own.
+_iac_found=0
+for _iac in infra infrastructure; do
+  [ -d "$_iac" ] || continue
+  _iac_found=1
+
   # Recipe A — CDK (TypeScript): detect by <iac>/cdk.json
   if [ -f "$_iac/cdk.json" ]; then
     if command -v cdk >/dev/null 2>&1; then
-      pipe_stage "IaC synth · cdk" _st_cdk
+      pipe_stage "IaC synth · cdk · $_iac" _st_cdk
     else
-      pipe_skip "IaC synth · cdk" "cdk not installed (bash scripts/install-toolchain.sh --infra) — CI will catch it"
+      pipe_skip "IaC synth · cdk · $_iac" "cdk not installed (bash scripts/install-toolchain.sh --infra) — CI will catch it"
     fi
   fi
 
   # Recipe B — Terraform: detect by any <iac>/**/*.tf
   if ls "$_iac"/**/*.tf >/dev/null 2>&1 || ls "$_iac"/*.tf >/dev/null 2>&1; then
     if command -v terraform >/dev/null 2>&1; then
-      pipe_stage "IaC validate · terraform" _st_terraform
+      pipe_stage "IaC validate · terraform · $_iac" _st_terraform
     else
-      pipe_skip "IaC validate · terraform" "terraform not installed (bash scripts/install-toolchain.sh --infra) — CI will catch it"
+      pipe_skip "IaC validate · terraform · $_iac" "terraform not installed (bash scripts/install-toolchain.sh --infra) — CI will catch it"
     fi
   fi
 
   # Recipe C — Helm charts: detect by <iac>/charts/*/Chart.yaml
   if ls "$_iac"/charts/*/Chart.yaml >/dev/null 2>&1; then
     if command -v helm >/dev/null 2>&1; then
-      pipe_stage "IaC lint · helm" _st_helm
+      pipe_stage "IaC lint · helm · $_iac" _st_helm
     else
-      pipe_skip "IaC lint · helm" "helm not installed (bash scripts/install-toolchain.sh --infra) — CI will catch it"
+      pipe_skip "IaC lint · helm · $_iac" "helm not installed (bash scripts/install-toolchain.sh --infra) — CI will catch it"
     fi
   fi
-else
+done
+
+if [ "$_iac_found" = "0" ]; then
   pipe_skip "IaC validate" "no infra/ or infrastructure/ directory — $_pp_layout_hint"
 fi
 

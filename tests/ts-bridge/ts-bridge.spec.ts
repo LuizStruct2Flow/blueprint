@@ -188,13 +188,13 @@
  *   failed with `sh_lint_stage: not found`, and #7 found no step.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { FORBIDDEN_ENV, UNPREFIXED_FORBIDDEN, isForbiddenAmbient } from '../harness/env.js'
 import { liveCmds } from '../manifest/manifest.js'
-import { notGithubActions, skipVisibly } from '../helpers/project-config.js'
+import { notGithubActions, skipNote, skipVisibly } from '../helpers/project-config.js'
 import { parseDocument } from 'yaml'
 
 /**
@@ -452,6 +452,36 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
       for (const skip of skips) {
         expect(r.output, `a skip notice was dropped behind the canary notes\n${r.output}`).toContain(skip)
       }
+    })
+  })
+
+  it('#8c a notice whose title or reason contains a newline reaches the gate whole', async () => {
+    // THE BYTES COME FROM THE REAL HELPER, not from a restatement of its format.
+    // What the gate must preserve is whatever skipNote actually emits, so a
+    // change to that format cannot leave this case passing over the old one.
+    //
+    // Alexey, finding 7: the gate keeps the marked LINES and deletes the rest of
+    // the run's output, so a notice split across two physical lines arrives
+    // without its reason — and a wrapped test title alone is enough to split it.
+    const emitted: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((m: string) => void emitted.push(m))
+    try {
+      skipNote('#live (#5)\nwrapped title', 'the declared CI is aws-codepipeline\nso the workflow is inert')
+    } finally {
+      warn.mockRestore()
+    }
+
+    await scenario('tsbridge-8c', async (s) => {
+      const f = await fixture(s)
+      await f.npx(0, (emitted[0] ?? '').split('\n'))
+
+      const r = await f.runBridge()
+
+      expect(r.output, `the case identity was lost\n${r.output}`).toContain('#live (#5)')
+      expect(
+        r.output,
+        `the REASON was lost — the half that says why a check did not run\n${r.output}`,
+      ).toContain('the declared CI is aws-codepipeline')
     })
   })
 })

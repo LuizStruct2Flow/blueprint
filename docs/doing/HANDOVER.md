@@ -1184,3 +1184,21 @@ independent checking in one session. Re-measure a number before repeating it.
   pinned by `pipeline` #9b, which turns red when fixed.
 - **BUG-108** — a product defect with a witness and no fix, kept deliberately so a
   port did not silently change behaviour.
+- **BUG-129 (S2) reworked after Codex's final review, and the lesson generalises.**
+  The first fix removed the supervisor's startup wipe and then ASSERTED that startup
+  was the feed's only non-append behaviour. It was not: `scripts/lib/feed.sh` had
+  rotated at 4,000 lines all along, in place, deleting the history it trimmed and
+  losing any append that raced the rewrite. **A claim about "the only writer" is worth
+  checking against every writer, including the one in the file you are editing.**
+  Rotation is now a RENAME to `<feed>.1` (no lock: `flock` is absent on macOS and a
+  rename needs no coordination), and `tests/harness/canary.ts` reads the archive, so a
+  rotation is a NOTE while lost history still fails. Followers need `tail -F`, not
+  `tail -f` — every doc was updated with the change.
+- **TASK-047 — `tests/dod-gate` #17 was a REMOVAL guard wearing an equality claim.**
+  Its extraction regexes recognised only `.spec.ts`/`.spec.tsx`, so widening any of the
+  three sides was invisible to it: Codex added `*.test.ts` to each in turn and it stayed
+  green all three times. It now reads each side's COMPLETE pattern list with comments
+  stripped, and #17b witnesses discovery behaviourally. **A guard whose reader only
+  knows the values it expects can only catch their removal.** #18 gained the paired
+  positives and the symlink witness it never had — it was all negatives, so it could not
+  tell "the filter works" from "the filter matches nothing".

@@ -114,7 +114,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, symlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -232,6 +232,22 @@ const BATON_FROM_FIXTURE = {
 }
 
 const rangeOf = (f: Fixture) => `${f.base}..HEAD`
+
+/**
+ * Drop whole-line comments before reading a rule out of a file.
+ *
+ * PROSE NAMING AN EXTENSION IS NOT A RUNNER THAT ACCEPTS ONE. #17 compares what
+ * three files DECIDE, and every one of them describes the rule in comments
+ * directly above the expression that implements it — so a stale sentence left
+ * behind by a narrowing edit would keep the comparison green on its own.
+ */
+function stripLineComments(text: string, marker: '#' | '//'): string {
+  const re = marker === '#' ? /^\s*#/ : /^\s*(\/\/|\*|\/\*)/
+  return text
+    .split('\n')
+    .filter((l) => !re.test(l))
+    .join('\n')
+}
 
 describe('TASK-007 — the DoD prints as stages, and each one fails when it should', () => {
   it('#0 the DoD gate lib is present', async () => {
@@ -466,31 +482,108 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     // find is never declared to the batch, so an assertion about "every runner"
     // passes vacuously over it rather than failing. Christian named that risk
     // for `.spec.tsx` in c5301c5 before it could happen.
+    // WHY THE EXTRACTION IS PERMISSIVE, AND WHY THAT IS THE WHOLE CASE. It used
+    // to match `-name '*(\.spec\.tsx?)'` — a regex that can only SEE the two
+    // extensions it already expects, so anything WIDER was invisible to it.
+    // Codex added `*.test.ts` to the DoD search, to suite discovery and to
+    // vitest's include in turn, and this case stayed GREEN all three times: it
+    // caught REMOVAL only. A guard blind to the drift it names is worse than
+    // none, because it contributes a green.
+    //
+    // So each side is now read as the COMPLETE pattern list of the expression
+    // that actually decides: every `-name '*X'` in the find, every glob in
+    // vitest's `include` array. An extension added anywhere shows up as a set
+    // difference instead of being silently discarded by the reader.
+    const shellPatterns = (text: string): string[] =>
+      [
+        ...new Set(
+          [...stripLineComments(text, '#').matchAll(/-name\s+'\*([^']+)'/g)].map(
+            (m) => m[1] ?? '',
+          ),
+        ),
+      ]
+        .filter(Boolean)
+        .sort()
+
     const lib = await readFile(join(REPO_ROOT, LIB), 'utf8')
     const config = await readFile(join(REPO_ROOT, 'tests/vitest.config.ts'), 'utf8')
     const suites = await readFile(join(REPO_ROOT, 'scripts/lib/suites.sh'), 'utf8')
 
-    // DEDUPED, because the lib now names the extensions TWICE — once for the
-    // shallow top-level search and once for the recursive one (#18). Without this
-    // the comparison fails on multiplicity while all three sides agree, which is a
+    // DEDUPED, because the lib names the extensions TWICE — once for the shallow
+    // top-level search and once for the recursive one (#18). Without this the
+    // comparison fails on multiplicity while all three sides agree, which is a
     // guard reporting a defect it invented.
-    const exts = (text: string, re: RegExp) =>
-      [...new Set([...text.matchAll(re)].map((m) => m[1]))].sort()
-    const counted = exts(lib, /-name '\*(\.spec\.tsx?)'/g)
-    const executed = exts(config, /'\*\*\/\*(\.spec\.tsx?)'/g)
-    const discovered = exts(suites, /-name '\*(\.spec\.tsx?)'/g)
+    const counted = shellPatterns(lib)
+    const discovered = shellPatterns(suites)
 
-    expect(counted, `${LIB} accepts no *.spec.ts* evidence at all — the extraction below is blind`).not.toEqual([])
+    // vitest's side is the `include` ARRAY specifically, not the whole file: a
+    // glob sitting in some other option decides nothing about what runs. The
+    // extension is whatever follows the last `*`, so `**/*.spec.ts` reduces to
+    // `.spec.ts` and a newly added `**/*.test.ts` reduces to `.test.ts` rather
+    // than being skipped by a pattern that only knows about specs.
+    const include = /include:\s*\[([^\]]*)\]/.exec(stripLineComments(config, '//'))
+    const executed = [
+      ...new Set(
+        [...(include?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) =>
+          (m[1] ?? '').replace(/^.*\*/, ''),
+        ),
+      ),
+    ]
+      .filter(Boolean)
+      .sort()
+
+    // NON-VACUITY, ONCE PER SIDE. If an expression is rewritten into a shape
+    // these readers do not recognise, all three come back EMPTY and therefore
+    // EQUAL, and the comparison below passes over nothing at all — which is the
+    // exact failure #8 exists to name, one level up.
+    expect(counted, `${LIB} accepts no evidence pattern at all — the comparison is blind`).not.toEqual([])
+    expect(discovered, 'scripts/lib/suites.sh discovers no runner pattern at all').not.toEqual([])
+    expect(executed, 'tests/vitest.config.ts includes no glob at all').not.toEqual([])
+
     expect(
-      { counted, discovered, executed },
+      { discovered, executed },
       'The extension rule must be ONE set on all three sides.\n' +
         `  counted as evidence (${LIB}): ${JSON.stringify(counted)}\n` +
         `  discovered (scripts/lib/suites.sh): ${JSON.stringify(discovered)}\n` +
         `  executed (tests/vitest.config.ts): ${JSON.stringify(executed)}\n` +
         'A file counted but not executed certifies a bug with a test that never ran.\n' +
         'A file executed but not discovered is never declared to the batch, so an\n' +
-        'assertion about "every runner" passes over it silently (TASK-047).',
-    ).toEqual({ counted, discovered: counted, executed: counted })
+        'assertion about "every runner" passes over it silently.\n' +
+        'A pattern one side accepts and the others have never heard of is the same\n' +
+        'drift in the WIDENING direction — which this case missed three times\n' +
+        'before Codex measured it (TASK-047).',
+    ).toEqual({ discovered: counted, executed: counted })
+  })
+
+  it('#17b TASK-047: discovery ACCEPTS every counted extension and refuses an uncounted one', async () => {
+    await scenario('dod-gate-17b', async (s) => {
+      // THE BEHAVIOURAL HALF, because #17 compares three expressions as TEXT and
+      // text cannot say what they do. This runs the real discovery function over
+      // a fixture `tests/` tree. Discovery is the side that fails quietly: a
+      // runner `suites.sh` does not find is never declared to the batch, so an
+      // assertion about "every runner" passes over it rather than failing — and
+      // one it finds but vitest does not run is a suite that reports nothing.
+      const dir = await s.workspace.dir('r17b')
+      await s.fs.write(join(dir, 'tests/alpha/alpha.spec.ts'), "it('a', () => {})\n")
+      await s.fs.write(join(dir, 'tests/beta/beta.spec.tsx'), "it('b', () => {})\n")
+      await s.fs.write(join(dir, 'tests/gamma/gamma.test.ts'), "it('c', () => {})\n")
+
+      const r = await s.run(
+        'sh',
+        [
+          '-c',
+          `. ${JSON.stringify(join(REPO_ROOT, 'scripts/lib/suites.sh'))}\nbp_suite_names "$1"\n`,
+          'discover',
+          dir,
+        ],
+        { cwd: dir },
+      )
+
+      expect(
+        r.stdout.split('\n').filter(Boolean).sort(),
+        `discovery does not match the extensions the gate counts:\n${r.output}`,
+      ).toEqual(['alpha', 'beta'])
+    })
   })
 
   it('#8b TASK-039: the gate reads subjects with the same rule the commit-msg hook applies', async () => {
@@ -772,6 +865,61 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
       ).not.toBe(0)
     })
   })
+
+  it('#18-symlink TASK-047: a spec-NAMED SYMLINK to non-spec content is not evidence', async () => {
+    await scenario('dod-gate-18-symlink', async (s) => {
+      // WHAT `-type f` IS FOR, asserted instead of assumed. Every #18 fixture is
+      // a plain file, so deleting `-type f` from the shared expression left the
+      // case GREEN: `grep` FOLLOWS a symlink, and a link named `fix.spec.ts`
+      // pointing at a README would then certify the bug with prose — the exact
+      // bypass the extension filter exists to close, wearing a spec's name.
+      const f = await derivedFix(s, 'r18s', 'backend')
+      await s.fs.write(join(f.dir, 'backend/NOTES.md'), 'Fixed BUG-042 in the parser.\n')
+      await symlink('NOTES.md', join(f.dir, 'backend/fix.spec.ts'))
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(
+        r.code,
+        `a spec-named symlink to prose counted as the regression test:\n${r.output}`,
+      ).not.toBe(0)
+    })
+  })
+
+  /**
+   * PAIRED POSITIVES — the half #18 did not have.
+   *
+   * Every #18 fixture is NEGATIVE, so the case could not establish that either
+   * extension is ACCEPTED: removing `.spec.ts` or `.spec.tsx` from the shared
+   * expression left it green, because a filter that matches NOTHING refuses the
+   * negatives just as well as the correct one does. A guard made only of
+   * refusals cannot tell those two apart.
+   *
+   * BOTH ROOT MODES, because the expression is shared but the depth is not: a
+   * declared root is searched recursively, the shipped `tests/` only at depth 1.
+   * #18 exercised the recursive one alone.
+   */
+  const ACCEPTED_EXTENSIONS = ['.spec.ts', '.spec.tsx'] as const
+  const ROOT_MODES = [
+    ['a declared root, searched recursively', 'backend', 'backend/deep/nested'],
+    ['the shipped tests/ root, searched shallow', 'tests', 'tests'],
+  ] as const
+
+  for (const [modeName, root, dir] of ROOT_MODES) {
+    for (const ext of ACCEPTED_EXTENSIONS) {
+      it(`#18-accepts a *${ext} under ${modeName} IS the regression test`, async () => {
+        await scenario(`dod-gate-18-accepts-${root}-${ext.replace(/\W+/g, '-')}`, async (s) => {
+          const f = await derivedFix(s, 'r18a', root)
+          await s.fs.write(join(f.dir, `${dir}/fix${ext}`), "it('BUG-042: regression', () => {})\n")
+
+          const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+          expect(
+            r.code,
+            `a *${ext} under ${modeName} did not count as the regression test:\n${r.output}`,
+          ).toBe(0)
+        })
+      })
+    }
+  }
 
   it('#13 FOUNDER RULE: a PROJECT spec directly at the tests/ root counts', async () => {
     await scenario('dod-gate-13', async (s) => {

@@ -237,25 +237,17 @@ command -v pipe_stage >/dev/null 2>&1 || . "$BP_CODE_ROOT/scripts/lib/pipeline.s
 # pipe_skip "suite absent" forever, which reads as a deliberate exclusion rather
 # than as a completed migration.
 
-# BUG-055 — the manifest proves the vitest bridge is INVOKED; this proves it
-# WORKS. The bridge only ever ran by hand, where GIT_DIR is absent. Under a real
-# `git push` git exports it, the TS harness correctly refuses every scenario,
-# and `set -e` killed the hook before one stage printed — a refused push with
-# the stage list truncated and no error anywhere. Runs before the stage it
-# guards, and hermetic (~0.1 s, stubbed npx).
-if [ -f "$BP_CODE_ROOT/tests/ts-bridge/test.sh" ]; then
-  _st_tsbridge(){
-    bash "$BP_CODE_ROOT/tests/ts-bridge/test.sh" || {
-      echo "❌ tests/ts-bridge/test.sh failed (BUG-055)."
-      echo "   The vitest bridge must scrub git's environment before invoking the"
-      echo "   runner, and must report its own failure instead of aborting the gate."
-      return 1
-    }
-  }
-  pipe_stage "ts-bridge · BUG-055" _st_tsbridge
-else
-  pipe_skip "ts-bridge · BUG-055" "suite absent"
-fi
+# BUG-055's shell stage was retired here (TASK-047, founder decision
+# 2026-09-16). `tests/ts-bridge/test.sh` ran before the vitest stage and proved
+# the bridge WORKS rather than merely that it is invoked; its assertions live in
+# tests/ts-bridge/ts-bridge.spec.ts, which the blanket vitest run below executes.
+#
+# What went with it is recorded as an accepted loss in docs/config/findings.md
+# F-003, not lost in a commit body: this was the only assertion about the vitest
+# bridge NOT executed by the vitest it asserts about, so a silently dead bridge
+# now produces no red case. Do not re-add a shell stage here — one runner
+# convention, no exceptions. If that loss ever needs covering again, it needs a
+# decision, not a stage.
 
 # BUG-029 — `tests/` is a managed DIRECTORY, and this is what makes that safe.
 # A derived project's suites were frozen at bootstrap while the machinery they

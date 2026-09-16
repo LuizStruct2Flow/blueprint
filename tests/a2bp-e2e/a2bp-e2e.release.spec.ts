@@ -1,5 +1,5 @@
 /**
- * tests/a2bp-e2e/a2bp-e2e.spec.ts — `blueprint a2bp` end to end, in TypeScript
+ * tests/a2bp-e2e/a2bp-e2e.release.spec.ts — `blueprint a2bp` end to end, in TypeScript
  * (TASK-018).
  *
  * Against a real local remote. NO NETWORK, NO gh.

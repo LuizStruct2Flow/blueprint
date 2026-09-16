@@ -465,7 +465,7 @@ Eight rules, each the gate to the next (`docs/DoD.md` §1b):
 - **Two-commit pattern** — reproducer test (failing) → fix
 - **Coverage thresholds** — whole-tree, tiered: domain/app ≥90%, adapters ≥80%, CLI ≥75% (brownfield ratcheted)
 - **ESLint + Prettier** — both blocking, independent gates
-- **Pre-push coverage is decided on risk, never on the clock** — no wall-clock ceiling; the gate reports its cost instead of silently paying it in coverage
+- **Expensive suites are release tier** — `*.release.spec.ts` runs in CI only, CI gates the `released` branch projects pull, and the gate names every suite it leaves to CI
 - **Snapshots are approval-based** — CI never runs with `-u`
 
 ---
@@ -519,11 +519,12 @@ said, a passing one stays quiet. That is not decoration:
   is the signal.
 - **Per-stage timings make cost arguable instead of guessed.** There is no
   wall-clock ceiling — the old 30 s one started *deciding what was tested*, and
-  a 41-assertion contamination suite left the gate for growing by 3.7 s. Now
-  every suite is classified in a manifest the gate **enforces**, a non-blocking
-  SLO warns instead of demoting, and a slow suite gets optimised: one went
-  **125 s → 75 s** with every assertion intact. Coverage is decided on risk,
-  never on the clock.
+  a 41-assertion contamination suite left the gate for growing by 3.7 s, and
+  nothing said so. Now the few expensive suites are **release tier**, named
+  `*.release.spec.ts`: they run in CI, which gates the `released` branch every
+  project pulls, and the gate prints each one it leaves to CI. A manifest the
+  gate **enforces** fails the push if CI stops running any suite or the gate
+  stops running any other.
 - **It fails closed by construction** — a stage exits non-zero and the runner
   exits, rather than returning a status one of ~18 call sites could drop. Tested
   against non-zero exits, signals, missing binaries and a missing scratch dir.

@@ -32,9 +32,9 @@
 # audit finding A-15.
 #
 # There is NO wall-clock ceiling (CLAUDE.md §"Pre-push tolerance", founder
-# decision 2026-08-02 closing BUG-005). Coverage here is decided on RISK. The
-# gate reports its total and slowest stage every run, so cost stays visible
-# rather than being paid silently by demoting suites to CI.
+# decision 2026-08-02 closing BUG-005). The gate reports its total and slowest
+# stage every run. Suites named `*.release.spec.ts` run in CI only (TASK-054),
+# and the vitest stage prints a skip line for each.
 
 # Normally sourced by .githooks/pre-push, which has already sourced the renderer
 # and called pipe_init. Sourcing defensively keeps this file runnable on its own
@@ -413,10 +413,9 @@ command -v pipe_stage >/dev/null 2>&1 || . "$BP_CODE_ROOT/scripts/lib/pipeline.s
 # one over the blueprint's own self-test suites, and this repo's gate stayed
 # green throughout because those suites pass at home.
 #
-# Deliberately LAST of the bootstrap group and the slowest stage in the gate: it
-# bootstraps a project from HEAD — the tree about to be pushed — and runs that
-# project's ENTIRE pre-push gate. That is the cost of the only assertion that
-# speaks for the people downstream.
+# It bootstraps a project from HEAD and runs that project's ENTIRE pre-push
+# gate, which made it the slowest suite by far. Since TASK-054 it is release
+# tier (`bootstrap-gate.release.spec.ts`): CI runs it, the local gate does not.
 # MIGRATED to TypeScript (TASK-018) — see the note on drift-in-blueprint above.
 # Equivalence proven by mutation first, and it shares the wrinkle every
 # bootstrap suite has: the fixture is materialised from HEAD with

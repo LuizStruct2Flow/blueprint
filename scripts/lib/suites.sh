@@ -153,6 +153,21 @@ bp_suites_with_spec() {
   return 0
 }
 
+# bp_release_suites ROOT — the RELEASE-tier suites, one per line (TASK-054).
+#
+# A suite is release-tier when EVERY spec it owns is a `*.release.spec.ts` or
+# `*.release.spec.tsx`. The tier is the file name, like `.integration.`; there is
+# no table. The pre-push gate excludes that glob and CI runs everything, and
+# tests/manifest checks both halves. A suite with one ordinary spec left is not
+# release-tier, so the gate still runs and reports it.
+bp_release_suites() {
+  bp_suite_runners "${1:-.}" \
+    | awk -F'\t' '$1 != "" { all[$1] = 1; if ($2 !~ /\.release\.spec\.tsx?$/) plain[$1] = 1 }
+        END { for (s in all) if (!(s in plain)) print s }' \
+    | sort
+  return 0
+}
+
 # bp_marker_balance FILE PREFIX — prints "<begins> <ends>" for one marker
 # vocabulary. The precondition marker_aware_merge (scripts/blueprint) requires
 # before it will merge rather than clobber: unequal counts make it return 1, and

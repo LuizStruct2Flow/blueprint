@@ -1,5 +1,5 @@
 /**
- * tests/signal-dispatch/signal-dispatch.spec.ts — the dispatcher will not fire
+ * tests/signal-dispatch/signal-dispatch.release.spec.ts — the dispatcher will not fire
  * on a Task nobody has updated.
  *
  * The signal is TWO fields written by TWO edits. Flipping `State` to the target

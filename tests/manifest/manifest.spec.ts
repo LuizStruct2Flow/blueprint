@@ -391,6 +391,45 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     })
   })
 
+  describe('TASK-054 — the release tier: CI runs every suite, the gate every non-release suite', () => {
+    /** s01 becomes release-tier, and the bridge excludes the release glob. */
+    const releaseTree = (files: Map<string, string>, exclude = "--exclude='**/*.release.spec.*'") => {
+      files.delete('tests/s01/s01.spec.ts')
+      files.set('tests/s01/s01.release.spec.ts', 'export const s01 = true\n')
+      const b = files.get('scripts/run-ts-suites.sh') ?? ''
+      files.set('scripts/run-ts-suites.sh', b.replace('npx vitest run', `npx vitest run ${exclude}`))
+    }
+
+    it('a gate excluding the release glob, with CI running everything, passes every check', async () => {
+      await scenario('manifest-release-ok', async (s) => {
+        const checks = await inspectFixture(s, 'bp', (files) => releaseTree(files))
+        expect(red(checks), checks.map((c) => c.message).join('\n')).toEqual([])
+      })
+    })
+
+    it('#5 CI excluding the release glob too leaves the release suite running nowhere', async () => {
+      await scenario('manifest-release-ci', async (s) => {
+        const checks = await inspectFixture(s, 'bp', (files) => {
+          releaseTree(files)
+          const wf = files.get('.github/workflows/security.yml') ?? ''
+          files.set('.github/workflows/security.yml', wf.replace('npx vitest run', "npx vitest run --exclude '**/*.release.spec.*'"))
+        })
+        expect(red(checks)).toEqual(['#5'])
+        expect(why(checks, '#5')).toContain('s01(release tier')
+        expect(why(checks, '#5')).not.toContain('s02')
+      })
+    })
+
+    it('#4 a gate exclude naming anything but the release glob is a narrowed run, so omitting a suite still fails', async () => {
+      await scenario('manifest-release-other', async (s) => {
+        const checks = await inspectFixture(s, 'bp', (files) => releaseTree(files, "--exclude='**/s02/**'"))
+        expect(red(checks)).toEqual(['#4'])
+        expect(why(checks, '#4')).toContain('s02(no vitest stage')
+        expect(why(checks, '#4')).not.toContain('s01(')
+      })
+    })
+  })
+
   it('#5b a workflow GitHub cannot PARSE runs nothing, while #5 still finds every suite in its text (BUG-115)', async () => {
     await scenario('manifest-5b-parse', async (s) => {
       // The exact defect: an unquoted `run:` value containing `: `. GitHub

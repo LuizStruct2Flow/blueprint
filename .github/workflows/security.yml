@@ -318,6 +318,9 @@ jobs:
       # cannot diverge again by one of them growing its own list. Sourced from the
       # repository root, which is why this step has no working-directory.
       # tests/ts-bridge #3 executes this block to prove it.
+      # TASK-054 — NO EXCLUDE HERE. This run includes the `*.release.spec.ts`
+      # suites the pre-push gate leaves to CI, and tests/manifest #5 fails if it
+      # stops including them.
       - name: Blueprint TypeScript regression suites
         if: hashFiles('tests/package.json') != ''
         run: |

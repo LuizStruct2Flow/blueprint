@@ -345,15 +345,33 @@ export function classifyCmds(text: string): string[] {
     }
     if (verb < 0) continue
     const args: string[] = []
+    let release = false
     for (let i = verb + 1; i < f.length; i++) {
       const w = f[i] as string
+      // TASK-054: an exclude is a narrowing like a path filter, UNLESS it names
+      // exactly the release glob. That one run covers every non-release suite.
+      let excluded: string | undefined
+      if (w === '--exclude') excluded = f[++i] ?? ''
+      else if (w.startsWith('--exclude=')) excluded = w.slice('--exclude='.length)
+      if (excluded !== undefined) {
+        if (excluded.replace(/^(['"])(.*)\1$/, '$2') === RELEASE_GLOB) release = true
+        else args.push(`--exclude=${excluded}`)
+        continue
+      }
       if (w === '--' || w.startsWith('-')) continue
       args.push(w)
     }
-    out.push(args.length === 0 ? `BLANKET ${kind}` : `ARGS ${args.join(' ')}`)
+    if (args.length > 0) out.push(`ARGS ${args.join(' ')}`)
+    else out.push(`${release ? 'NONRELEASE' : 'BLANKET'} ${kind}`)
   }
   return out
 }
+
+/** The glob the gate excludes to leave the release tier to CI (TASK-054). */
+export const RELEASE_GLOB = '**/*.release.spec.*'
+
+/** What a text's vitest runs reach: every suite, every non-release suite, or neither. */
+export type Reach = 'all' | 'nonrelease' | 'none'
 
 /**
  * The `test` script out of tests/package.json, WITHOUT Node.
@@ -376,18 +394,18 @@ export function npmTestScript(pkgText: string): string[] {
   return out
 }
 
-/** Is there a whole-tree vitest run anywhere in this text? */
-export function blanketOf(text: string, pkgText: string): boolean {
+/** How far the whole-tree vitest runs in this text reach. */
+export function reachOf(text: string, pkgText: string): Reach {
   // Shell metacharacters become line breaks first, so
   // `pipe_stage "x" npm test || { … }` is classified as the `npm test` it is,
   // and a stray `}` is not read as a path filter.
   const kinds = classifyCmds(text.replace(/[|&;(){}]/g, '\n'))
-  if (kinds.includes('BLANKET vitest')) return true
-  if (kinds.some((k) => k === 'BLANKET npm')) {
-    const scripts = npmTestScript(pkgText)
-    if (classifyCmds(scripts.join('\n')).includes('BLANKET vitest')) return true
-  }
-  return false
+  const scripts = classifyCmds(npmTestScript(pkgText).join('\n'))
+  const via = (tier: string) =>
+    kinds.includes(`${tier} vitest`) || (kinds.includes(`${tier} npm`) && scripts.includes('BLANKET vitest'))
+  if (via('BLANKET')) return 'all'
+  if (via('NONRELEASE')) return 'nonrelease'
+  return 'none'
 }
 
 /**
@@ -445,6 +463,8 @@ interface Derivation {
   /** suite -> tier (`blueprint` | `both`). */
   readonly rows: Array<{ suite: string; tier: string }>
   readonly names: string[]
+  /** The release-tier suites (TASK-054): every spec is `*.release.spec.ts(x)`. */
+  readonly release: ReadonlySet<string>
 }
 
 /**
@@ -462,15 +482,20 @@ async function derive(root: string, run: Runner): Promise<Derivation | null> {
     '. "$1/scripts/lib/suites.sh" || exit 1',
     'command -v bp_suite_runners >/dev/null 2>&1 || exit 1',
     'command -v bp_suite_rows >/dev/null 2>&1 || exit 1',
+    'command -v bp_release_suites >/dev/null 2>&1 || exit 1',
     'echo "--RUNNERS--"',
     'bp_suite_runners "$1"',
     'echo "--ROWS--"',
     'bp_suite_rows "$1"',
+    'echo "--RELEASE--"',
+    'bp_release_suites "$1"',
   ].join('\n')
   const r = await run('sh', ['-c', script, 'sh', root], { cwd: root })
   if (r.code !== 0) return null
 
-  const [, runnerBlock = '', rowBlock = ''] = r.stdout.split(/^--(?:RUNNERS|ROWS)--$/m)
+  const [, runnerBlock = '', rowBlock = '', releaseBlock = ''] = r.stdout.split(
+    /^--(?:RUNNERS|ROWS|RELEASE)--$/m,
+  )
   const runners = runnerBlock
     .split('\n')
     .filter((l) => l !== '')
@@ -485,7 +510,8 @@ async function derive(root: string, run: Runner): Promise<Derivation | null> {
       const [suite = '', tier = ''] = l.split('\t')
       return { suite, tier }
     })
-  return { runners, rows, names: rows.map((r) => r.suite) }
+  const release = new Set(releaseBlock.split('\n').filter((l) => l !== ''))
+  return { runners, rows, names: rows.map((r) => r.suite), release }
 }
 
 /** `git archive HEAD | tar -t`, i.e. what a derived project actually receives. */
@@ -659,7 +685,11 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   //    which is the state `drift-in-blueprint` was found in (running in neither
   //    the gate nor CI).
   //
-  //    NO TIER TEST HERE, and none is needed. A `blueprint`-tier suite is
+  //    THE RELEASE TIER IS THE ONE EXCEPTION (TASK-054). A suite whose specs are
+  //    all `*.release.spec.ts` is owed by CI, and #5 checks it there. Here it
+  //    is left out, and the gate's run may exclude exactly RELEASE_GLOB.
+  //
+  //    NO OTHER TIER TEST HERE, and none is needed. A `blueprint`-tier suite is
   //    `both` plus "does not ship": it still blocks the push HERE. Downstream
   //    it is not on disk, so it is not in the derivation and there is nothing
   //    to skip.
@@ -669,8 +699,8 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   const ciCmds = hasCi ? await deepCmds(root, [ciPath]) : ''
 
   const tsPresent = suitesWithTs.size > 0
-  const gateBlanket = tsPresent && blanketOf(gateCmds, pkgText)
-  const ciBlanket = tsPresent && hasCi && blanketOf(ciCmds, pkgText)
+  const gateReach: Reach = tsPresent ? reachOf(gateCmds, pkgText) : 'none'
+  const ciReach: Reach = tsPresent && hasCi ? reachOf(ciCmds, pkgText) : 'none'
   const includeCovers = includeOk(cfgText)
 
   // BUG-066: a stage may name its path through the gate's resolved code root,
@@ -681,17 +711,21 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   const tsNamed = (cmds: string, s: string) =>
     new RegExp(`vitest[^|]*${rootVar}tests/${rx(s)}/[a-zA-Z0-9._-]+\\.spec\\.tsx?`).test(cmds)
   /** A spec is covered when it is named outright, or reached by the chain. */
-  const tsCovered = (cmds: string, s: string, blanket: boolean, noRunner: string) => {
+  const tsCovered = (cmds: string, s: string, reach: Reach, noRunner: string) => {
     if (tsNamed(cmds, s)) return ''
-    if (!blanket) return noRunner
+    if (reach === 'none') return noRunner
+    // TASK-054: a run excluding the release glob covers every OTHER suite.
+    if (reach === 'nonrelease' && d.release.has(s)) return `release tier, and this run excludes ${RELEASE_GLOB}`
     if (!includeCovers) return 'tests/vitest.config.ts include no longer covers **/*.spec.ts'
     return ''
   }
 
+  // TASK-054: the gate owes every suite EXCEPT the release tier, which CI owes
+  // (#5). The tier is the file name, so leaving it out here hides nothing.
   const notrun: string[] = []
   for (const s of d.names) {
-    if (suitesWithTs.has(s)) {
-      const why = tsCovered(gateCmds, s, gateBlanket, 'no vitest stage in .githooks/pre-push*')
+    if (suitesWithTs.has(s) && !d.release.has(s)) {
+      const why = tsCovered(gateCmds, s, gateReach, 'no vitest stage in .githooks/pre-push*')
       if (why) notrun.push(`${s}(${why})`)
     }
   }
@@ -705,7 +739,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
             '        reaches it. A stage naming the spec outright also counts.\n' +
             '        A runner nothing invokes is not retired, it is dead: delete it, or wire it in.',
         )
-      : ok('#4', '#4 every suite is invoked by the gate, runner kind by runner kind'),
+      : ok('#4', '#4 every non-release suite is invoked by the gate'),
   )
 
   // =========================================================================
@@ -726,7 +760,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
     const missing: string[] = []
     for (const s of d.names) {
       if (suitesWithTs.has(s)) {
-        const why = tsCovered(ciCmds, s, ciBlanket, 'no vitest step in the workflow')
+        const why = tsCovered(ciCmds, s, ciReach, 'no vitest step in the workflow')
         if (why) missing.push(`${s}(${why})`)
       }
     }

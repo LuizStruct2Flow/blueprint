@@ -103,8 +103,11 @@ _pipe_dur(){ # ms -> "1.2s"
 # soup in a CI log is worse than no rendering at all.
 if [ -t 1 ]; then
   _PIPE_TTY=1
-  _C_DIM='[2m'; _C_OK='[32m'; _C_BAD='[31m'; _C_WARN='[33m'; _C_OFF='[0m'
-  _PIPE_CLR='[K'
+  # The ESC byte is generated, not typed: a raw 0x1b in source is invisible and
+  # was silently stripped once already (BUG-083).
+  _PIPE_ESC=$(printf '\033')
+  _C_DIM="${_PIPE_ESC}[2m"; _C_OK="${_PIPE_ESC}[32m"; _C_BAD="${_PIPE_ESC}[31m"; _C_WARN="${_PIPE_ESC}[33m"; _C_OFF="${_PIPE_ESC}[0m"
+  _PIPE_CLR="${_PIPE_ESC}[K"
 else
   _PIPE_TTY=0
   _C_DIM=''; _C_OK=''; _C_BAD=''; _C_WARN=''; _C_OFF=''

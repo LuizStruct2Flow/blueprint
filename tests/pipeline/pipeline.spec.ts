@@ -56,12 +56,11 @@
  *     so the buffer #8 asserts swallowed exactly the evidence #3 looked for.
  *     Green in both implementations with the halt deleted. Now asserted on a
  *     filesystem side effect, which the buffer cannot hide.
- *   * #9/#17 "no ANSI escapes" cannot fail via the colour path, because BUG-083
- *     means there is no escape byte in the renderer at all. A mutant forcing
- *     `[ -t 1 ]` true survives both implementations. #9b pins that.
- *   * BUG-083 itself: the colour literals lost their ESC bytes, so the gate
- *     prints `[2m`, `[32m` and `[K` as literal text on every push from a
- *     terminal. Verified on a real pty.
+ *   * #9/#17 "no ANSI escapes" could not fail via the colour path while BUG-083
+ *     was open, because there was no escape byte in the renderer at all.
+ *   * BUG-083 itself (fixed): the colour literals lost their ESC bytes, so the
+ *     gate printed `[2m`, `[32m` and `[K` as literal text on every push from a
+ *     terminal. #9b now asserts the real escape on a pty.
  *
  * #12 also disagreed, and the shell side is the wrong one: its machine-wide
  * `/tmp/tmp.*` count went red under a mutant that changes nothing about temp
@@ -82,9 +81,8 @@
  *       Red: #7.
  *   M4  a passing stage's buffer is echoed
  *       Red: #8.
- *   M5  `_PIPE_TTY=1` forced (colour always)
- *       Red: NOTHING — and that is BUG-083, pinned by #9b. With real escape
- *       bytes restored in the same mutant, Red: #9, #17, #9b.
+ *   M5  `[ -t 1 ]` forced true (colour always)
+ *       Red: #9, #9b. (Before BUG-083's fix: NOTHING.)
  *   M6  `pipe_skip` calls `_pipe_record bad`
  *       Red: #11.
  *   M7  `_pipe_cleanup` becomes a no-op
@@ -362,8 +360,8 @@ pipe_finish`),
       )
       // POSITIVE CONTROL ON THE DETECTOR. `not.toContain` over a haystack that
       // could never hold the needle is the shape of a check that has never been
-      // seen doing anything, and #9b below shows this one is in exactly that
-      // position today. Proving the search itself works separates "the renderer
+      // seen doing anything, and this one was in exactly that position while
+      // BUG-083 was open. Proving the search itself works separates "the renderer
       // is clean" from "the search is broken".
       expect(`plain ${ESC}[31mred`, 'the ESC search cannot find an ESC').toContain(ESC)
     })
@@ -635,10 +633,8 @@ pipe_finish`),
       // showed up as a false divergence in the equivalence run against the shell
       // suite. One case, one claim.
       //
-      // NOTE what #9b says about this: with BUG-083 open there is no escape byte
-      // anywhere in the renderer, so this case cannot currently fail via the
-      // colour path. It still catches an escape arriving any OTHER way — which a
-      // mutant injecting one into `_pipe_feed` confirms.
+      // It also catches an escape arriving any way other than the colour path —
+      // which a mutant injecting one into `_pipe_feed` confirms.
       const r = await runPipe(
         s,
         'p17',

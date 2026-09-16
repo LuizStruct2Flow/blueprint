@@ -1160,4 +1160,81 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       ).toBe(1)
     })
   })
+
+  it('#19 BUG-131: a dispatch leaves the tree clean — the slot dir is ignored by the SHIPPED .gitignore', async () => {
+    await scenario('sf-19', async (s) => {
+      // The slot directory sits at `<repo>/subagent-defer` BY DESIGN (#16): it
+      // comes from `bp_state_root`, the project root, never from
+      // AGENT_STATE_HOME. BUG-131 is not that path — it is that NOTHING IGNORED
+      // it, so every project that dispatched a subagent carried a permanently
+      // untracked directory. That erodes the clean-tree precondition the
+      // pre-push gate and `blueprint drift` both lean on, and a `git status`
+      // that is always dirty is one nobody reads.
+      //
+      // THE WITNESS RUNS AGAINST THE SHIPPED FILE, copied into a real
+      // repository, rather than against a rule retyped here: `.gitignore` is
+      // seeded into every derived project at bootstrap, so the file under test
+      // must be the one those projects actually receive. A `git check-ignore`
+      // against a hand-written fixture would pass over a rule that never ships.
+      const f = await deferFixture(s)
+      await s.fs.copyIn(join(SUBJECT, '.gitignore'), 'repo/.gitignore')
+
+      const git = (args: string[]) => s.run('git', args, { cwd: f.repo })
+      expect((await git(['init', '-q', '--initial-branch=main', '.'])).code).toBe(0)
+      expect((await git(['add', '-A'])).code).toBe(0)
+      const commit = await git([
+        '-c',
+        'user.name=Fixture Operator',
+        '-c',
+        'user.email=fixture@example.test',
+        'commit',
+        '-qm',
+        'fixture project',
+      ])
+      expect(commit.code, commit.output).toBe(0)
+
+      const porcelain = async (): Promise<string> =>
+        (await git(['status', '--porcelain', '--untracked-files=all'])).stdout.trim()
+
+      // ORDER MATTERS. A tree already dirty before the dispatch would make a
+      // dirty tree afterwards prove nothing about the slot directory.
+      expect(
+        await porcelain(),
+        'the fixture was dirty BEFORE any dispatch, so the assertion below would be measuring the fixture',
+      ).toBe('')
+
+      const r = await s.run(
+        'sh',
+        [
+          '-c',
+          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+          'x',
+          start(s, f, 'clean0000000'),
+        ],
+        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '5' } },
+      )
+      expect(r.code, `a hook must always exit 0\n${r.output}`).toBe(0)
+      await f.expectLine('→ dispatched', 15_000)
+
+      // VACUITY GUARD, and it is conditional for a reason rather than skipped.
+      // `defer_spawn` probes `bp_flock_cmd` BEFORE it creates the directory, so
+      // a host without flock(1) — macOS, which is #18's whole subject — defers
+      // nothing and creates nothing. On such a host this case would pass while
+      // demonstrating nothing about the ignore rule, so the guard asserts the
+      // reservation happened exactly where it CAN happen, and the clean-tree
+      // assertion below runs on every host either way.
+      const hasFlock = (await s.run('sh', ['-c', 'command -v flock || true'], { cwd: f.repo })).stdout.trim()
+      if (hasFlock !== '') {
+        expect(
+          await s.fs.exists('repo/subagent-defer'),
+          'nothing was reserved on a host that HAS flock — the case would prove nothing about ignoring the slot dir',
+        ).toBe(true)
+      }
+
+      expect(
+        await porcelain(),
+        'the deferral slot directory dirties the tree of every project that dispatches a subagent (BUG-131)',
+      ).toBe('')
+    })
+  })
 })

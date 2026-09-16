@@ -731,7 +731,7 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
         join(f.dir, 'project_config_paths.md'),
         '- BP_TEST_ROOTS: `backend`\n- BP_TEST_ROOTS: `scripts`\n',
       )
-      await s.fs.write(join(f.dir, 'backend/fix.test.ts'), "it('BUG-042: regression', () => {})\n")
+      await s.fs.write(join(f.dir, 'backend/fix.spec.ts'), "it('BUG-042: regression', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `two declarations were resolved silently:\n${r.output}`).not.toBe(0)
@@ -887,7 +887,7 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
         join(f.dir, 'project_config_paths.md'),
         '- BP_TEST_ROOTS: `backend`\n- BP_TEST_ROOTS = `docs`\n',
       )
-      await s.fs.write(join(f.dir, 'backend/fix.test.ts'), "it('BUG-042: regression', () => {})\n")
+      await s.fs.write(join(f.dir, 'backend/fix.spec.ts'), "it('BUG-042: regression', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `a malformed second declaration was ignored:\n${r.output}`).not.toBe(0)
@@ -908,7 +908,7 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
           '- **Literal paths only.** No wildcards, and exactly one `BP_TEST_ROOTS` line.\n' +
           'Prose may mention BP_TEST_ROOTS mid-sentence without declaring anything.\n',
       )
-      await s.fs.write(join(f.dir, 'backend/fix.test.ts'), "it('BUG-042: regression', () => {})\n")
+      await s.fs.write(join(f.dir, 'backend/fix.spec.ts'), "it('BUG-042: regression', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `documentation prose was read as a declaration:\n${r.output}`).toBe(0)

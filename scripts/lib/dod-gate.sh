@@ -355,19 +355,27 @@ EOF
     # project root once TASK-021 moves the code under scaffolding/. The `docs/`
     # paths above stay cwd-relative on purpose — those are the PROJECT's own
     # lifecycle files and do not move.
+    # ONE SEARCH, AND THE ONLY DIFFERENCE IS DEPTH. The extension filter applies
+    # to BOTH modes (TASK-047 #18, found by Christian). It used to apply only to
+    # the shallow top-level search, while a declared root — `backend/src`, where a
+    # project actually keeps its tests — was a recursive `grep -raq` over EVERY
+    # file. So prose satisfied the gate: a README, a CHANGELOG, a commit note, or a
+    # test in the retired `*.test.ts` form. The rule this stage exists to enforce
+    # was false exactly where projects live, and the case that should have caught
+    # it was passing on "some file contains the string" (#4-tested, whose own
+    # fixture was a shell runner long after shell runners stopped being evidence).
+    #
+    # -maxdepth 1 on the shipped tests/ is still the guarantee that one level down
+    # — where every shipped suite lives — cannot be reached.
     _dg_hit=""
     while IFS="$_dg_tab" read -r _dg_r _dg_mode; do
       [ -n "$_dg_r" ] || continue
-      if [ "$_dg_mode" = shallow ]; then
-        # -maxdepth 1 IS the guarantee. One level down is where every shipped
-        # suite lives, so this must never become a recursive search.
-        if [ -n "$(find "$_dg_r" -maxdepth 1 -type f \
-                     \( -name '*.spec.ts' -o -name '*.spec.tsx' \) \
-                     -exec grep -laE "BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
-          _dg_hit=1
-          break
-        fi
-      elif grep -raqE "BUG-0*${_dg_n}\b" "$_dg_r" 2>/dev/null; then
+      _dg_depth=""
+      [ "$_dg_mode" = shallow ] && _dg_depth="-maxdepth 1"
+      # shellcheck disable=SC2086 # $_dg_depth is one literal flag pair or empty
+      if [ -n "$(find "$_dg_r" $_dg_depth -type f \
+                   \( -name '*.spec.ts' -o -name '*.spec.tsx' \) \
+                   -exec grep -laE "BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
         _dg_hit=1
         break
       fi

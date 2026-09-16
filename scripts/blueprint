@@ -167,6 +167,7 @@ MANAGED_FILES=(
   # tests/manifest #2c the day the bridge landed.
   "scripts/lib/suites.sh"
   "scripts/run-ts-suites.sh"
+  "scripts/semgrep-verdict.sh"
   # THE roster parser, shared by the feed and team-kickoff. MUST ship: both of
   # those are managed files, and without this one they have nowhere to resolve
   # persona identity from — which is BUG-010, where a fleet's persona names were

@@ -424,6 +424,9 @@ async function fixture(s: Scenario): Promise<SecretsFixture> {
   // it, by design. Without it every case here reports "the hook could not start"
   // rather than testing the secret scan at all.
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/pipeline.sh'), 'repo/scripts/lib/pipeline.sh')
+  // BUG-126: the SAST stage sources the verdict policy and fails closed without
+  // it, the same way it does without the renderer above.
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/semgrep-verdict.sh'), 'repo/scripts/semgrep-verdict.sh')
   await s.fs.write('repo/.claude/settings.json', '{\n  "permissions": {\n    "allow": []\n  }\n}\n')
 
   await s.fs.write('repo/README.md', 'base\n')

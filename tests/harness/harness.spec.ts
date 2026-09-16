@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { appendFile, chmod, readFile, writeFile, stat, symlink } from 'node:fs/promises'
+import { appendFile, chmod, readFile, rename, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
 import { RealStateCanary } from './canary.js'
@@ -635,6 +635,64 @@ describe('harness — the real-state canary (BUG-030)', () => {
       await writeFile(victim, 'history replaced\n', 'utf8')
       await expect(canary.assertUnchanged(token)).rejects.toThrow(
         /was rewritten or truncated/,
+      )
+    } finally {
+      await ws.dispose()
+    }
+  })
+
+  it('BUG-129: a feed ROTATION is a note, not a fixture escape', async () => {
+    // Rotation moves the history into `<feed>.1` and starts a new file, so the
+    // live feed no longer begins with what was captured. That is not damage and
+    // it is not an escape — it is scripts/lib/feed.sh capping growth, and
+    // reading it as an escape is what turns a suite red for a change that never
+    // touched the feed (BUG-129, the mechanism behind tests/subagent-feed #9).
+    //
+    // THE TOLERANCE IS EXACT, NOT A SHRUG, which is the whole difference from
+    // "the feed is noisy, ignore it". Three properties, one per assertion
+    // below: the captured bytes must still be a prefix of archive+live, so a
+    // rotation that dropped or rewrote history still FAILS; the escape token is
+    // searched in the archive too, so rotating is not a way to launder a leaked
+    // line out of view; and the judgement is REPORTED, never silent.
+    const ws = await createWorkspace('canary-feed-rotation')
+    try {
+      const victim = join(ws.root, 'agent-activity.log')
+      await writeFile(victim, 'operator history that must survive\n', 'utf8')
+      const token = RealStateCanary.escapeToken('harness-feed-rotation')
+      const canary = await RealStateCanary.capture([
+        { label: 'activity feed', path: victim },
+      ])
+
+      // Exactly what feed.sh does at the cap.
+      await rename(victim, `${victim}.1`)
+      await writeFile(
+        victim,
+        '12:00:00 [feed] rotated, previous history → agent-activity.log.1\n',
+        'utf8',
+      )
+
+      const said: string[] = []
+      const realWarn = console.warn
+      console.warn = (...args: unknown[]) => {
+        said.push(args.map(String).join(' '))
+      }
+      try {
+        await canary.assertUnchanged(token)
+      } finally {
+        console.warn = realWarn
+      }
+      expect(said.join('\n'), 'a rotation was waved through in SILENCE').toMatch(/CANARY-NOTE:/)
+      expect(said.join('\n'), 'the note does not say what it forgave').toMatch(/rotat/i)
+
+      // NOT A LAUNDERING PATH: a leaked line that rotated out of the live feed
+      // is still caught in the archive.
+      await appendFile(`${victim}.1`, `a fixture line carrying ${token}\n`, 'utf8')
+      await expect(canary.assertUnchanged(token)).rejects.toThrow(/escape token/)
+
+      // And history that did NOT survive the rotation is still damage.
+      await writeFile(`${victim}.1`, 'history replaced\n', 'utf8')
+      await expect(canary.assertUnchanged(token)).rejects.toThrow(
+        /rewritten or truncated/,
       )
     } finally {
       await ws.dispose()

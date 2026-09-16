@@ -543,6 +543,40 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
         `PUBLIC_PATHS` omits the three root documents, so the documented flow cannot satisfy §5's
         own expectation; and §3b keeps the handover tracked, drops it from the preflight, points
         at §3a's redaction — which §3b never executes — and ends with "then push".
+    - **FIVE OF SEVEN SECTIONS ARE CLOSED (2026-09-16, fresh narrow-brief agents):**
+      - **§7 TASK-048** (`6937540`): §3a's `PUBLIC_PATHS` gains the three root documents, and §3b
+        redacts the handover itself — restore the shipped stub, add, gate, push — with the §3a
+        cross-reference reworded to say that scrub does NOT run on this path. **The agent caught
+        his own gate before it shipped:** his first version demanded ≤1 non-blank line, which
+        `templates/HANDOVER.md` (40 lines) would have failed in every fresh project; it now keys
+        on the §2 WIP placeholder, verified both ways. doc-links 27/27.
+      - **§6 BUG-129** (`8e9e21e`, `713d291`): rotation renames to `<feed>.1` plus a marker
+        instead of `tail`→`cat >`, so history survives and a racing writer lands in one file or
+        the other. **No lock, deliberately: `flock` is absent on macOS**, and rename needs no
+        coordination. The canary reads the archive — rotation is a CANARY-NOTE, lost or rewritten
+        history still fails, and the escape token is searched in the archive too.
+        **A FALSE PREMISE THIS FILE CARRIED IS CORRECTED:** "truncate-in-place preserves the inode
+        for `tail -F`" is wrong — `emit` reopens per line, only `exec N>` touches the lock file.
+        Fixed in `log-activity.sh`, `env-namespace.ts` and the BUGS row. `AGENT_FEED_KEEP_LINES`
+        is deleted.
+      - **§5 and §1 TASK-047** (`7c54cb4`): #17 now reads each side's COMPLETE pattern list with
+        comments stripped, plus three non-vacuity assertions; #17b witnesses discovery
+        behaviourally; #18 gains the symlink witness and paired positives across both extensions
+        and both root modes. Every mutant verified: `dod-gate.sh`→#17, `suites.sh`→#17/#17b,
+        vitest→#17, `-type f`→#18-symlink, removing `.spec.tsx`→#17/#16b/both positives.
+      - **§3 BUG-124** (`5abbd03`, `7f44bf2`): one bounded `flock -w 5` spans reclaim + reserve +
+        spawn; age is dropped as a liveness test for an owner pid written inside the lock;
+        `trap 'exit 143'` on HUP/INT/TERM. **He also caught his own vacuous test** — the
+        cwd-filtered `children()` helper reports an uninspectable process as gone, so #17 now
+        follows the owner by pid.
+    - **THE ONE OPEN QUESTION: `flock` on macOS.** BUG-124's fix degrades to "no flock → no
+      deferral", and `install-toolchain.sh` installs coreutils for `gtimeout` only — it provides
+      no `flock`, and macOS ships none. On the founder's Mac that means type-labelled bookends:
+      **BUG-124's original symptom, on the machine that reported it.** The BUG-129 agent hit the
+      same gap and designed rotation to need no lock at all. Asked of the BUG-124 agent: does the
+      toolchain provide it, can `mkdir` (already the reservation primitive, atomic everywhere)
+      carry the critical section instead, or must the degradation at least be announced once
+      rather than silent? **Nothing pushes until that is answered.**
     - **Non-finding worth keeping:** the derived-project `subagent-feed #12` red that blocked this
       batch for hours **did not reproduce** — 34/34 here, and #12 passed in a fresh derived
       project. It was never a measured blueprint/derived difference.

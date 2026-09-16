@@ -1,6 +1,5 @@
 # struct2flow — blueprint
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
 [![Status: alpha](https://img.shields.io/badge/Status-alpha-orange.svg)](#status)
 
 > **A living operating system for AI-native software development.**
@@ -345,7 +344,7 @@ it. Current contents:
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`, `way-of-working.md`
 - **`scripts/`:** `install-toolchain.sh`, `codex-signal-watch.sh`,
-  `start-codex-signal-watch.sh`, `new-project.sh`, `blueprint` itself
+  `start-codex-signal-watch.sh`, `blueprint` itself
 - **`tests/`** — the whole directory, expanded from `git archive HEAD tests`
   (BUG-029). The regression suites guard blueprint-managed machinery your
   project runs, so they have to move forward with it. The blueprint's own

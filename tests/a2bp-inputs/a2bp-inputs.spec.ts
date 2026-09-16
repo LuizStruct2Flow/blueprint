@@ -212,32 +212,9 @@ describe('a2bp validates its destination and its inputs before anything leaves',
     })
   })
 
-  it('#4c the exact placeholder new-project.sh writes is the one the validator refuses', async () => {
-    await scenario('a2bp-inputs-4c', async (s) => {
-      // Asserted against the script rather than a copy of the string, so the two
-      // cannot drift apart into a config that bootstraps unusable and validates
-      // fine.
-      const bootstrap = await s.run(
-        'bash',
-        [
-          '-c',
-          "grep -m1 '^blueprint_remote' \"$1\" | sed 's/^[^=]*=[[:space:]]*//'",
-          '_',
-          join(SUBJECT_ROOT, 'scripts/new-project.sh'),
-        ],
-        { cwd: s.workspace.root },
-      )
-      const remote = captured(bootstrap)
-      expect(remote, 'could not find the blueprint_remote line new-project.sh writes').not.toBe('')
-
-      const cfg = await withCfg(s, 'config_version   = 2', `blueprint_remote = ${remote}`)
-      const r = await call(s, 'bp_config_load', [cfg])
-      expect(
-        r.code,
-        `new-project.sh writes '${remote}', which bp_config_load ACCEPTS — a fresh project would push to it`,
-      ).not.toBe(0)
-    })
-  })
+  // #4c — "the exact placeholder new-project.sh writes is refused" — lives in
+  // tests/bootstrap-contents now (TASK-021): it reads the bootstrapper, which
+  // does not ship, and this suite does.
 
   // =========================================================================
   // PART 2 — input validation (§5.1)

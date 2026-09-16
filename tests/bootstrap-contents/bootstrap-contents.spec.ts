@@ -81,6 +81,10 @@ async function build(s: Scenario): Promise<Fixture> {
   await s.run('cp', ['-R', join(REPO_ROOT, 'templates'), join(blueprint, 'templates')], {
     cwd: s.workspace.root,
   })
+  // The bootstrapper does not ship either (TASK-021), for the same reason.
+  await s.run('cp', ['-p', join(REPO_ROOT, 'scripts/new-project.sh'), join(blueprint, 'scripts/new-project.sh')], {
+    cwd: s.workspace.root,
+  })
 
   const hasScript = await s.fs.exists(join(blueprint, 'scripts/new-project.sh'))
   expect(hasScript, 'fixture blueprint has no new-project.sh — it is not a blueprint').toBe(true)
@@ -429,6 +433,43 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
         /^blueprint_release_branch\s*=\s*released$/m,
       )
       expect(conf, 'bootstrap moved a2bp\'s base off main').toMatch(/^blueprint_branch\s*=\s*main$/m)
+    })
+  })
+
+  it('#8b the placeholder bootstrap writes is the one a2bp refuses to push to', async () => {
+    await scenario('bootstrap-contents-8b', async (s) => {
+      const { derived } = await build(s)
+
+      // Moved from a2bp-inputs #4c (TASK-021): that suite ships, and this reads
+      // the bootstrapper, which does not. Asserted against what bootstrap really
+      // wrote rather than a copy of the string, so the two cannot drift into a
+      // config that bootstraps unusable and validates fine.
+      const conf = await readFile(join(derived, '.blueprint-source'), 'utf8')
+      const remote = /^blueprint_remote\s*=\s*(.*)$/m.exec(conf)?.[1]?.trim() ?? ''
+      expect(remote, 'bootstrap wrote no blueprint_remote line').not.toBe('')
+
+      const cfg = await s.fs.write('cfg', `config_version   = 2\nblueprint_remote = ${remote}\n`)
+      const r = await s.run(
+        'bash',
+        ['-c', '. "$1/scripts/lib/request.sh"\n. "$1/scripts/lib/request-config.sh"\nbp_config_load "$2"', '_', REPO_ROOT, cfg],
+        { cwd: s.workspace.root },
+      )
+      expect(r.code, `bootstrap writes '${remote}', which bp_config_load ACCEPTS — a fresh project would push to it`).not.toBe(0)
+    })
+  })
+
+  it('#9 TASK-021: the bootstrapper, LICENSE and the dead acceptance script do not ship, and no link names LICENSE', async () => {
+    await scenario('bootstrap-contents-9', async (s) => {
+      const { derived } = await build(s)
+
+      const shipped: string[] = []
+      for (const f of ['scripts/new-project.sh', 'LICENSE', 'scripts/accept-bug-022.sh']) {
+        if (await s.fs.exists(join(derived, f))) shipped.push(f)
+      }
+      expect(shipped, 'blueprint-only files reached a new project').toEqual([])
+
+      const readme = await readFile(join(derived, 'README.md'), 'utf8')
+      expect(readme, 'the delivered README links to a LICENSE the project does not have').not.toMatch(/\]\(LICENSE\)/)
     })
   })
 })

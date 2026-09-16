@@ -329,6 +329,42 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
+  it('#5c TASK-048: a fresh project TRACKS the six framework documents, and still ignores project_config_*.md', async () => {
+    await scenario('bootstrap-contents-5c', async (s) => {
+      const { derived } = await build(s)
+
+      // THE FOUNDER'S CRITERION, CHECKED RATHER THAN ASSUMED. `git add -A` at
+      // bootstrap skips an ignored path in SILENCE — it reports nothing — so
+      // "the six are tracked now" and "the six look tracked now" render
+      // identically without this. #3b only asserts CLAUDE.md exists on disk,
+      // which was true while it was ignored too.
+      //
+      // Before TASK-048 every one of these sat in the privacy block and none
+      // reached the first commit's index, which is why a doc link into them
+      // was dead in a clone (the limitation BUG-125 had to accept).
+      const tracked = (await s.run('git', ['ls-files'], { cwd: derived })).stdout.split('\n')
+      expect(tracked.length, 'the derived project has no index to read').toBeGreaterThan(10)
+
+      const untracked = [
+        'CLAUDE.md',
+        'AGENTS.md',
+        'AGENT_SIGNAL.md',
+        'docs/DoD.md',
+        'docs/PUBLISHING.md',
+        'docs/doing/HANDOVER.md',
+      ].filter((f) => !tracked.includes(f))
+      expect(untracked, 'these are excluded again, so a clone cannot resolve a link into them').toEqual([])
+
+      // The other half of the same decision: what stays private stays private.
+      // A-27 put the threat model, the adversary assumptions and the infra
+      // account IDs in two of these five, and TASK-048 did not touch them.
+      expect(
+        tracked.filter((f) => /^project_config_.*\.md$/.test(f)),
+        'a project_config file reached the derived index',
+      ).toEqual([])
+    })
+  })
+
   it.each([
     'scripts/start-codex-signal-watch.sh',
     'scripts/start-gemini-signal-watch.sh',

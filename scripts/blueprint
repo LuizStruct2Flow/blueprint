@@ -75,223 +75,31 @@ else
   }
 fi
 
-# --- Canonical list of blueprint-managed files ---
-# This is the SINGLE SOURCE OF TRUTH for "which files does the blueprint
-# own". The README.md and CLAUDE.md link here; do not duplicate the list
-# elsewhere.
+# --- What the blueprint manages: DERIVED, never listed (TASK-021 Stage 1) ---
 #
-# Rules for what belongs in this list:
-#   - Generic to every struct2flow project (no {{PROJECT_NAME}} after
-#     bootstrap substitution → the file's content is the same everywhere).
-#   - Improving it in one project should benefit every project (that's
-#     what blueprint sync is for).
+# The managed set is every file the blueprint's `git archive HEAD` ships, minus
+# the project-owned files below. HEAD is the blueprint's: the fetched release
+# commit on the address path, the named checkout under BLUEPRINT_ROOT, never the
+# project's own. bp_managed_files computes it.
 #
-# What does NOT belong (project-owned, never synced):
-#   - project_config_*.md  (the whole point of these files is project drift)
-#   - AGENT_SIGNAL.md, HANDOVER.md, BUGS.md, BACKLOG.md, PLAN-*.md, etc.
-#   - backend/, frontend/, infra/, src/, anywhere with project code
-#   - .claude/settings.local.json (host-specific)
-#   - .claude/settings.project.json (the project's own permission rules, merged
-#     into settings.json by pull — TASK-042, BP_SETTINGS_LAYER below)
+# There used to be a hand-kept MANAGED_FILES array here, while bootstrap shipped
+# the archive. Two descriptions of one delivery disagreed in both directions:
+# files that shipped and never synced (BUG-015, BUG-029, BUG-114,
+# AGENT_SIGNAL.md), and a managed file that should not have shipped at all
+# (new-project.sh). Now "ships" and "is managed" are one fact, decided by
+# `.gitattributes` alone, and tests/bootstrap-contents #10 checks they agree.
 #
-# An entry ending in `/` names a DIRECTORY, and stands for every file the
-# blueprint SHIPS under it (bp_expand_managed_dirs below). The expansion only
-# creates and updates. A file the blueprint stops shipping is retired by a full
-# pull, and only when unedited (_bp_retire).
-
-MANAGED_FILES=(
-  # Top-level agent protocol
-  "CLAUDE.md"
-  "AGENTS.md"
-  "AGENT_ROSTER.example.md"
-  "STACK_DEFAULTS.md"
-
-  # docs/ — the canonical reference docs
-  "docs/DoD.md"
-  "docs/OBSERVABILITY.md"
-  "docs/SECURITY.md"
-  "docs/INFRASTRUCTURE.md"
-  "docs/DOCUMENTATION.md"
-  "docs/A2BP_PLAYBOOK.md"
-  "docs/PUBLISHING.md"
-  "docs/way-of-working.md"
-
-  # scripts/ — the agent infra
-  "scripts/install-toolchain.sh"
-  "scripts/codex-signal-watch.sh"
-  "scripts/start-codex-signal-watch.sh"
-  "scripts/start-gemini-signal-watch.sh"
-  "scripts/start-copilot-signal-watch.sh"
-  "scripts/start-all-watchers.sh"
-  "scripts/agent-activity.sh"
-  # Shared helper sourced by agent-activity.sh and this CLI. MUST ship: without
-  # it arm_gate is absent in a derived project and the gate silently never arms
-  # there — exactly the A-22 defect, just relocated downstream.
-  "scripts/lib/gate.sh"
-  # State-dir derivation shared by the feed and the dispatchers. MUST ship: a
-  # derived project without it falls back to divergent paths and re-opens the
-  # A-09 cross-project log contamination.
-  "scripts/lib/state-dir.sh"
-  # Sourced by BOTH .githooks/pre-commit and .githooks/pre-push — if it does
-  # not travel, both hooks fail closed in every derived project (BUG-015).
-  # Sourced by .githooks/pre-push-project to render the DoD as stages. Without
-  # it the checklist silently drops four stages in every derived project.
-  "scripts/lib/dod-gate.sh"
-  # The watcher-liveness oracle: the dispatchers TAKE this lock, the feed TESTS
-  # it. MUST ship with either side — a project with the watcher but not this lib
-  # loses the dead-watcher warning silently, which is the bug itself (BUG-022).
-  "scripts/lib/watcher-lock.sh"
-  # THE definition of "a subject names its item", shared by .githooks/commit-msg
-  # and scripts/check-commit-subjects.sh. MUST ship with the hook: the hook fails
-  # closed without it, and a second copy of the rule is two rules that drift.
-  "scripts/lib/commit-subject.sh"
-  # Checks REAL subjects — a range, or the PR title that becomes a squash-merge
-  # commit. The hook is client-side and cannot reach that door (TASK-002).
-  "scripts/check-commit-subjects.sh"
-  # THE activity-feed appender, shared by the gate renderer and the CI watcher.
-  # MUST ship: it owns the inode-preserving rotation, and a second copy of that
-  # rule is how a rotation orphans the feed supervisor's open handle.
-  "scripts/lib/feed.sh"
-  # Post-push CI watcher, backgrounded by the gate (FEATURE-002).
-  "scripts/watch-ci.sh"
-  # THE gate renderer, sourced by .githooks/pre-push. MUST ship: the hook fails
-  # CLOSED without it (deliberately), so a project that pulls the hook and not
-  # this file cannot push at all until it lands.
-  "scripts/lib/pipeline.sh"
-  # TASK-018. Both are sourced BY a managed hook, so managing the hook without
-  # managing them delivers a call to a file the recipient never receives: the
-  # derived gate takes the `else` branch and pipe_skips the vitest stage on
-  # every push, permanently, with a reason that reads as deliberate. Worse, that
-  # reason said `blueprint pull scripts/run-ts-suites.sh`, which cannot work on
-  # an unmanaged file — the message sent the operator to a dead end. Found by
-  # tests/manifest #2c the day the bridge landed.
-  "scripts/lib/suites.sh"
-  "scripts/run-ts-suites.sh"
-  "scripts/semgrep-verdict.sh"
-  # THE roster parser, shared by the feed and team-kickoff. MUST ship: both of
-  # those are managed files, and without this one they have nowhere to resolve
-  # persona identity from — which is BUG-010, where a fleet's persona names were
-  # literals inside scripts that travel to every project.
-  "scripts/lib/roster.sh"
-  # THE forward {{PROJECT_NAME}} substitution, shared by pull, drift and a2bp's
-  # verifier. MUST ship: this CLI refuses to start without it, because three
-  # near-copies of this logic drifted apart and disagreed on legal project
-  # names containing `&` or `\` (A-07 R5-F1).
-  "scripts/lib/placeholders.sh"
-  # The terminating INT/TERM handler, shared by drift/pull and the installer's
-  # command swap (TASK-025). MUST ship: without it drift and pull refuse to run
-  # rather than risk an interrupted write, and the installer cannot replace the
-  # per-machine command.
-  "scripts/lib/signals.sh"
-  # Atomic baton publication. MUST ship: hand-editing Task and State as two
-  # writes lets a poller sample the new State beside the previous round's Task
-  # and dispatch against finished work. A settle window shrinks that race; only
-  # one indivisible write removes it.
-  "scripts/signal-set.sh"
-  # Reverse-substitution + contamination scan for the project→blueprint
-  # direction (A-07). MUST ship: cmd_a2bp refuses to run without it, so a
-  # derived project missing this file cannot back-propagate at all — which is
-  # the intended fail-closed behaviour, but only useful if the file travels.
-  "scripts/lib/contamination.sh"
-  # BUG-015 — the rest of a2bp's plumbing and the staleness probe. These are
-  # SOURCED by this CLI and were absent from this list, so `a2bp` could not run
-  # in ANY derived project and `drift` could not check staleness there. The
-  # comment above already stated the correct reasoning for contamination.sh —
-  # "only useful if the file travels" — and these five siblings simply never got
-  # added. Intent written down, files left behind. Compounds BUG-011: the PR
-  # path was broken at both ends at once.
-  "scripts/lib/staleness.sh"
-  "scripts/lib/request.sh"
-  "scripts/lib/request-build.sh"
-  "scripts/lib/request-config.sh"
-  "scripts/lib/request-inputs.sh"
-  "scripts/lib/request-file.sh"
-  "scripts/codex-feed-filter.sh"
-  "scripts/log-activity.sh"
-  "scripts/team-kickoff.sh"
-  # BUG-114 — named by managed files and shipped suites, so they must be MANAGED
-  # and not merely shipped. `.claude/settings.json` runs no-chain-guard.sh as a
-  # PreToolUse hook; the harness and suites drive session-resume.sh and
-  # wait-mic.sh. A fresh bootstrap always had them (it is `git archive HEAD`);
-  # an EXISTING project never did, because pull delivers this list and nothing
-  # else. tests/managed-references derives the set, so the next one is caught.
-  "scripts/no-chain-guard.sh"
-  "scripts/session-resume.sh"
-  "scripts/wait-mic.sh"
-  "scripts/blueprint"
-  "scripts/build-deck.sh"
-  "scripts/sonar.sh"
-  "scripts/sonar-api.sh"
-
-  # tests/ — THE regression suites, as a managed DIRECTORY (BUG-029).
-  #
-  # Every one of these guards blueprint-MANAGED machinery that a derived project
-  # runs and can break. They were seeded once by bootstrap and then never again,
-  # so a project's suites froze at its bootstrap commit while the code under
-  # them kept being pulled forward — and a stale suite still PASSES, so the gate
-  # went green over assertions about machinery that project no longer runs.
-  #
-  # A directory rather than 40 rows because suites are added, renamed and
-  # dropped constantly, and a hand-maintained list of them is the thing that
-  # goes stale (BUG-028's substitution TARGETS array, one directory over).
-  #
-  # TASK-020 put the TypeScript harness manifest under here too —
-  # tests/package.json, tests/tsconfig.json, tests/vitest.config.ts. At the repo
-  # root those files travelled by bootstrap and not by pull, and could not be
-  # listed by name to fix it: pull_file has no marker vocabulary for JSON, so it
-  # falls back to a whole-file copy with no .bp-bak, and every derived project
-  # has its own root package.json. Under a managed DIRECTORY the expansion is
-  # `git archive HEAD tests`, the same query bootstrap answers — so ships and
-  # managed became the same fact instead of two that have to agree.
-  "tests/"
-  # .githooks/ — generic gate
-  ".githooks/pre-push"
-  ".githooks/pre-push-project.example"
-  # BUG-029 — this MUST travel with tests/, and the markers are what make that
-  # possible. A suite is coherent only as two things: the files, and its
-  # invocation here. (It used to be three — TASK-020 deleted tests/SUITES.md,
-  # whose row was a second description of what those two already say.) Managing
-  # tests/ alone delivers the files and not the invocation, at which point
-  # tests/manifest #4 fails every derived push on a suite the gate cannot
-  # invoke.
-  #
-  # It used to be excluded as "project guards". That was the right instinct
-  # about the BOTTOM of the file and wrong about the top: it ships already
-  # populated (BUG-028), wiring the suites, and only the region after
-  # BLUEPRINT:END is the project's. The marker-aware merge in pull_file is
-  # exactly this distinction, and until now nothing used it.
-  ".githooks/pre-push-project"
-  # commit-msg: every commit names its backlog item (DoD §1b rule 1). Generic —
-  # the rule applies to every project, blueprint or derived.
-  ".githooks/commit-msg"
-  # gitleaks generic false-positive allowlist (working-tree scans only;
-  # staged-scan gate runs the full default rule set)
-  ".gitleaks.toml"
-
-  # CI security gate — gitleaks + semgrep scan + osv-scanner on every
-  # push, plus nightly osv-scanner cron for new CVEs
-  ".github/workflows/security.yml"
-
-  # .claude/ — generic permission allowlist (host-specific bits live in
-  # .claude/settings.local.json which is gitignored). Pull lands it merged with
-  # the project's tracked .claude/settings.project.json (TASK-042).
-  ".claude/settings.json"
-
-  # Folder skeleton READMEs — describe the conventions, never project content
-  "docs/backlog/README.md"
-  "docs/doing/README.md"
-  "docs/waiting-acceptance/README.md"
-  "docs/done/README.md"
-  "docs/config/README.md"
-  "docs/mocks/README.md"
-  "docs/requirements/README.md"
-  "config/README.md"
-)
-
-# Files that are BOOTSTRAPPED from the blueprint as templates but then
-# project-owned. New projects get them via new-project.sh; they're NOT
-# synced afterward (improvements to the template propagate to *new*
-# projects only).
+# So: to stop a file reaching projects, export-ignore it. To make one travel,
+# commit it. A file the blueprint stops shipping is retired by a full pull, and
+# only when unedited (_bp_retire).
+#
+# Known limit: archive membership is not audience. A blueprint document ships,
+# and is managed, until an export-ignore says otherwise.
+#
+# TEMPLATE_FILES: bootstrapped as templates or seeds, then project-owned. New
+# projects get them via new-project.sh; they are NOT synced afterward
+# (improvements reach *new* projects only). Subtracted from the archive, so a
+# seed the archive ships is never managed.
 TEMPLATE_FILES=(
   "project_config_overview.md"
   "project_config_paths.md"
@@ -477,70 +285,12 @@ marker_aware_merge() {
 # guards, so bootstrap, pull, drift and a2bp cannot disagree about it (BUG-028).
 _should_substitute() { bp_should_substitute "$1"; }
 
-# --- TASK-021 Stage A′: the blueprint's shipping tree may be nested ----------
-#
-# The blueprint is being restructured so that everything a project receives
-# lives under `scaffolding/` and everything only the blueprint itself needs
-# lives under `forge/`. `scaffolding/` is shaped exactly like a project root, so
-# the mapping is one prefix on the BLUEPRINT side and nothing at all on the
-# project side.
-#
-# THIS SHIPS BEFORE THE MOVE, ON PURPOSE. A derived project runs its OWN copy of
-# this CLI, frozen at whatever commit it last pulled. On the day the blueprint
-# moves, a frozen copy that does not know about `scaffolding/` runs
-# `git archive HEAD tests` against a root that no longer has `tests`, and
-# bp_expand_managed_dirs fails closed inside read_blueprint_source — which BOTH
-# `drift` and `pull` go through. So `drift` dies at every wake AND
-# `blueprint pull scripts/blueprint`, the obvious recovery, dies before it can
-# copy anything. Three projects, three manual `cp`s, no tool saying why:
-# BUG-028's shape, self-inflicted. Reproduced against a scaffolding-shaped
-# fixture blueprint before this was written.
-#
-# (Not every subcommand: `files`, `a2bp`, `prs` and `help` do not call
-# read_blueprint_source. `a2bp` breaks after the move for a different reason —
-# it would file its request at the wrong coordinate — and is handled separately
-# in scripts/lib/request.sh.)
-#
-# RESOLUTION IS PER PATH, NOT PER TREE, and that is the whole design decision.
-# A `[ -d "$BLUEPRINT_ROOT/scaffolding" ]` probe would prefix EVERY path the
-# moment the directory appears, so any file still at the root during the move
-# would resolve to a path that does not exist. That does not make the move
-# safer; it makes the move ATOMIC — one 185-file commit that is red at every
-# intermediate point. Asking about the individual path instead lets a
-# half-migrated blueprint answer correctly for both halves, so the move can land
-# as green, pushable slices. The resolver is the thing that decides that, not
-# the restructure.
-#
-# `scaffolding/` wins when both exist. During a move that is the copy being
-# migrated to; outside a move the situation does not arise.
-#
-# THE PROJECT SIDE STAYS PROJECT-RELATIVE. bp_should_substitute has exactly one
-# leading-component rule (`tests/*`) and its header says not to add another
-# without checking every call site. Hand it `scaffolding/tests/…` and the case
-# stops matching, every suite gets {{PROJECT_NAME}} substituted, and BUG-029's
-# forever-drifted state comes back. Only the blueprint-side path gains a prefix.
-#
-# WHICH ORACLE — the filesystem or HEAD? Each consumer asks the question the way
-# it reads the answer, and the two genuinely differ:
-#
-#   bp_blueprint_path      the FILESYSTEM, because drift and pull compare and
-#                          copy WORKING-TREE bytes. `[ -e ]` on the same file
-#                          the caller is about to open cannot disagree with it.
-#   bp_expand_managed_dirs HEAD, because BUG-029 fixed the set of files a
-#                          directory expands to as "what a bootstrap would have
-#                          received" — an uncommitted suite must not sync.
-#
-# They diverge exactly while a `git mv` is staged but not committed: HEAD still
-# names the root path, the filesystem only has the scaffolding one. That
-# combination is CORRECT rather than merely tolerated — the expansion yields the
-# project-relative NAME, the resolver finds the CONTENT, and both point at the
-# one file on disk. It is the same split the file already had.
+# bp_blueprint_path PATH — where the blueprint holds a project-relative PATH.
+# The blueprint is flat: the `scaffolding/` move was dropped (TASK-021, founder
+# 2026-09-16), so project and blueprint coordinates are the same and this is a
+# plain join. It stays one function so every reader asks the same question.
 bp_blueprint_path() {
-  if [ -e "$BLUEPRINT_ROOT/scaffolding/$1" ]; then
-    printf '%s/scaffolding/%s' "$BLUEPRINT_ROOT" "$1"
-  else
-    printf '%s/%s' "$BLUEPRINT_ROOT" "$1"
-  fi
+  printf '%s/%s' "$BLUEPRINT_ROOT" "$1"
 }
 
 # Write a placeholder-substituted COPY of the blueprint file to a
@@ -902,7 +652,7 @@ pull_file() {
 #
 # BLUEPRINT_ROOT then names a detached checkout built from that cache at the
 # fetched SHA, so every reader below — bp_prospective_for's content, drift and
-# pull's existence checks, pull_file's mode, bp_expand_managed_dirs' archive and
+# pull's existence checks, pull_file's mode, bp_managed_files' archive and
 # the history — runs unchanged against one oracle. Swapping only the content
 # read would leave two answers to "does the blueprint have this file", which is
 # BUG-113's shape arriving by another route.
@@ -1262,9 +1012,9 @@ read_blueprint_source() {
     _bp_fetch_blueprint
   fi
 
-  # Every MANAGED_FILES consumer below this point walks a list of FILES. Expand
-  # here, once, so `drift` and both of `pull`'s loops are unchanged (BUG-029).
-  bp_expand_managed_dirs
+  # Derived here, once, from the blueprint just resolved, so drift and both of
+  # pull's loops walk one list of files.
+  bp_managed_files
 }
 
 # The first `KEY = value` in .blueprint-source, trimmed; empty when absent.
@@ -1272,138 +1022,88 @@ _bp_config_value() {
   sed -n "/^[[:space:]]*$1[[:space:]]*=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*\$//;p;q;}" .blueprint-source
 }
 
-# --- BUG-029: a MANAGED_FILES entry ending in `/` names a directory ----------
+# --- bp_managed_files: the managed set, from the blueprint's archive ----------
 #
-# Replaces each such entry with the files the blueprint SHIPS under it. Called
-# at the end of read_blueprint_source, which is the one place every path that
-# needs BLUEPRINT_ROOT goes through — so drift and pull get the expansion for
-# free and nothing else has to know directories exist.
+# Every file `git archive HEAD` ships out of $BLUEPRINT_ROOT, minus
+# TEMPLATE_FILES and `.blueprint-root`, into BP_MANAGED. Called at the end of
+# read_blueprint_source, the one place drift and pull resolve the blueprint, and
+# by `files`. The listing is per file, so nothing downstream knows directories.
 #
-# THE LISTING IS `git archive HEAD <dir>`. Two parts of that are load-bearing
-# and neither is the obvious choice:
+# `git archive`, NOT `git check-attr export-ignore`: a trailing-slash pattern
+# does not propagate to the files under it, so check-attr says `unspecified` for
+# a file the archive drops (pinned by tests/suite-sync #1c). HEAD, not the
+# working tree: an uncommitted file must not sync. CONTENT is read from the tree,
+# which on the address path is a checkout of that same commit.
 #
-#   - `git archive`, NOT `git check-attr export-ignore`. A trailing-slash
-#     directory pattern in `.gitattributes` does NOT propagate to the files
-#     underneath it: `git check-attr export-ignore tests/bootstrap-contents/
-#     test.sh` reports `unspecified` for a file `git archive` genuinely drops.
-#     Archiving is the only query that answers "what ships". tests/manifest
-#     (:139-141) rejected check-attr for exactly this and had to say so; the
-#     trap is now pinned by tests/suite-sync #1c so nobody re-walks it.
-#   - HEAD, not the working tree — the same argument tests/manifest #2b makes.
-#     An uncommitted suite must not sync, or a project pulls a file that does
-#     not exist upstream yet. CONTENT still comes from the working tree, as it
-#     does for every other managed file.
+# `.blueprint-root` is subtracted as well as export-ignored (BUG-013): shipped,
+# it would make a project identify as the blueprint, and drift would compare
+# nothing and exit 0. Two mechanisms, because that one failing silently is what
+# made it expensive.
 #
-# So the expansion is precisely "the files a bootstrap would have received",
-# which is the set a pull has to keep current.
+# FAILS CLOSED (BUG-029 R2-S1). An archive that cannot be listed, or lists
+# nothing, is a hard failure: an empty set would let drift print "✓ All
+# blueprint-managed files match" over zero files. Each stage runs on its own and
+# is checked, because `$(a | b)` keeps only b's status (BUG-027 finding b).
 #
-# THE EXPANSION NEVER DELETES. The project alone cannot tell "the blueprint
-# dropped this suite" from "the project wrote this suite", and a prefix-based
-# delete would take out project-authored suites. Removal is _bp_retire's job,
-# which reads that distinction from the blueprint's history and deletes only
-# unedited copies. An edited orphan stays, and tests/manifest #4 fails the
-# derived push naming the runner nothing invokes.
-# IT FAILS CLOSED (BUG-029 R2-S1). An expansion that errors, or that yields
-# nothing, is a HARD failure — never an empty list.
-#
-# The first version warned and carried on, which reproduced BUG-029 inside its
-# own fix: `tests/` would silently expand to nothing, `drift` would compare zero
-# suites, report "✓ All blueprint-managed files match" and exit 0. A mechanism
-# that is present, reports nothing, and whose silence is indistinguishable from
-# success is the exact shape of A-22, BUG-004, BUG-018 and BUG-028 — four times
-# already in this repo, and it went straight back in through the door built to
-# close it. There is no such thing as "a managed directory that happens to be
-# empty today": either the blueprint ships files there and they must sync, or
-# the entry does not belong in MANAGED_FILES.
-#
-# STATUS IS CAPTURED OUTSIDE THE PIPE. `x=$(a | b | c)` yields only c's status,
-# so a failed `git archive` feeding a successful `grep` reads as success with
-# empty output — the trap behind BUG-027 finding (b), where a killed lookup's
-# partial stdout was accepted because its status vanished in `$( )`. Each stage
-# runs on its own, to a file, and is checked. `grep`'s own no-match 1 is the one
-# expected non-zero, and the emptiness check below is what actually judges it.
-#
-# TASK-021 — THE DIRECTORY IS LISTED FROM BOTH HALVES AND THE RESULTS UNIONED.
-# A managed directory is the one entry that can straddle a partial move:
-# `tests/` may have half its suites under `scaffolding/tests/` and half still at
-# the root. Asking only one side would silently drop the other half from the
-# managed set — the exact class of silent under-coverage this function exists to
-# make impossible. `scaffolding/` is stripped back off, because the expansion
-# feeds drift, both pull loops and bp_should_substitute, all of which take the
-# path a file has in the PROJECT.
-#
-# ONE HALF BEING ABSENT IS NORMAL, NOT A FAILURE — before the move only the root
-# answers, after it only `scaffolding/`, during it both. So a single missing
-# candidate no longer dies; the UNION being empty does, which is the property
-# BUG-029 R2-S1 actually asserts. The residual: a checkout unreadable in one
-# half only would carry on with the other. That other half is the whole set in
-# every shape this repo can be in, and the alternative is refusing to run
-# throughout the move.
-bp_expand_managed_dirs() {
-  local expanded=() f listing part line tarf listf cand strip
-  for f in "${MANAGED_FILES[@]}"; do
-    case "$f" in
-      */) ;;
-      *)  expanded+=("$f"); continue ;;
-    esac
-
-    listing=""
-    for cand in "scaffolding/${f%/}" "${f%/}"; do
-      # Only the scaffolding listing is rewritten. The root listing already
-      # carries project-relative paths.
-      strip=""
-      case "$cand" in scaffolding/*) strip="s#^scaffolding/##" ;; esac
-
-      tarf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
-      listf=$(mktemp) || die "cannot create a temp file to expand managed directory '$f'"
-
-      if ! _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD "$cand" >"$tarf" 2>/dev/null; then
-        # Not in HEAD under this candidate. The other one answers, or the
-        # emptiness check below fails the run.
-        rm -f "$tarf" "$listf"
-        continue
-      fi
-      if ! tar -tf "$tarf" >"$listf" 2>/dev/null; then
-        rm -f "$tarf" "$listf"
-        _bp_expand_die "$f" "the archive of '$cand' could not be listed ('tar -t' failed)"
-      fi
-      part=$(grep -v '/$' "$listf" | sed -e "$strip" || true)
-      rm -f "$tarf" "$listf"
-
-      [ -n "$part" ] && listing="${listing}${part}"$'\n'
-    done
-
-    # Sorted and de-duplicated: a file present in both halves mid-move is one
-    # managed file, and bp_blueprint_path decides which copy it reads.
-    listing=$(printf '%s' "$listing" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u || true)
-
-    if [ -z "$listing" ]; then
-      _bp_expand_die "$f" "it contains no shipping files at HEAD, under '${f%/}' or 'scaffolding/${f%/}' — every file under it is uncommitted or export-ignore'd"
-    fi
-
-    while IFS= read -r line; do
-      if [ -n "$line" ]; then expanded+=("$line"); fi
-    done <<< "$listing"
-  done
-  MANAGED_FILES=("${expanded[@]}")
+# NEVER DELETES. Removal is _bp_retire's job, which reads "the blueprint stopped
+# shipping this" from history and deletes only unedited copies.
+bp_managed_files() {
+  local tarf listf line
+  tarf=$(mktemp) || die "cannot create a temp file to list the blueprint archive"
+  listf=$(mktemp) || die "cannot create a temp file to list the blueprint archive"
+  if ! _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar HEAD >"$tarf" 2>/dev/null; then
+    rm -f "$tarf" "$listf"
+    _bp_managed_die "'git archive HEAD' failed in $BLUEPRINT_ROOT"
+  fi
+  if ! tar -tf "$tarf" >"$listf" 2>/dev/null; then
+    rm -f "$tarf" "$listf"
+    _bp_managed_die "the archive could not be listed ('tar -t' failed)"
+  fi
+  BP_MANAGED=()
+  while IFS= read -r line; do
+    BP_MANAGED+=("$line")
+  done < <(_bp_managed_filter < "$listf")
+  rm -f "$tarf" "$listf"
+  if [ "${#BP_MANAGED[@]}" -eq 0 ]; then
+    _bp_managed_die "it ships no files at HEAD: every file is uncommitted, export-ignore'd or project-owned"
+  fi
 }
 
-# One message, so the failure always says which entry and always says why
-# continuing would be worse than stopping.
-_bp_expand_die() {
-  local entry="$1" why="$2"
-  echo "${C_RED}error:${C_RESET} managed directory '$entry' expanded to nothing: $why" >&2
-  echo "${C_DIM}  Refusing to continue. Carrying on would sync ZERO files from '$entry' while${C_RESET}" >&2
-  echo "${C_DIM}  reporting success — a project would read '✓ everything matches' and be wrong.${C_RESET}" >&2
-  echo "${C_DIM}  Fix the blueprint checkout (is '${entry%/}' committed at HEAD?), or remove${C_RESET}" >&2
-  echo "${C_DIM}  '$entry' from MANAGED_FILES in scripts/blueprint if it is genuinely gone.${C_RESET}" >&2
+# _bp_managed_filter — a `tar -t` listing on stdin, its managed files on stdout.
+# The one subtraction, shared by bp_managed_files and a2bp's base.
+_bp_managed_filter() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in ''|*/|.blueprint-root) continue ;; esac
+    case " ${TEMPLATE_FILES[*]} " in *" $line "*) continue ;; esac
+    printf '%s\n' "$line"
+  done
+}
+
+# One message, so the failure always says why continuing would be worse.
+_bp_managed_die() {
+  echo "${C_RED}error:${C_RESET} the blueprint's managed set could not be derived: $1" >&2
+  echo "${C_DIM}  Refusing to continue. Carrying on would sync ZERO files while reporting${C_RESET}" >&2
+  echo "${C_DIM}  success — a project would read '✓ everything matches' and be wrong.${C_RESET}" >&2
   exit 1
 }
 
 # --- Subcommand: files ---
+# Which blueprint it lists: in a derived project (a .blueprint-source beside
+# this CLI's scripts/), the one drift and pull read. Anywhere else, BLUEPRINT_ROOT
+# or the checkout this CLI lives in — how new-project.sh and the blueprint ask.
 cmd_files() {
+  local root
+  root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+  if [ -f "$root/.blueprint-source" ]; then
+    cd "$root" || die "cannot enter $root"
+    read_blueprint_source
+  else
+    BLUEPRINT_ROOT="${BLUEPRINT_ROOT:-$root}"
+    bp_managed_files
+  fi
   echo "${C_BOLD}Blueprint-managed files (synced by 'blueprint pull'):${C_RESET}"
-  for f in "${MANAGED_FILES[@]}"; do
+  for f in "${BP_MANAGED[@]}"; do
     echo "  $f"
   done
   echo
@@ -1412,7 +1112,7 @@ cmd_files() {
     echo "  $f"
   done
   echo
-  echo "${C_DIM}Source of truth: scripts/blueprint MANAGED_FILES array.${C_RESET}"
+  echo "${C_DIM}Derived: what 'git archive HEAD' ships from the blueprint, minus the template files.${C_RESET}"
 }
 
 # --- Is BLUEPRINT_ROOT itself behind its remote? ---
@@ -1534,7 +1234,7 @@ report_staleness() {
 #
 # The signal is now an explicit marker file that CANNOT reach a derived project:
 # `.blueprint-root` is `export-ignore` (so `git archive`, which new-project.sh
-# bootstraps from, omits it) AND absent from MANAGED_FILES (so `pull` never
+# bootstraps from, omits it) AND subtracted by bp_managed_files (so `pull` never
 # copies it). Two independent mechanisms, because this one failing silently is
 # what made BUG-013 expensive.
 #
@@ -1661,7 +1361,7 @@ cmd_drift() {
   REFUSED=()
 
   local drift_out
-  for f in "${MANAGED_FILES[@]}"; do
+  for f in "${BP_MANAGED[@]}"; do
     bp=$(bp_blueprint_path "$f")
     if [ ! -f "$bp" ]; then
       MISSING_BLUEPRINT+=("$f")
@@ -1710,7 +1410,7 @@ cmd_drift() {
   if [ ${#MISSING_BLUEPRINT[@]} -gt 0 ]; then
     echo "${C_RED}Listed managed but missing in blueprint: ${#MISSING_BLUEPRINT[@]}${C_RESET}"
     for f in "${MISSING_BLUEPRINT[@]}"; do echo "  ${C_RED}!${C_RESET} $f"; done
-    echo "${C_DIM}  (the MANAGED_FILES array in scripts/blueprint may be ahead of the blueprint itself)${C_RESET}"
+    echo "${C_DIM}  (committed at the blueprint's HEAD but absent from its working tree)${C_RESET}"
     echo
   fi
 
@@ -1722,13 +1422,13 @@ cmd_drift() {
 
 # --- Subcommand: pull ---
 # _bp_cli_libs — the scripts/lib/*.sh files the blueprint's CLI needs, one per
-# line: every NAME.sh its CODE names (not its comments, not MANAGED_FILES) that
+# line: every NAME.sh its CODE names (not its comments) that
 # exists as scripts/lib/NAME.sh in the blueprint. Read from the CLI being
 # PULLED, so a lib it starts sourcing travels with it without an edit here.
 # Catches both `lib/NAME.sh` paths and `for lib in a.sh b.sh` lists.
 _bp_cli_libs() {
   local name
-  sed -e '/^MANAGED_FILES=(/,/^)/d' -e '/^[[:space:]]*#/d' "$(bp_blueprint_path scripts/blueprint)" \
+  sed -e '/^[[:space:]]*#/d' "$(bp_blueprint_path scripts/blueprint)" \
     | { grep -oE '[A-Za-z0-9_-]+\.sh' || true; } | sort -u \
     | while IFS= read -r name; do
         if [ -f "$(bp_blueprint_path "scripts/lib/$name")" ]; then printf 'scripts/lib/%s\n' "$name"; fi
@@ -1834,7 +1534,7 @@ cmd_pull() {
   # Default: every drifted or missing file
   if [ ${#files[@]} -eq 0 ]; then
     local sel_out
-    for f in "${MANAGED_FILES[@]}"; do
+    for f in "${BP_MANAGED[@]}"; do
       bp=$(bp_blueprint_path "$f")
       if [ ! -f "$bp" ]; then continue; fi
       # BUG-113 — drift's predicate exactly, so a file drift calls clean is never
@@ -2136,31 +1836,11 @@ cmd_a2bp() {
   echo
 
   # --- input validation, before ANY remote contact (§5.1) -------------------
-  # So a mistyped argument cannot leave a branch pushed and the run aborted.
-  local managed_list
-  managed_list=$(mktemp)
-  printf '%s\n' "${MANAGED_FILES[@]}" > "$managed_list"
+  # So a mistyped argument cannot leave a branch pushed and the run aborted. The
+  # ignore check waits for the fetch (the empty managed list defers it): the
+  # managed set is the base's archive, and a fetch pushes nothing.
   local validated
-  validated=$(bp_inputs_validate "$root" "$managed_list" "${files[@]}") || {
-    rm -f "$managed_list"
-    return "$BP_RC_BLOCKED"
-  }
-  # TASK-037 — accepted paths outside MANAGED_FILES. They are filed like any
-  # other, but no derived project will ever receive them, and the operator and
-  # the reviewer are both told so. Newline-delimited, one path per line.
-  local unshipped="" vline
-  while IFS= read -r vline; do
-    [ -n "$vline" ] || continue
-    bp_inputs_is_managed "${vline%%:*}" "$managed_list" || unshipped="${unshipped}${vline%%:*}"$'\n'
-  done <<< "$validated"
-  rm -f "$managed_list"
-  # bp_base_path reads this so an unshipped creation stays at the root rather
-  # than being placed under scaffolding/ (see request.sh). Local, and so visible
-  # to every function this command calls and to their subshells.
-  # shellcheck disable=SC2034  # read by bp_base_path in scripts/lib/request.sh
-  local BP_REQUEST_UNSHIPPED="$unshipped"
-  # shellcheck disable=SC2317
-  _a2bp_unshipped() { case $'\n'"$unshipped" in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
+  validated=$(bp_inputs_validate "$root" "" "${files[@]}") || return "$BP_RC_BLOCKED"
 
   # --- scratch, cleaned on EVERY exit path ---------------------------------
   # BP_A2BP_SCRATCH is GLOBAL on purpose. As a `local` it is out of scope by the
@@ -2185,6 +1865,34 @@ cmd_a2bp() {
   echo "  base:     $base"
   echo
 
+  # --- the managed set, from the base (TASK-021) ----------------------------
+  # What the base's archive ships, minus the project-owned seeds: the same
+  # derivation drift and pull make, at the commit this request is diffed against.
+  local managed_list="$scratch/managed" tarf="$scratch/base.tar" vline
+  if ! bp_request_hermetic git -C "$bare" archive --format=tar "$base" > "$tarf" 2>/dev/null \
+     || ! tar -tf "$tarf" > "$managed_list.all" 2>/dev/null; then
+    echo "${C_RED}error:${C_RESET} could not list what the base $base ships" >&2
+    return "$BP_RC_FAILED"
+  fi
+  _bp_managed_filter < "$managed_list.all" > "$managed_list"
+  bp_inputs_refuse_ignored "$root" "$managed_list" "$validated" || return "$BP_RC_BLOCKED"
+
+  # TASK-037 — accepted paths outside the managed set. They are filed like any
+  # other, but no existing project will receive them, and the operator and the
+  # reviewer are both told so. Newline-delimited, one path per line.
+  local unshipped=""
+  while IFS= read -r vline; do
+    [ -n "$vline" ] || continue
+    bp_inputs_is_managed "${vline%%:*}" "$managed_list" || unshipped="${unshipped}${vline%%:*}"$'\n'
+  done <<< "$validated"
+  # bp_base_path reads this so an unshipped creation stays at the root rather
+  # than being placed under scaffolding/ (see request.sh). Local, and so visible
+  # to every function this command calls and to their subshells.
+  # shellcheck disable=SC2034  # read by bp_base_path in scripts/lib/request.sh
+  local BP_REQUEST_UNSHIPPED="$unshipped"
+  # shellcheck disable=SC2317
+  _a2bp_unshipped() { case $'\n'"$unshipped" in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
+
   # --- base topology (§5.2) -------------------------------------------------
   local paths=()
   local line
@@ -2206,7 +1914,7 @@ cmd_a2bp() {
     mode=${spec#*:}
 
     if _a2bp_unshipped "$path"; then
-      echo "  ${C_YELLOW}not shipped${C_RESET}  $path  ${C_DIM}(not in MANAGED_FILES: no derived project receives it)${C_RESET}"
+      echo "  ${C_YELLOW}not shipped${C_RESET}  $path  ${C_DIM}(not managed: no existing project receives it)${C_RESET}"
     fi
 
     basecopy="$scratch/base.$(printf '%s' "$path" | tr '/' '_')"

@@ -17,7 +17,7 @@
 # ceremony wrote the SHIPPED EXAMPLE's names into the live baton — actively
 # undoing the rename it was supposed to confirm. The roster is per-engineer and
 # gitignored precisely because no two fleets share names, and this file is in
-# MANAGED_FILES, so those literals shipped to every derived project. Same class
+# the managed set, so those literals shipped to every derived project. Same class
 # as BUG-002 and BUG-009.
 #
 # Now: the roster is the source of truth, ROLE is the key, and the introductions

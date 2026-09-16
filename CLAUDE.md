@@ -1156,8 +1156,7 @@ project name blocks until you write `{{PROJECT_NAME}}` or justify an
 `a2bp-allow`. What `a2bp` refuses before contacting the remote: a path outside
 the project, a symlink or a path under a symlinked directory, anything inside a
 `.git` directory, a root `project_config_*.md` in any letter case (that is the
-blueprint's own config), an unmanaged path the project gitignores (tracked or
-not), a file named like a secret (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`,
+blueprint's own config), a file named like a secret (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`,
 `id_ed25519*`, `*.p12`, `*.pfx`), and any file, managed or not, in which
 `gitleaks` finds a secret. A missing `gitleaks` **refuses the request**, unlike
 the pre-push gate, which skips it: the gate's skip keeps unscanned bytes on your
@@ -1166,7 +1165,9 @@ the pull request afterwards can refuse the merge but cannot un-disclose it
 (BUG-127). Install it with `bash scripts/install-toolchain.sh`. A scanner that
 cannot run — one too old for `gitleaks dir`, for instance — is reported as an
 incomplete scan rather than as a found secret, and blocks either way. After
-fetching, it also refuses a new path that differs
+fetching, and before pushing anything, it also refuses an unmanaged path the
+project gitignores (tracked or not), because the managed set is what the fetched
+base ships, and a new path that differs
 from a blueprint path only by letter case. A request that is not yet a file change goes in
 `docs/backlog/feature-requests.md` in the blueprint.
 
@@ -1372,14 +1373,17 @@ What this means for the agent:
 
 ### What blueprint sync covers
 
-The canonical list of synced files is the `MANAGED_FILES` array in
-`scripts/blueprint` — run `blueprint files` to print it. If you catch
+Nobody keeps a list of synced files. The managed set is **derived**: every file
+the blueprint's `git archive` ships at the commit sync reads, minus the
+project-owned seeds (`TEMPLATE_FILES` in `scripts/blueprint`), so bootstrap and
+pull deliver the same set and `.gitattributes` alone decides what ships
+(TASK-021). Run `blueprint files` to print it. If you catch
 yourself adding a project-specific incident or path to a blueprint-managed
 file, move it to the right `project_config_*.md` before committing.
 
 ### Your project's `.gitignore` is yours (TASK-048)
 
-`.gitignore` is seeded at bootstrap and is **not** in `MANAGED_FILES`, so a
+`.gitignore` is seeded at bootstrap and is **not** managed, so a
 blueprint change to it reaches NEW projects only. A project bootstrapped before
 2026-09-16 still excludes the framework's own documents, and every doc link into
 them is dead in a clone. To adopt the change:

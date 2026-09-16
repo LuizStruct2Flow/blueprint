@@ -22,7 +22,8 @@
  * entry) would exist upstream. A two-file fixture blueprint gives the CLI the
  * same answer for that path: every OTHER managed entry lands in the
  * missing-in-blueprint list, which `pull <one file>` never consults.
- * tests/blueprint-relocation #1 already pins that property independently.
+ * (Since TASK-021 the managed set is derived from the fixture itself, so there
+ * is no missing-in-blueprint list to land in.)
  * Measured equivalence: both implementations agree on all six perturbed trees
  * in the population below.
  *

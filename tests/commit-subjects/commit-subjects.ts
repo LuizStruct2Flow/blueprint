@@ -18,8 +18,8 @@
  *
  * WHAT THIS FILE DOES AND DELIBERATELY DOES NOT DO. It checks the WIRING — that
  * one definition of the rule exists, that the hook and the CI checker both reach
- * it rather than carrying copies, that CI points at the PR title, and that both
- * files travel to derived projects. It does NOT express the rule. The rule is
+ * it rather than carrying copies, and that CI points at the PR title. (That both
+ * files travel is structural since TASK-021: what ships is managed.) It does NOT express the rule. The rule is
  * `commit_subject_ok` in `scripts/lib/commit-subject.sh`, it ships as shell
  * because `commit-msg` must run on a machine with no Node, and a TypeScript
  * restatement of it would be the second copy this whole suite exists to forbid.
@@ -46,11 +46,9 @@ export interface WiringScan {
   readonly ciChecksPrTitle: boolean
   /** #5 — the workflow re-runs when the title is EDITED after a green run. */
   readonly ciRerunsOnEdit: boolean
-  /** #6 — files that do NOT travel to derived projects. */
-  readonly unmanaged: readonly string[]
 }
 
-/** The two files that must travel together, or the hook cannot load its rule. */
+/** The rule library and its CI checker. */
 export const MUST_TRAVEL = [
   'scripts/lib/commit-subject.sh',
   'scripts/check-commit-subjects.sh',
@@ -77,7 +75,6 @@ async function isExecutable(path: string): Promise<boolean> {
 export async function scanWiring(root: string): Promise<WiringScan> {
   const hook = await readOrEmpty(join(root, '.githooks/commit-msg'))
   const workflow = await readOrEmpty(join(root, '.github/workflows/security.yml'))
-  const cli = await readOrEmpty(join(root, 'scripts/blueprint'))
 
   return {
     ruleLibPresent: (await readOrEmpty(join(root, MUST_TRAVEL[0]))) !== '',
@@ -96,10 +93,5 @@ export async function scanWiring(root: string): Promise<WiringScan> {
     // that matters: a title edited after the checks pass would otherwise merge
     // unchecked.
     ciRerunsOnEdit: workflow.includes('edited'),
-
-    // MANAGED means "travels on `blueprint pull`", and the authority is the
-    // MANAGED_FILES array in the CLI. Matched as a quoted path so a mention in
-    // prose is not a membership claim.
-    unmanaged: MUST_TRAVEL.filter((rel) => !cli.includes(`"${rel}"`)),
   }
 }

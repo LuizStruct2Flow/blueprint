@@ -94,7 +94,7 @@
 # tests/agent-activity-bound's temp repos). They resolve nothing and fail. So a
 # spec enumerates every project-shaped fixture constructor and fails when one
 # produces no terminator — belt and braces, the same doubling this repo already
-# applies to .blueprint-root (export-ignore AND absent from MANAGED_FILES) and
+# applies to .blueprint-root (export-ignore AND subtracted from the managed set) and
 # .scratch/ (gitignored AND export-ignored).
 #
 # `-e` and not `-d`: a submodule and a linked `git worktree` carry `.git` as a

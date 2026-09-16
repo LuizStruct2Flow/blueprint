@@ -92,6 +92,28 @@ the 69-entry hand-kept array.
     blueprint-only set.
 - `AGENT_SIGNAL.md` becomes managed automatically.
 
+**As built (2026-09-17), and where it differs from the above:**
+
+- The consistency check is `bootstrap-contents` #10 (equation) and #10b (a real
+  bootstrap), not `tests/manifest`. `manifest` ships, and the equation is only
+  answerable where the blueprint is. `manifest` #2c lost its MANAGED_FILES parse
+  and bridge checks, which the derivation makes structural.
+- `docs/config/**` is export-ignored here rather than in Stage 2, keeping its
+  README. Derived, a shipped `findings.md` would be managed, and pull would offer
+  to overwrite every project's own findings register. The requirements
+  documents, the talk, the deck PDF and the brand assets become managed, which
+  adds them to projects on the next pull; Stage 2 removes them.
+- `tests/env-namespace` is export-ignored: its population is `blueprint files`,
+  which in a derived project needs the blueprint fetched, and a fresh
+  bootstrap's remote is `FILL-ME-IN`.
+- `a2bp` derives the managed set from the base it fetched, so its ignore check
+  now runs after that read and before any push. The secret checks still run
+  before any remote contact.
+- `tests/blueprint-relocation` and `bp_blueprint_path`'s `scaffolding/` branch
+  are removed (§5, Stage 3 dropped). `bp_base_path`'s `scaffolding/` branches in
+  `scripts/lib/request.sh`, and their cases in `a2bp-build` and
+  `a2bp-contamination`, remain for that cleanup.
+
 ### 4.2 Retirement (decision 9, corrected)
 
 `bootstrap_sha` is a moving sync checkpoint, not an inventory. An old CLI's full

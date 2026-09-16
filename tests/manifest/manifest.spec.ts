@@ -268,36 +268,6 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     })
   })
 
-  it('#2c refuses to judge when MANAGED_FILES cannot be parsed, rather than passing vacuously', async () => {
-    await scenario('manifest-2c-vacuous', async (s) => {
-      // A textual parse can go stale in silence, and stale here would pass
-      // vacuously — which is the failure mode the whole check exists to
-      // prevent. So the parse asserts its own non-vacuity first.
-      const checks = await inspectFixture(s, 'bp', (files) => {
-        files.set('scripts/blueprint', '#!/bin/sh\nMANAGED_FILES=(\n  "CLAUDE.md"\n)\n')
-      })
-
-      expect(red(checks)).toEqual(['#2c'])
-      expect(why(checks, '#2c')).toContain('parsed 1 entries')
-    })
-  })
-
-  it('#2c a bridge the managed hook sources must travel by BOTH propagation paths or by neither', async () => {
-    await scenario('manifest-2c-bridge', async (s) => {
-      // ships=1,managed=0 means a NEW project gets the bridge and freezes it
-      // forever, while an EXISTING project that pulls the hook never receives
-      // it at all — its gate takes the `else` branch and pipe_skips that stage
-      // on every push, permanently, with a reason that reads as deliberate.
-      const checks = await inspectFixture(s, 'bp', (files) => {
-        const bp = files.get('scripts/blueprint') ?? ''
-        files.set('scripts/blueprint', bp.replace('  "scripts/run-ts-suites.sh"\n', ''))
-      })
-
-      expect(red(checks)).toEqual(['#2c'])
-      expect(why(checks, '#2c')).toContain('scripts/run-ts-suites.sh(ships=1,managed=0)')
-    })
-  })
-
   // RETIRED WITH TASK-047, recorded rather than silently absent: "a suite whose
   // gate stage is DELETED is named, and the suites still wired in are not" was
   // a perturbation on PER-SUITE invocation lines (`gateFor(SUITES.filter(…))`).
@@ -341,8 +311,7 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     await scenario('manifest-4-nobridge', async (s) => {
       // Link 2. An absent bridge is pipe_skipped at runtime — a skip carries a
       // reason and is still not running, so it must FAIL a blocking suite
-      // rather than pass it. #2c goes red alongside, because the hook now
-      // sources nothing while MANAGED_FILES still promises the file.
+      // rather than pass it.
       const checks = await inspectFixture(s, 'bp', (files) => {
         files.delete('scripts/run-ts-suites.sh')
       })
@@ -521,30 +490,6 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
       // Nothing about this gate is broken: the bridge is sourced, called, and
       // still holds the blanket run.
       expect(red(checks)).toEqual([])
-    })
-  })
-
-  it('BUG-074 and the bridge is still judged by #2c when it is sourced at column 0', async () => {
-    await scenario('manifest-bug074-2c', async (s) => {
-      // The half that failed OPEN. An undiscovered bridge is an unchecked
-      // bridge, so the same unindented source line PLUS a ships/managed split
-      // must still be caught — otherwise the case above only proves #4 recovered.
-      const checks = await inspectFixture(s, 'bp', (files) => {
-        files.set(
-          '.githooks/pre-push-project',
-          (files.get('.githooks/pre-push-project') ?? '').replace(
-            '  . ./scripts/run-ts-suites.sh',
-            '. ./scripts/run-ts-suites.sh',
-          ),
-        )
-        files.set(
-          'scripts/blueprint',
-          (files.get('scripts/blueprint') ?? '').replace('  "scripts/run-ts-suites.sh"\n', ''),
-        )
-      })
-
-      expect(red(checks)).toEqual(['#2c'])
-      expect(why(checks, '#2c')).toContain('scripts/run-ts-suites.sh(ships=1,managed=0)')
     })
   })
 

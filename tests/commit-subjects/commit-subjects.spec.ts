@@ -54,7 +54,8 @@
  * the mutant(s) per case. The denominator comes from the runner rather than
  * from a grep, so the `it.each` tables are expanded rather than counted once.
  *
- * Twenty-three cases, twenty-three with an observed red. One belongs here rather
+ * Twenty-one cases, twenty-one with an observed red (TASK-021 removed the two
+ * that asked whether a file is LISTED to travel: shipping is managing now). One belongs here rather
  * than next door: turning the hook's missing-library `exit 1` into `exit 0`
  * is invisible in tests/commit-msg-gate, whose own R6 case rewrites that
  * same branch in its fixture — `#6 the hook FAILS CLOSED when its rule
@@ -65,7 +66,7 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { MUST_TRAVEL, scanWiring, type WiringScan } from './commit-subjects.js'
+import { scanWiring, type WiringScan } from './commit-subjects.js'
 import { notGithubActions, skipNote } from '../helpers/project-config.js'
 
 const RULE_LIB = join(REPO_ROOT, 'scripts/lib/commit-subject.sh')
@@ -134,9 +135,10 @@ describe('TASK-002 — the item rule is checked where the commit is actually mad
       )
       expect(scan.ciRerunsOnEdit, 'a title edited after a green run would bypass the check').toBe(true)
     }
-    // #6 — both files travel, or a derived project gets a hook that cannot load
-    // its rule.
-    expect(scan.unmanaged, `${scan.unmanaged.join(' ')} do not travel`).toEqual([])
+    // #6 — that both files travel is no longer this suite's to check. Since
+    // TASK-021 a file is managed exactly when it ships, so it travels unless an
+    // export-ignore stops it, and bootstrap-contents #0 (the library) and
+    // managed-references (the checker, named by the managed workflow) fail then.
   })
 
   it('#1 the library exposes commit_subject_ok, so the rule is reusable at all', async () => {
@@ -246,8 +248,8 @@ describe('TASK-002 — the item rule is checked where the commit is actually mad
     await scenario('cs-6', async (s) => {
       // The hook gained a dependency. A project that pulled the hook but not the
       // library has a gate that cannot load its rule — which must refuse, never
-      // pass. This is why #6 above asserts both files are blueprint-managed:
-      // travelling together is the fix, and failing closed is the backstop.
+      // pass. Travelling together is the fix (both ship, so both are managed), and
+      // failing closed is the backstop.
       const repo = await s.gitRepo('repo')
       await s.fs.copyIn(HOOK, join('repo', '.githooks/commit-msg'))
       await s.fs.chmod(join('repo', '.githooks/commit-msg'), 0o755)
@@ -306,13 +308,6 @@ describe('TASK-002 R6 — each wiring check is provably able to fail', () => {
         '        run: bash scripts/check-commit-subjects.sh --subject "$PR_TITLE"',
         '',
       ].join('\n'),
-      'scripts/blueprint': [
-        '#!/bin/sh',
-        'MANAGED_FILES=(',
-        ...MUST_TRAVEL.map((rel) => `  "${rel}"`),
-        ')',
-        '',
-      ].join('\n'),
     }
   }
 
@@ -342,7 +337,6 @@ describe('TASK-002 R6 — each wiring check is provably able to fail', () => {
       expect(scan.ciInvokesChecker).toBe(true)
       expect(scan.ciChecksPrTitle).toBe(true)
       expect(scan.ciRerunsOnEdit).toBe(true)
-      expect(scan.unmanaged).toEqual([])
     })
   })
 
@@ -426,32 +420,6 @@ describe('TASK-002 R6 — each wiring check is provably able to fail', () => {
         f['.github/workflows/security.yml'] = 'on:\n  pull_request:\njobs: {}\n'
       })
       expect(scan.ciInvokesChecker).toBe(false)
-    })
-  })
-
-  it('#6 goes red when either file stops travelling to derived projects', async () => {
-    await scenario('cs-r6-6', async (s) => {
-      const scan = await scanPerturbed(s, 'bp', (f) => {
-        // A project that pulls the hook and not its rule gets a gate that cannot
-        // load its rule. Dropping the LIBRARY is the worse of the two, so that
-        // is the one injected.
-        f['scripts/blueprint'] =
-          `#!/bin/sh\nMANAGED_FILES=(\n  "${MUST_TRAVEL[1]}"\n)\n`
-      })
-      expect(scan.unmanaged).toEqual([MUST_TRAVEL[0]])
-    })
-  })
-
-  it('#6 a MENTION in the CLI is not membership — the path must be a quoted entry', async () => {
-    await scenario('cs-r6-6-mention', async (s) => {
-      const scan = await scanPerturbed(s, 'bp', (f) => {
-        // The `scripts/blueprint` file discusses managed paths in prose and in
-        // help text. A substring match would count those, which is the
-        // row-versus-mention distinction `tests/bug-numbers` #3 makes.
-        f['scripts/blueprint'] =
-          '#!/bin/sh\n# see scripts/lib/commit-subject.sh for the rule\nMANAGED_FILES=(\n)\n'
-      })
-      expect(scan.unmanaged).toEqual([...MUST_TRAVEL])
     })
   })
 })

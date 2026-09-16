@@ -72,41 +72,51 @@ bp_inputs_mode() {
   if [ -x "$1" ]; then printf '100755'; else printf '100644'; fi
 }
 
-# --- _bp_inputs_under_managed_dir CANON MANAGED_LIST_FILE --------------------
-# BUG-029 — a managed entry ending in `/` names a DIRECTORY, and every file the
-# blueprint ships under it is managed.
-#
-# An exact-match test cannot see those. `cmd_a2bp` is the one command
-# that never calls `read_blueprint_source` — it works against the fetched REMOTE
-# base rather than a local checkout, deliberately — so it has no HEAD to expand
-# the directory from and validates against the raw MANAGED_FILES list. Without
-# this, `a2bp tests/pipeline/pipeline.spec.ts` is labelled not shipped, which
-# tells the reviewer something false about a suite every project receives.
-#
-# Prefix, and the trailing `/` is what makes it a safe one: `tests/` matches
-# `tests/pipeline/pipeline.spec.ts` and not a sibling `testsuite/…`. This is a
-# MEMBERSHIP test only — whether the path really exists in the base is checked
-# after the fetch by bp_build_validate_base, and whether it exists HERE is
-# checked below, which is what refuses a suite this project does not have.
-_bp_inputs_under_managed_dir() {
-  local canon="$1" managed="$2" d
-  while IFS= read -r d; do
-    # `if`, not `[ … ] && return 0`: a trailing `&&` list that fails is the last
-    # command of the loop body, so under `set -e` this would abort anywhere but
-    # the `if !` condition it happens to be called from today.
-    case "$d" in
-      */) if [ "${canon#"$d"}" != "$canon" ]; then return 0; fi ;;
-    esac
-  done < "$managed"
-  return 1
+# --- bp_inputs_is_managed CANON MANAGED_LIST_FILE ----------------------------
+# Is this canonical path shipped to derived projects? MANAGED_LIST_FILE holds one
+# managed file per line — cmd_a2bp derives it from the fetched base's archive
+# (TASK-021), so the list is per file and an exact match is the whole test.
+bp_inputs_is_managed() {
+  grep -qxF -- "$1" "$2"
 }
 
-# --- bp_inputs_is_managed CANON MANAGED_LIST_FILE ----------------------------
-# Is this canonical path shipped to derived projects? Exact entry, or under a
-# managed directory. MANAGED_LIST_FILE holds one MANAGED_FILES entry per line,
-# passed as a file so the answer has one source and cannot drift from the CLI.
-bp_inputs_is_managed() {
-  grep -qxF -- "$1" "$2" || _bp_inputs_under_managed_dir "$1" "$2"
+# --- _bp_inputs_ignored ROOT CANON -------------------------------------------
+# Refuses (status 1, with the reason) a path the project's .gitignore ignores,
+# or one whose ignore status cannot be answered.
+#
+# Outside the managed set, the project's .gitignore is what separates content
+# from local state (AGENT_ROSTER.md, logs/). Managed paths skip this only because
+# they are shipped content by definition.
+#
+# --no-index: without it git answers from the index, so a force-tracked file is
+# never reported as ignored whatever the pattern says.
+_bp_inputs_ignored() {
+  local ign_rc=0 ign_err
+  ign_err=$(bp_request_transport_env git -C "$1" check-ignore --no-index -q -- "$2" 2>&1) || ign_rc=$?
+  case "$ign_rc" in
+    0) echo "bp_inputs: '$2' is gitignored in this project; ignored files are never filed" >&2
+       return 1 ;;
+    1) return 0 ;;
+    *) # Unanswered is not "not ignored" (BUG-003: a guard that cannot run
+       # is not a guard that passed). git's own reason, not a guess at it.
+       echo "bp_inputs: cannot tell whether '$2' is gitignored: ${ign_err:-git check-ignore exited $ign_rc}" >&2
+       return 1 ;;
+  esac
+}
+
+# --- bp_inputs_refuse_ignored ROOT MANAGED_LIST_FILE VALIDATED ---------------
+# The ignore check for a validation that deferred it: every accepted
+# `<canonical>:<mode>` line whose path is not managed. cmd_a2bp runs it once the
+# base is fetched, because the managed set is the base's archive, and a fetch is
+# a read: nothing has been pushed. Fails if any path is refused.
+bp_inputs_refuse_ignored() {
+  local root="$1" managed="$2" line rc=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    bp_inputs_is_managed "${line%%:*}" "$managed" && continue
+    _bp_inputs_ignored "$root" "${line%%:*}" || rc=1
+  done <<< "$3"
+  return "$rc"
 }
 
 # --- _bp_inputs_secret_scan ROOT ACCEPTED ------------------------------------
@@ -169,7 +179,7 @@ _bp_inputs_secret_scan() {
 # Prints one `<canonical-path>:<mode>` line per accepted input, sorted byte-wise
 # and de-duplicated. Any refusal fails the whole call: a request is filed as one
 # unit, so proceeding with a subset would file something the operator did not
-# ask for.
+# ask for. An empty MANAGED_LIST_FILE defers the ignore check (see there).
 bp_inputs_validate() {
   local root="$1" managed="$2"; shift 2
   local raw canon mode rc=0
@@ -224,24 +234,11 @@ bp_inputs_validate() {
       rc=1; continue
     fi
 
-    # Outside the managed set, the project's .gitignore is what separates
-    # content from local state (AGENT_ROSTER.md, logs/). Managed paths skip
-    # this only because they are shipped content by definition.
-    #
-    # --no-index: without it git answers from the index, so a force-tracked
-    # file is never reported as ignored whatever the pattern says.
-    if ! bp_inputs_is_managed "$canon" "$managed"; then
-      local ign_rc=0 ign_err
-      ign_err=$(bp_request_transport_env git -C "$root" check-ignore --no-index -q -- "$canon" 2>&1) || ign_rc=$?
-      case "$ign_rc" in
-        0) echo "bp_inputs: '$canon' is gitignored in this project; ignored files are never filed" >&2
-           rc=1; continue ;;
-        1) : ;;
-        *) # Unanswered is not "not ignored" (BUG-003: a guard that cannot run
-           # is not a guard that passed). git's own reason, not a guess at it.
-           echo "bp_inputs: cannot tell whether '$canon' is gitignored: ${ign_err:-git check-ignore exited $ign_rc}" >&2
-           rc=1; continue ;;
-      esac
+    # The ignore check, for unmanaged paths. An EMPTY managed-list argument
+    # defers it to bp_inputs_refuse_ignored: cmd_a2bp knows the managed set only
+    # after fetching the base, and everything else here must run before that.
+    if [ -n "$managed" ] && ! bp_inputs_is_managed "$canon" "$managed"; then
+      _bp_inputs_ignored "$root" "$canon" || { rc=1; continue; }
     fi
 
     # Secrets, by name. The content scan below is the real check; this catches

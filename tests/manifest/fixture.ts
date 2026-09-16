@@ -55,22 +55,6 @@ export const TS_SUITE = 'tsone'
 /** Declared blueprint-only in `.gitattributes`, so nothing of it may ship. */
 export const BP_ONLY_SUITE = 'bponly'
 
-/**
- * MANAGED_FILES needs >= 20 entries and must contain `tests/`, or #2c refuses
- * to judge anything (its own non-vacuity guard). The names beyond the four that
- * matter are filler, and deliberately look like filler.
- */
-const MANAGED = [
-  'CLAUDE.md',
-  'docs/DoD.md',
-  '.githooks/pre-push',
-  '.githooks/pre-push-project',
-  'scripts/run-ts-suites.sh',
-  'scripts/lib/suites.sh',
-  'tests/',
-  ...Array.from({ length: 16 }, (_, i) => `docs/filler-${String(i).padStart(2, '0')}.md`),
-]
-
 function gate(): string {
   return [
     '#!/bin/sh',
@@ -129,10 +113,6 @@ export async function baselineTree(): Promise<Map<string, string>> {
     await readFile(join(REPO_ROOT, 'scripts/lib/suites.sh'), 'utf8'),
   )
 
-  files.set(
-    'scripts/blueprint',
-    ['#!/bin/sh', 'MANAGED_FILES=(', ...MANAGED.map((m) => `  "${m}"`), ')', ''].join('\n'),
-  )
   files.set(
     'scripts/run-ts-suites.sh',
     [

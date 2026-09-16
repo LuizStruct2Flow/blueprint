@@ -140,8 +140,9 @@ async function setup(s: Scenario): Promise<E2E> {
   await s.fs.write('bp-work/CLAUDE.md', '# CLAUDE\noriginal line\n')
   await s.fs.write('bp-work/docs/DoD.md', '# DoD\noriginal dod\n')
   await s.fs.write('bp-work/docs/SECURITY.md', '# Security\noriginal sec\n')
-  // Blueprint-only: in the base, never in MANAGED_FILES (TASK-037).
+  // Blueprint-only: in the base, export-ignored, so never managed (TASK-037).
   await s.fs.write('bp-work/templates/seed.md', '# Seed\noriginal seed\n')
+  await s.fs.write('bp-work/.gitattributes', 'templates/   export-ignore\n')
   await bp.commitAll('base')
 
   const remote = s.workspace.path('bp-remote.git')
@@ -639,13 +640,16 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
   it('#16 TASK-037: .git metadata and gitignored files are refused before anything is pushed', async () => {
     await scenario('a2bp-e2e-16', async (s) => {
       const e = await setup(s)
-      await s.fs.write('acme-flow/.gitignore', '.env\n')
-      await s.fs.write('acme-flow/.env', 'TOKEN=abc123\n')
+      // The ignored file is not named like a secret, so the IGNORE check is the
+      // one that refuses it — after the base is fetched, since the managed set
+      // is what that base ships (TASK-021), and before anything is pushed.
+      await s.fs.write('acme-flow/.gitignore', 'notes.local\n')
+      await s.fs.write('acme-flow/notes.local', 'my own notes\n')
 
       const before = await e.allRefs()
       for (const [f, reason] of [
         ['.git/config', '.git directory'],
-        ['.env', 'gitignored'],
+        ['notes.local', 'gitignored'],
       ] as const) {
         const { r } = await withGh(s, e, ['a2bp', f])
         expect(r.code, `${f} gave the wrong status\n${r.output}`).toBe(RC.BLOCKED)
@@ -731,38 +735,9 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     `exit 1`,
   ].join('\n')
 
-  it('#19 TASK-037: against a scaffolding/ base, an unshipped new file stays at the root and a managed one moves under scaffolding/', async () => {
-    await scenario('a2bp-e2e-19', async (s) => {
-      // bp_base_path places a creation under scaffolding/ once the base has one
-      // (TASK-021). That is right for a file projects receive and wrong for a
-      // blueprint-only one, which was silently relocated (Alexey, P4).
-      const e = await setup(s)
-      await s.fs.write('bp-work/scaffolding/keep', '')
-      for (const args of [
-        ['add', 'scaffolding/keep'],
-        ['commit', '-q', '-m', 'scaffolding'],
-        ['push', '-q', 'origin', 'main'],
-      ]) {
-        const g = await s.run('git', ['-C', e.bpWork, ...args], { cwd: s.workspace.root })
-        expect(g.code, g.output).toBe(0)
-      }
-
-      await s.fs.write('acme-flow/docs/NEW.md', '# New\n')
-      // Managed (in MANAGED_FILES) and absent from this base: a creation that ships.
-      await s.fs.write('acme-flow/docs/OBSERVABILITY.md', '# Observability\n')
-
-      for (const f of ['docs/NEW.md', 'docs/OBSERVABILITY.md']) {
-        const { r } = await withGh(s, e, ['a2bp', f])
-        expect(r.code, `${f} did not file a request\n${r.output}`).toBe(RC.PENDING)
-      }
-      const changes: string[] = []
-      for (const ref of await e.requestRefs()) {
-        const d = await e.git(['diff', '--name-status', 'main', ref])
-        changes.push(...d.stdout.split('\n').filter(Boolean))
-      }
-      expect(changes.sort()).toEqual(['A\tdocs/NEW.md', 'A\tscaffolding/docs/OBSERVABILITY.md'])
-    })
-  })
+  // #19 RETIRED WITH TASK-021 STAGE 1: it filed a MANAGED creation against a
+  // scaffolding/ base. The managed set is now what the base ships, so a path the
+  // base lacks is never managed, and the scaffolding/ move itself was dropped.
 
   it('#17 TASK-037: a tracked ignored .env, an unignored private key and a managed file carrying a secret exit 4 before any remote contact', async () => {
     await scenario('a2bp-e2e-17', async (s) => {

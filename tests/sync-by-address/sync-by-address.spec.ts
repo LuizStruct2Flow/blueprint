@@ -748,19 +748,18 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       expect(r5.code, r5.output).toBe(5)
       await expectNothingLeft(s, 'exit 5')
 
-      // A remote whose tests/ holds only export-ignored files: the expansion
-      // fails closed with exit 1 AFTER the fetch, so a cache ref exists by then.
+      // A remote whose archive ships nothing: the managed set fails closed with
+      // exit 1 AFTER the fetch, so a cache ref exists by then.
       const bad = await s.workspace.dir('bad-remote')
       await s.fs.write(join(bad, 'CLAUDE.md'), '# CLAUDE\n')
       await s.fs.write(join(bad, 'docs/DoD.md'), '# DoD\n')
-      await s.fs.write(join(bad, 'tests/fixture/test.sh'), 'echo fixture\n')
-      await s.fs.write(join(bad, '.gitattributes'), 'tests/ export-ignore\n')
+      await s.fs.write(join(bad, '.gitattributes'), '* export-ignore\n')
       await initRepo(s, bad)
-      const badHead = await commitAll(s, bad, 'nothing ships under tests/')
+      const badHead = await commitAll(s, bad, 'nothing ships')
       const one = await project(s, bad, badHead, 'OLD', { tag: 'one' })
       const r1 = await run(s, cli, one, ['drift'])
       expect(r1.code, r1.output).toBe(1)
-      expect(r1.output).toContain('expanded to nothing')
+      expect(r1.output).toContain('managed set could not be derived')
       await expectNothingLeft(s, 'exit 1')
     })
   })

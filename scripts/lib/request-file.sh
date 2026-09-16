@@ -141,7 +141,7 @@ bp_file_existing_pr() {
 # so the residual is surfaced where a reviewer can see whether the base has
 # moved since.
 #
-# UNSHIPPED is a newline-delimited list of paths outside MANAGED_FILES
+# UNSHIPPED is a newline-delimited list of paths outside the managed set
 # (TASK-037). Each is marked in the file list, so the reviewer judges it as a
 # blueprint-only change rather than one every project will pull.
 bp_file_pr_body() {
@@ -161,7 +161,7 @@ bp_file_pr_body() {
     path=${spec%%:*}
     case $'\n'"$unshipped" in
       *$'\n'"$path"$'\n'*)
-        printf -- '- `%s` (**not shipped**: not in `MANAGED_FILES`, so no derived project receives it)\n' "$path" ;;
+        printf -- '- `%s` (**not shipped**: not managed, so no existing project receives it)\n' "$path" ;;
       *) printf -- '- `%s`\n' "$path" ;;
     esac
   done

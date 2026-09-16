@@ -291,12 +291,14 @@ script may read "PR opened" as "the blueprint has this".
 change to a file the blueprint does not ship (`templates/`, a blueprint-only
 doc), or a new file. They go through the same guard and PR, and are marked
 **not shipped** so the reviewer sees no project will receive them. If a file
-*should* ship, the request is also a change to the `MANAGED_FILES` array in
-`scripts/blueprint`. Before contacting the remote, `a2bp` refuses anything inside
+*should* ship, the request is also a change to the blueprint's `.gitattributes`,
+which decides what ships. Before contacting the remote, `a2bp` refuses anything inside
 `.git`, a root `project_config_*.md` in any letter case, a symlink or a path under
-one, an unmanaged file your project gitignores (tracked or not), a file named like
+one, a file named like
 a secret (`.env`, `*.pem`, `*.key`, `id_rsa*`, …), and any file in which `gitleaks`
-finds a secret. It also refuses a new path that differs from a blueprint path
+finds a secret. Once it has fetched the base, and before pushing anything, it
+refuses an unmanaged file your project gitignores (tracked or not), because the
+managed set is what that base ships. It also refuses a new path that differs from a blueprint path
 only by letter case. And it refuses when `gitleaks` is missing or cannot run:
 filing would publish bytes nothing scanned, and a later CI scan cannot
 un-disclose them.
@@ -336,17 +338,17 @@ request, and is told so explicitly.
 
 ### What's managed and what isn't
 
-The canonical list is the `MANAGED_FILES` array inside
-[`scripts/blueprint`](scripts/blueprint). Run `blueprint files` to print
-it. Current contents:
+Nobody keeps a list. The managed set is **derived**: every file the blueprint's
+`git archive HEAD` ships, minus the project-owned seeds (TASK-021). So bootstrap
+and pull deliver the same set by construction, and `.gitattributes` alone
+decides what ships. Run `blueprint files` to print it. Current contents include:
 
 - **Top-level:** `CLAUDE.md`, `AGENTS.md`, `STACK_DEFAULTS.md`
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`, `way-of-working.md`
 - **`scripts/`:** `install-toolchain.sh`, `codex-signal-watch.sh`,
   `start-codex-signal-watch.sh`, `blueprint` itself
-- **`tests/`** — the whole directory, expanded from `git archive HEAD tests`
-  (BUG-029). The regression suites guard blueprint-managed machinery your
+- **`tests/`** — every suite the archive ships (BUG-029). The regression suites guard blueprint-managed machinery your
   project runs, so they have to move forward with it. The blueprint's own
   TypeScript harness manifest lives here too and is `export-ignore`d, so it
   reaches no project until the migration ships it. Files the blueprint ships

@@ -164,6 +164,11 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     Claude Code." Lifecycle artefacts under `docs/` stay public. So tracking them in a derived
     project is not a formality — it publishes the methodology from every derived repo. **Founder
     decision, not an agent's.**
+  - **Every fix made after a review needs its own cross-provider pass** (DoD §1b rule 4): the
+    reviewed code is not the code that would land. Brief `.scratch/brief-alexey-fix-review.md`,
+    dispatched 05:10, covering TASK-039, TASK-042, TASK-040, TASK-044, TASK-045, BUG-125 and
+    BUG-124 → `.scratch/ALEXEY-fix-review.md`. BUG-126 and BUG-127 are excluded, still in flight.
+    Codex quota came back (storm2flow ran three reviews in the half hour before 05:10).
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

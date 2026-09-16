@@ -62,24 +62,29 @@ coverage/
 #
 # Lifecycle artifacts under docs/ (BACKLOG.md, BUGS.md, SLICE-*/PLAN.md,
 # FEATURES.md, ACCEPTANCE_TESTS.md, requirements/, waiting-acceptance/,
-# done/, mocks/, all folder README.md) are PUBLIC by default. Only the
-# four methodology files inside docs/ are PRIVATE — see below.
+# done/, mocks/, all folder README.md) are PUBLIC by default. Inside docs/,
+# only review records (docs/**/CODEX_REVIEW.md) are PRIVATE — see below.
 #
-# Before pushing to a public remote, read docs/PUBLISHING.md (itself
-# gitignored below) for the §1b index preflight and §3a fresh-repo
-# allowlist publish flow.
+# Before pushing to a public remote, read docs/PUBLISHING.md (tracked, like
+# the rest of the framework's own documents) for the §1b index preflight and
+# §3a fresh-repo allowlist publish flow.
 # ============================================================
 
-# --- struct2flow / multi-AI methodology (PRIVATE) ---
-# These files reveal how the founder works with Codex + Claude Code.
-# Lifecycle artifacts under docs/ stay PUBLIC; only the four
-# methodology files inside docs/ are listed here.
-/CLAUDE.md
-/AGENTS.md
-/AGENT_SIGNAL.md
-docs/DoD.md
-docs/PUBLISHING.md
-docs/doing/HANDOVER.md
+# --- struct2flow / multi-AI methodology ---
+# These files WERE private, and deliberately are not any more: founder decision
+# 2026-09-16, "all six, no exceptions" (TASK-048). /CLAUDE.md, /AGENTS.md,
+# /AGENT_SIGNAL.md, docs/DoD.md, docs/PUBLISHING.md and docs/doing/HANDOVER.md
+# are the framework's own documents — identical in every project by
+# construction, since project specifics live in project_config_*.md. Excluding
+# them protected nothing project-specific and cost every doc link into them:
+# a link a clone cannot resolve, which is the limitation BUG-125 had to accept.
+#
+# What IS private now has a home of its own: claude.internal.md (TASK-046),
+# which the project owns and may track or ignore as it chooses.
+#
+# The entries below stay private, and for unchanged reasons: review records,
+# and the five project_config_*.md — A-27 put the threat model, the adversary
+# assumptions and the infra account IDs in two of them.
 docs/**/CODEX_REVIEW.md
 /project_config_overview.md
 /project_config_paths.md

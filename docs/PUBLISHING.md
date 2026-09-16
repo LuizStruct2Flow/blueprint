@@ -24,15 +24,21 @@ Three categories of leak we are preventing:
    captured production logs, etc. — replace with whatever your project
    has).
 2. **AI configurations**: the founder's Claude Code permission
-   allowlist, the struct2flow methodology files (including the
-   `AGENT_SIGNAL.md` protocol document), and the multi-AI review chain
-   itself: the runtime handoff history in `logs/state/signal-history.log`
-   and review records such as `docs/doing/SLICE-*/CODEX_REVIEW.md`.
-3. **Operational state**: ongoing plan decisions, handover docs, codex
-   run logs.
+   allowlist, and the multi-AI review chain itself — the runtime handoff
+   history in `logs/state/signal-history.log` and review records such as
+   `docs/doing/SLICE-*/CODEX_REVIEW.md`. **Not** the framework's own
+   documents: `CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md` and
+   `docs/DoD.md` are tracked and publish with the repo (TASK-048,
+   founder decision 2026-09-16).
+3. **Operational state**: ongoing plan decisions and codex run logs —
+   and the live handover, which is a case of its own:
+   `docs/doing/HANDOVER.md` is TRACKED in the project and REDACTED at
+   publish time (§3a). Tracking and publishing are different acts, and
+   only the second one exposes in-flight work to strangers.
 
-`.gitignore` excludes all of the above by default (blueprint privacy
-block). This runbook is the **process** that keeps it true over time.
+`.gitignore` excludes the still-private paths above (blueprint privacy
+block); §3a's scrub removes the publish-time ones. This runbook is the
+**process** that keeps both true over time.
 
 ## 1. Pre-flight check — what does the worktree state look like?
 
@@ -43,21 +49,25 @@ From the project root:
 git status --ignored
 ```
 
-`Ignored files:` should include `CLAUDE.md`, `AGENTS.md`,
-`AGENT_SIGNAL.md`, the four private docs files only —
-`docs/DoD.md`, `docs/PUBLISHING.md`, `docs/doing/HANDOVER.md`, and
-`docs/doing/*/CODEX_REVIEW.md` — plus `project_config_*.md`,
-`scripts/codex-signal-watch.sh`, `scripts/start-codex-signal-watch.sh`,
-`scripts/new-project.sh`, `.claude/`, `.blueprint-source`, plus any
-project-specific privacy paths you've added in the project's
-`.gitignore` extension block. The rest of `docs/` (lifecycle
-artifacts) is PUBLIC and should NOT appear under `Ignored files`.
+`Ignored files:` should include `docs/**/CODEX_REVIEW.md`,
+`project_config_*.md`, `scripts/codex-signal-watch.sh`,
+`scripts/start-codex-signal-watch.sh`, `scripts/new-project.sh`,
+`.claude/`, `.blueprint-source`, plus any project-specific privacy paths
+you've added in the project's `.gitignore` extension block. The rest of
+`docs/` (lifecycle artifacts) is PUBLIC and should NOT appear under
+`Ignored files`.
+
+**`CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md`, `docs/DoD.md`,
+`docs/PUBLISHING.md` and `docs/doing/HANDOVER.md` are NOT here any more**
+(TASK-048). They are tracked, so seeing them under `Ignored files` means
+your `.gitignore` predates 2026-09-16 — CLAUDE.md §"Your project's
+`.gitignore` is yours" says what to run.
 
 ```bash
 # 1b. Index state — what would actually publish if you `git push`?
 # .gitignore does NOT untrack already-tracked files. This is the
 # critical check: a tracked file ignores nothing.
-git ls-files | grep -E '^(CLAUDE\.md|AGENTS\.md|AGENT_SIGNAL\.md|docs/(DoD\.md|PUBLISHING\.md|doing/HANDOVER\.md|.+/CODEX_REVIEW\.md)|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "PRIVATE FILES STILL TRACKED — DO NOT PUSH" || echo "index clean"
+git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "PRIVATE FILES STILL TRACKED — DO NOT PUSH" || echo "index clean"
 ```
 
 Expected output: `index clean`.
@@ -94,13 +104,17 @@ grep if needed.)
 ## 3. Decide how to actually publish
 
 The current local repo's git history includes the struct2flow bootstrap
-commit (`chore(bootstrap)`). That commit **tracks** the methodology
-files (`CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md`, `docs/DoD.md`,
-`project_config_*.md`, `scripts/codex-signal-watch.sh`,
+commit (`chore(bootstrap)`). That commit **tracks** the still-private
+files (`project_config_*.md`, `scripts/codex-signal-watch.sh`,
 `scripts/start-codex-signal-watch.sh`, `scripts/new-project.sh`,
 `.claude/settings.json`). `.gitignore` does NOT untrack them — it only
 prevents NEW additions. They will publish on a normal `git push` unless
 we explicitly close the gap.
+
+`CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md`, `docs/DoD.md` and
+`docs/PUBLISHING.md` are **not** in that list any more: they are tracked
+and publish deliberately (TASK-048). `docs/doing/HANDOVER.md` is tracked
+too, and §3a redacts it at publish time rather than untracking it.
 
 Three options, in decreasing safety:
 
@@ -144,7 +158,8 @@ PUBLIC_PATHS=(
   # — docs/ — lifecycle artifacts are public (BACKLOG.md, BUGS.md,
   # FEATURES.md, ACCEPTANCE_TESTS.md, SLICE-*/PLAN.md,
   # waiting-acceptance/*, done/*, requirements/*, mocks/* if you keep them).
-  # The post-copy scrub below removes the four private files inside docs/.
+  # docs/DoD.md and docs/PUBLISHING.md are public too (TASK-048). The
+  # post-copy scrub below removes review records and the LIVE HANDOVER.
   docs/
 )
 
@@ -163,14 +178,18 @@ for p in "${PUBLIC_PATHS[@]}"; do
   fi
 done
 
-# Scrub private files that the docs/ copy brought along.
-rm -f docs/DoD.md docs/PUBLISHING.md docs/doing/HANDOVER.md
+# Scrub what must not be PUBLISHED, which is a shorter list than what used
+# to be gitignored (TASK-048). This is publish-time REDACTION of live work
+# notes and review records, not the privacy block returning by the back door:
+# the framework's own documents are tracked AND public, while the handover is
+# tracked and redacted here, because tracking and publishing are different
+# acts and only the second one shows in-flight work to strangers.
+rm -f docs/doing/HANDOVER.md
 find docs -name 'CODEX_REVIEW.md' -delete 2>/dev/null
 
 # Verify nothing private slipped in. This is the §1b check, repeated
-# on the filesystem rather than the git index.
-find . -type f \( -name 'CLAUDE.md' -o -name 'AGENTS.md' -o -name 'AGENT_SIGNAL.md' \
-  -o -name 'DoD.md' -o -name 'PUBLISHING.md' -o -name 'HANDOVER.md' -o -name 'CODEX_REVIEW.md' \
+# on the filesystem rather than the git index, plus the handover.
+find . -type f \( -name 'HANDOVER.md' -o -name 'CODEX_REVIEW.md' \
   -o -name 'project_config_*.md' \
   -o -name 'codex-signal-watch.sh' -o -name 'start-codex-signal-watch.sh' \
   -o -name 'new-project.sh' -o -path './.claude/*' \
@@ -214,18 +233,25 @@ the same commit.
 cd "$(git rev-parse --show-toplevel)"
 
 # Untrack ONLY the private files (keeps them on disk).
-# docs/ lifecycle artifacts stay tracked and public.
+# docs/ lifecycle artifacts stay tracked and public, and since TASK-048 so do
+# CLAUDE.md, AGENTS.md, AGENT_SIGNAL.md, docs/DoD.md and docs/PUBLISHING.md —
+# they are the framework's own documents. docs/doing/HANDOVER.md is tracked too
+# and is redacted at PUBLISH time instead (§3a), so it is not untracked here.
+#
+# All FIVE project_config_*.md, not three: A-27 added security and infra, which
+# hold the threat model and the infra account IDs. This list said three for long
+# enough to be worth naming — untracking "only the private files" while leaving
+# the two most sensitive ones in the index is the failure it exists to prevent.
 git rm --cached \
-  CLAUDE.md AGENTS.md AGENT_SIGNAL.md \
-  docs/DoD.md docs/PUBLISHING.md docs/doing/HANDOVER.md \
   $(git ls-files 'docs/**/CODEX_REVIEW.md') \
   project_config_overview.md project_config_paths.md project_config_dod.md \
+  project_config_security.md project_config_infra.md \
   scripts/codex-signal-watch.sh scripts/start-codex-signal-watch.sh scripts/new-project.sh \
   $(git ls-files '.claude/**' 2>/dev/null) \
   .blueprint-source
 
-# Confirm index is now clean — same pattern as §1b:
-git ls-files | grep -E '^(CLAUDE\.md|AGENTS\.md|AGENT_SIGNAL\.md|docs/(DoD\.md|PUBLISHING\.md|doing/HANDOVER\.md|.+/CODEX_REVIEW\.md)|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
+# Confirm index is now clean — the pattern MUST stay identical to §1b's:
+git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
 
 # Commit "private: untrack methodology" then push.
 ```
@@ -276,10 +302,13 @@ Look at every changed file in `git diff`. If any line mentions:
 #    fresh clone has no personal content.
 git clone <public-remote-url> /tmp/pubclone-check
 ls -la /tmp/pubclone-check
-# Should NOT see: CLAUDE.md, AGENT_SIGNAL.md, docs/doing/HANDOVER.md,
-# docs/DoD.md, project_config_*.md, .claude/, .blueprint-source.
+# Should NOT see: docs/doing/HANDOVER.md, docs/**/CODEX_REVIEW.md,
+# project_config_*.md, .claude/, .blueprint-source.
 # SHOULD see: src/, tests/, README.md, package.json (or your stack's
-# equivalent), config/<name>.example.* files.
+# equivalent), config/<name>.example.* files — and, since TASK-048,
+# CLAUDE.md, AGENTS.md, AGENT_SIGNAL.md, docs/DoD.md and
+# docs/PUBLISHING.md. Their ABSENCE from a fresh clone is now the
+# finding, not their presence.
 ```
 
 ## 6. Adding new private content
@@ -317,7 +346,7 @@ git push --force-with-lease public main
 
 ```bash
 # From the project root:
-ls -A     # should NOT show: CLAUDE.md, AGENTS.md, AGENT_SIGNAL.md, project_config_*.md, .blueprint-source
+ls -A     # should NOT show: project_config_*.md, .blueprint-source
 cat README.md | grep -i 'struct2flow\|codex\|radio over'  # should return nothing
 ```
 

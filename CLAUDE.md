@@ -1345,6 +1345,33 @@ The canonical list of synced files is the `MANAGED_FILES` array in
 yourself adding a project-specific incident or path to a blueprint-managed
 file, move it to the right `project_config_*.md` before committing.
 
+### Your project's `.gitignore` is yours (TASK-048)
+
+`.gitignore` is seeded at bootstrap and is **not** in `MANAGED_FILES`, so a
+blueprint change to it reaches NEW projects only. A project bootstrapped before
+2026-09-16 still excludes the framework's own documents, and every doc link into
+them is dead in a clone. To adopt the change:
+
+1. Delete these six lines from your `.gitignore`: `/CLAUDE.md`, `/AGENTS.md`,
+   `/AGENT_SIGNAL.md`, `docs/DoD.md`, `docs/PUBLISHING.md`,
+   `docs/doing/HANDOVER.md`.
+2. Run `git status`. Some of them may already be tracked — a project that
+   force-added one keeps it — so "nothing changed" here is a legitimate
+   outcome and not a failure.
+3. Track whatever is still untracked:
+
+```bash
+git add CLAUDE.md AGENTS.md AGENT_SIGNAL.md \
+        docs/DoD.md docs/PUBLISHING.md docs/doing/HANDOVER.md
+```
+
+Keep `project_config_*.md` ignored — A-27 put the threat model and the infra
+account IDs there. If your copy of any of the six has **diverged** from the
+blueprint's — a locally edited `AGENTS.md`, say — tracking it publishes that
+divergence: run `blueprint drift` and reconcile first, not after. And if you
+publish this repo publicly, re-read `docs/PUBLISHING.md` first: its preflight
+and its allowlist changed with this.
+
 **`.claude/settings.json` is managed, but a project's own permission rules are
 not lost.** Put them in `.claude/settings.project.json`: it is tracked and
 project-owned, and it holds only `permissions.allow`/`ask`/`deny`/`additionalDirectories`.

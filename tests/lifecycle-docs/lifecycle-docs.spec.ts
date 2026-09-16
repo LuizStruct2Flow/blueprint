@@ -296,6 +296,22 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     })
   })
 
+  it('#6 BUG-134: a bug cancelled into docs/config/findings.md has a record, as the DoD prescribes', async () => {
+    await scenario('lifecycle-6-cancelled', async (s) => {
+      const docs = await s.workspace.dir('bp', 'docs')
+      // DoD §1 cancels an item by deleting its row and leaving a pointer in the
+      // findings register. The DoD gate honours that (BUG-130), so this check
+      // must too, or the prescribed cancellation fails the push that performs it.
+      await s.fs.write('bp/docs/doing/BUGS.md', `${TABLE_HEAD}${row('BUG-101')}`)
+      await s.fs.write('bp/docs/config/findings.md', '## F-005\n\n- **BUG-108** — cancelled.\n')
+
+      const ids = await rowedBugIds(docs)
+
+      expect(bugsWithoutRows(['BUG#108: x', 'BUG#101: y'], ids)).toEqual([])
+      expect(bugsWithoutRows(['BUG#73: z'], ids)).toEqual(['BUG-073'])
+    })
+  })
+
   it('THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row', async () => {
     const docs = join(REPO_ROOT, 'docs')
     const scan = await scanLifecycleDocs(docs)

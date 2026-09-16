@@ -505,6 +505,29 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     - One intermediate red explained rather than hidden: `bootstrap-gate` bootstraps from HEAD, so
       between his two commits the derived project got the new spec against the old lib. He re-ran
       after the fix: 8/8. dod-gate 46/46.
+  - **STATE AT 17:20, 2026-09-16 — read this first.**
+    - **The working tree is CLEAN and every item is committed.** `bootstrap-gate` is **8/8** at
+      HEAD (#2 in 402 s against the 900 s budget), so the batch's last red is gone. Christian's
+      `#5c` landed as `a2123b6` — Eto ran it (17/17) and committed it, because Christian wrote it
+      and then died mid-turn.
+    - **BOTH CLAUDE AGENTS ARE DEAD on the account's session limit, which resets 16:30 Berlin.**
+      Philipp and Christian both took HTTP 429. Neither has unfinished work that blocks the push.
+      Outstanding from them, for later: Philipp's probe into why `sh_lint`'s 46-file ShellCheck
+      invocation suppresses the `AGENT_FEED_TAG` SC2034 that a 2-file run reports (his leading
+      hypothesis: `scripts/lib/feed.sh` is in the 46 and uses it; his unchecked rival: absolute
+      vs relative paths), and Christian's own TASK-048 wrap-up.
+    - **A Codex review is RUNNING** (`.scratch/brief-codex-final-review.md` →
+      `.scratch/CODEX-final-review.md`). It covers everything that changed **after** its own
+      review — the evidence-search hole, the semgrep extraction, BUG-124's rework, TASK-042's
+      stream fix, the retirement, BUG-129, TASK-047/048. **Codex quota is separate from the
+      Claude session limit**, so it is unaffected.
+    - **THE PUSH IS WAITING ON THAT VERDICT ONLY.** DoD §1b rule 4: the code that would land has
+      never been reviewed. Nothing else blocks it.
+    - **After the push, in order:** CI watch → move ~15 rows to `waiting-acceptance/` (five are
+      fully prepared in `.scratch/`: BUG-122, TASK-040, TASK-041, TASK-045, BUG-125 — rows,
+      test instructions and commit messages all written; the rest need their verdicts) → restart
+      PID 1154186, which is running a **deleted inode** of `scripts/agent-activity.sh` and so
+      executes pre-BUG-124 labelling.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

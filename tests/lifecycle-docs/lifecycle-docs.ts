@@ -192,7 +192,12 @@ export function bugsWithoutRows(
   return [...committed].filter((id) => !rowedIds.has(id)).sort()
 }
 
-/** Every bug id carried by a ROW (not a mention) in any `BUGS.md` under docs/. */
+/**
+ * Every bug id with a record: a ROW (not a mention) in any `BUGS.md` under docs/,
+ * or any mention in `config/findings.md`. BUG-134: DoD §1 cancels an item by
+ * deleting its row and leaving a pointer in that register, and
+ * `scripts/lib/dod-gate.sh` already treats the register as a record (BUG-130).
+ */
 export async function rowedBugIds(docsDir: string): Promise<Set<string>> {
   const ids = new Set<string>()
   for (const file of await recordFiles(docsDir)) {
@@ -201,6 +206,9 @@ export async function rowedBugIds(docsDir: string): Promise<Set<string>> {
       const m = /^\| \*\*(BUG-[0-9]+)\*\*/.exec(line)
       if (m?.[1]) ids.add(m[1])
     }
+  }
+  for (const m of (await readOrEmpty(join(docsDir, 'config', 'findings.md'))).matchAll(/BUG-([0-9]+)/g)) {
+    if (m[1]) ids.add(`BUG-${m[1].padStart(3, '0')}`)
   }
   return ids
 }

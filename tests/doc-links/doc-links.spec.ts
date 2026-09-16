@@ -348,15 +348,19 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
       })
     })
 
-    it('#3 a local-only file INSIDE the repository still resolves — the privacy block keeps CLAUDE.md untracked by design', async () => {
+    it('#3 a local-only file INSIDE the repository still resolves — gitignored is not missing', async () => {
       await scenario('doc-links-local-only', async (s) => {
         // DECIDED, and pinned so it is not "tightened" back. A tracked-files rule
-        // was built first. It reported `DOCUMENTATION.md -> ../CLAUDE.md` in every
-        // freshly bootstrapped project, because .gitignore keeps CLAUDE.md,
-        // AGENTS.md, docs/DoD.md and HANDOVER.md private and managed docs link
-        // them. The scan is a plain directory here, so nothing is tracked at all.
-        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[rules](../CLAUDE.md)\n' }, {
-          'CLAUDE.md': '# local-only\n',
+        // was built first and reported `DOCUMENTATION.md -> ../CLAUDE.md` in every
+        // freshly bootstrapped project. TASK-048 later made the framework's own
+        // docs tracked, so that example no longer exists — but the class does:
+        // AGENT_ROSTER.md is per-engineer, `.scratch/` is agent scratch, and
+        // project_config_security.md and project_config_infra.md stay local-only
+        // by design (A-27). A link into any of those must still resolve for the
+        // engineer who has the file. The scan runs over a plain directory here,
+        // so nothing in it is tracked at all.
+        const scan = await scanTree(s, 'bp', { ...healthyTree(), 'ref.md': '[roster](../AGENT_ROSTER.md)\n' }, {
+          'AGENT_ROSTER.md': '# per-engineer, gitignored\n',
         })
 
         expect(scan.broken).toEqual([])

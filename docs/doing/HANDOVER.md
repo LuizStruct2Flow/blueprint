@@ -210,6 +210,25 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     and puts the logic where ShellCheck covers it. Philipp owns the one `MANAGED_FILES` line for
     it. **Rejected:** excusing `PartialParsing` on `.github/workflows/*.yml`, which would leave
     the workflow we ship to every project unanalysed by SAST.
+  - **Alexey reviewed the FIXES** (the reviewed code was not the code that would land) →
+    `.scratch/ALEXEY-fix-review.md`, baseline `53fffd0`, 149/150 in the seven suites (the one
+    failure is ts-bridge #5, his sandbox again; it passes here).
+    - **push as is:** TASK-040, TASK-045, BUG-125.
+    - **TASK-039** → Vitali: a declaration-shaped but malformed line (indented bullet, tab,
+      table row, `=`) is ignored rather than refused, so the stage silently searches the default
+      root; and the five accepted extensions disagree with what actually runs
+      (`suites.sh` finds `*.sh`/`*.spec.ts`, vitest runs `**/*.spec.ts`), so the blessed snapshot
+      counts as evidence but never executes. If aligning that is more than small, it comes to
+      the founder.
+    - **TASK-042** → Philipp: the project layer and legacy settings still take a JSON *stream*
+      and merge only `.[1]`, so a later object's permission rules vanish silently.
+    - **TASK-044** → Christian: `run-ts-suites.sh:419` keeps every LINE containing `SKIP-NOTE:`,
+      not every notice, so a multiline title or reason loses the reason.
+    - **BUG-124 → REWORK** → Philipp: the eight-child cap is a check/create race (twelve
+      concurrent hooks took twelve slots); `eval "exec 19>&-"` under dash execs a command named
+      `19`, killing the child so **no feed line is emitted at all**; and `08`/`0009`/24-digit
+      waits bypass the clamp, again losing the bookend. Over-cap dispatches also degrade the
+      label with no notice.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

@@ -114,6 +114,16 @@ the defaults.
 | `trivy image` | `HIGH+` | `HIGH+` | — |
 | ZAP baseline | `HIGH+` alert | `HIGH+` alert | — |
 
+**Semgrep completeness, and the one accepted diagnostic (BUG-126).** A run whose
+`.errors` is non-empty is INCOMPLETE, not clean: it is retried single-job and
+then blocks, in the hook and in CI alike. The single exception is a
+`Syntax error` / `PartialParsing` on a shell script (`.sh`/`.bash`, or an
+sh/bash/dash shebang), because Semgrep's bash parser rejects 18 ShellCheck-clean
+scripts here and blocking on them would block every push. Accepted errors are
+counted visibly. The residual risk — unparsed shell regions are not analysed,
+and ShellCheck covers less ground than the exception — is stated in
+[`docs/SECURITY.md`](docs/SECURITY.md) §2.
+
 ---
 
 ## Suppressions register

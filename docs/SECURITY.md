@@ -80,6 +80,27 @@ CI runs the deeper Semgrep pack
 (`--config=p/owasp-top-ten --config=p/r2c-security-audit`) — slower,
 not pre-push budget.
 
+**A scan that could not read the code is not a clean scan.** Semgrep exits 0
+with zero findings when it could only partly parse a file, so the gate reads
+`.errors`, not just the exit status and the results array: any error the policy
+does not accept makes the run INCOMPLETE — retried once single-job, then
+blocking. An error list the gate cannot decode blocks too. CI applies the same
+classification (BUG-126).
+
+**Accepted risk — shell parse errors are not analysed.** The SAST gate accepts
+one class of Semgrep diagnostic: a `Syntax error` or `PartialParsing` on a shell
+script, identified by a `.sh`/`.bash` extension or by a shebang naming sh, bash
+or dash. Semgrep's bash parser rejects valid scripts — 18 ShellCheck-clean files
+in the blueprint alone — so blocking on them would block every push. The cost is
+real: an unparsed region of a shell file is not analysed, and a rule finding
+inside it would be missed. ShellCheck is not a substitute: it enforces shell
+correctness rather than security rules, and its coverage is narrower than the
+exception's, since `sh_lint` lints only tracked files under `scripts/` and
+`.githooks/` while the exception accepts shell files anywhere, including a
+`.bash` file with no shebang. The gate does not independently prove a file's
+language either, so a deliberately false shell shebang is accepted. Everything
+else — any other error type, any other language, an error with no path — blocks.
+
 ### 3. SCA — `osv-scanner` for dependency CVEs
 
 Pre-push: `osv-scanner scan source --recursive --format=json .`, with the

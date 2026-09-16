@@ -313,6 +313,20 @@ describe('BUG-029 — a managed DIRECTORY syncs, additively, without eating proj
     })
   })
 
+  it('#1e TASK-021: a file the blueprint ships is managed with no list naming it, and a shipped seed is not', async () => {
+    await scenario('suite-sync-1e', async (s) => {
+      const bp = await fixtureBlueprint(s, 'a2')
+      await s.fs.write(join(bp, 'NEW-PROTOCOL.md'), '# a document no list has heard of\n')
+      await s.fs.write(join(bp, 'README.md'), '# the seed a project rewrites\n')
+      await commitAll(s, bp, 'a shipped document and a shipped seed')
+      const p = await newProject(s, 'a2', 'proj', bp)
+
+      const offered = marked((await drift(s, p)).output, '+')
+      expect(offered, 'a file the archive ships is not managed').toContain('NEW-PROTOCOL.md')
+      expect(offered, 'a project-owned seed is managed, so pull would overwrite it').not.toContain('README.md')
+    })
+  })
+
   it('#1b an export-ignore\'d suite is absent from the expansion', async () => {
     await scenario('suite-sync-1b', async (s) => {
       const bp = await fixtureBlueprint(s, 'b')

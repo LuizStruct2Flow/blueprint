@@ -423,6 +423,53 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
   - **`tsc` is currently RED across the tests project, and it is not a regression:** every error
     is in `tests/manifest/*` (`SHELL_SUITES`, `suitesWithSh`, `shInvoked` gone), which is
     Christian mid-sequence on the `.sh` handling. It clears when he lands.
+  - **TASK-047's port half is done and TASK-023 is CLOSED** (Christian, `c5301c5`, `da73f36`,
+    `da352b6`, `ae7e634`, `072b80f`). The runner and its `ts-bridge · BUG-055` stage went in ONE
+    commit — removing either alone leaves manifest #4 red or the gate calling a missing path. The
+    red was put on the invariant the founder decided (every runner under `tests/` is a spec),
+    which failed naming exactly `tests/ts-bridge/test.sh`, rather than on removing dead code,
+    which would have been a false red. **F-003 in `docs/config/findings.md`** records what is
+    gone and says plainly that what replaces it is weaker; the spec header now agrees with it.
+    - **What the manifest conversion cost, recorded not absorbed:** two perturbations lost their
+      subject (a blanket vitest run has no per-suite line to remove). **One case had gone GREEN
+      WHILE ASSERTING NOTHING** — "a toolchain that ships with no spec to run" withheld one
+      suite's spec, but every suite owns a spec now, so the condition never arose. It now
+      withholds every suite's spec by `export-ignore`, since deleting would trip #7's vacuity
+      floor instead.
+    - Two widenings protect Vitali's change: `includeOk()` accepts `**/*.spec.{ts,tsx}` and
+      `specsShip` recognises a shipped `.spec.tsx` — without them a fully migrated tree would turn
+      #4/#5 red, a control failing because the tree got *more* correct.
+  - **ONE RED LEFT, and it is Philipp's.** Christian ran `bootstrap-gate` after the semgrep fix:
+    SAST no longer blocks, the nested gate reaches the vitest batch, and inside the derived
+    project it is **892 passed, 1 failed** — `subagent-feed #12 twelve SIMULTANEOUS dispatches
+    reserve at most the cap`, his own BUG-124 case. It passes in this repo and fails in a
+    bootstrapped one, which is the interesting part. **He must not weaken the assertion to get
+    green**; if the cap genuinely does not hold there, BUG-124 is not fixed.
+  - **A-13 is absorbed by TASK-048** (both record that `.gitignore` is not managed). Christian
+    cancels the parked row with a findings pointer as part of TASK-048, rather than leaving two
+    live records to drift.
+  - **Pre-existing, unowned:** `.githooks/pre-push-project` SC2034 on `AGENT_FEED_TAG` (:453,
+    :467). Christian proved it identical on HEAD. `sh_lint` blocks on warnings yet our pushes
+    pass, so the gate's invocation shape is not reporting it — worth understanding, not before
+    the push.
+  - **BUG-129's real defect is fixed** (Vitali, `a2d7ca1`, `65b0492`). `supervise_body` wiped the
+    log with `: >"$out"` once per supervisor start; it now emits **`feed restarted`** over a
+    non-empty log and `feed started` over an empty one. The feed is append-only across restarts,
+    so the canary needs no new tolerance and truncation stays a hard failure that still means
+    something — no excuse-path a real fixture escape could hide behind.
+    - **His first reproducer PASSED against the unfixed script, and he said so.** The fixture is
+      deterministic and fast, so both supervisors emitted the same banner inside the same second
+      and the rewritten bytes were byte-identical — the prefix check had nothing to see. Live, the
+      two starts are minutes apart, which is exactly why this wipe reds `subagent-feed` #9 on the
+      founder's host and redded nothing in a fixture. The case now appends a history marker a
+      restart cannot reproduce and asserts it before capturing, so it cannot go vacuous again.
+    - Not built, recorded as its own future item: size-capped rotation. The log now grows across
+      restarts, and rotation by rename trips the same prefix check, so it needs the canary
+      question answered alongside it.
+  - **TASK-047's knowingly-red manifest is GREEN.** With Christian's `072b80f` in, `manifest`,
+    `dod-gate`, `suite-sync` and `ts-bridge` pass together at **121**, exactly as his commit
+    message predicted. The extension rule is now one set on all four sides — counted, discovered,
+    executed, and asserted by #17.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

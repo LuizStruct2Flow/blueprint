@@ -45,7 +45,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
-/** The five configs every project needs. */
+/** The five configs every project needs. Bootstrap seeds all of them. */
 const CONFIGS = [
   'project_config_overview.md',
   'project_config_paths.md',
@@ -53,6 +53,24 @@ const CONFIGS = [
   'project_config_security.md',
   'project_config_infra.md',
 ] as const
+
+/**
+ * The sixth import, and the one file CLAUDE.md imports that bootstrap
+ * DELIBERATELY never seeds (TASK-046).
+ *
+ * It is project-owned: no bootstrap writes one, `blueprint pull` cannot replace
+ * it, and Claude Code skips an import whose file is missing — so the import
+ * names a file that does not exist until the project decides to create it. That
+ * asymmetry is the feature, not an oversight. Do NOT "fix" a failure here by
+ * adding this to CONFIGS or by seeding the file; both halves are the contract.
+ *
+ * Only the IMPORT side is asserted here, because that is what this suite owns.
+ * The other half — the import ships to a derived project while the file does
+ * not — is `tests/bootstrap-contents` #3c, which proves it against a real
+ * bootstrap rather than an archive listing. Repeating it here would be a
+ * second, weaker copy of that assertion, and copies drift.
+ */
+const UNSEEDED_IMPORT = 'claude.internal.md'
 
 /**
  * What bootstrap actually ships.
@@ -68,16 +86,24 @@ async function archiveListing(s: Scenario): Promise<string[]> {
   return r.stdout.split('\n').filter(Boolean)
 }
 
-describe('TASK-043 — CLAUDE.md imports exactly the five project configs', () => {
-  it('#import-1 the @-imports in CLAUDE.md are the seeded configs, and the root copies exist', async () => {
+describe('TASK-043 — CLAUDE.md imports the five project configs, and only those plus one', () => {
+  it('#import-1 the @-imports are the seeded configs plus the unseeded project-owned file, and the root copies exist', async () => {
     const doc = await readFile(join(REPO_ROOT, 'CLAUDE.md'), 'utf8')
     // Claude Code ignores code blocks and code spans when it looks for imports, so this does too.
     const prose = doc.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
     const imports = [...prose.matchAll(/(?:^|\s)@([^\s\\]+)/g)].map((m) => m[1])
 
-    expect(imports.sort(), 'CLAUDE.md must import the same five files bootstrap seeds').toEqual(
-      [...CONFIGS].sort(),
-    )
+    // Exact equality, deliberately not a superset check. "imports ⊇ CONFIGS"
+    // would stay green over a bootstrap that silently stopped seeding one, and
+    // an unexplained sixth import is exactly what this case caught last time.
+    expect(
+      imports.sort(),
+      `CLAUDE.md must import the five seeded configs plus ${UNSEEDED_IMPORT}, and nothing else`,
+    ).toEqual([...CONFIGS, UNSEEDED_IMPORT].sort())
+
+    // CONFIGS only: UNSEEDED_IMPORT has no root copy to require — whether this
+    // repo has written one is its own business, and a missing one is the
+    // documented resting state.
     for (const c of CONFIGS) {
       // BUG-009: here the root copies are this repo's own config, so the blueprint's sessions import real files.
       await expect(readFile(join(REPO_ROOT, c), 'utf8'), `root ${c} is missing`).resolves.toBeTruthy()

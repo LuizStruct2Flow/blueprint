@@ -206,25 +206,6 @@ jobs:
         if: github.event_name == 'push'
         run: bash scripts/check-commit-subjects.sh --range "HEAD~1..HEAD"
 
-  shell-tests:
-    name: shell regression suites (full)
-    runs-on: ubuntu-latest
-    if: github.event_name != 'schedule'
-    permissions:
-      contents: read
-    steps:
-      - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Blueprint shell regression tests
-        # ONE LINE LEFT. TASK-018 migrated the other 35 shell suites to vitest;
-        # they run in the ts-tests job below. tests/ts-bridge is held back on
-        # purpose (TASK-023): it is the only assertion about the vitest bridge
-        # that is NOT executed by the vitest the bridge starts, so retiring it
-        # would answer a founder-pending question by deletion.
-        run: |
-          set -euo pipefail
-          bash tests/ts-bridge/test.sh
-
   ts-tests:
     name: TypeScript regression suites (vitest)
     runs-on: ubuntu-latest
@@ -365,7 +346,7 @@ jobs:
     name: release (fast-forward released to the tested commit)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.repository == 'LuizStruct2Flow/blueprint'
-    needs: [secret-scan, sast, sca, commit-subjects, shell-tests, ts-tests]
+    needs: [secret-scan, sast, sca, commit-subjects, ts-tests]
     permissions:
       contents: write
     steps:

@@ -89,8 +89,9 @@ After bootstrap:
    `check` to report what is present without installing anything)
 4. Fill out `project_config_overview.md`, `project_config_paths.md`,
    `project_config_dod.md`, `project_config_security.md`,
-   `project_config_infra.md` (`CLAUDE.md` imports all five, so their content is
-   in every agent session)
+   `project_config_infra.md` (`CLAUDE.md` `@`-imports all five, so their content
+   is in every **Claude Code** session; agents on other providers read them by
+   instruction, not automatically)
 5. Start adding code under `backend/`, `frontend/`, etc.
 6. Optional: **append** your project-specific guards to
    `.githooks/pre-push-project`, **after the `BLUEPRINT:END` marker**.

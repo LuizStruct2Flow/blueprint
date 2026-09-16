@@ -447,7 +447,7 @@ per the normal team workflow below.
 | Integration / wire | `*.integration.test.{js,ts,jsx,tsx}` | YES (near subject) | pre-push |
 | Data snapshot | `*.snap.test.{js,ts}` | NO (lives in `tests/`) | pre-push |
 | Pixel snapshot | project-defined | NO | manual + CI pipeline |
-| E2E / acceptance | project-defined | NO (lives in `tests/e2e/`) | CI pipeline |
+| E2E / acceptance | project-defined | NO (blueprint: `tests/e2e/`; a derived project: its own declared root, e.g. `e2e/` — see §"Which tests count for the DoD bug gate") | CI pipeline |
 
 DOM and layout snapshots live next to the deterministic transform they
 pin. A change that ripples across multiple snapshot files is the signal
@@ -462,9 +462,11 @@ they test**, not stashed in a separate `tests/` mirror. So
 file per source file when reasonable; multiple small files beat one
 giant cross-cutting one.
 
-**Snapshot and E2E tests live separately** under `tests/`
-(typically `tests/` root for snapshots, `tests/e2e/` for E2E).
-Their diff is a cross-cutting review concern; treating them as
+**Snapshot and E2E tests live separately** — snapshots at the `tests/`
+root, E2E under `tests/e2e/` in the blueprint and in a root of its own
+(e.g. `e2e/`) in a derived project, because only the top level of
+`tests/` is the project's own there (§"Which tests count for the DoD bug
+gate"). Their diff is a cross-cutting review concern; treating them as
 sidebar tests muddies the per-source-file co-location rule.
 
 **Shared test helpers / mocks / fixtures** live under
@@ -473,10 +475,17 @@ serve multiple tests.
 
 **Which tests count for the DoD bug gate.** The gate that checks every pushed
 `BUG#n` has a test naming it searches only the roots a project declares as
-`BP_TEST_ROOTS` in `project_config_paths.md`. In a derived project the
-top-level `tests/` holds the blueprint's own suites, which name blueprint bug
-numbers, so it never counts. Put project tests in their own declared roots
-(`backend/src`, `tests/e2e`, …) (TASK-039).
+`BP_TEST_ROOTS` in `project_config_paths.md`. The list is literal, and exactly
+one such line may exist. `docs/`, `.git/`, `scripts/` and `.githooks/` never
+count, and neither does a root containing one or sitting inside one, because the
+blueprint's own code and the bug's own backlog row would otherwise vouch for a
+project bug. A root must also resolve inside the repository. In a derived
+project, **only the top level of `tests/` counts**: a test file sitting directly
+in `tests/`, such as the snapshot layout `tests/own.snap.test.ts`, is the
+project's own, because the blueprint ships no test file there. Everything in a
+subdirectory of `tests/` is a suite the blueprint ships, so **`tests/e2e` does
+not count in a derived project** — put E2E tests in a root of their own, such as
+`e2e/`, and declare it (TASK-039).
 
 **Which CI the checks assume.** `project_config_paths.md` also declares
 `BP_CI`. Checks on `.github/workflows` run only when it is `github-actions` or

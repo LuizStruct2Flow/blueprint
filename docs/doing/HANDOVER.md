@@ -229,6 +229,21 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       `19`, killing the child so **no feed line is emitted at all**; and `08`/`0009`/24-digit
       waits bypass the clamp, again losing the bookend. Over-cap dispatches also degrade the
       label with no notice.
+  - **TASK-039 finding 5 fixed** (Vitali, `ef3ec3d`, `9e076e1`): a candidate is now the
+    declaration FORM — optional indent, optional list or table marker, key, separator — so a
+    malformed near-miss is refused instead of silently defaulting, and an exact declaration
+    beside a malformed one is a duplicate rather than first-wins. Prose stays inert
+    deliberately: the template documents the rule in a bullet containing the key, and #15f pins
+    that it is not matched.
+  - **TASK-039 finding 6 is WITH THE FOUNDER, not fixed.** The gate accepts five runner
+    extensions; only `*.spec.ts` and `*.sh` are discovered (`suites.sh:68-82`) and only
+    `**/*.spec.ts` executes (`tests/vitest.config.ts:22`). So the snapshot the founder's rule
+    blesses counts as evidence and never runs. Vitali stopped rather than widen: the decision
+    also touches `run-ts-suites.sh` (`:52`, `:55`, `:250`, `:304`) and `pipeline.sh:344`, neither
+    his, and widening only his two files would declare suites the runner never reports — the
+    vacuity the batch API exists to catch. Two coherent states: align execution up to five
+    extensions (and decide how a top-level runner, which belongs to no suite, is named in the
+    batch), or narrow the gate down to the two that execute, contradicting the rule just set.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

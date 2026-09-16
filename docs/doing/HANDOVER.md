@@ -72,12 +72,15 @@ bash scripts/session-resume.sh
 **State at handover, 2026-09-16 evening.**
 
 **Landed and CI-green:** `1248230..c3e2044`. `released` is at `c3e2044` (run 35131958151).
-Nineteen rows are in `docs/waiting-acceptance/` — TASK-039..048, BUG-122, 124, 125, 126,
-127, 129, 130, 131 and **BUG-132** (CI's suites job never had gitleaks, so every a2bp
-scenario was red on `71388b9`; the job now runs `install-toolchain.sh`). Read a row rather
-than this file.
+**All nineteen rows were accepted by the founder** (2026-09-16) and are in `docs/done/`:
+TASK-039..048, BUG-122, 124..127, 129..132. `waiting-acceptance/` is empty.
 
-**Not yet pushed:** the BUG-132 row move and this handover update. They ride the next push.
+**Not yet pushed:** the BUG-132 row move, TASK-050 (Sonar template), the nineteen
+acceptances and this update. They ride the next push.
+
+**Open, founder's call:** how to make the SonarQube shell import permanent — in the shipped
+`scripts/sonar.sh`, or blueprint-only. A working prototype is `.scratch/shellcheck-sonar.sh`.
+Also open from the same session: whether to revert BUG-126 and how to scope review findings.
 
 **storm2flow was told** (session `storm2flow-3b`) that TASK-039/040/042/043 are on
 `released`, including TASK-042's `settings.json` pull refusal.

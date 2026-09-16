@@ -278,6 +278,18 @@ jobs:
         run: |
           bash scripts/install-toolchain.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # BUG-132 — THE HARNESS-LESS CHECKOUT STILL LINTS SHELL, and the installer
+      # above is skipped there with the harness. So ShellCheck is assured the way
+      # TASK-033 did it, only when it is absent, and only in that case: with the
+      # harness present the installer provides it. tests/ts-bridge #9c executes it.
+      - name: ShellCheck present without the harness
+        if: hashFiles('tests/package.json') == ''
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q shellcheck
+          fi
+          shellcheck --version
       # TASK-033 — THE SHELL LINT, through the function the pre-push gate's shell
       # lint stage calls, so the two modes run one command. tests/ts-bridge #7
       # executes this block.

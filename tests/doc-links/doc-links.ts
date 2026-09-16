@@ -128,12 +128,18 @@ function inside(root: string, path: string): string | null {
  * wherever it pointed, so `../../../../blueprint/docs/DoD.md` passed on any
  * machine with a sibling checkout.
  *
- * NOT "tracked by git", deliberately. .gitignore's public-publishing privacy
- * block keeps CLAUDE.md, AGENTS.md, docs/DoD.md, docs/doing/HANDOVER.md and the
- * project_config files local-only in every derived project, and managed docs
- * link them. A tracked-only rule reported `DOCUMENTATION.md -> ../CLAUDE.md` in
- * every freshly bootstrapped project (tests/bootstrap-gate #2/#3). So a link to a
- * gitignored file inside the repository still resolves on the machine that has it.
+ * NOT "tracked by git", deliberately. A gitignored file inside the repository
+ * still resolves on the machine that has it: AGENT_ROSTER.md is per-engineer
+ * state, `.scratch/` is agent scratch, and `project_config_security.md` and
+ * `project_config_infra.md` are local-only by design (A-27 — threat model and
+ * infra account IDs). A tracked-only rule reports every link into them as broken.
+ *
+ * MEASURED, on the tree of the day: the rule was built, and it reported
+ * `DOCUMENTATION.md -> ../CLAUDE.md` in every freshly bootstrapped project
+ * (tests/bootstrap-gate #2/#3), because the privacy block then kept the
+ * framework's own docs untracked downstream. TASK-048 has since made those six
+ * tracked, so that particular example is gone — but the rule it argued against
+ * would still strand every link into the files listed above.
  *
  * TASK-045 — A SITE-ABSOLUTE TARGET (`/security.html`) names a served page, not
  * a path on this disk. It resolves only through what the project declares in

@@ -133,9 +133,10 @@ export async function scanEnvNamespace(
 /**
  * #3 — the rotation is not duplicated.
  *
- * `log-activity.sh` had its own copy of "append then trim", which is how the
- * inode-preserving detail drifts: a `mv`-based rotate in one copy orphans the
- * feed supervisor's open handle while the other stays correct. One appender.
+ * `log-activity.sh` had its own copy of "append then trim", which is how a
+ * rotation detail drifts: BUG-129 found the surviving copy dropping concurrent
+ * appends and deleting the history it trimmed, and one copy is hard enough to
+ * get right. One appender.
  */
 export async function checkRotationIsShared(root: string): Promise<string | null> {
   const rel = 'scripts/log-activity.sh'

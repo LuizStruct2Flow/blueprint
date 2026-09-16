@@ -13,7 +13,7 @@
 #   bash scripts/agent-activity.sh --stop     # stop the running feed
 #   bash scripts/agent-activity.sh --status   # is it running?
 #   bash scripts/agent-activity.sh --whoami   # which persona this session is
-#   tail -f logs/agent-activity.log           # follow from anywhere
+#   tail -F logs/agent-activity.log           # follow from anywhere (-F: it rotates)
 #
 # Env:
 #   AGENT_STATE_HOME=...  state dir for dispatcher run logs
@@ -568,9 +568,13 @@ supervise_body(){
   # stays a hard failure that still means something. Regression:
   # tests/agent-activity-bound #20.
   #
-  # The log now grows across restarts. Capping it is deliberately NOT done here —
-  # rotation by rename trips the same prefix check, so it needs the canary
-  # question answered with it, and that is its own item (BUG-129's row records it).
+  # The log grows across restarts, and scripts/lib/feed.sh caps it — by RENAME,
+  # to `<feed>.1`, which keeps every byte and every racing append. This comment
+  # used to say size-capped rotation "is NOT built"; that was wrong on both
+  # counts, since feed.sh had rotated at 4,000 lines all along and did it by
+  # rewriting the file in place. The canary question it deferred is answered:
+  # tests/harness/canary.ts reads the archive, so a rotation is a NOTE and a lost
+  # history is still a failure.
   if [ -s "$out" ]; then
     emit "$(ts) [agent-activity] feed restarted → $out"
   else

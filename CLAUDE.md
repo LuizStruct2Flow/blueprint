@@ -61,7 +61,7 @@ roster, not a bare agent type.
   Read it before any coordinated work.
 
 Watch the whole team live in one terminal: `bash scripts/agent-activity.sh --daemon`
-then `tail -f logs/agent-activity.log` streams
+then `tail -F logs/agent-activity.log` streams
 a single `[Persona - Backing Agent]` feed. `bash scripts/team-kickoff.sh` runs a
 round-robin kick-off to confirm the roster after editing it.
 
@@ -89,7 +89,7 @@ the **Orchestrator**. The moment you wake as this session, before anything else:
    counts them across repositories rather than within one). It returns
    immediately. It cleans the activity log and streams the one
    `[Persona - Backing Agent]` feed of every agent's work. **Watch it with
-   `tail -f logs/agent-activity.log`** — the feed does not open a terminal for
+   `tail -F logs/agent-activity.log`** — the feed does not open a terminal for
    you. Stop it with `--stop`; check with `--status`.
 
    > Spawned, non-primary personas must **not** start it. Every-wake spawning is

@@ -22,7 +22,7 @@
 # Only do this when the mic is NOT handed to an agent, or you will dispatch one.
 #
 #   1. bash scripts/agent-activity.sh --daemon
-#      tail -f logs/agent-activity.log          # in another terminal
+#      tail -F logs/agent-activity.log          # in another terminal
 #   2. bash scripts/start-codex-signal-watch.sh &   # a listener exists
 #   3. kill -9 %1                                # it dies without cleaning up
 #   4. bash scripts/signal-set.sh --holder <a Codex persona> \

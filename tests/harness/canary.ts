@@ -74,6 +74,66 @@ function countLines(content: string): number {
   return (content.match(/\n/g) ?? []).length
 }
 
+/**
+ * The verdict on one append-only target: the feed, or the baton's journal.
+ *
+ * A FUNCTION RATHER THAN A BRANCH IN THE LOOP, because the loop now carries
+ * three discriminators (created/deleted, rotated, escaped) and reviewers have to
+ * be able to read this one without holding the other two. It returns its
+ * findings instead of mutating the caller's arrays, so the ordering of the
+ * report stays the caller's business.
+ *
+ * BUG-129 — A ROTATION MOVES HISTORY, IT DOES NOT DESTROY IT, and the archive is
+ * what tells the two apart. Same shape as the baton's journal witness: a
+ * specific, checkable discriminator, never a blanket tolerance for "the feed is
+ * noisy". scripts/lib/feed.sh renames to `<feed>.1` at its cap, so archive+live
+ * still begins with whatever was captured — and if it does not, that is damage
+ * and still fails.
+ */
+async function appendOnlyVerdict(
+  before: Snapshot,
+  after: Snapshot,
+  escapeToken?: string,
+): Promise<{ problems: string[]; notes: string[] }> {
+  const problems: string[] = []
+  const notes: string[] = []
+
+  const archive = await snapshotOne({
+    label: `${before.target.label} archive`,
+    path: `${before.target.path}.1`,
+  })
+  const appended = after.content!.startsWith(before.content!)
+  const rotated =
+    !appended &&
+    archive.content !== null &&
+    (archive.content + after.content!).startsWith(before.content!)
+
+  if (rotated) {
+    notes.push(
+      `${before.target.label} ROTATED during the run — its history moved to ` +
+        `${archive.target.path}, where every captured byte is still present and ` +
+        `in order. Not a fixture escape (${before.target.path})`,
+    )
+  } else if (!appended) {
+    problems.push(
+      `${before.target.label} was rewritten or truncated, not appended to ` +
+        `(${before.target.path})`,
+    )
+  }
+
+  // The archive is searched too: rotating must not become a way to carry a
+  // leaked line out of the file the token check reads.
+  const written = after.content! + (archive.content ?? '')
+  if (escapeToken && written.includes(escapeToken)) {
+    problems.push(
+      `${before.target.label} contains this scenario's unique escape token ` +
+        `(${before.target.path})`,
+    )
+  }
+
+  return { problems, notes }
+}
+
 export class RealStateCanary {
   private constructor(private readonly before: Snapshot[]) {}
 
@@ -99,6 +159,15 @@ export class RealStateCanary {
    *               content intact as a prefix, so the prefix check passes by
    *               construction, and there is no token for the token check to
    *               find. Nothing here sees it.
+   *   NOTED       a ROTATION (BUG-129). scripts/lib/feed.sh renames the feed to
+   *               `<feed>.1` at its size cap, so the live file no longer starts
+   *               with what was captured — but archive+live does, byte for
+   *               byte. That is growth being capped, not damage, and failing on
+   *               it turned suites red for changes that never touched the feed.
+   *               The tolerance is exact rather than a shrug: a rotation that
+   *               LOST or rewrote history still fails, and the escape token is
+   *               searched in the archive too, so rotating is not a way to move
+   *               a leaked line out of view.
    *
    * That third row read "caught only by the prefix check" until Codex pointed
    * out that the prefix check passes on EVERY append — a claim of coverage
@@ -185,18 +254,9 @@ export class RealStateCanary {
         before.target.label === 'activity feed' ||
         before.target.label === 'baton journal'
       if (isAppendOnly) {
-        if (!after.content!.startsWith(before.content!)) {
-          problems.push(
-            `${before.target.label} was rewritten or truncated, not appended to ` +
-              `(${before.target.path})`,
-          )
-        }
-        if (escapeToken && after.content!.includes(escapeToken)) {
-          problems.push(
-            `${before.target.label} contains this scenario's unique escape token ` +
-              `(${before.target.path})`,
-          )
-        }
+        const verdict = await appendOnlyVerdict(before, after, escapeToken)
+        problems.push(...verdict.problems)
+        notes.push(...verdict.notes)
         continue
       }
 

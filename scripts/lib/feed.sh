@@ -11,10 +11,30 @@
 # and the dispatchers deriving the state dir two different ways) and BUG-010 (two
 # roster readers that agreed only by coincidence). One appender instead.
 #
-# Rotation matters and is easy to get wrong: the trim must PRESERVE THE INODE,
-# because scripts/agent-activity.sh holds the file open and appends by offset. A
-# `mv` would leave the supervisor writing to an unlinked file and the feed would
-# silently stop updating. tail→tmp→`cat >` keeps the inode; `mv` does not.
+# Rotation matters and is easy to get wrong. It is a RENAME — `mv` to
+# `<feed>.1`, then one marker line into the new file — and BUG-129 is why:
+#
+#   * NOTHING IS LOST. The previous form was tail→tmp→`cat >`, which leaves a
+#     window between the snapshot and the rewrite; a line appended inside it is
+#     overwritten and gone. Every hook and gate stage calls this appender on the
+#     same feed, so a racing writer is routine, and NO LOCK coordinates them —
+#     this file is POSIX sh sourced by `#!/bin/sh` hooks, and `flock` is absent
+#     on macOS, so locking every writer would put a tool the platform may not
+#     have on the one path that must never fail a push. A rename closes the
+#     window instead of guarding it: a writer that opened the old file appends
+#     into the archive, a later one into the new file, and neither is dropped.
+#   * THE FEED STAYS APPEND-ONLY, which tests/harness/canary.ts is built on.
+#     History MOVES to `<feed>.1` rather than being deleted, so what the canary
+#     captured is still a prefix of archive+live. The in-place trim deleted the
+#     head, which reads as a fixture escape and turned innocent suites red
+#     (tests/subagent-feed #9).
+#
+# THE COMMENT HERE USED TO SAY `mv` WOULD ORPHAN THE SUPERVISOR'S OPEN HANDLE,
+# and that premise is false — it is what made the in-place rewrite look
+# mandatory. scripts/agent-activity.sh's `emit` is `printf '%s\n' "$1" >>"$out"`,
+# which REOPENS per line, and the only `exec N>` in that script targets its lock
+# file. Nothing tracks this file by descriptor. Followers must therefore use
+# `tail -F` (follow by NAME), which is what every doc that names the feed says.
 #
 # POSIX sh: sourced by scripts/lib/pipeline.sh, which is sourced by a #!/bin/sh
 # hook.
@@ -26,7 +46,11 @@
 # Env:
 #   AGENT_FEED_LOG        override the log path
 #   AGENT_FEED_MAX_LINES  rotate above this many lines (default 4000)
-#   AGENT_FEED_KEEP_LINES keep this many on rotate      (default 2000)
+#
+# Exactly ONE archive is kept (`<feed>.1`), and rotating again replaces it.
+# Deeper history is not this file's job: the feed summarises transcripts that are
+# themselves durable. AGENT_FEED_KEEP_LINES is gone with the trim that used it —
+# a rename keeps everything, so there is no "how much to keep" left to tune.
 
 # Resolve the feed path once per process, from $BP_STATE_ROOT — the ONE
 # derivation every consumer of per-project state already shares.
@@ -84,15 +108,17 @@ feed_append(){
   printf '%s %s\n' "$(date +%H:%M:%S)" "$1" >>"$_fa_log" 2>/dev/null || return 0
 
   _fa_max="${AGENT_FEED_MAX_LINES:-4000}"
-  _fa_keep="${AGENT_FEED_KEEP_LINES:-2000}"
   _fa_lines="$(wc -l <"$_fa_log" 2>/dev/null || echo 0)"
   if [ "$_fa_lines" -gt "$_fa_max" ] 2>/dev/null; then
-    _fa_tmp="$_fa_log.rot.$$"
-    if tail -n "$_fa_keep" "$_fa_log" >"$_fa_tmp" 2>/dev/null; then
-      # `cat >` and NOT `mv`: the supervisor tracks this file by offset on an
-      # open handle, so replacing the inode would silently orphan its writes.
-      cat "$_fa_tmp" >"$_fa_log" 2>/dev/null || true
-      rm -f "$_fa_tmp" 2>/dev/null || true
+    # `mv` and NOT a trim: atomic, loses no racing append, and moves the history
+    # instead of deleting it. See the header — the inode argument that used to
+    # forbid this rested on a premise that is not true of any writer.
+    if mv -f "$_fa_log" "$_fa_log.1" 2>/dev/null; then
+      # The new file says where its history went, so a reader following the feed
+      # does not see it silently restart. Written best-effort like everything
+      # here: a missing marker is worth less than a failed push.
+      printf '%s [feed] rotated, previous history → %s\n' \
+        "$(date +%H:%M:%S)" "${_fa_log##*/}.1" >>"$_fa_log" 2>/dev/null || true
     fi
   fi
   return 0

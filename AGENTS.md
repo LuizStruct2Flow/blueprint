@@ -9,7 +9,7 @@ protocol** (how the radio works). `CLAUDE.md` points here rather than duplicatin
 it.
 
 Watch every agent live in one place: `bash scripts/agent-activity.sh --daemon`,
-then `tail -f logs/agent-activity.log`. One tail-able
+then `tail -F logs/agent-activity.log`. One tail-able
 `[Persona - Backing agent]` feed (mic changes + each agent's actual work) written
 to `logs/agent-activity.log`. `--stop` ends it; `--status` reports whether it runs.
 

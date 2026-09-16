@@ -10,10 +10,10 @@
 # matching the feed's existing "[Persona - Backing Agent] …" format.
 #
 # Self-rotating (the founder's "delete older entries" requirement): after each
-# append, if the log exceeds MAX_FEED_LINES it is trimmed IN PLACE to the last
-# KEEP_FEED_LINES (truncate-and-rewrite preserves the inode so a concurrent
-# `tee -a` from agent-activity.sh keeps writing to the same file). Tunable via
-# env: AGENT_FEED_MAX_LINES / AGENT_FEED_KEEP_LINES (see scripts/lib/feed.sh).
+# append, if the log exceeds AGENT_FEED_MAX_LINES it is RENAMED to `<feed>.1` and
+# a new one started, so no concurrent append is lost and the history moves rather
+# than being deleted (BUG-129). Tunable via env: AGENT_FEED_MAX_LINES (see
+# scripts/lib/feed.sh, which owns the rotation and explains why it is a rename).
 #
 # Defensive by design: a hook must NEVER fail the tool call. Every branch falls
 # back to a best-effort line and exits 0. No jq → degrades to the raw event name.
@@ -44,12 +44,11 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 #     every project — BUG-002's contamination in env-var form. A derived project
 #     inherited knobs named after somebody else's repo.
 #   * The rotation was a second implementation of what scripts/lib/feed.sh now
-#     owns, and the inode-preserving trim is exactly the kind of detail two
-#     copies drift on. A `mv`-based rotate here would orphan the feed
-#     supervisor's open handle while the other copy stayed correct.
+#     owns, and the rotation mechanism is exactly the kind of detail two copies
+#     drift on — as BUG-129 showed when the surviving copy's own trim turned out
+#     to drop concurrent appends and delete the history it trimmed.
 #
-# One appender, generic names. AGENT_FEED_MAX_LINES / AGENT_FEED_KEEP_LINES are
-# honoured by feed.sh. No back-compat alias for the old names: keeping one would
+# One appender, generic names. AGENT_FEED_MAX_LINES is honoured by feed.sh. No back-compat alias for the old names: keeping one would
 # preserve the exact string this bug is about in a file that ships everywhere,
 # and these were undocumented knobs whose defaults are unchanged — a project
 # that never set them sees no difference.
@@ -76,8 +75,7 @@ BP_STATE_ROOT="$(bp_state_root)" || exit 0
 ROSTER_LIB="$repo_root/scripts/lib/roster.sh"
 
 : "${AGENT_FEED_MAX_LINES:=4000}"
-: "${AGENT_FEED_KEEP_LINES:=2000}"
-export AGENT_FEED_MAX_LINES AGENT_FEED_KEEP_LINES
+export AGENT_FEED_MAX_LINES
 
 payload="$(cat 2>/dev/null || true)"
 

@@ -114,7 +114,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
@@ -704,17 +705,57 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   })
 
-  it('#13 Alexey finding 3: a PROJECT snapshot at the tests/ root is refused — pinned pending the founder', async () => {
+  it('#13 FOUNDER RULE: a PROJECT snapshot directly at the tests/ root counts', async () => {
     await scenario('dod-gate-13', async (s) => {
-      // CLAUDE.md:466 puts snapshots at the tests/ root. This is a genuine
-      // project test and it no longer counts, because nothing local tells the
-      // gate which files under tests/ the blueprint shipped. Pinned so the cost
-      // is visible and the case flips the day provenance exists.
+      // Founder decision, 2026-09-16, resolving Alexey finding 3. CLAUDE.md:466
+      // puts snapshots at the tests/ root, and the blueprint ships NO runner
+      // there (#14 guards that), so a runner sitting directly in tests/ can only
+      // be the project's own. This case previously asserted the opposite.
       const f = await derivedFix(s, 'r13', 'tests')
       await s.fs.write(join(f.dir, 'tests/own.snap.test.ts'), "it('BUG-042: snapshot', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
-      expect(r.code, `the documented snapshot layout counted — provenance now exists, so revisit #10c/#12:\n${r.output}`).not.toBe(0)
+      expect(r.code, `the documented snapshot layout did not count:\n${r.output}`).toBe(0)
     })
+  })
+
+  it('#13b FOUNDER RULE: a blueprint suite in a SUBDIRECTORY of tests/ still does not count', async () => {
+    await scenario('dod-gate-13b', async (s) => {
+      // The other half of the rule, and what keeps it safe: depth is the whole
+      // distinction. The same declared `tests` root that blesses #13's snapshot
+      // must not reach the shipped suites one level down.
+      const f = await derivedFix(s, 'r13b', 'tests')
+      await s.fs.write(
+        join(f.dir, 'tests/bug-numbers/bug-numbers.spec.ts'),
+        "row('BUG-042', 'a blueprint fixture naming the number')\n",
+      )
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a shipped suite under tests/ vouched for a project bug:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed but did not name the bug').toContain('BUG-42')
+    })
+  })
+
+  it('#14 GUARD: the blueprint ships no runner directly at the tests/ root', async (ctx) => {
+    // THE RULE ABOVE RESTS ON THIS FACT, so it is asserted rather than assumed.
+    // Only meaningful in the blueprint: in a derived project a runner at the
+    // tests/ root is precisely what the founder's rule blesses as project-owned,
+    // so asserting there would fail every project that follows CLAUDE.md:466.
+    if (!existsSync(join(REPO_ROOT, '.blueprint-root'))) ctx.skip()
+
+    const entries = await readdir(join(REPO_ROOT, 'tests'), { withFileTypes: true })
+    const runners = entries
+      .filter((e) => e.isFile() && /(\.(spec|test)\.[jt]s|\.sh)$/.test(e.name))
+      .map((e) => e.name)
+      .sort()
+
+    expect(
+      runners,
+      `The blueprint now ships runner(s) directly at the tests/ root: ${runners.join(', ')}.\n` +
+        'The DoD bug-test stage treats ANY runner there as the project\'s own (docs/DoD.md §2),\n' +
+        'so a shipped one would vouch for a derived project\'s bug carrying the same number —\n' +
+        'the exact defect TASK-039 exists to close. Move it into a suite directory under\n' +
+        'tests/<suite>/, or change the rule in scripts/lib/dod-gate.sh and these tests together.',
+    ).toEqual([])
   })
 })

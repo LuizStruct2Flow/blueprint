@@ -155,6 +155,21 @@ have_gnu_diff() {
     /dev/null /dev/null >/dev/null 2>&1
 }
 
+# flock(1) is what bounds the subagent-bookend deferral in scripts/log-activity.sh
+# (BUG-124). Without it that hook cannot enforce its cap, so it does not defer at
+# all and every subagent bookend is labelled by agent TYPE rather than by
+# persona — which is the symptom BUG-124 was filed for, reappearing on the one
+# platform the founder works on.
+#
+# It is util-linux, NOT coreutils: installing coreutils for `gtimeout` does not
+# bring it. And the formula is KEG-ONLY, so `have flock` is false even after a
+# successful install. Hence the shared resolver rather than a name check — the
+# installer must decide "present" by exactly the rule the hook uses, or it will
+# report success for a machine the hook still cannot defer on.
+# shellcheck source=scripts/lib/watcher-lock.sh
+. "$(dirname "$0")/lib/watcher-lock.sh"
+have_flock() { bp_flock_cmd >/dev/null 2>&1; }
+
 # Node and npm are BLOCK-class, not skip-class, and the difference is the whole
 # reason this file exists. The gate `pipe_skip`s a scanner it cannot find; if the
 # test harness were treated the same way, a machine without a usable Node would
@@ -606,6 +621,17 @@ if [ "$(uname -s)" = "Darwin" ]; then
     fail_tool coreutils "brew install coreutils failed — the secret scan cannot be bounded"
   fi
 
+  # Keyed on the capability for a third reason: util-linux is keg-only, so brew
+  # installs flock WITHOUT putting it on PATH. `have flock` is false after a
+  # perfectly good install, and a formula-keyed check would reinstall every run.
+  if have_flock; then
+    note "✓ flock already present"
+  elif brew install util-linux >/dev/null && rehash && have_flock; then
+    note "✓ flock installed (util-linux)"
+  else
+    fail_tool util-linux "brew install util-linux failed — subagent bookends will be labelled by agent type instead of by persona (BUG-124)"
+  fi
+
   # Keyed on the capability, not the formula: Apple's diff is always on PATH.
   if have_gnu_diff; then
     note "✓ GNU diff already present"
@@ -645,6 +671,11 @@ else
   # alpine) ships a diff without the line-format flags, and a2bp would then
   # fail there for the same reason it fails on a stock Mac.
   have_gnu_diff || fail_tool diffutils "diff lacks --unchanged-line-format — install GNU diffutils (apt/dnf install diffutils)"
+  # util-linux is the default on Linux, so this normally passes untouched. Still
+  # asserted rather than assumed, for the same reason as diffutils above: a
+  # minimal container ships without it, and the subagent feed would then label
+  # every bookend by agent type there.
+  have_flock || fail_tool util-linux "no flock(1) — install util-linux (apt/dnf install util-linux)"
   # Same posture on both OSes: required, reported, never vendored. See
   # require_node's comment for why a distro/vendored Node is the wrong answer.
   require_node

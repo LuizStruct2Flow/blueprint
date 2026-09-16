@@ -93,8 +93,9 @@ fi
 # commit it. A file the blueprint stops shipping is retired by a full pull, and
 # only when unedited (_bp_retire).
 #
-# Known limit: archive membership is not audience. A blueprint document ships,
-# and is managed, until an export-ignore says otherwise.
+# Known limits: archive membership is not audience — a blueprint document ships,
+# and is managed, until an export-ignore says otherwise. And managed files must
+# be text: substitution refuses NUL bytes, so a binary has to be export-ignored.
 #
 # TEMPLATE_FILES: bootstrapped as templates or seeds, then project-owned. New
 # projects get them via new-project.sh; they are NOT synced afterward

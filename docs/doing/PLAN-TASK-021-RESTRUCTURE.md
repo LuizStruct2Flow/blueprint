@@ -101,8 +101,11 @@ the 69-entry hand-kept array.
 - `docs/config/**` is export-ignored here rather than in Stage 2, keeping its
   README. Derived, a shipped `findings.md` would be managed, and pull would offer
   to overwrite every project's own findings register. The requirements
-  documents, the talk, the deck PDF and the brand assets become managed, which
+  documents, the talk and the brand assets become managed, which
   adds them to projects on the next pull; Stage 2 removes them.
+- `docs/way-of-working.pdf` is export-ignored: managed files must be text, and
+  substitution refuses its NUL bytes, so it drifted forever and never pulled
+  (`bootstrap-gate` #4/#6).
 - `tests/env-namespace` is export-ignored: its population is `blueprint files`,
   which in a derived project needs the blueprint fetched, and a fresh
   bootstrap's remote is `FILL-ME-IN`.

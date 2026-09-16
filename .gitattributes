@@ -191,5 +191,10 @@ tests/env-namespace/               export-ignore
 # the managed set is what ships (TASK-021), a shipped findings.md would be
 # MANAGED: pull would offer to overwrite every project's own findings register
 # with this one. The directory convention, so the next record needs no line.
+# The deck's PDF is a binary, and managed files must be text: substitution
+# refuses NUL bytes, so a shipped PDF drifts forever and never pulls (TASK-021).
+# The founder regenerates it by hand; Stage 2 withholds the deck itself.
+docs/way-of-working.pdf            export-ignore
+
 docs/config/**                     export-ignore
 docs/config/README.md             -export-ignore

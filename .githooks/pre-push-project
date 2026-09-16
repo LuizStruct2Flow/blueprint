@@ -493,7 +493,18 @@ fi
 # Placed here, at the END of the managed region, deliberately. It is the only
 # stage that needs a toolchain the rest of the gate does not, so a machine
 # missing it fails one clearly-named stage rather than poisoning earlier ones.
-if [ -f "$BP_CODE_ROOT/scripts/run-ts-suites.sh" ]; then
+#
+# TASK-053: a text-only push (.githooks/pre-push decides it) skips the three
+# code stages with a reason and runs only the suites that judge documents.
+: "${_PP_TEXT_ONLY:=0}"
+if [ "$_PP_TEXT_ONLY" = "1" ] && [ -f "$BP_CODE_ROOT/scripts/run-ts-suites.sh" ]; then
+  # shellcheck source=scripts/run-ts-suites.sh
+  . "$BP_CODE_ROOT/scripts/run-ts-suites.sh"
+  pipe_skip "shellcheck · TASK-033" "text-only push: no shell script changed"
+  pipe_skip "typecheck · TASK-031" "text-only push: no TypeScript changed"
+  pipe_skip "vitest · TASK-018" "text-only push: only the document suites run"
+  ts_docs_stage "$BP_CODE_ROOT"
+elif [ -f "$BP_CODE_ROOT/scripts/run-ts-suites.sh" ]; then
   # shellcheck source=scripts/run-ts-suites.sh
   . "$BP_CODE_ROOT/scripts/run-ts-suites.sh"
   # TASK-033: lint the tracked shell scripts. It needs no Node and takes about a

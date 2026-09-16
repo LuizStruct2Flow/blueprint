@@ -234,6 +234,12 @@ scanner versions are unverified, and semgrep's install is not pinned. A checkout
 without `tests/package.json` skips the installer, so the job still ensures
 ShellCheck for the shell lint.
 
+**A push that changes only `.md` files is text-only (TASK-053).** The hook reads
+the files in the push range. If every one ends in `.md`, it runs gitleaks, the
+DoD checklist and the document suites, and skips every code stage with a
+`text-only push:` reason. An unknown range or any other file gives the full
+gate. Details in [docs/DoD.md](docs/DoD.md) §4.
+
 **The hook only runs if `core.hooksPath` points at `.githooks` — and that is
 repo-LOCAL config, so a fresh `git clone` does NOT have it.** `new-project.sh`
 sets it at bootstrap, but a clone never runs bootstrap. This file previously

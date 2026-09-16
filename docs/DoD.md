@@ -366,6 +366,14 @@ The shared pre-push hook at `.githooks/pre-push` enforces (in order, per
 struct2flow convention — the project's exact targets are wired in
 `project_config_dod.md`):
 
+**Text-only pushes (TASK-053).** When every file the push changes ends in `.md`
+(root files such as `CLAUDE.md` included), the gate runs gitleaks, the host-path
+guard, the four DoD checklist stages and one stage of the document suites
+(`doc-links`, `lifecycle-docs`, `bug-numbers`). semgrep, osv-scanner, the
+backend, frontend and IaC stages, ShellCheck, the typecheck and the vitest batch
+skip with a `text-only push:` reason. An unknown push range, an empty file list
+or any other file gives the full gate.
+
 1. Build (e.g. `tsc` — catches missing imports)
 2. Lint (`--max-warnings` ratcheted; never loosen)
 3. **Formatter check** (`prettier --check` or equivalent — fails if

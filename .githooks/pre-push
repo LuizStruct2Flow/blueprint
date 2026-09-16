@@ -191,6 +191,28 @@ push_log_opts() {
   done
 }
 
+# TASK-053 — a push that changes only `.md` files takes the TEXT-ONLY profile:
+# gitleaks, the DoD checklist and the doc suites still run, and the code stages
+# skip with a "text-only push:" reason. Founder decision 2026-09-16, and it
+# includes root files such as CLAUDE.md.
+#
+# FAIL-SAFE: an unknown range, an empty file list, or any path not ending in
+# `.md` gives the FULL gate. `--no-renames` lists a rename as delete + add, so
+# renaming a script to `.md` still names the script. `-m` lists a merge's
+# changes too.
+bp_push_is_text_only() {
+  _to_ranges="$(push_log_opts)"
+  [ -n "$_to_ranges" ] || return 1
+  # shellcheck disable=SC2086  # one selector per line, split on purpose
+  _to_files="$(git log -m --no-renames --name-only --format= $_to_ranges 2>/dev/null)" || return 1
+  _to_files="$(printf '%s\n' "$_to_files" | grep -v '^$' || true)"
+  [ -n "$_to_files" ] || return 1
+  ! printf '%s\n' "$_to_files" | grep -qv '\.md$'
+}
+_PP_TEXT_ONLY=0
+if bp_push_is_text_only; then _PP_TEXT_ONLY=1; fi
+_pp_text_reason="text-only push: every changed file is .md"
+
 # Open the pipeline once the ref list is known, so the header can say what is
 # actually being pushed. Everything from here to pipe_finish renders as stages,
 # including .githooks/pre-push-project, which shares this one pipeline rather
@@ -502,7 +524,9 @@ _st_semgrep(){
   rm -f "$_sg_json" "$_sg_err"
   return 0
 }
-if command -v semgrep >/dev/null 2>&1; then
+if [ "$_PP_TEXT_ONLY" = "1" ]; then
+  pipe_skip "SAST · semgrep p/owasp-top-ten" "$_pp_text_reason"
+elif command -v semgrep >/dev/null 2>&1; then
   pipe_stage "SAST · semgrep p/owasp-top-ten" _st_semgrep
 else
   pipe_skip "SAST · semgrep p/owasp-top-ten" "semgrep not installed locally — SAST skipped (CI will catch it)."
@@ -583,7 +607,9 @@ _st_osv_scanner(){
   fi
   return 0
 }
-if command -v osv-scanner >/dev/null 2>&1; then
+if [ "$_PP_TEXT_ONLY" = "1" ]; then
+  pipe_skip "SCA · osv-scanner" "$_pp_text_reason"
+elif command -v osv-scanner >/dev/null 2>&1; then
   pipe_stage "SCA · osv-scanner" _st_osv_scanner
 else
   pipe_skip "SCA · osv-scanner" "osv-scanner not installed locally — SCA skipped (CI will catch it)."
@@ -616,7 +642,9 @@ _st_backend_build(){ ( cd backend && npm run build ) || { echo "❌ Backend buil
 _st_backend_lint(){ ( cd backend && npm run lint ) || { echo "❌ Backend lint exceeded --max-warnings threshold."; return 1; }; }
 _st_backend_format_check(){ ( cd backend && npm run format:check ) || { echo "❌ Backend has unformatted files. Run 'npm run format' in backend/ and recommit."; return 1; }; }
 _st_backend_test_coverage(){ ( cd backend && npm run test:coverage ) || { echo "❌ Backend tests failed or coverage below threshold (see project_config_dod.md)."; return 1; }; }
-if [ -d backend ]; then
+if [ "$_PP_TEXT_ONLY" = "1" ]; then
+  pipe_skip "backend" "$_pp_text_reason"
+elif [ -d backend ]; then
   pipe_stage "backend · build" _st_backend_build
   pipe_stage "backend · lint" _st_backend_lint
   pipe_stage "backend · format" _st_backend_format_check
@@ -632,7 +660,9 @@ fi
 _st_frontend_lint(){ ( cd frontend && npm run lint ) || { echo "❌ Frontend lint exceeded --max-warnings threshold."; return 1; }; }
 _st_frontend_format_check(){ ( cd frontend && npm run format:check ) || { echo "❌ Frontend has unformatted files. Run 'npm run format' in frontend/ and recommit."; return 1; }; }
 _st_frontend_test_coverage(){ ( cd frontend && npm run test:coverage ) || { echo "❌ Frontend tests failed or coverage below threshold (see project_config_dod.md)."; return 1; }; }
-if [ -d frontend ]; then
+if [ "$_PP_TEXT_ONLY" = "1" ]; then
+  pipe_skip "frontend" "$_pp_text_reason"
+elif [ -d frontend ]; then
   pipe_stage "frontend · lint" _st_frontend_lint
   pipe_stage "frontend · format" _st_frontend_format_check
   pipe_stage "frontend · tests + coverage" _st_frontend_test_coverage
@@ -692,7 +722,13 @@ _st_helm(){
 # `_iac` is the LOOP variable, and the stage functions above read it when they
 # run, which is inside this loop. Each existing tree is examined on its own.
 _iac_found=0
-for _iac in infra infrastructure; do
+_iac_dirs="infra infrastructure"
+if [ "$_PP_TEXT_ONLY" = "1" ]; then
+  pipe_skip "IaC validate" "$_pp_text_reason"
+  _iac_dirs=""
+  _iac_found=1
+fi
+for _iac in $_iac_dirs; do
   [ -d "$_iac" ] || continue
   _iac_found=1
 

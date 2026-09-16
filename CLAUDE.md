@@ -1,7 +1,7 @@
 # Development Instructions
 
 This file is the struct2flow **generic** agent protocol. Project-specific
-overrides live in five files at the repo root. They are imported here, so every
+overrides live in files at the repo root. They are imported here, so every
 session loads them with this file:
 
 - @project_config_overview.md
@@ -9,10 +9,24 @@ session loads them with this file:
 - @project_config_dod.md
 - @project_config_security.md
 - @project_config_infra.md
+- @claude.internal.md
 
 A project that has not created one of them yet still gets a working session:
 Claude Code skips an import whose file is missing. Project rules belong in these
 files, never in this one, because a pull replaces this file whole.
+
+**`claude.internal.md` is the project's own file, and nothing in the blueprint
+ever writes it.** It is not managed, so `blueprint pull` cannot replace it, and
+no bootstrap seeds one — the import above names a file that does not exist until
+the project creates it. It is the place for agent context that belongs to this
+project rather than to the framework: house rules, local runbooks, notes a
+session should carry that no other project should inherit.
+
+**Whether it is tracked is the project's decision.** Commit it and the whole team
+gets it; add it to `.gitignore` and it stays on one machine. Nothing in the
+framework reads it or depends on the choice. This is what makes the split
+possible: the generic protocol can be tracked and public, because the private
+half has a home of its own.
 
 **In the blueprint itself, those root files are THIS repo's own config and do
 not ship** — the seed source a new project is built from lives in

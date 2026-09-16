@@ -313,6 +313,8 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
       await s.fs.write(join(bp, 'docs/absent.md'), 'never reached the project\n')
       // Seeded once and then the project's own: never a candidate, even identical.
       await s.fs.write(join(bp, 'project_config_paths.md'), 'config for {{PROJECT_NAME}}\n')
+      // A seed the project edits freely, unedited here (Jesko's reproduction).
+      await s.fs.write(join(bp, 'README.md'), 'readme as shipped\n')
       await initRepo(s, bp)
       await git(s, bp, ['add', '-A'])
       await git(s, bp, ['commit', '-q', '-m', 'one'])
@@ -321,7 +323,7 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
       await git(s, bp, ['rm', '-q', 'scripts/gone.sh', 'docs/absent.md'])
       await s.fs.write(
         join(bp, '.gitattributes'),
-        'LICENSE export-ignore\ndocs/edited.md export-ignore\nproject_config_paths.md export-ignore\n',
+        'LICENSE export-ignore\ndocs/edited.md export-ignore\nproject_config_paths.md export-ignore\nREADME.md export-ignore\n',
       )
       await git(s, bp, ['add', '-A'])
       await git(s, bp, ['commit', '-q', '-m', 'two'])
@@ -332,6 +334,7 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
       await s.fs.write(join(p, 'LICENSE'), 'MIT, the blueprint owner\n')
       await s.fs.write(join(p, 'docs/edited.md'), 'blueprint text\nand this project wrote more\n')
       await s.fs.write(join(p, 'project_config_paths.md'), 'config for retiree\n')
+      await s.fs.write(join(p, 'README.md'), 'readme as shipped\n')
       await s.fs.write(
         join(p, '.blueprint-source'),
         [
@@ -362,6 +365,8 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
       expect(r.output, 'a file the project never had was mentioned').not.toContain('docs/absent.md')
       expect(await s.fs.exists(join(p, 'project_config_paths.md')), 'a project-owned seed was retired').toBe(true)
       expect(r.output, 'a project-owned seed was treated as a candidate').not.toContain('project_config_paths.md')
+      expect(await s.fs.exists(join(p, 'README.md')), `an unedited README seed was retired:\n${r.output}`).toBe(true)
+      expect(r.output, 'the README seed was treated as a candidate').not.toContain('README.md')
 
       // A second pull has nothing left to offer, and still says the edited copy is kept.
       const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })

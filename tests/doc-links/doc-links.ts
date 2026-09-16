@@ -29,7 +29,7 @@
  * reported in, never the set.
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { declaration } from '../helpers/project-config.js'
 
@@ -99,12 +99,17 @@ export function relativeLinkTargets(content: string): string[] {
   return targets
 }
 
-async function exists(path: string): Promise<boolean> {
+/**
+ * The PHYSICAL path with every symlink resolved, or null when nothing is there.
+ *
+ * `stat` answered "does something exist here" and followed symlinks silently,
+ * which is what let a link escape a lexically-contained path.
+ */
+async function physical(path: string): Promise<string | null> {
   try {
-    await stat(path)
-    return true
+    return await realpath(path)
   } catch {
-    return false
+    return null
   }
 }
 
@@ -143,14 +148,25 @@ function inside(root: string, path: string): string | null {
  */
 export async function scanDocLinks(docsDir: string): Promise<DocLinkScan> {
   const projectRoot = dirname(docsDir)
+  const rootReal = (await physical(projectRoot)) ?? projectRoot
   const declaredRoot = await declaration(projectRoot, 'BP_WEB_ROOT')
   const webPaths = (await declaration(projectRoot, 'BP_WEB_PATHS'))?.split(/\s+/).filter(Boolean) ?? []
   const webRoot = declaredRoot === null ? null : resolve(projectRoot, declaredRoot)
+  const webRootReal = webRoot === null ? null : await physical(webRoot)
 
-  /** Why `abs` does not resolve, or null when it does. */
-  const unresolved = async (abs: string): Promise<string | null> => {
-    if (inside(projectRoot, abs) === null) return 'leaves the repository'
-    return (await exists(abs)) ? null : ''
+  /**
+   * Why `abs` does not resolve inside `root`, or null when it does.
+   *
+   * BOTH the lexical path and the PHYSICAL one are judged. Lexically because a
+   * `..` that climbs out must be refused whether or not anything exists there;
+   * physically because `stat` follows symlinks, so a path that reads as inside
+   * can open a file that is not (Alex, finding 3).
+   */
+  const unresolved = async (abs: string, lexRoot: string, realRoot: string, out: string) => {
+    if (inside(lexRoot, abs) === null) return out
+    const real = await physical(abs)
+    if (real === null) return ''
+    return inside(realRoot, real) === null ? `${out}, through a symlink` : null
   }
 
   let examined = 0
@@ -163,17 +179,26 @@ export async function scanDocLinks(docsDir: string): Promise<DocLinkScan> {
     for (const target of relativeLinkTargets(content)) {
       examined++
       if (!target.startsWith('/')) {
-        const why = await unresolved(resolve(dirname(file), target))
+        const why = await unresolved(resolve(dirname(file), target), projectRoot, rootReal, 'leaves the repository')
         if (why !== null) report(file, target, why)
       } else if (webPaths.includes(target)) {
         continue
       } else if (webRoot === null) {
         report(file, target, 'site-absolute: declare BP_WEB_ROOT or BP_WEB_PATHS in project_config_paths.md')
-      } else if (inside(projectRoot, webRoot) === null) {
+      } else if (webRootReal === null) {
+        report(file, target, `BP_WEB_ROOT ${declaredRoot} does not exist`)
+      } else if (inside(projectRoot, webRoot) === null || inside(rootReal, webRootReal) === null) {
         report(file, target, `BP_WEB_ROOT ${declaredRoot} leaves the repository`)
       } else {
-        const abs = join(webRoot, target)
-        const why = inside(webRoot, abs) === null ? `climbs out of BP_WEB_ROOT ${declaredRoot}` : await unresolved(abs)
+        // Resolved from the web root's PHYSICAL path, so a served page reached
+        // through a symlinked-but-internal web root still resolves, while one
+        // that leaves the served directory does not — even inside the repository.
+        const why = await unresolved(
+          join(webRootReal, target),
+          webRootReal,
+          webRootReal,
+          `climbs out of BP_WEB_ROOT ${declaredRoot}`,
+        )
         if (why !== null) report(file, target, why)
       }
     }

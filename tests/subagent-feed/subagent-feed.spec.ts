@@ -54,7 +54,7 @@
  *     where a green local suite said nothing.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -635,5 +635,147 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
     // That question has one answer. A second way to find a timeout command is a
     // second rule that will disagree with the first on some host.
     expect(await code(HOOK)).toMatch(/bp_staleness_timeout_cmd/)
+  })
+})
+
+/**
+ * Alex's cross-provider review, 2026-09-16, finding 4: the deferred child is the
+ * only part of this hook that outlives the tool call, and it inherited the
+ * caller's open descriptors, took its bound from an unvalidated variable, and had
+ * no cap on how many could be waiting at once.
+ */
+describe('BUG-124 — the deferred bookend child holds nothing and is bounded', () => {
+  const deferFixture = (s: Scenario) =>
+    feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren', withHook: true })
+
+  /** Deferred children of THIS scenario, by cwd — never machine-wide (BUG-089). */
+  async function children(s: Scenario, repo: string): Promise<number> {
+    const r = await s.run(
+      'sh',
+      [
+        '-c',
+        `. "${join(REPO_ROOT, 'tests', 'helpers', 'proc-cwd.sh')}"
+         bp_proc_cwd_available || { echo NO-PROC-CWD-MECHANISM; exit 1; }
+         n=0
+         for p in $(ps -eo pid,args 2>/dev/null | grep '[l]og-activity.sh' | awk '{print $1}'); do
+           case "$(bp_proc_cwd "$p")" in "$1"*) n=$((n+1)) ;; esac
+         done
+         printf '%s\\n' "$n"`,
+        'x',
+        repo,
+      ],
+      { cwd: repo },
+    )
+    if (r.stdout.includes('NO-PROC-CWD-MECHANISM')) {
+      throw new Error(
+        'this host has neither /proc nor lsof, so the deferred child cannot be counted. ' +
+          'Every count would be 0 — which is what these cases assert — so the suite refuses ' +
+          'to answer rather than reporting clean over nothing (BUG-089).',
+      )
+    }
+    return Number(r.stdout.trim())
+  }
+
+  const start = (s: Scenario, f: FeedFixture, id: string): string =>
+    JSON.stringify(hookPayload('SubagentStart', join(s.workspace.root, sessionRel(f)), id))
+
+  it('#8 an inherited descriptor is released when the hook returns, not when the child finishes', async () => {
+    await scenario('sf-8', async (s) => {
+      // The hook redirects 0, 1 and 2 only, so everything above 2 went to the
+      // child — including a lock. A dispatch lock could therefore be held for the
+      // whole meta wait, long after the hook exited.
+      const f = await deferFixture(s)
+      await s.fs.write('lock', '')
+      const lock = join(s.workspace.root, 'lock')
+      const driver = await s.fs.write(
+        'hold-fd.sh',
+        `exec 9>${JSON.stringify(lock)}\n` +
+          `flock -n 9 || exit 3\n` +
+          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}\n` +
+          `exec 9>&-\n`,
+      )
+
+      const r = await s.run('sh', [driver, start(s, f, 'abc123def456')], {
+        cwd: f.repo,
+        env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '5' },
+      })
+      expect(r.code, `the fixture never took the lock\n${r.output}`).toBe(0)
+
+      // While the child is still waiting for a meta file that never comes.
+      const probe = await s.run('flock', ['-w', '2', lock, 'true'], { cwd: f.repo })
+      expect(
+        probe.code,
+        'the lock was still held after the hook returned — the deferred child inherited it',
+      ).toBe(0)
+      await f.expectLine('→ dispatched', 15_000)
+    })
+  })
+
+  it('#9 an out-of-range meta wait is capped, so the child cannot outlive the dispatch by hours', async () => {
+    await scenario('sf-9', async (s) => {
+      const f = await deferFixture(s)
+      const r = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'abc123def456')],
+        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '999999' } },
+      )
+      expect(r.code, r.output).toBe(0)
+      expect(await children(s, f.repo), 'no child was deferred, so this case proves nothing').toBeGreaterThan(0)
+
+      // PROCESS EXIT, not marker arrival: the bookend lands on the way out, so a
+      // case that waits for the line says nothing about the process behind it.
+      await vi.waitFor(
+        async () => {
+          const n = await children(s, f.repo)
+          if (n > 0) throw new Error(`${n} deferred child(ren) still running`)
+        },
+        { timeout: 30_000, interval: 250 },
+      )
+      expect(await f.read()).toContain('→ dispatched')
+    })
+  })
+
+  it('#10 a meta wait that is not a number costs neither the bookend nor the hook', async () => {
+    await scenario('sf-10', async (s) => {
+      // Unvalidated, the value reached shell arithmetic, where a non-numeric name
+      // is an error under `set -u` — killing the child before it emits anything.
+      const f = await deferFixture(s)
+      const r = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'abc123def456')],
+        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: 'soon' } },
+      )
+      expect(r.code, `a hook must always exit 0\n${r.output}`).toBe(0)
+      await f.expectLine('→ dispatched', 15_000)
+    })
+  })
+
+  it('#11 a burst of dispatches is capped, and every bookend still lands', async () => {
+    await scenario('sf-11', async (s) => {
+      const f = await deferFixture(s)
+      const ids = Array.from({ length: 12 }, (_, i) => `burst${i}0000000`)
+      for (const id of ids) {
+        const r = await s.run(
+          'sh',
+          ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, id)],
+          { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '20' } },
+        )
+        expect(r.code, r.output).toBe(0)
+      }
+
+      // Unbounded, all twelve sit waiting for twenty seconds each. The cap makes
+      // the surplus emit at once instead — labelled by agent type, never dropped.
+      expect(
+        await children(s, f.repo),
+        'every dispatch in the burst deferred a waiting child; nothing caps them',
+      ).toBeLessThanOrEqual(8)
+      await vi.waitFor(
+        async () => {
+          const n = await f.count('→ dispatched')
+          if (n !== ids.length) throw new Error(`${n} of ${ids.length} bookends have landed`)
+        },
+        { timeout: 40_000, interval: 250 },
+      )
+    })
   })
 })

@@ -382,12 +382,18 @@ if [ "${BP_SUBAGENT_DEFER_CHILD:-}" = 1 ]; then
   # cleanup was therefore never a bound on the child's lifetime (Codex's S2,
   # test #17). 143 is the conventional 128+SIGTERM; the EXIT trap above does the
   # one removal, on this path as on every other.
-  trap 'exit 143' HUP INT TERM
+  # BUG-133: the sleep runs in the background and is waited on, so a signal
+  # interrupts the wait at once and the handler takes the sleep down with it. A
+  # foreground sleep delays the handler and outlives the child by up to 0.1 s,
+  # which a loaded CI runner caught as a leftover process.
+  trap 'kill "${_sl:-}" 2>/dev/null; exit 143' HUP INT TERM
   close_inherited
   _w="$(bp_clamp_int "${BP_DEFER_WAIT:-}" 5 15)"
   i=0
   while [ ! -e "$meta" ] && [ "$i" -lt $((_w * 10)) ]; do
-    sleep 0.1
+    sleep 0.1 &
+    _sl=$!
+    wait "$_sl"
     i=$((i + 1))
   done
   emit_bookend

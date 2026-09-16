@@ -253,6 +253,31 @@ ts_typecheck_stage(){
   pipe_stage "typecheck · TASK-031" ts_typecheck "$_tc_root"
 }
 
+# ts_docs_stage [ROOT] — TASK-053. The one test stage a text-only push runs:
+# the suites that judge documents (doc-links, lifecycle-docs, bug-numbers), in
+# one vitest process. A suite this project does not have is left out, and with
+# none of them present the stage skips with that reason.
+ts_docs_stage(){
+  _td_root="${1:-$(pwd)}"
+  set --
+  for _td_s in doc-links lifecycle-docs bug-numbers; do
+    if [ -f "$_td_root/tests/$_td_s/$_td_s.spec.ts" ]; then
+      set -- "$@" "$_td_s/$_td_s.spec.ts"
+    fi
+  done
+  if [ "$#" -eq 0 ]; then
+    pipe_skip "docs · TASK-053" "no document suites under tests/"
+    return 0
+  fi
+  if [ ! -d "$_td_root/tests/node_modules" ]; then
+    echo "❌ The document suites cannot run: tests/node_modules is absent. Run: (cd tests && npm ci)"
+    pipe_stage "docs · TASK-053" false
+    return 1
+  fi
+  _td_run(){ ( cd "$_td_root/tests" || exit 1; ts_scrubbed npx vitest run "$@" ); }
+  pipe_stage "docs · TASK-053" _td_run "$@"
+}
+
 # ts_suites_stage [ROOT] — the whole thing.
 ts_suites_stage(){
   _ts_root="${1:-$(pwd)}"

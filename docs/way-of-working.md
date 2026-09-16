@@ -508,6 +508,10 @@ The shared `.githooks/pre-push` hook **blocks the push** if any step fails:
 
 Same hook, every project. No "I'll skip pre-push just this once."
 
+**A push that changes only `.md` files is text-only**: the secret scan, the DoD
+checklist and the document suites run, and every code stage skips with the
+reason `text-only push`. One file that is not `.md` gives the full gate.
+
 **It renders as a pipeline**, one line per stage with its status and duration,
 then a `PASSED` / `FAILED` summary — a failing stage prints exactly what the tool
 said, a passing one stays quiet. That is not decoration:

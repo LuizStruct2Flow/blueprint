@@ -512,6 +512,59 @@ describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () =
   })
 })
 
+describe('TASK-053 — a push that changes only .md files skips the code stages', () => {
+  /**
+   * Commit `files` on top of a base commit and run the hook with the real ref
+   * line for that range, so the hook decides from what is actually pushed.
+   */
+  async function pushOf(s: Scenario, files: Record<string, string>) {
+    const f = await fixture(s)
+    await f.gitleaks([0])
+    await f.semgrep(['clean'])
+    const git = async (...args: string[]) => {
+      const r = await s.run('git', args, { cwd: f.dir })
+      expect(r.code, `git ${args.join(' ')}\n${r.output}`).toBe(0)
+      return r.stdout.trim()
+    }
+    await git('add', '-A')
+    await git('commit', '-q', '-m', 'base')
+    const base = await git('rev-parse', 'HEAD')
+    for (const [path, body] of Object.entries(files)) await s.fs.write(`repo/${path}`, body)
+    await git('add', '-A')
+    await git('commit', '-q', '-m', 'change')
+    const head = await git('rev-parse', 'HEAD')
+
+    const refs = await s.fs.write('refs.txt', `refs/heads/main ${head} refs/heads/main ${base}\n`)
+    const driver = await s.fs.write(
+      'run-hook.sh',
+      `exec sh .githooks/pre-push origin git@example.com:x/y.git < ${JSON.stringify(refs)}\n`,
+    )
+    const r = await s.run('sh', [driver], { cwd: f.dir, env: { PATH: f.shims.path() }, timeoutMs: 120_000 })
+    return { ...r, gitleaks: await f.calls('gitleaks'), semgrep: await f.calls('semgrep') }
+  }
+
+  it('#text-1 only .md changed: gitleaks runs, semgrep and the code stages skip as text-only', async () => {
+    await scenario('scanners-text-1', async (s) => {
+      const r = await pushOf(s, { 'CLAUDE.md': 'rules\n', 'docs/a.md': 'a\n' })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.gitleaks, `the secret scan must still run on a text-only push\n${r.output}`).toBeGreaterThan(0)
+      expect(r.semgrep, `semgrep ran on a text-only push\n${r.output}`).toBe(0)
+      expect(r.output).toContain('text-only push')
+    })
+  })
+
+  it('#text-2 one non-.md file in the push takes the FULL gate', async () => {
+    await scenario('scanners-text-2', async (s) => {
+      const r = await pushOf(s, { 'docs/a.md': 'a\n', 'scripts/x.sh': 'echo x\n' })
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.semgrep, `a push changing a script skipped semgrep\n${r.output}`).toBe(1)
+      expect(r.output).not.toContain('text-only push')
+    })
+  })
+})
+
 describe('TASK-040 — the IaC stages find infrastructure/ as well as infra/', () => {
   it('#iac-1 a project with infrastructure/cdk.json reaches the CDK synth stage', async () => {
     await scenario('scanners-iac-1', async (s) => {

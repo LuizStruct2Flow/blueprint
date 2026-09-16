@@ -195,7 +195,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { FORBIDDEN_ENV, UNPREFIXED_FORBIDDEN, isForbiddenAmbient } from '../harness/env.js'
@@ -494,6 +494,7 @@ describe('BUG-055 — the vitest bridge scrubs git’s environment and reports i
 
 interface WorkflowStep {
   name?: string
+  if?: unknown
   run?: string
   'working-directory'?: string
 }
@@ -562,100 +563,213 @@ describe('BUG-132 — CI runs the suites on a machine the installer prepared', (
       // nothing else, so six a2bp files went red in CI only. Naming gitleaks next
       // would catch gitleaks. What this case requires instead is the installer's
       // own verdict: whatever the installer declares, the job must provide.
-      //
-      // So the job's provisioning steps are EXECUTED, the way #3 executes the
-      // vitest step, on a PATH with every tool the installer declares removed,
-      // and nothing reaches the network: curl, tar, pipx and apt-get are stubs
-      // that make whatever was asked for, so a step that installs a tool by any
-      // mechanism gets it. Then the installer's `check` judges the result.
-      // Provisioning steps are the `run:` steps before the vitest step, minus the
-      // ones that source run-ts-suites.sh: those consume tools.
-      //
-      // CEILING, stated: a tool a suite needs that the INSTALLER does not declare
-      // is invisible here, as it is on every developer machine. The declaration
-      // is what makes the next one catchable, so a new requirement goes there.
-      const installer = await readFile(join(REPO_ROOT, 'scripts/install-toolchain.sh'), 'utf8')
-      const declared = (/^SECURITY_TOOLS="([^"]*)"/m.exec(installer)?.[1] ?? '').split(/\s+/).filter(Boolean)
-      expect(declared.length, 'the installer declares no tools — this case would assert nothing').toBeGreaterThan(0)
+      // The machinery, and what it does NOT prove, is on provisionSuitesJob.
+      const failure = await provisionSuitesJob(s)
+      expect(failure, failure ?? '').toBeNull()
+    })
+  })
 
-      const job = await suitesJob()
-      const at = job.findIndex((step) => typeof step.run === 'string' && /\bvitest\s+run\b/.test(step.run))
-      expect(at, 'no job runs vitest — this case would assert nothing').toBeGreaterThan(-1)
-      const provisioning = job
-        .slice(0, at)
-        .filter((step) => typeof step.run === 'string' && !step.run.includes('run-ts-suites.sh'))
-
-      const dir = await s.workspace.dir('runner-proj')
-      for (const f of ['scripts/install-toolchain.sh', 'scripts/lib/watcher-lock.sh', 'tests/package.json']) {
-        await s.fs.copyIn(join(REPO_ROOT, f), `runner-proj/${f}`)
-      }
-      const home = await s.workspace.dir('runner-home')
-      const githubPath = await s.fs.write('github-path', '')
-      const which = async (tool: string) => {
-        const r = await s.run('sh', ['-c', `command -v ${tool}`], { cwd: dir })
-        expect(r.code, `${tool} is not on this machine`).toBe(0)
-        return r.stdout.trim()
-      }
-      const [tar, npm] = [await which('tar'), await which('npm')]
-
-      const stub = (name: string) => `printf '#!/bin/sh\\necho "${name} stub 0.0.0"\\n'`
-      const shims = await s.shimDir('runner-bin')
-      await shims.add('uname', 'case "$1" in -m) echo x86_64 ;; *) echo Linux ;; esac')
-      await shims.add('sudo', 'exec "$@"')
-      await shims.add('npm', `[ "$1" = ci ] && exit 0\nexec ${JSON.stringify(npm)} "$@"`)
-      await shims.add(
-        'curl',
-        `while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; esac; shift; done\n` +
-          `${stub('fetched')} > "$out"`,
-      )
-      await shims.add(
-        'tar',
-        `case " $* " in *" -x"*) ;; *) exec ${JSON.stringify(tar)} "$@" ;; esac\n` +
-          `while [ "$#" -gt 0 ]; do case "$1" in -C) into="$2"; shift ;; *) member="$1" ;; esac; shift; done\n` +
-          `mkdir -p "$(dirname "$into/$member")"\n${stub('extracted')} > "$into/$member"\nchmod 755 "$into/$member"`,
-      )
-      await shims.add(
-        'pipx',
-        `[ "$1" = install ] || exit 0\nmkdir -p "$HOME/.local/bin"\n${stub('pipx')} > "$HOME/.local/bin/$2"\nchmod 755 "$HOME/.local/bin/$2"`,
-      )
-      await shims.add(
-        'apt-get',
-        `[ "$1" = install ] || exit 0\nfor p in "$@"; do case "$p" in install|-*) ;; *) ${stub('apt')} > ${JSON.stringify(shims.dir)}/"$p"; chmod 755 ${JSON.stringify(shims.dir)}/"$p" ;; esac; done`,
-      )
-      // jq stays: every GitHub runner image ships it, and on Linux the installer
-      // does not fetch it but defers to the package manager. Every other declared
-      // tool is absent, so the job has to provide it.
-      const absent = declared.filter((t) => t !== 'jq')
-      const base = await s.pathWithout([...absent, 'curl', 'tar', 'pipx', 'sudo', 'apt-get', 'brew', 'uname', 'npm'])
-
-      let path = `${shims.dir}:${base}`
-      const log: string[] = []
-      for (const [i, step] of provisioning.entries()) {
-        const script = await s.fs.write(`provision-${i}.sh`, step.run ?? '')
-        const r = await s.run('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], {
-          cwd: join(dir, step['working-directory'] ?? '.'),
-          env: { HOME: home, PATH: path, GITHUB_PATH: githubPath },
-          timeoutMs: 120_000,
-        })
-        log.push(`--- step "${step.name}" exit ${r.code} ---\n${r.output}`)
-        // GitHub prepends what a step appends to GITHUB_PATH, for every later step.
-        const added = (await readFile(githubPath, 'utf8')).split('\n').filter(Boolean).reverse()
-        await s.fs.write('github-path', '')
-        if (added.length > 0) path = `${added.join(':')}:${path}`
-      }
-
-      const check = await s.run('bash', [join(dir, 'scripts/install-toolchain.sh'), 'check'], {
-        cwd: dir,
-        env: { HOME: home, PATH: path },
+  // WITNESSES. Each is a regression #9 would have passed before Jesko's review
+  // (Codex, 2026-09-16): the machinery has to turn it red, not merely run.
+  it('#9b a provisioning step whose guard is false is skipped, as GitHub skips it, so the tools are missing', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('tsbridge-9b', async (s) => {
+      const failure = await provisionSuitesJob(s, {
+        edit: (job) => {
+          namedStep(job, 'Gate toolchain').if = "hashFiles('tests/package.json') == ''"
+        },
       })
-      expect(
-        check.code,
-        `the job's provisioning left the installer's check failing — the suites would run without these tools\n` +
-          `${check.output}\n${log.join('\n')}`,
-      ).toBe(0)
+      expect(failure ?? '#9 PASSED', 'a skipped installer passed #9 — the guard is not evaluated').toMatch(/check failing/)
+      expect(failure ?? '#9 PASSED').toContain('gitleaks  MISSING')
+    })
+  })
+
+  it('#9c with no tests/package.json the guarded installer is skipped, and the job still provides ShellCheck for the shell lint', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('tsbridge-9c', async (s) => {
+      // The guard is evaluated against the fixture's real files: the manifest is
+      // absent here, so the installer must not run. The shell lint step is not
+      // guarded, so ShellCheck must arrive anyway (the harness-less checkout).
+      const failure = await provisionSuitesJob(s, { omitManifest: true })
+      expect(failure ?? '#9 PASSED', 'the installer ran although its manifest is missing').toMatch(/check failing/)
+      expect(failure ?? '#9 PASSED').toContain('gitleaks  MISSING')
+      expect(failure ?? '#9 PASSED', 'a harness-less checkout reaches the shell lint without ShellCheck').toContain('✓ shellcheck')
+    })
+  })
+
+  it('#9d a setup step that installs the tools and then exits nonzero is red, naming the step and its output', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('tsbridge-9d', async (s) => {
+      const failure = await provisionSuitesJob(s, {
+        edit: (job) => {
+          const step = namedStep(job, 'Gate toolchain')
+          step.run = `${step.run ?? ''}\necho BUG132-AFTER-INSTALL\nexit 42\n`
+        },
+      })
+      expect(failure ?? '#9 PASSED', 'a failed setup step passed #9').toMatch(/setup step "Gate toolchain" exited 42/)
+      expect(failure ?? '#9 PASSED').toContain('BUG132-AFTER-INSTALL')
+    })
+  })
+
+  it('#9e a step condition #9 cannot evaluate fails loudly instead of being ignored', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('tsbridge-9e', async (s) => {
+      const failure = await provisionSuitesJob(s, {
+        edit: (job) => {
+          namedStep(job, 'Gate toolchain').if = false
+        },
+      })
+      expect(failure ?? '#9 PASSED', 'an unmodelled condition was run or skipped on a guess').toMatch(/cannot evaluate/)
     })
   })
 })
+
+function namedStep(job: WorkflowStep[], name: string): WorkflowStep {
+  const step = job.find((st) => st.name === name)
+  expect(step, `the suites job has no step "${name}"`).toBeDefined()
+  return step as WorkflowStep
+}
+
+/**
+ * #9's machinery. The suites job's provisioning steps are EXECUTED, the way #3
+ * executes the vitest step, on a PATH with every tool the installer declares
+ * removed. Provisioning steps are the `run:` steps before the vitest step, minus
+ * the ones that source run-ts-suites.sh: those consume tools. Each step's `if:`
+ * is evaluated as GitHub would, for the one form this job uses,
+ * `hashFiles('<path>') != ''` or `== ''`, against the fixture's files; any other
+ * form is a failure, not a guess. A step that exits nonzero fails the job here,
+ * as it does on GitHub. Then the installer's `check` judges the result.
+ *
+ * OFFLINE, and NOT an install smoke test: curl, tar, pipx and apt-get are stubs
+ * that make whatever was asked for, and `npm ci` succeeds without installing. So
+ * this proves the wiring (which steps run, that each succeeds, that GITHUB_PATH
+ * reaches the next step, that the declared tool set is provided) and nothing
+ * about downloads, archive contents, package validity or scanner versions.
+ * A tool a suite needs that the INSTALLER does not declare is invisible here,
+ * as it is on every developer machine.
+ *
+ * Returns why the job would leave the suites without their tools, or null.
+ */
+async function provisionSuitesJob(
+  s: Scenario,
+  opts: { edit?: (job: WorkflowStep[]) => void; omitManifest?: boolean } = {},
+): Promise<string | null> {
+  const installer = await readFile(join(REPO_ROOT, 'scripts/install-toolchain.sh'), 'utf8')
+  const declared = (/^SECURITY_TOOLS="([^"]*)"/m.exec(installer)?.[1] ?? '').split(/\s+/).filter(Boolean)
+  expect(declared.length, 'the installer declares no tools — this case would assert nothing').toBeGreaterThan(0)
+
+  const job = await suitesJob()
+  opts.edit?.(job)
+  const at = job.findIndex((step) => typeof step.run === 'string' && /\bvitest\s+run\b/.test(step.run))
+  expect(at, 'no job runs vitest — this case would assert nothing').toBeGreaterThan(-1)
+  const provisioning = job
+    .slice(0, at)
+    .filter((step) => typeof step.run === 'string' && !step.run.includes('run-ts-suites.sh'))
+
+  const dir = await s.workspace.dir('runner-proj')
+  const files = ['scripts/install-toolchain.sh', 'scripts/lib/watcher-lock.sh']
+  if (!opts.omitManifest) files.push('tests/package.json')
+  for (const f of files) await s.fs.copyIn(join(REPO_ROOT, f), `runner-proj/${f}`)
+  const home = await s.workspace.dir('runner-home')
+  const githubPath = await s.fs.write('github-path', '')
+  const which = async (tool: string) => {
+    const r = await s.run('sh', ['-c', `command -v ${tool}`], { cwd: dir })
+    expect(r.code, `${tool} is not on this machine`).toBe(0)
+    return r.stdout.trim()
+  }
+  const [tar, npm] = [await which('tar'), await which('npm')]
+
+  const stub = (name: string) => `printf '#!/bin/sh\\necho "${name} stub 0.0.0"\\n'`
+  const shims = await s.shimDir('runner-bin')
+  await shims.add('uname', 'case "$1" in -m) echo x86_64 ;; *) echo Linux ;; esac')
+  await shims.add('sudo', 'exec "$@"')
+  await shims.add('npm', `[ "$1" = ci ] && exit 0\nexec ${JSON.stringify(npm)} "$@"`)
+  await shims.add(
+    'curl',
+    `while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; esac; shift; done\n` +
+      `${stub('fetched')} > "$out"`,
+  )
+  await shims.add(
+    'tar',
+    `case " $* " in *" -x"*) ;; *) exec ${JSON.stringify(tar)} "$@" ;; esac\n` +
+      `while [ "$#" -gt 0 ]; do case "$1" in -C) into="$2"; shift ;; *) member="$1" ;; esac; shift; done\n` +
+      `mkdir -p "$(dirname "$into/$member")"\n${stub('extracted')} > "$into/$member"\nchmod 755 "$into/$member"`,
+  )
+  await shims.add(
+    'pipx',
+    `[ "$1" = install ] || exit 0\nmkdir -p "$HOME/.local/bin"\n${stub('pipx')} > "$HOME/.local/bin/$2"\nchmod 755 "$HOME/.local/bin/$2"`,
+  )
+  await shims.add(
+    'apt-get',
+    `[ "$1" = install ] || exit 0\nfor p in "$@"; do case "$p" in install|-*) ;; *) ${stub('apt')} > ${JSON.stringify(shims.dir)}/"$p"; chmod 755 ${JSON.stringify(shims.dir)}/"$p" ;; esac; done`,
+  )
+  // jq stays: every GitHub runner image ships it, and on Linux the installer
+  // does not fetch it but defers to the package manager. Every other declared
+  // tool is absent, so the job has to provide it.
+  const absent = declared.filter((t) => t !== 'jq')
+  const base = await s.pathWithout([...absent, 'curl', 'tar', 'pipx', 'sudo', 'apt-get', 'brew', 'uname', 'npm'])
+
+  let path = `${shims.dir}:${base}`
+  const log: string[] = []
+  for (const [i, step] of provisioning.entries()) {
+    const runs = await stepRuns(step, dir)
+    if (typeof runs === 'string') return runs
+    if (!runs) {
+      log.push(`--- step "${step.name}" skipped: if: ${String(step.if)} is false here ---`)
+      continue
+    }
+    const script = await s.fs.write(`provision-${i}.sh`, step.run ?? '')
+    const r = await s.run('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], {
+      cwd: join(dir, step['working-directory'] ?? '.'),
+      env: { HOME: home, PATH: path, GITHUB_PATH: githubPath },
+      timeoutMs: 120_000,
+    })
+    log.push(`--- step "${step.name}" exit ${r.code} ---\n${r.output}`)
+    if (r.code !== 0) {
+      return `setup step "${step.name}" exited ${r.code} — GitHub fails the job here and the suites never run\n${log.join('\n')}`
+    }
+    // GitHub prepends what a step appends to GITHUB_PATH, for every later step.
+    const added = (await readFile(githubPath, 'utf8')).split('\n').filter(Boolean).reverse()
+    await s.fs.write('github-path', '')
+    if (added.length > 0) path = `${added.join(':')}:${path}`
+  }
+
+  const check = await s.run('bash', [join(dir, 'scripts/install-toolchain.sh'), 'check'], {
+    cwd: dir,
+    env: { HOME: home, PATH: path },
+  })
+  if (check.code === 0) return null
+  return (
+    `the job's provisioning left the installer's check failing — the suites would run without these tools\n` +
+    `${check.output}\n${log.join('\n')}`
+  )
+}
+
+/**
+ * Whether GitHub runs `step`, for the one condition form the suites job uses.
+ * A string is the reason the condition cannot be evaluated: guessing either way
+ * would let a skipped installer pass, or an unskipped one hide its guard.
+ */
+async function stepRuns(step: WorkflowStep, root: string): Promise<boolean | string> {
+  if (step.if === undefined) return true
+  const m = /^\s*(?:\$\{\{\s*)?hashFiles\('([^'*?[\]]+)'\)\s*(!=|==)\s*''\s*(?:\}\}\s*)?$/.exec(String(step.if))
+  if (!m) {
+    return (
+      `step "${step.name}" has \`if: ${String(step.if)}\`, which #9 cannot evaluate — it models only ` +
+      `hashFiles('<literal path>') != '' and == ''. Model the new form in stepRuns.`
+    )
+  }
+  // hashFiles hashes files, so a directory at that path counts as absent.
+  const present = await stat(join(root, m[1] ?? '')).then(
+    (st) => st.isFile(),
+    () => false,
+  )
+  return (m[2] === '!=') === present
+}
 
 /** The steps of the one job that runs the vitest suites. */
 async function suitesJob(): Promise<WorkflowStep[]> {

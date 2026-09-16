@@ -505,7 +505,31 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     - One intermediate red explained rather than hidden: `bootstrap-gate` bootstraps from HEAD, so
       between his two commits the derived project got the new spec against the old lib. He re-ran
       after the fix: 8/8. dod-gate 46/46.
-  - **STATE AT 17:20, 2026-09-16 — read this first.**
+  - **LANDED 2026-09-16: `1248230..71388b9`, 163 commits, gate green.** Eighteen rows moved to
+    `waiting-acceptance/` — TASK-039, 040, 041, 042, 043, 044, 045, 046, 047, 048 and BUG-122,
+    124, 125, 126, 127, 129, 130, 131 — each carrying what to test and what its review found.
+    `doing/` now holds 3 backlog rows and 46 bug rows; TASK-049 and BUG-128 stay parked.
+    **This repo's feed daemon was restarted** on the fixed code: it had been running a deleted
+    inode, so pre-BUG-124 labelling and pre-BUG-129 truncation.
+    - **THREE PUSHES WERE REFUSED FIRST, and each refusal was a real defect:**
+      1. `§1b·1` blocked on `TASK-23` having no row — because closing an item the way the DoD
+         prescribes (delete the row, leave a `findings.md` pointer) leaves no row. **BUG-130.**
+      2. An untracked `subagent-defer/` at the repo root: correct path, nothing ignored it, so
+         every derived project would have carried a permanently dirty status. **BUG-131.**
+      3. `template-source` #import-1 asserted the imports equal the five seeded configs, which
+         stopped being true when TASK-046 added `claude.internal.md` — two agents, hours apart,
+         neither updating the other's witness. Fixed as a witness, not as code (`71388b9`).
+    - **The rotation canary proved itself in production** during the failed run: it reported the
+      feed rotating mid-suite as a NOTE, history preserved in `agent-activity.log.1`, rather than
+      failing the suite — hours after BUG-129 landed.
+    - **Still local, riding the next push:** the eighteen move commits and this note.
+    - **Next:** CI on `71388b9` (watch armed, dies with the session), then tell storm2flow — its
+      four gating items (TASK-039, 040, 042, 043) are on `main`, and `released` fast-forwards when
+      CI is green.
+    - **`doing/BUGS.md` holds 46 rows (BUG-036..BUG-109).** They predate tonight and none was
+      touched by it. Whether they are genuinely open or rows whose fixes landed and never moved is
+      an `lcm` question for the founder, not an assumption to make here.
+  - **Superseded, kept for the trail — state at 17:20:**
     - **The working tree is CLEAN and every item is committed.** `bootstrap-gate` is **8/8** at
       HEAD (#2 in 402 s against the 900 s budget), so the batch's last red is gone. Christian's
       `#5c` landed as `a2123b6` — Eto ran it (17/17) and committed it, because Christian wrote it

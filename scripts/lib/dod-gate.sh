@@ -136,29 +136,69 @@ dod_stage_rows() {
 # space-separated, relative to the project root. Undeclared, the root is
 # `$BP_CODE_ROOT/tests`, which is what the blueprint needs.
 #
-# WHAT IT NEVER COUNTS. Outside the blueprint, `$BP_CODE_ROOT/tests` is the
-# blueprint's managed directory: its suites name the BLUEPRINT's bug numbers, and
-# storm2flow had about 97 bugs passing on them with no test of their own. So in
-# any checkout without `.blueprint-root`, a root that is or contains that
-# directory is refused. `docs/` and `.git` are refused the same way everywhere.
+# WHAT IT NEVER COUNTS, and the containment is SYMMETRIC (Alexey finding 1).
+# `docs/` holds the bug's own backlog row, `.git` holds commit text, and
+# `scripts/` and `.githooks/` are blueprint-managed code naming blueprint bug
+# numbers. Outside the blueprint, so is `$BP_CODE_ROOT/tests`: its suites name
+# the BLUEPRINT's numbers, and storm2flow had about 97 bugs passing on them.
 #
-# Why "the whole directory" rather than per suite: nothing in a derived project
-# records which files under tests/ came from the blueprint. `export-ignore` only
-# names suites that do NOT ship, and a marker would have to be added to every
-# shipped suite and trusted on its contents. `.blueprint-root` is already the
-# positive, export-ignored answer to "is this the blueprint" (BUG-013), and
-# keying on its ABSENCE fails loud: an unrecognised checkout reports bugs
-# untested instead of passing them.
+# A root is refused when it IS one of those, CONTAINS one, or sits INSIDE one.
+# The first version refused only the first two, so `tests/shipped`, `docs/doing`
+# and a symlink resolving into `tests/` all certified project bugs on blueprint
+# material. Declaring a directory is not evidence of who wrote it.
 #
-# The exception is a declared root strictly INSIDE one of them (`tests/e2e`,
-# where CLAUDE.md puts E2E suites). Declaring it is the project claiming it.
+# THE COST, recorded rather than hidden: `tests/e2e` and a snapshot at the
+# `tests/` root are the layouts CLAUDE.md documents, and neither counts in a
+# derived project now. The honest fix is PROVENANCE — the blueprint ships a known
+# set of files under `tests/`, so anything else there is the project's. That set
+# is not knowable at gate time: `blueprint files` prints `tests/` unexpanded, the
+# expansion lives in `read_blueprint_source` which FETCHES the remote, and
+# `.gitattributes` names only the suites that do NOT ship. A pre-push gate cannot
+# depend on the network. So the layout question is the founder's, and until it is
+# answered the gate refuses rather than trusts. tests #13 pins the cost.
+#
+# THE DECLARATION IS A LITERAL LIST (Alexey finding 2). Globs are refused rather
+# than expanded, a second declaration is refused rather than silently first-wins,
+# and a malformed line is refused rather than falling back to the default — the
+# fallback searched the blueprint's own `tests/`, which is the dangerous
+# direction. Roots must also resolve INSIDE the project, which is what stops
+# `../outside`, an absolute path and an outward symlink.
 dod_test_roots() {
-  _dg_decl="$(sed -n 's/^- BP_TEST_ROOTS: `\(.*\)`[[:space:]]*$/\1/p' project_config_paths.md 2>/dev/null | head -n 1)"
-  if [ -z "$_dg_decl" ]; then
+  _dg_cfg="project_config_paths.md"
+  if [ ! -f "$_dg_cfg" ]; then
     printf '%s\n' "${BP_CODE_ROOT:-.}/tests"
     return 0
   fi
+  _dg_count="$(grep -c '^- BP_TEST_ROOTS:' "$_dg_cfg" 2>/dev/null || true)"
+  [ -n "$_dg_count" ] || _dg_count=0
+  if [ "$_dg_count" -eq 0 ]; then
+    printf '%s\n' "${BP_CODE_ROOT:-.}/tests"
+    return 0
+  fi
+  if [ "$_dg_count" -gt 1 ]; then
+    echo "project_config_paths.md declares BP_TEST_ROOTS $_dg_count times (more than one)."
+    echo "Keep exactly one declaration — the gate will not guess which is current."
+    return 1
+  fi
+  _dg_decl="$(sed -n 's/^- BP_TEST_ROOTS: `\([^`]*\)`[[:space:]]*$/\1/p' "$_dg_cfg")"
+  if [ -z "$(printf '%s' "$_dg_decl" | tr -d '[:space:]')" ]; then
+    echo "the BP_TEST_ROOTS declaration in project_config_paths.md is malformed."
+    echo "Expected one backtick-quoted, space-separated list of directories:"
+    echo '  - BP_TEST_ROOTS: `backend/src frontend/e2e`'
+    echo "Refusing rather than defaulting to tests/, which holds the blueprint's suites."
+    return 1
+  fi
+  case "$_dg_decl" in
+    *'*'*|*'?'*|*'['*|*']'*)
+      echo "BP_TEST_ROOTS contains a glob metacharacter: $_dg_decl"
+      echo "Roots are literal paths. A glob expands to whatever is on disk, which"
+      echo "is how docs/ and scripts/ became searchable."
+      return 1 ;;
+  esac
+  # -f as well as the refusal above: splitting is wanted here, expansion never is.
+  set -f
   for _dg_word in $_dg_decl; do printf '%s\n' "$_dg_word"; done
+  set +f
 }
 
 dod_stage_bugtests() {
@@ -170,13 +210,23 @@ dod_stage_bugtests() {
     return 0
   fi
 
-  # Directories that are never evidence of a test. A root that IS one of them,
-  # or CONTAINS one, is refused whole rather than pruned: docs/ holds the bug's
-  # own backlog row, so a `.` root would pass every bug on it, and a derived
-  # project's root also holds the blueprint's managed scripts/ and CLAUDE.md,
-  # which name blueprint bugs too. No prune list covers that; refusing does.
+  # A refused declaration stops the stage. It does NOT fall back to a default:
+  # the project meant to say where its tests are, and guessing would search the
+  # blueprint's own suites.
+  if ! _dg_rootlist="$(dod_test_roots 2>&1)"; then
+    printf '%s\n' "$_dg_rootlist"
+    echo ""
+    echo "DoD §2 — the gate cannot tell where this project's tests live, so it"
+    echo "cannot check that every BUG in this push has one."
+    return 1
+  fi
+
+  # Never evidence of a project test, in EITHER direction of containment.
+  _dg_proj="$(pwd -P)"
   _dg_never="$(cd -P docs 2>/dev/null && pwd)
-$(cd -P .git 2>/dev/null && pwd)"
+$(cd -P .git 2>/dev/null && pwd)
+$(cd -P scripts 2>/dev/null && pwd)
+$(cd -P .githooks 2>/dev/null && pwd)"
   if [ ! -f .blueprint-root ]; then
     _dg_never="$_dg_never
 $(cd -P "${BP_CODE_ROOT:-.}/tests" 2>/dev/null && pwd)"
@@ -187,28 +237,40 @@ $(cd -P "${BP_CODE_ROOT:-.}/tests" 2>/dev/null && pwd)"
   _dg_skipped=""
   while IFS= read -r _dg_r; do
     [ -n "$_dg_r" ] || continue
+    # cd -P resolves symlinks, so a root is judged by the directory it REACHES.
     if ! _dg_rp="$(cd -P "$_dg_r" 2>/dev/null && pwd)"; then
-      _dg_skipped="$_dg_skipped $_dg_r(absent)"
+      _dg_skipped="$_dg_skipped $_dg_r(not a directory)"
       continue
     fi
+    case "$_dg_rp/" in
+      "$_dg_proj"/*) ;;
+      *) _dg_skipped="$_dg_skipped $_dg_r(outside the project)"; continue ;;
+    esac
     _dg_why=""
     while IFS= read -r _dg_x; do
       [ -n "$_dg_x" ] || continue
+      if [ "$_dg_rp" = "$_dg_x" ]; then
+        _dg_why="is ${_dg_x##*/}/"
+        break
+      fi
       case "$_dg_x/" in
-        "$_dg_rp"/*) _dg_why="${_dg_x##*/}"; break ;;
+        "$_dg_rp"/*) _dg_why="contains ${_dg_x##*/}/"; break ;;
+      esac
+      case "$_dg_rp/" in
+        "$_dg_x"/*) _dg_why="inside ${_dg_x##*/}/"; break ;;
       esac
     done <<EOF
 $_dg_never
 EOF
     if [ -n "$_dg_why" ]; then
-      _dg_skipped="$_dg_skipped $_dg_r(contains $_dg_why/)"
+      _dg_skipped="$_dg_skipped $_dg_r($_dg_why)"
       continue
     fi
     _dg_plan="$_dg_plan$_dg_r
 "
     _dg_searched="$_dg_searched $_dg_r"
   done <<EOF
-$(dod_test_roots)
+$_dg_rootlist
 EOF
   if [ -n "$_dg_skipped" ]; then pipe_note "not searched:$_dg_skipped"; fi
 

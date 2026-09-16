@@ -23,9 +23,14 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 
 - BP_TEST_ROOTS: `tests`
 
-In the blueprint, `tests/` is this repo's own regression suites, so it counts.
+In the blueprint, `tests/` is this repo's own regression suites, so it counts
+here — `.blueprint-root` is what says so. In a derived project the same
+directory holds the suites this repo ships, and never counts there.
+
 This is also the undeclared default. The line is written out so the declaration
-is visible here, as it is in every derived project.
+is visible here, as it is in every derived project. `docs/`, `.git/`, `scripts/`
+and `.githooks/` are refused as roots in every checkout, along with anything
+inside or containing them.
 
 ## CI
 

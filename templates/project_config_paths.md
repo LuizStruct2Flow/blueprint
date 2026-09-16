@@ -24,10 +24,21 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 
 - BP_TEST_ROOTS: `backend/src frontend/src`
 
-`tests/` does not count here. It holds the suites the blueprint ships, and they
-name the blueprint's bug numbers, not this project's. A directory you create
-inside it, such as `tests/e2e`, does count once you list it. A root that
-contains `docs/`, `.git` or `tests/` is refused, so do not list `.`.
+Rules the gate applies to this list:
+
+- **Literal paths only.** No wildcards, and exactly one `BP_TEST_ROOTS` line.
+  A malformed or duplicated declaration is refused rather than guessed at.
+- **Inside this repo only.** A root that resolves outside it — `../elsewhere`,
+  an absolute path, a symlink pointing away — is refused.
+- **`tests/`, `docs/`, `.git/`, `scripts/` and `.githooks/` never count**, and
+  neither does anything inside or containing them. `tests/` holds the suites the
+  blueprint ships, which name the blueprint's bug numbers; `docs/` holds the
+  bug's own row; the other two are blueprint-managed code. So do not list `.`,
+  and note that `tests/e2e` and snapshots at the `tests/` root do not count
+  either, pending a founder decision on the layout (TASK-039).
+
+Put this project's tests somewhere of its own — `backend/src`, `frontend/src`,
+`e2e/` — and list those directories here.
 
 ## CI
 

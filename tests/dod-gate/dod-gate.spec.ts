@@ -576,16 +576,145 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   })
 
-  it('#10c a declared root inside tests/ is the project\'s own and is searched', async () => {
+  it('#10c REVERSED by Alexey finding 1: a declared root INSIDE the shipped tests/ is refused', async () => {
     await scenario('dod-gate-10c', async (s) => {
-      // CLAUDE.md puts a project's E2E suites under tests/e2e/. Declaring that
-      // directory is the project claiming it, so it counts. Only the undeclared
-      // bulk of tests/ is the blueprint's.
+      // This case used to assert the opposite: that declaring tests/e2e was the
+      // project claiming it. Alexey showed the same door admits tests/shipped
+      // (#12), where the only evidence is a blueprint suite — a declaration
+      // cannot prove provenance, and the gate has no local record of what the
+      // blueprint ships (see the report). So descendants are refused with
+      // ancestors, and the cost is that this documented layout no longer counts
+      // until the founder rules on it.
       const f = await derivedFix(s, 'r10c', 'tests/e2e')
       await s.fs.write(join(f.dir, 'tests/e2e/fix.spec.ts'), "it('BUG-042: regression', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
-      expect(r.code, `a declared root under tests/ was not searched:\n${r.output}`).toBe(0)
+      expect(r.code, `a root inside the blueprint's tests/ was searched:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was refused').toContain('tests/')
+    })
+  })
+
+  it('#12 Alexey finding 1: a declared tests/shipped cannot be vouched for by the suite in it', async () => {
+    await scenario('dod-gate-12', async (s) => {
+      // His probe: declaring a subdirectory of the shipped tests/ passed on a
+      // synthetic shipped suite naming BUG-042.
+      const f = await derivedFix(s, 'r12', 'tests/shipped')
+      await s.fs.write(join(f.dir, 'tests/shipped/test.sh'), SHIPPED_TEXT)
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a suite under a declared tests/ subdirectory vouched for a project bug:\n${r.output}`).not.toBe(0)
+    })
+  })
+
+  it('#12b Alexey finding 1: a declared docs/doing is refused — only the bug ROW names it', async () => {
+    await scenario('dod-gate-12b', async (s) => {
+      const f = await derivedFix(s, 'r12b', 'docs/doing')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `the bug's own row in docs/doing vouched for it:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was refused').toContain('docs/')
+    })
+  })
+
+  it('#12c Alexey finding 1: a declared scripts/ is refused — blueprint code names blueprint bugs', async () => {
+    await scenario('dod-gate-12c', async (s) => {
+      const f = await derivedFix(s, 'r12c', 'scripts')
+      await s.fs.write(join(f.dir, 'scripts/tool.sh'), '# BUG-042 is mentioned in this managed script\n')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a blueprint-managed script vouched for a project bug:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was refused').toContain('scripts/')
+    })
+  })
+
+  it('#12d Alexey finding 1: a symlink root pointing into the shipped tests/ is refused', async () => {
+    await scenario('dod-gate-12d', async (s) => {
+      // Physical resolution is what closes this: the symlink's own path is
+      // innocent, the directory it names is not.
+      const f = await derivedFix(s, 'r12d', 'suites')
+      await s.fs.write(join(f.dir, 'tests/shipped/test.sh'), SHIPPED_TEXT)
+      await s.run('ln', ['-s', 'tests/shipped', 'suites'], { cwd: f.dir })
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a symlink into the blueprint's tests/ vouched for a project bug:\n${r.output}`).not.toBe(0)
+    })
+  })
+
+  it('#12e Alexey finding 2: a glob in the declaration is refused, not expanded', async () => {
+    await scenario('dod-gate-12e', async (s) => {
+      // His probe: `*` expanded to directories and passed on the scripts witness.
+      const f = await derivedFix(s, 'r12e', '*')
+      await s.fs.write(join(f.dir, 'scripts/tool.sh'), '# BUG-042 mentioned here\n')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a glob expanded into the searched set:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without naming the glob as the problem').toMatch(/glob|metacharacter/i)
+    })
+  })
+
+  it('#12f Alexey finding 2: a relative root that leaves the project is refused', async () => {
+    await scenario('dod-gate-12f', async (s) => {
+      const f = await derivedFix(s, 'r12f', '../outside')
+      await s.fs.write(join(f.dir, '..', 'outside', 'notes.txt'), 'BUG-042 is named in a sibling directory\n')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a root outside the project vouched for a project bug:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was outside the project').toContain('outside the project')
+    })
+  })
+
+  it('#12g Alexey finding 2: an absolute root outside the project is refused', async () => {
+    await scenario('dod-gate-12g', async (s) => {
+      const outside = await s.fs.mkdirp('absolute-outside')
+      await s.fs.write(join(outside, 'notes.txt'), 'BUG-042 is named out here\n')
+      const f = await derivedFix(s, 'r12g', outside)
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `an absolute root outside the project vouched for a project bug:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without saying the root was outside the project').toContain('outside the project')
+    })
+  })
+
+  it('#12h Alexey finding 2: two BP_TEST_ROOTS declarations are refused, not silently first-wins', async () => {
+    await scenario('dod-gate-12h', async (s) => {
+      const f = await derivedFix(s, 'r12h', 'backend')
+      await s.fs.write(
+        join(f.dir, 'project_config_paths.md'),
+        '- BP_TEST_ROOTS: `backend`\n- BP_TEST_ROOTS: `scripts`\n',
+      )
+      await s.fs.write(join(f.dir, 'backend/fix.test.ts'), "it('BUG-042: regression', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `two declarations were resolved silently:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without naming the duplicate declaration').toMatch(/twice|2 times|more than one/i)
+    })
+  })
+
+  it('#12i Alexey finding 2: a malformed declaration is refused, not defaulted to tests/', async () => {
+    await scenario('dod-gate-12i', async (s) => {
+      // Falling back to the default here is the dangerous direction: the project
+      // meant to declare roots, and a silent default searches the blueprint's.
+      const f = await derivedFix(s, 'r12i', 'backend')
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: backend\n')
+      await s.fs.write(join(f.dir, SHIPPED_SUITE), SHIPPED_TEXT)
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a malformed declaration fell back to the blueprint's tests/:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed without naming the malformed declaration').toMatch(/malformed|backtick/i)
+    })
+  })
+
+  it('#13 Alexey finding 3: a PROJECT snapshot at the tests/ root is refused — pinned pending the founder', async () => {
+    await scenario('dod-gate-13', async (s) => {
+      // CLAUDE.md:466 puts snapshots at the tests/ root. This is a genuine
+      // project test and it no longer counts, because nothing local tells the
+      // gate which files under tests/ the blueprint shipped. Pinned so the cost
+      // is visible and the case flips the day provenance exists.
+      const f = await derivedFix(s, 'r13', 'tests')
+      await s.fs.write(join(f.dir, 'tests/own.snap.test.ts'), "it('BUG-042: snapshot', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `the documented snapshot layout counted — provenance now exists, so revisit #10c/#12:\n${r.output}`).not.toBe(0)
     })
   })
 })

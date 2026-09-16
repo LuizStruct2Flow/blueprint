@@ -74,6 +74,12 @@
  * TypeScript deletes its shell runner in the same change that adds its spec,
  * having run the mutant first (R6).
  *
+ * THAT MIGRATION IS FINISHED (TASK-047). There is one runner convention now —
+ * `*.spec.ts`, or `*.spec.tsx` where the test contains JSX — so the rule reads
+ * simply: every runner on disk is a spec, and every spec is invoked by the
+ * blanket vitest run. What the last shell runner's retirement cost is recorded
+ * in docs/config/findings.md F-003.
+ *
  * ---------------------------------------------------------------------------
  * WHAT THIS PORT LOST, STATED RATHER THAN QUIETLY DROPPED.
  *
@@ -395,7 +401,11 @@ export function blanketOf(text: string, pkgText: string): boolean {
 export function includeOk(cfgText: string): boolean {
   if (cfgText === '') return false
   const flat = cfgText.replace(/[ \n]/g, '')
-  return /include:\[[^\]]*["']\*\*\/\*\.spec\.ts["']/.test(flat)
+  // BOTH SPELLINGS COUNT (TASK-047). A config may name `**/*.spec.ts`, or the
+  // brace form `**/*.spec.{ts,tsx}` that also reaches a JSX component test.
+  // Accepting only the first would turn #4 and #5 red the moment the config
+  // widens — a control failing because the tree got MORE correct.
+  return /include:\[[^\]]*["']\*\*\/\*\.spec\.(ts["']|\{ts,tsx\}["'])/.test(flat)
 }
 
 /** Lines containing a marker token — `grep -c`, which counts LINES. */
@@ -518,11 +528,16 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   const pkgText = await readOr(join(root, 'tests/package.json'))
   const cfgText = await readOr(join(root, 'tests/vitest.config.ts'))
 
-  const suitesWithSh = new Set(
-    d.runners.filter((r) => r.suite !== '' && r.path.endsWith('.sh')).map((r) => r.suite),
-  )
+  // ONE RUNNER CONVENTION SINCE TASK-047: a runner is a `*.spec.ts`, or a
+  // `*.spec.tsx` where the test contains JSX — the same convention, because
+  // `.tsx` is TypeScript and a JSX component test cannot be written as `.ts`.
+  //
+  // `suitesWithSh`, and with it the per-suite `bash tests/<s>/<file>.sh` proof,
+  // went with the last shell runner. The loss that retirement cost is recorded
+  // in docs/config/findings.md F-003, not here.
+  const isSpec = (p: string) => p.endsWith('.spec.ts') || p.endsWith('.spec.tsx')
   const suitesWithTs = new Set(
-    d.runners.filter((r) => r.suite !== '' && r.path.endsWith('.spec.ts')).map((r) => r.suite),
+    d.runners.filter((r) => r.suite !== '' && isSpec(r.path)).map((r) => r.suite),
   )
 
   // =========================================================================
@@ -658,18 +673,13 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   const ciBlanket = tsPresent && hasCi && blanketOf(ciCmds, pkgText)
   const includeCovers = includeOk(cfgText)
 
-  // BUG-066: `bash "$BP_CODE_ROOT/tests/<suite>/test.sh"` is the same
-  // invocation as `bash tests/<suite>/test.sh` — the gate now resolves its code
-  // root instead of trusting cwd. The optional variable prefix is what keeps
-  // this an assertion about INVOCATION rather than about spelling.
+  // BUG-066: a stage may name its path through the gate's resolved code root,
+  // `"$BP_CODE_ROOT/tests/<suite>/…"`, rather than trusting cwd. The optional
+  // variable prefix is what keeps this an assertion about INVOCATION rather
+  // than about spelling.
   const rootVar = '"?(\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?/)?'
-  const shInvoked = (cmds: string, s: string, anchored: boolean) =>
-    new RegExp(
-      `${anchored ? '(^|[^#A-Za-z0-9_/])' : ''}bash +${rootVar}tests/${rx(s)}/[a-z0-9._-]+\\.sh`,
-      'm',
-    ).test(cmds)
   const tsNamed = (cmds: string, s: string) =>
-    new RegExp(`vitest[^|]*${rootVar}tests/${rx(s)}/[a-zA-Z0-9._-]+\\.spec\\.ts`).test(cmds)
+    new RegExp(`vitest[^|]*${rootVar}tests/${rx(s)}/[a-zA-Z0-9._-]+\\.spec\\.tsx?`).test(cmds)
   /** A spec is covered when it is named outright, or reached by the chain. */
   const tsCovered = (cmds: string, s: string, blanket: boolean, noRunner: string) => {
     if (tsNamed(cmds, s)) return ''
@@ -680,9 +690,6 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
 
   const notrun: string[] = []
   for (const s of d.names) {
-    if (suitesWithSh.has(s) && !shInvoked(gateCmds, s, true)) {
-      notrun.push(`${s}(shell runner never invoked)`)
-    }
     if (suitesWithTs.has(s)) {
       const why = tsCovered(gateCmds, s, gateBlanket, 'no vitest stage in .githooks/pre-push*')
       if (why) notrun.push(`${s}(${why})`)
@@ -693,7 +700,6 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
       ? bad(
           '#4',
           `#4 suites the gate never invokes: ${notrun.join(' ')}\n` +
-            "        A shell runner is proven by an anchored 'bash tests/<suite>/<file>.sh'.\n" +
             '        A spec is proven by a vitest run with NO path filter — in the hook, or in\n' +
             '        a bridge the hook sources AND calls into — plus an include glob that\n' +
             '        reaches it. A stage naming the spec outright also counts.\n' +
@@ -719,7 +725,6 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   } else if (hasCi) {
     const missing: string[] = []
     for (const s of d.names) {
-      if (suitesWithSh.has(s) && !shInvoked(ciCmds, s, false)) missing.push(`${s}(shell runner)`)
       if (suitesWithTs.has(s)) {
         const why = tsCovered(ciCmds, s, ciBlanket, 'no vitest step in the workflow')
         if (why) missing.push(`${s}(${why})`)
@@ -895,7 +900,10 @@ async function exportBoundary(
     tsAbsent.push('tests/harness/')
   }
 
-  const specsShip = listing.some((l) => /^tests\/.*\.spec\.ts$/.test(l))
+  // `.spec.tsx` counts as a shipped spec too (TASK-047): a project whose suites
+  // are JSX component tests must not read as "no spec ships", which would send
+  // #2c down its phase-1 branch over a tree that is fully migrated.
+  const specsShip = listing.some((l) => /^tests\/.*\.spec\.tsx?$/.test(l))
 
   // Which harness files exist but do NOT arrive. Both sides are read off the
   // filesystem, so a file added to tests/harness/ tomorrow is covered without
@@ -922,24 +930,16 @@ async function exportBoundary(
 
   for (const { suite: s, tier } of d.rows) {
     if (s === '') continue
-    // Runners counted BY KIND, because only one kind's executability depends on
-    // the phase. A directory that arrives without a runner the recipient can
-    // execute is worse than an absent one: the derived gate skips it silently
-    // and the push stays green over a suite that no longer exists.
-    let shTot = 0
-    let shGot = 0
+    // ONE RUNNER KIND SINCE TASK-047, so the count is simply how many of this
+    // suite's specs arrive. A directory that arrives without a runner is worse
+    // than an absent one: the derived gate has nothing to run from it and the
+    // push stays green over a suite that no longer exists.
     let tsTot = 0
     let tsGot = 0
     for (const r of d.runners.filter((r) => r.suite === s)) {
-      if (r.path.endsWith('.spec.ts')) {
-        tsTot++
-        if (ships(r.path)) tsGot++
-      } else {
-        shTot++
-        if (ships(r.path)) shGot++
-      }
+      tsTot++
+      if (ships(r.path)) tsGot++
     }
-    const tot = shTot + tsTot
     const any = shipsUnder(`tests/${s}/`)
 
     if (tier === 'blueprint') {
@@ -947,27 +947,24 @@ async function exportBoundary(
       if (any) shippedBp.push(s)
       continue
     }
-    // (i) NEVER ship a runner the recipient cannot execute.
+    // (i) NEVER ship a runner the recipient cannot execute. Without the
+    // toolchain a spec is not executable, so shipping one is shipping nothing
+    // the recipient can use.
     if (!tsShips && tsGot > 0) {
       unrunnable.push(`${s}(${tsGot} spec)`)
       continue
     }
-    // (ii) Within each EXECUTABLE kind, every runner still has to arrive.
-    if (shGot < shTot) {
-      hollow.push(`${s}(${shGot}/${shTot} shell)`)
-      continue
-    }
+    // (ii) Every runner the suite has still has to arrive.
     if (tsShips && tsGot < tsTot) {
       hollow.push(`${s}(${tsGot}/${tsTot} spec)`)
       continue
     }
     // (iii) AT LEAST ONE executable runner must arrive.
-    const runnable = tsShips ? shGot + tsGot : shGot
-    if (runnable > 0) continue
+    if (tsShips && tsGot > 0) continue
 
-    if (tsTot > 0 && shTot === 0) tsonly.push(s)
+    if (tsTot > 0) tsonly.push(s)
     else if (!any) withheld.push(s)
-    else hollow.push(`${s}(0/${tot} runners)`)
+    else hollow.push(`${s}(0/${tsTot} runners)`)
   }
 
   if (shippedBp.length > 0) {
@@ -997,8 +994,9 @@ async function exportBoundary(
       bad(
         '#2b',
         `#2b suites are TypeScript-ONLY while the TS toolchain does not ship, so they reach a derived project with no runner it can execute: ${tsonly.join(' ')}\n` +
-          '        Keep a shell runner until phase 2, or add \'tests/<suite>/ export-ignore\'\n' +
-          '        to make the suite blueprint-only deliberately.',
+          '        Ship the TS toolchain (see #2c), or add \'tests/<suite>/ export-ignore\'\n' +
+          '        to make the suite blueprint-only deliberately. There is no shell runner to\n' +
+          '        fall back on any more (TASK-047) — a spec is the only kind there is.',
       ),
     )
   } else if (withheld.length > 0) {
@@ -1019,7 +1017,7 @@ async function exportBoundary(
     checks.push(
       ok(
         '#2b',
-        '#2b the export boundary matches .gitattributes in both directions, runner by runner (HEAD; phase 1 — the TS toolchain does not ship, so every shipping suite keeps an executable shell runner)',
+        '#2b the export boundary matches .gitattributes in both directions, runner by runner (HEAD; the TS toolchain does not ship, so no shipping suite may carry a spec the recipient cannot execute)',
       ),
     )
   }

@@ -35,7 +35,7 @@ Rules the gate applies to this list:
   other two are blueprint-managed code naming the blueprint's bug numbers. So
   do not list `.`.
 - **Only the top level of `tests/` is yours.** A test file sitting directly in
-  `tests/` — the snapshot layout, `tests/own.snap.test.ts` — counts, because the
+  `tests/` — the snapshot layout, `tests/own.snap.spec.ts` — counts, because the
   blueprint ships no test file there. Everything in a subdirectory of `tests/`
   is a suite the blueprint ships, so `tests/e2e` does **not** count: put E2E
   tests somewhere of their own, such as `e2e/`, and list it here.

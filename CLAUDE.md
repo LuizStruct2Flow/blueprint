@@ -456,12 +456,19 @@ per the normal team workflow below.
 
 | Layer | Filename suffix | Lives next to source? | Runs in |
 |---|---|---|---|
-| Minimal reproducer | sibling of `*.test.{js,ts}` | YES | pre-push |
-| Unit | `*.test.{js,ts}` | YES (side-by-side) | pre-push |
-| Integration / wire | `*.integration.test.{js,ts,jsx,tsx}` | YES (near subject) | pre-push |
-| Data snapshot | `*.snap.test.{js,ts}` | NO (lives in `tests/`) | pre-push |
+| Minimal reproducer | sibling of the `*.spec.ts` it reproduces | YES | pre-push |
+| Unit | `*.spec.ts` | YES (side-by-side) | pre-push |
+| Integration / wire | `*.integration.spec.ts` | YES (near subject) | pre-push |
+| Data snapshot | `*.snap.spec.ts` | NO (lives in `tests/`) | pre-push |
 | Pixel snapshot | project-defined | NO | manual + CI pipeline |
 | E2E / acceptance | project-defined | NO (blueprint: `tests/e2e/`; a derived project: its own declared root, e.g. `e2e/` — see §"Which tests count for the DoD bug gate") | CI pipeline |
+
+Every suffix above ends in `.spec.ts` — or `.spec.tsx` where the test
+contains JSX, which is **the same convention rather than an exception to
+it**: `.tsx` *is* TypeScript, and a JSX component test cannot be written
+as `.ts`, so a literal single-extension rule would strand every React
+project. One convention, two spellings of one language. The layer is the
+infix (`.integration.`, `.snap.`); the extension never varies.
 
 DOM and layout snapshots live next to the deterministic transform they
 pin. A change that ripples across multiple snapshot files is the signal
@@ -472,7 +479,7 @@ we want — it surfaces which layer changed.
 **Unit and integration tests are co-located with the source file
 they test**, not stashed in a separate `tests/` mirror. So
 `src/domain/rating/decide.ts` is tested by
-`src/domain/rating/decide.test.ts` sitting next to it. One test
+`src/domain/rating/decide.spec.ts` sitting next to it. One test
 file per source file when reasonable; multiple small files beat one
 giant cross-cutting one.
 
@@ -487,6 +494,31 @@ sidebar tests muddies the per-source-file co-location rule.
 `tests/helpers/` or `tests/__helpers__/`, never co-located — they
 serve multiple tests.
 
+**Migrating an existing project to `*.spec.ts` (TASK-047).** The blueprint
+cannot rename your files for you, so this is the one-time move, and it belongs
+in one commit of its own:
+
+```bash
+git ls-files -z '*.test.ts' '*.test.tsx' '*.test.js' |
+  while IFS= read -r -d '' f; do
+    git mv "$f" "${f%.test.*}.spec.${f##*.}"
+  done
+```
+
+(`${f%.test.*}` strips from the LAST `.test.`, so a path with `.test.` in a
+directory name survives; `${f##*.}` keeps the original extension, so a `.tsx`
+test stays `.tsx`.)
+
+Then widen the globs that find them — `vitest.config.ts` `include`,
+`tsconfig.json` if it names test files, any `eslint-plugin-boundaries`
+exclusion, and any coverage `include`/`exclude` — to `*.spec.{ts,tsx}`, and
+run the suite. **Check the count, not just the colour:** a glob that no longer
+matches reports zero failures, which looks identical to success. If your test
+count dropped, a glob is still on the old suffix. A project that keeps
+`*.test.ts` keeps working — nothing in the gate refuses it — but its layer
+names then disagree with this file, and the DoD bug gate looks for evidence
+under the declared roots either way.
+
 **Which tests count for the DoD bug gate.** The gate that checks every pushed
 `BUG#n` has a test naming it searches only the roots a project declares as
 `BP_TEST_ROOTS` in `project_config_paths.md`. The list is literal, and exactly
@@ -495,7 +527,7 @@ count, and neither does a root containing one or sitting inside one, because the
 blueprint's own code and the bug's own backlog row would otherwise vouch for a
 project bug. A root must also resolve inside the repository. In a derived
 project, **only the top level of `tests/` counts**: a test file sitting directly
-in `tests/`, such as the snapshot layout `tests/own.snap.test.ts`, is the
+in `tests/`, such as the snapshot layout `tests/own.snap.spec.ts`, is the
 project's own, because the blueprint ships no test file there. Everything in a
 subdirectory of `tests/` is a suite the blueprint ships, so **`tests/e2e` does
 not count in a derived project** — put E2E tests in a root of their own, such as
@@ -514,12 +546,14 @@ link that leaves the repository (TASK-045, BUG-125).
 
 **Tooling consequences:**
 
-- `vitest.config.ts` `include`: both `src/**/*.test.ts` (co-located
-  unit/integration) and `tests/**/*.test.ts` (snapshot/e2e).
-- `tsconfig.json`: a `src/**/*.ts` glob already includes
-  `src/**/*.test.ts`; no separate entry needed.
+- `vitest.config.ts` `include`: both `src/**/*.spec.{ts,tsx}` (co-located
+  unit/integration) and `tests/**/*.spec.{ts,tsx}` (snapshot/e2e). Name
+  **both** spellings — a glob of `*.spec.ts` alone silently never runs a
+  JSX component test, which is a coverage cut nothing else reports.
+- `tsconfig.json`: a `src/**/*.{ts,tsx}` glob already includes
+  `src/**/*.spec.{ts,tsx}`; no separate entry needed.
 - If you enforce layering with `eslint-plugin-boundaries` or
-  similar, **exclude `src/**/*.test.ts` from the enforcement** so
+  similar, **exclude `src/**/*.spec.{ts,tsx}` from the enforcement** so
   tests can import freely across layers (a domain test reaching
   for a fake adapter is normal and good).
 

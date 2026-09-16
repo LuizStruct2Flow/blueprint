@@ -355,6 +355,27 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       guard, not a reproducer — and it exists because this invariant was restated three times by
       three people (Alexey found five-versus-one, the founder collapsed it to one, Eto widened it
       by `.tsx`) and checked by reading each time. Reading is what let the first drift live.
+  - **THE BLOCKER IS CLEARED** (Philipp, `b683eb9`). The semgrep classification moved into a
+    shipped `scripts/semgrep-verdict.sh` — the hook **sources** it, the workflow **executes** it,
+    one statement of the rule where there were two copies, and a `run:` block small enough for
+    semgrep's own GHA rule to parse. `bootstrap-gate` is **8/8, #2 and #3 included**. Verified in
+    the real `returntocorp/semgrep` image: 0 findings, 20 shell parse errors accepted.
+    - **But #2 now takes ~364 s against the suite's 320 s budget**, because it runs the entire
+      derived gate instead of dying at SAST in 3 s. **Philipp is raising it with headroom**, and
+      putting the reason in the code: the number now means "how long a full derived gate takes".
+    - BUG-124 rework landed (`f479e85`, `6df5c56`): slots are reserved by `mkdir` of a fixed
+      name, so the slot set IS the ceiling; the child re-executes under bash, because dash takes
+      only single-digit descriptors; digits are normalised before comparison. His fix briefly
+      reintroduced BUG-124 — the roster lookup lost its inputs — and the existing #4 caught it.
+    - TASK-042 finding 4 landed (`1c8ce26`): `_bp_one_object` decides "exactly one JSON object"
+      once, for the blueprint, the project layer and legacy settings alike.
+  - **BUG-129 filed: four feed daemons are running at once.** `pgrep -af agent-activity.sh` shows
+    PIDs 1154186, 3275474, 3373642, 3423373. CLAUDE.md tells every wake to start the feed and
+    promises a `flock` makes it a no-op; it plainly does not. **BUG-001 was this exact class** —
+    a broken idempotency guard, every-wake spawning, load 175 for 2.7 days. It is already red in
+    the gate: `subagent-feed` #9 fails because the team's own feed rotates the log mid-scenario
+    and the canary hard-fails on truncation while only noting baton writes. **Do not kill the
+    daemons before capturing what started them.**
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

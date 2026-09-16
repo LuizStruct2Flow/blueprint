@@ -376,6 +376,84 @@ describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () =
     })
   })
 
+  it('#5 an error entry the gate cannot decode is incomplete, not zero unaccepted errors', async () => {
+    await scenario('scanners-bug126-5', async (s) => {
+      // Alex's finding 1. `errors: [42]` cannot be indexed, so jq wrote nothing,
+      // the empty output read as "no unaccepted errors", and the gate PASSED
+      // claiming one accepted shell parse error. jq's own exit status was ignored.
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['errnumber'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `an undecodable error list was approved\n${r.output}`).not.toBe(0)
+      expect(r.output).not.toContain('WARNING+ finding')
+      expect(r.output, 'the block did not say the error list could not be read').toMatch(/could not be (read|decoded)/)
+      expect(await f.calls('semgrep'), 'expected exactly 1 call + 1 retry').toBe(2)
+    })
+  })
+
+  it('#5b an error whose type and path are objects is incomplete too', async () => {
+    await scenario('scanners-bug126-5b', async (s) => {
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['errobject'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `an error with object-valued fields was approved\n${r.output}`).not.toBe(0)
+      expect(r.output).not.toContain('WARNING+ finding')
+    })
+  })
+
+  it('#6 the interpreter is parsed: a node script behind env -S blocks', async () => {
+    await scenario('scanners-bug126-6', async (s) => {
+      // Alex's finding 2. The predicate searched anywhere after `#!` for sh, bash
+      // or dash, so `#!/usr/bin/env -S node --require /tmp/bash` matched on the
+      // REQUIRE argument and a node file was accepted as shell.
+      const f = await fixture(s)
+      await shellTargets(s)
+      await f.gitleaks([0])
+      await f.semgrep(['envnode'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `a node script was accepted as shell\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('scripts/env-node')
+    })
+  })
+
+  it('#6b the joined spelling -Snode blocks as well', async () => {
+    await scenario('scanners-bug126-6b', async (s) => {
+      const f = await fixture(s)
+      await shellTargets(s)
+      await f.gitleaks([0])
+      await f.semgrep(['envnodejoined'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `-Snode was read as a shell header\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('scripts/env-node-joined')
+    })
+  })
+
+  it('#6c real shell headers keep their acceptance: a flag, env -S, env assignments', async () => {
+    await scenario('scanners-bug126-6c', async (s) => {
+      // The other half of finding 2: tightening the predicate must not start
+      // blocking the scripts the policy exists to accept.
+      const f = await fixture(s)
+      await shellTargets(s)
+      await f.gitleaks([0])
+      await f.semgrep(['envshell'])
+
+      const r = await f.runHook()
+
+      expect(r.code, `a real shell header stopped being accepted\n${r.output}`).toBe(0)
+      expect(r.output).toMatch(/3 shell parse error\(s\) accepted/)
+    })
+  })
+
   it('#ci the workflow semgrep step applies the same classification', async (ctx) => {
     const notGithub = await notGithubActions(REPO_ROOT)
     if (notGithub) skipVisibly(ctx, notGithub)
@@ -408,6 +486,13 @@ describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () =
         ['oserror', false],
         ['badschema', false],
         ['err1json', false],
+        // Alex's findings 1 and 2, against the workflow block as well as the
+        // hook: the two copies of the policy must agree on every payload.
+        ['errnumber', false],
+        ['errobject', false],
+        ['envnode', false],
+        ['envnodejoined', false],
+        ['envshell', true],
       ]
       for (const [mode, passes] of cases) {
         await f.shims.add('semgrep', `mode=${mode}\n${SEMGREP_MODES}`)
@@ -519,12 +604,32 @@ type SemgrepMode =
   | 'partial'
   | 'shellparse'
   | 'nodeparse'
+  | 'errnumber'
+  | 'errobject'
+  | 'envnode'
+  | 'envnodejoined'
+  | 'envshell'
 
 /** The targets BUG-126's shell policy reads the shebang of. */
 async function shellTargets(s: Scenario): Promise<void> {
   await s.fs.write('repo/scripts/x.sh', 'echo x\n')
   await s.fs.write('repo/scripts/tool', '#!/usr/bin/env bash\necho tool\n')
   await s.fs.write('repo/scripts/node-tool', '#!/usr/bin/env node\nconsole.log(1)\n')
+  // Alex's finding 2: a header whose REAL interpreter is node, wearing a shell
+  // name further along the line. Both spellings of env's --split-string.
+  await s.fs.write(
+    'repo/scripts/env-node',
+    '#!/usr/bin/env -S node --require /tmp/bash\nconsole.log(1)\n',
+  )
+  await s.fs.write(
+    'repo/scripts/env-node-joined',
+    '#!/usr/bin/env -Snode --require /tmp/bash\nconsole.log(1)\n',
+  )
+  // Shell headers that must KEEP their acceptance: a direct one with a flag, an
+  // env one behind -S, and one behind an env assignment and -u.
+  await s.fs.write('repo/scripts/direct-sh', '#!/bin/sh -e\necho hi\n')
+  await s.fs.write('repo/scripts/env-dash', '#!/usr/bin/env -S dash -e\necho hi\n')
+  await s.fs.write('repo/scripts/env-assign', '#!/usr/bin/env -u FOO BAR=1 bash\necho hi\n')
 }
 
 async function fixture(s: Scenario): Promise<ScannerFixture> {
@@ -637,4 +742,9 @@ const SEMGREP_MODES = `case "$mode" in
   partial)   printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":["PartialParsing",[{"path":"src/broken.js","start":{"line":1,"col":1,"offset":0},"end":{"line":2,"col":10,"offset":28}}]],"message":"Syntax error at line src/broken.js:1","path":"src/broken.js"}]}\\n'; exit 0 ;;
   shellparse) printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":["PartialParsing",[{"path":"scripts/x.sh","start":{"line":1,"col":1,"offset":0},"end":{"line":1,"col":4,"offset":3}}]],"message":"Syntax error at line scripts/x.sh:1","path":"scripts/x.sh"},{"code":3,"level":"warn","type":"Syntax error","message":"Syntax error at line scripts/tool:1","path":"scripts/tool"}]}\\n'; exit 0 ;;
   nodeparse) printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":"Syntax error","message":"Syntax error at line scripts/node-tool:1","path":"scripts/node-tool"}]}\\n'; exit 0 ;;
+  errnumber) printf '{"version":"1.171.0","results":[],"errors":[42]}\\n'; exit 0 ;;
+  errobject) printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":{"kind":"odd"},"path":{"file":"src/x.js"}}]}\\n'; exit 0 ;;
+  envnode)   printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":"Syntax error","message":"Syntax error at line scripts/env-node:2","path":"scripts/env-node"}]}\\n'; exit 0 ;;
+  envnodejoined) printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":"Syntax error","message":"Syntax error at line scripts/env-node-joined:2","path":"scripts/env-node-joined"}]}\\n'; exit 0 ;;
+  envshell)  printf '{"version":"1.171.0","results":[],"errors":[{"code":3,"level":"warn","type":"Syntax error","path":"scripts/direct-sh"},{"code":3,"level":"warn","type":["PartialParsing",[{"path":"scripts/env-dash"}]],"path":"scripts/env-dash"},{"code":3,"level":"warn","type":"Syntax error","path":"scripts/env-assign"}]}\\n'; exit 0 ;;
 esac`

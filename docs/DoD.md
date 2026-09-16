@@ -283,12 +283,19 @@ The shipped code is only as good as the tests that gate it.
 
    | Layer | Path convention | Runs in |
    |---|---|---|
-   | Minimal reproducer | sibling of the `*.test.{js,ts}` it reproduces | pre-push |
-   | Unit | `*.test.{js,ts}` | pre-push |
-   | Integration / wire | `*.integration.test.{js,ts,jsx,tsx}` | pre-push |
-   | Data snapshot | `*.snap.test.{js,ts}` | pre-push |
+   | Minimal reproducer | sibling of the `*.spec.ts` it reproduces | pre-push |
+   | Unit | `*.spec.ts` | pre-push |
+   | Integration / wire | `*.integration.spec.ts` | pre-push |
+   | Data snapshot | `*.snap.spec.ts` | pre-push |
    | Pixel snapshot | project-defined | manual + CI pipeline |
    | E2E / acceptance | project-defined | CI pipeline |
+
+   **One extension, `*.spec.ts`, in `src/` as well as `tests/`** (founder,
+   2026-09-16: *"migrate the tests to be spec driven ts tests, we don't need
+   exceptions"*). Every layer above ends in `.spec.ts`, so the files a runner
+   executes and the files the DoD gate counts as evidence are one set. That is
+   the whole point: a `*.test.ts` accepted as a regression test but never run is
+   a green standing in for a test (TASK-047, from Alexey's TASK-039 finding 6).
 
 5. **Snapshot tests are approval-based.** A snapshot diff is a *change*,
    not necessarily a *break*. Update locally via the project's approve

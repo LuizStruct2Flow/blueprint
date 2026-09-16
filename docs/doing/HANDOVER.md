@@ -569,7 +569,17 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
         `trap 'exit 143'` on HUP/INT/TERM. **He also caught his own vacuous test** — the
         cwd-filtered `children()` helper reports an uninspectable process as gone, so #17 now
         follows the owner by pid.
-    - **THE ONE OPEN QUESTION: `flock` on macOS.** BUG-124's fix degrades to "no flock → no
+    - **ANSWERED, and all seven sections are now closed** (`6285fbe`, `9af5e74`). The toolchain
+      **did not** provide `flock` — macOS installed coreutils and diffutils only; `flock` is
+      util-linux. It installs it now, keyed on the **capability** rather than the formula, because
+      util-linux is keg-only so `have flock` is false even after a good install; the resolver
+      mirrors `bp_staleness_timeout_cmd` (PATH, then keg paths) and lives in `watcher-lock.sh`,
+      the lib that already reasons about flock, so installer and hook cannot disagree.
+      **`mkdir` was rejected with a reason worth keeping:** it gives exclusion but no
+      release-on-death, so a holder killed mid-section wedges deferral permanently, and breaking a
+      stale mutex means judging its owner dead — which is the defect one level up. The
+      degradation is also loud now: it names `flock` and how to install it, once.
+    - **History of the question (resolved):** BUG-124's fix degrades to "no flock → no
       deferral", and `install-toolchain.sh` installs coreutils for `gtimeout` only — it provides
       no `flock`, and macOS ships none. On the founder's Mac that means type-labelled bookends:
       **BUG-124's original symptom, on the machine that reported it.** The BUG-129 agent hit the

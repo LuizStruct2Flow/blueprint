@@ -705,19 +705,50 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     })
   })
 
-  it('#13 FOUNDER RULE: a PROJECT snapshot directly at the tests/ root counts', async () => {
+  it('#13 FOUNDER RULE: a PROJECT spec directly at the tests/ root counts', async () => {
     await scenario('dod-gate-13', async (s) => {
-      // Founder decision, 2026-09-16, resolving Alexey finding 3. CLAUDE.md:466
-      // puts snapshots at the tests/ root, and the blueprint ships NO runner
-      // there (#14 guards that), so a runner sitting directly in tests/ can only
-      // be the project's own. This case previously asserted the opposite.
+      // Founder decision, 2026-09-16, resolving Alexey finding 3: a runner
+      // sitting directly in tests/ can only be the project's own, because the
+      // blueprint ships none there (#14 guards that).
+      //
+      // TASK-047 narrowed the file to `*.spec.ts`. It was `own.snap.test.ts`
+      // here, which read as evidence while vitest would never have run it.
       const f = await derivedFix(s, 'r13', 'tests')
-      await s.fs.write(join(f.dir, 'tests/own.snap.test.ts'), "it('BUG-042: snapshot', () => {})\n")
+      await s.fs.write(join(f.dir, 'tests/own.snap.spec.ts'), "it('BUG-042: snapshot', () => {})\n")
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `the documented snapshot layout did not count:\n${r.output}`).toBe(0)
     })
   })
+
+  /**
+   * TASK-047: what the gate COUNTS and what vitest RUNS are one set.
+   *
+   * These two extensions were accepted as evidence and are not executed by the
+   * shipped runner (`tests/vitest.config.ts` includes `**​/*.spec.ts` only), so a
+   * bug could be certified by a file nothing ever runs — a green standing in for
+   * a test, which is this repo's signature failure. Founder, 2026-09-16:
+   * "migrate the tests to be spec driven ts tests, we don't need exceptions".
+   */
+  const NOT_RUN: ReadonlyArray<readonly [string, string]> = [
+    ['a TypeScript test that is not a spec', 'tests/own.snap.test.ts'],
+    ['a JavaScript spec', 'tests/own.spec.js'],
+  ]
+
+  for (const [name, path] of NOT_RUN) {
+    it(`#16 TASK-047: ${name} is not evidence — vitest never runs it`, async () => {
+      await scenario(`dod-gate-16-${path.replace(/\W+/g, '-')}`, async (s) => {
+        const f = await derivedFix(s, 'r16', 'tests')
+        await s.fs.write(join(f.dir, path), "it('BUG-042: regression', () => {})\n")
+
+        const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+        expect(
+          r.code,
+          `${path} counted as a regression test, but the shipped runner would never execute it:\n${r.output}`,
+        ).not.toBe(0)
+      })
+    })
+  }
 
   it('#13b FOUNDER RULE: a blueprint suite in a SUBDIRECTORY of tests/ still does not count', async () => {
     await scenario('dod-gate-13b', async (s) => {
@@ -807,16 +838,19 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     // so asserting there would fail every project that follows CLAUDE.md:466.
     if (!existsSync(join(REPO_ROOT, '.blueprint-root'))) ctx.skip()
 
+    // TASK-047 collapsed this to the one extension the gate accepts and vitest
+    // runs. A shipped `.sh` or `.test.ts` at this root is no longer a hazard for
+    // the bug-test stage, because neither is evidence any more.
     const entries = await readdir(join(REPO_ROOT, 'tests'), { withFileTypes: true })
     const runners = entries
-      .filter((e) => e.isFile() && /(\.(spec|test)\.[jt]s|\.sh)$/.test(e.name))
+      .filter((e) => e.isFile() && e.name.endsWith('.spec.ts'))
       .map((e) => e.name)
       .sort()
 
     expect(
       runners,
-      `The blueprint now ships runner(s) directly at the tests/ root: ${runners.join(', ')}.\n` +
-        'The DoD bug-test stage treats ANY runner there as the project\'s own (docs/DoD.md §2),\n' +
+      `The blueprint now ships spec(s) directly at the tests/ root: ${runners.join(', ')}.\n` +
+        'The DoD bug-test stage treats ANY spec there as the project\'s own (docs/DoD.md §2),\n' +
         'so a shipped one would vouch for a derived project\'s bug carrying the same number —\n' +
         'the exact defect TASK-039 exists to close. Move it into a suite directory under\n' +
         'tests/<suite>/, or change the rule in scripts/lib/dod-gate.sh and these tests together.',

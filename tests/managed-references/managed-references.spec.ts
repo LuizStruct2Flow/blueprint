@@ -262,3 +262,73 @@ describe('TASK-025 — a single-file pull of the CLI brings the libs it needs', 
     })
   })
 })
+
+/**
+ * TASK-021 §4.2 — a retirement survives an OLD CLI's full pull across the removal.
+ *
+ * Alexey's second finding on the plan: an old CLI's full pull advances
+ * bootstrap_sha past an export removal, so a retirement computed from
+ * archive(bootstrap_sha) − archive(tip) would never offer the orphan. The old
+ * CLI is REAL, read from history like #3: scripts/ as it stood just before the
+ * first commit that introduced _bp_retire (HEAD while no commit has, which is
+ * the reproducer commit). Blueprint-tier because a derived project has no
+ * blueprint history to read it from.
+ */
+describe('TASK-021 — retirement comes from history, so an old CLI cannot erase it', () => {
+  it('#4 old CLI full-pulls across the removal, then the new CLI still retires the orphan', async () => {
+    await scenario('managed-references-4', async (s) => {
+      const introduced = (
+        await s.run('git', ['-C', REPO_ROOT, 'log', '--reverse', '--format=%H', '-S', '_bp_retire', '--', 'scripts/blueprint'], {
+          cwd: s.workspace.root,
+        })
+      ).stdout.split('\n')[0]
+      const oldRev = introduced ? `${introduced}^` : 'HEAD'
+
+      const old = await s.workspace.dir('old')
+      const extracted = await s.run(
+        'bash',
+        ['-c', 'git -C "$1" archive --format=tar "$2" scripts | tar -x -C "$3"\n', 'old', REPO_ROOT, oldRev, old],
+        { cwd: s.workspace.root },
+      )
+      expect(extracted.code, `could not read the old CLI (a shallow clone? ts-tests needs fetch-depth: 0)\n${extracted.output}`).toBe(0)
+      expect(await readFile(join(old, 'scripts/blueprint'), 'utf8'), 'the "old" CLI already retires, so this proves nothing').not.toContain('_bp_retire')
+
+      // The blueprint ships an orphan-to-be, then stops shipping it in the same
+      // commit that changes a managed file, so the old CLI's full pull has
+      // something to land and advances bootstrap_sha past the removal.
+      const bp = await s.workspace.dir('bp')
+      await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\n')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(join(bp, 'scripts/orphan.sh'), 'echo bootstrap {{PROJECT_NAME}}\n')
+      await initRepo(s, bp)
+      const first = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+      await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\nnewer\n')
+      await s.fs.write(join(bp, '.gitattributes'), 'scripts/orphan.sh export-ignore\n')
+      await s.run('git', ['add', '-A'], { cwd: bp })
+      await s.run('git', ['commit', '-q', '-m', 'stop shipping orphan.sh'], { cwd: bp })
+      const removal = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+
+      const proj = await s.workspace.dir('proj')
+      await s.fs.write(join(proj, 'CLAUDE.md'), '# CLAUDE\nfor proj\n')
+      await s.fs.write(join(proj, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(join(proj, 'scripts/orphan.sh'), 'echo bootstrap proj\n')
+      await s.fs.write(
+        join(proj, '.blueprint-source'),
+        ['config_version   = 2', `blueprint_remote = ${bp}`, `bootstrap_sha    = ${first}`, 'bootstrap_date   = 2026-01-01', ''].join('\n'),
+      )
+      await initRepo(s, proj)
+
+      const byOld = await s.run(join(old, 'scripts/blueprint'), ['pull', '--yes'], { cwd: proj })
+      expect(byOld.code, byOld.output).toBe(0)
+      expect(await readFile(join(proj, '.blueprint-source'), 'utf8'), `the old CLI's full pull did not advance past the removal\n${byOld.output}`).toContain(removal)
+      expect(await s.fs.exists(join(proj, 'scripts/orphan.sh')), 'fixture broken: the old CLI already removed the orphan').toBe(true)
+
+      const byNew = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+      expect(byNew.code, byNew.output).toBe(0)
+      expect(
+        await s.fs.exists(join(proj, 'scripts/orphan.sh')),
+        `bootstrap_sha is past the removal and the new CLI no longer offered the orphan\n${byNew.output}`,
+      ).toBe(false)
+    })
+  })
+})

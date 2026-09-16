@@ -298,3 +298,76 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
     })
   })
 })
+
+describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped shipping, only on content proof', () => {
+  it('#5 identical is offered and removed, edited is reported and kept, absent and project-owned are silent', async () => {
+    await scenario('pull-behaviour-5', async (s) => {
+      const bp = await s.workspace.dir('r', 'bp')
+      await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\n')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      // Removed by deletion, and substituted, so the proof has to substitute too.
+      await s.fs.write(join(bp, 'scripts/gone.sh'), 'echo {{PROJECT_NAME}}\n')
+      // Removed by a new export-ignore line.
+      await s.fs.write(join(bp, 'LICENSE'), 'MIT, the blueprint owner\n')
+      await s.fs.write(join(bp, 'docs/edited.md'), 'blueprint text\n')
+      await s.fs.write(join(bp, 'docs/absent.md'), 'never reached the project\n')
+      // Seeded once and then the project's own: never a candidate, even identical.
+      await s.fs.write(join(bp, 'project_config_paths.md'), 'config for {{PROJECT_NAME}}\n')
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      await git(s, bp, ['rm', '-q', 'scripts/gone.sh', 'docs/absent.md'])
+      await s.fs.write(
+        join(bp, '.gitattributes'),
+        'LICENSE export-ignore\ndocs/edited.md export-ignore\nproject_config_paths.md export-ignore\n',
+      )
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'two'])
+
+      const p = await s.workspace.dir('r', 'retiree')
+      await s.fs.write(join(p, 'CLAUDE.md'), '# CLAUDE\nfor retiree\n')
+      await s.fs.write(join(p, 'scripts/gone.sh'), 'echo retiree\n')
+      await s.fs.write(join(p, 'LICENSE'), 'MIT, the blueprint owner\n')
+      await s.fs.write(join(p, 'docs/edited.md'), 'blueprint text\nand this project wrote more\n')
+      await s.fs.write(join(p, 'project_config_paths.md'), 'config for retiree\n')
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          // Already at the removal commit: candidates come from history, not
+          // from the distance between bootstrap_sha and the tip.
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(r.code, r.output).toBe(0)
+
+      expect(await s.fs.exists(join(p, 'scripts/gone.sh')), `an unedited deleted file was not retired:\n${r.output}`).toBe(false)
+      expect(await s.fs.exists(join(p, 'LICENSE')), `an unedited export-ignored file was not retired:\n${r.output}`).toBe(false)
+      expect(r.output, 'the retirement was not reported').toMatch(/retired\s+scripts\/gone\.sh/)
+
+      expect(await s.fs.exists(join(p, 'docs/edited.md')), 'an EDITED copy was deleted').toBe(true)
+      expect(r.output, 'the edited copy was not reported as the project\'s').toMatch(/yours now\s+docs\/edited\.md/)
+
+      expect(r.output, 'a file the project never had was mentioned').not.toContain('docs/absent.md')
+      expect(await s.fs.exists(join(p, 'project_config_paths.md')), 'a project-owned seed was retired').toBe(true)
+      expect(r.output, 'a project-owned seed was treated as a candidate').not.toContain('project_config_paths.md')
+
+      // A second pull has nothing left to offer, and still says the edited copy is kept.
+      const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      expect(again.code, again.output).toBe(0)
+      expect(again.output).not.toMatch(/retired/)
+      expect(again.output).toMatch(/yours now\s+docs\/edited\.md/)
+    })
+  })
+})

@@ -51,15 +51,7 @@ import { describe, it, expect, vi, type TestContext } from 'vitest'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { inspect, type CheckResult } from './manifest.js'
 import { notGithubActions, skipNote, skipVisibly } from '../helpers/project-config.js'
-import {
-  baselineTree,
-  gateFor,
-  materialize,
-  workflowFor,
-  BP_ONLY_SUITE,
-  SHELL_SUITES,
-  TS_SUITE,
-} from './fixture.js'
+import { baselineTree, materialize, BP_ONLY_SUITE, SUITES, TS_SUITE } from './fixture.js'
 
 /** The ids of the checks that FAILED — the verdict, in one comparable shape. */
 const red = (checks: CheckResult[]): string[] => checks.filter((c) => !c.ok).map((c) => c.id)
@@ -118,11 +110,14 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
   it('#1 a runner sitting directly in tests/ belongs to no suite, so it executes nowhere', async () => {
     await scenario('manifest-1', async (s) => {
       const checks = await inspectFixture(s, 'bp', (files) => {
-        files.set('tests/orphan.sh', 'echo nothing invokes me\n')
+        // A spec, since TASK-047: the orphan is a runner of the only kind there
+        // is. It still belongs to no suite, so nothing invokes it, no export rule
+        // covers it, and it would execute nowhere while looking like a test.
+        files.set('tests/orphan.spec.ts', 'export const orphan = true\n')
       })
 
       expect(red(checks)).toEqual(['#1'])
-      expect(why(checks, '#1')).toContain('tests/orphan.sh')
+      expect(why(checks, '#1')).toContain('tests/orphan.spec.ts')
     })
   })
 
@@ -160,14 +155,14 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     await scenario('manifest-2b-hollow', async (s) => {
       const checks = await inspectFixture(s, 'bp', (files) => {
         // A sibling file so the DIRECTORY still arrives — `grep "^tests/s02/"`
-        // used to call that a healthy boundary while the recipient's
-        // `if [ -f tests/s02/test.sh ]` guard skipped the suite in silence.
+        // used to call that a healthy boundary while the recipient received a
+        // suite directory with no runner in it and ran nothing from it.
         files.set('tests/s02/README.md', 'a sibling that ships\n')
-        files.set('.gitattributes', `${files.get('.gitattributes') ?? ''}tests/s02/test.sh   export-ignore\n`)
+        files.set('.gitattributes', `${files.get('.gitattributes') ?? ''}tests/s02/s02.spec.ts   export-ignore\n`)
       })
 
       expect(red(checks)).toEqual(['#2b'])
-      expect(why(checks, '#2b')).toContain('s02(0/1 shell)')
+      expect(why(checks, '#2b')).toContain('s02(0/1 spec)')
     })
   })
 
@@ -253,7 +248,19 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
       // that ships for nothing, which is a check going green for the wrong
       // reason.
       const checks = await inspectFixture(s, 'bp', (files) => {
-        files.delete(`tests/${TS_SUITE}/${TS_SUITE}.spec.ts`)
+        // EVERY suite's spec is withheld, not one. With a single runner
+        // convention every suite owns a spec, so withholding one leaves the rest
+        // shipping and the condition this case exists to produce never arises —
+        // which is how it went green after TASK-047 while asserting nothing.
+        //
+        // WITHHELD, NOT DELETED: deleting the specs would leave the suites with
+        // no runner, so they would not be suites at all and #7's vacuity floor
+        // would fire instead. A directory-level export-ignore is also the tier
+        // declaration, so #2b is satisfied — nothing may ship from these suites
+        // and nothing does — leaving #2c alone to report a toolchain that ships
+        // for nothing.
+        const ignored = [...SUITES, TS_SUITE].map((x) => `tests/${x}/   export-ignore\n`).join('')
+        files.set('.gitattributes', `${files.get('.gitattributes') ?? ''}${ignored}`)
       })
 
       expect(red(checks)).toEqual(['#2c'])
@@ -291,41 +298,28 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     })
   })
 
-  it('#4 a suite whose gate stage is DELETED is named, and the suites still wired in are not', async () => {
-    await scenario('manifest-4-dropped', async (s) => {
-      // This is the case tests/suite-sync used to reach across into this suite's
-      // shell runner to assert: the blueprint drops a suite, pull deliberately
-      // leaves the orphan in place, and the control that already exists names
-      // it. Both halves are pinned — s04 named, s05 not.
-      const checks = await inspectFixture(s, 'bp', (files) => {
-        files.set(
-          '.githooks/pre-push-project',
-          `${gateFor(SHELL_SUITES.filter((x) => x !== 's04'))}\n`,
-        )
-      })
+  // RETIRED WITH TASK-047, recorded rather than silently absent: "a suite whose
+  // gate stage is DELETED is named, and the suites still wired in are not" was
+  // a perturbation on PER-SUITE invocation lines (`gateFor(SUITES.filter(…))`).
+  // With one blanket vitest run proving every suite, there is no single suite's
+  // line to remove — dropping the run drops them all, which is the case below
+  // and #4-nobridge. The property is not weakened; its subject is gone.
 
-      expect(red(checks)).toEqual(['#4'])
-      expect(why(checks, '#4')).toContain('s04(shell runner never invoked)')
-      expect(why(checks, '#4')).not.toContain('s05')
-    })
-  })
-
-  it('#4 COMMENTING OUT a stage stops the suite running, and is not readable as an invocation (Codex R2-F1b)', async () => {
+  it('#4 COMMENTING OUT the vitest stage stops every suite running, and is not readable as an invocation (Codex R2-F1b)', async () => {
     await scenario('manifest-4-commented', async (s) => {
       // Membership was once checked with an unanchored grep for the path, so
       // `sed -i '/tests\\/pipeline/s/^/#/' .githooks/pre-push*` left this
       // passing "every suite is invoked by the gate" while the suite had
-      // stopped running. Comments are stripped before anything is matched.
+      // stopped running. Comments are stripped before anything is matched, and
+      // that stripping is what this still pins — now against the one line that
+      // carries every suite.
       const checks = await inspectFixture(s, 'bp', (files) => {
         const g = files.get('.githooks/pre-push-project') ?? ''
-        files.set(
-          '.githooks/pre-push-project',
-          g.replace('bash tests/s06/test.sh', '# bash tests/s06/test.sh'),
-        )
+        files.set('.githooks/pre-push-project', g.replace('  ts_suites_stage', '#  ts_suites_stage'))
       })
 
       expect(red(checks)).toEqual(['#4'])
-      expect(why(checks, '#4')).toContain('s06(shell runner never invoked)')
+      expect(why(checks, '#4')).toContain('no vitest stage in .githooks/pre-push*')
     })
   })
 
@@ -376,20 +370,24 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     })
   })
 
-  it('#5 a suite the workflow never runs is caught even when the gate runs it (A-15)', async () => {
+  it('#5 suites the workflow never runs are caught even when the gate runs them (A-15)', async () => {
     await scenario('manifest-5', async (s) => {
       // `drift-in-blueprint` was found running in NEITHER; `a2bp-e2e` was
       // gate-only, so CI carried no backstop. The two checks are independent
-      // for that reason.
+      // for that reason, and this perturbs ONLY the workflow — the gate below
+      // still runs everything, so a #5 that merely echoed #4 would stay green.
+      //
+      // TASK-047: this used to drop ONE suite from the workflow's per-suite
+      // `bash tests/<s>/test.sh` lines. A blanket run has no per-suite line to
+      // drop, so the expressible perturbation is removing the run itself, and
+      // then every suite is unrun in CI. Same property, coarser subject.
       const checks = await inspectFixture(s, 'bp', (files) => {
-        files.set(
-          '.github/workflows/security.yml',
-          `${workflowFor(SHELL_SUITES.filter((x) => x !== 's07'))}\n`,
-        )
+        const wf = files.get('.github/workflows/security.yml') ?? ''
+        files.set('.github/workflows/security.yml', wf.replace('npx vitest run', 'echo skipping tests'))
       })
 
       expect(red(checks)).toEqual(['#5'])
-      expect(why(checks, '#5')).toContain('s07(shell runner)')
+      expect(why(checks, '#5')).toContain('no vitest step in the workflow')
     })
   })
 
@@ -431,10 +429,10 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
   it('#7 a derivation finding almost no suites fails, because every check above would pass over it', async () => {
     await scenario('manifest-7', async (s) => {
       const checks = await inspectFixture(s, 'bp', (files) => {
-        for (const s2 of SHELL_SUITES.slice(2)) files.delete(`tests/${s2}/test.sh`)
+        // The gate and the workflow are NOT rebuilt here any more: they name no
+        // suite, so deleting the specs is the whole perturbation (TASK-047).
+        for (const s2 of SUITES.slice(2)) files.delete(`tests/${s2}/${s2}.spec.ts`)
         files.delete(`tests/${TS_SUITE}/${TS_SUITE}.spec.ts`)
-        files.set('.githooks/pre-push-project', `${gateFor(SHELL_SUITES.slice(0, 2))}\n`)
-        files.set('.github/workflows/security.yml', `${workflowFor(SHELL_SUITES.slice(0, 2))}\n`)
       })
 
       // #2c goes red too, and legitimately: the toolchain ships with no spec
@@ -525,7 +523,7 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
         { cwd: root },
       )
 
-      expect(listing.stdout).toContain(`tests/${SHELL_SUITES[0]}/test.sh`)
+      expect(listing.stdout).toContain(`tests/${SUITES[0]}/${SUITES[0]}.spec.ts`)
       expect(listing.stdout).not.toContain(`tests/${BP_ONLY_SUITE}/`)
     })
   })

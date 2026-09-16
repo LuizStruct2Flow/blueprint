@@ -27,8 +27,16 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, type Scenario } from '../harness/index.js'
 
-/** The shell suites the baseline tree carries, all wired into gate and CI. */
-export const SHELL_SUITES = [
+/**
+ * The suites the baseline tree carries.
+ *
+ * Each owns a `*.spec.ts` and is reached by the blanket vitest run. Since
+ * TASK-047 there is no other kind of runner, so the per-suite `bash
+ * tests/<s>/test.sh` lines these used to contribute to the gate and the
+ * workflow are gone — and with them the perturbations that dropped ONE suite
+ * from either, which is not expressible against a blanket run.
+ */
+export const SUITES = [
   's01',
   's02',
   's03',
@@ -63,12 +71,15 @@ const MANAGED = [
   ...Array.from({ length: 16 }, (_, i) => `docs/filler-${String(i).padStart(2, '0')}.md`),
 ]
 
-function gate(shellSuites: readonly string[]): string {
+function gate(): string {
   return [
     '#!/bin/sh',
     '# BLUEPRINT:BEGIN',
-    ...shellSuites.map((s) => `bash tests/${s}/test.sh`),
-    `bash tests/${BP_ONLY_SUITE}/test.sh`,
+    // NO SUITE IS NAMED HERE, and that is the point since TASK-047. Every suite
+    // is a spec, so the blanket vitest run below is the whole proof that the
+    // gate invokes them — which is why manifest.ts checks the CHAIN (the bridge
+    // sourced AND called, a run with no path filter, an include glob that
+    // reaches the specs) instead of one line per suite.
     // The bridge: sourced by a literal relative path, and CALLED. All three
     // conditions in manifest.ts's liveBridges have to hold or it does not count.
     //
@@ -83,18 +94,17 @@ function gate(shellSuites: readonly string[]): string {
   ].join('\n')
 }
 
-function workflow(shellSuites: readonly string[]): string {
+function workflow(): string {
   // A REAL workflow shape, not just the text #5 greps: #5b parses it the way
   // GitHub does, and a fixture GitHub would reject proves nothing (BUG-115).
+  //
+  // ONE JOB SINCE TASK-047. The shell-tests job existed to run per-suite `bash
+  // tests/<s>/test.sh` lines, and the real workflow's equivalent went with the
+  // last shell runner. CI proves invocation the same way the gate does now: a
+  // blanket vitest run, which #5 checks through the same chain as #4.
   return [
     'on: push',
     'jobs:',
-    '  shell-tests:',
-    '    runs-on: ubuntu-latest',
-    '    steps:',
-    '      - run: |',
-    ...shellSuites.map((s) => `          bash tests/${s}/test.sh`),
-    `          bash tests/${BP_ONLY_SUITE}/test.sh`,
     '  ts-tests:',
     '    runs-on: ubuntu-latest',
     '    steps:',
@@ -137,8 +147,8 @@ export async function baselineTree(): Promise<Map<string, string>> {
   )
 
   files.set('.githooks/pre-push', '#!/bin/sh\n# BLUEPRINT:BEGIN\n:\n# BLUEPRINT:END\n')
-  files.set('.githooks/pre-push-project', `${gate(SHELL_SUITES)}\n`)
-  files.set('.github/workflows/security.yml', `${workflow(SHELL_SUITES)}\n`)
+  files.set('.githooks/pre-push-project', `${gate()}\n`)
+  files.set('.github/workflows/security.yml', `${workflow()}\n`)
 
   files.set('tests/package.json', '{\n  "scripts": {\n    "test": "vitest run"\n  }\n}\n')
   files.set('tests/package-lock.json', '{}\n')
@@ -150,16 +160,26 @@ export async function baselineTree(): Promise<Map<string, string>> {
   files.set('tests/harness/index.ts', 'export const harness = true\n')
   files.set('tests/harness/canary.ts', 'export const canary = true\n')
 
-  for (const s of SHELL_SUITES) files.set(`tests/${s}/test.sh`, `echo ${s}\n`)
-  files.set(`tests/${BP_ONLY_SUITE}/test.sh`, `echo ${BP_ONLY_SUITE}\n`)
+  // Every suite owns a spec, including the blueprint-only one: its tier is a
+  // claim about what SHIPS, not about what kind of runner it has, and #2b must
+  // still be able to catch it shipping.
+  for (const s of SUITES) files.set(`tests/${s}/${s}.spec.ts`, `export const ${s} = true\n`)
+  files.set(`tests/${BP_ONLY_SUITE}/${BP_ONLY_SUITE}.spec.ts`, 'export const bponly = true\n')
   files.set(`tests/${TS_SUITE}/${TS_SUITE}.spec.ts`, 'export const spec = true\n')
 
   return files
 }
 
-/** Rebuild the gate for a subset of suites — the #4 perturbations use this. */
+/**
+ * The gate and the workflow as the baseline builds them.
+ *
+ * They took a SUBSET of suites until TASK-047, so a case could drop one suite
+ * from either and watch the control name it. With one blanket run proving every
+ * suite, that perturbation is not expressible: there is no per-suite line to
+ * remove. What replaced those cases is in manifest.spec.ts, and the reason is
+ * recorded there rather than left as two deleted tests.
+ */
 export const gateFor = gate
-/** Rebuild the workflow for a subset of suites — the #5 perturbation uses this. */
 export const workflowFor = workflow
 
 /**

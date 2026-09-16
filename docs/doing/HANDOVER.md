@@ -71,16 +71,21 @@ bash scripts/session-resume.sh
 
 **State at handover, 2026-09-16 evening.**
 
-**Landed and CI-green:** `1248230..c3e2044`. `released` is at `c3e2044` (run 35131958151).
-**All nineteen rows were accepted by the founder** (2026-09-16) and are in `docs/done/`:
-TASK-039..048, BUG-122, 124..127, 129..132. `waiting-acceptance/` is empty.
+**Landed and CI-green:** up to `3940d57`. TASK-050..052 are in `waiting-acceptance/`.
 
-**Not yet pushed:** the BUG-132 row move, TASK-050 (Sonar template), the nineteen
-acceptances and this update. They ride the next push.
+**Committed, pushed with this update:** TASK-053 (a push changing only `.md` files skips the
+code stages; Jesko's three findings fixed in `8a6bbfe`), TASK-054 (five slow suites are
+`*.release.spec.ts` and run only in CI, reversing BUG-005), TASK-055 (suites run in
+parallel: 879 tests in ~20 s locally), TASK-056 and TASK-057 (permission changes). Their rows
+stay in `doing/` until CI on that push is green.
 
-**Open, founder's call:** how to make the SonarQube shell import permanent — in the shipped
-`scripts/sonar.sh`, or blueprint-only. A working prototype is `.scratch/shellcheck-sonar.sh`.
-Also open from the same session: whether to revert BUG-126 and how to scope review findings.
+**Founder decisions 2026-09-16, not yet encoded anywhere else:** no separate filing or
+promotion commits (rows go straight into `doing/` with the first work commit); the handover is
+committed with the work that changes the open state, not in narration commits. The review rule
+is in `docs/DoD.md` §1b rule 4 (TASK-052).
+
+**Open, founder's call:** whether `Bash(curl -sS *)` also moves to `ask` (TASK-056 moved only
+`curl -s`).
 
 **storm2flow was told** (session `storm2flow-3b`) that TASK-039/040/042/043 are on
 `released`, including TASK-042's `settings.json` pull refusal.

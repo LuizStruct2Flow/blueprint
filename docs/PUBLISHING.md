@@ -132,6 +132,12 @@ PUBLIC_PATHS=(
   LICENSE
   .gitignore
   .env.example
+  # — the framework's own root documents (TASK-048). They are tracked and
+  # public; copying docs/ alone does NOT bring them, and §5 treats their
+  # ABSENCE from the fresh clone as the finding. —
+  CLAUDE.md
+  AGENTS.md
+  AGENT_SIGNAL.md
   # — common project root files (adapt to your stack) —
   # package.json
   # package-lock.json
@@ -235,8 +241,10 @@ cd "$(git rev-parse --show-toplevel)"
 # Untrack ONLY the private files (keeps them on disk).
 # docs/ lifecycle artifacts stay tracked and public, and since TASK-048 so do
 # CLAUDE.md, AGENTS.md, AGENT_SIGNAL.md, docs/DoD.md and docs/PUBLISHING.md —
-# they are the framework's own documents. docs/doing/HANDOVER.md is tracked too
-# and is redacted at PUBLISH time instead (§3a), so it is not untracked here.
+# they are the framework's own documents. docs/doing/HANDOVER.md is tracked too,
+# so it is NOT untracked here — it is redacted in place below instead. Do not
+# expect §3a's scrub to cover you: that is a step of the fresh-repo flow and it
+# does not run on this path.
 #
 # All FIVE project_config_*.md, not three: A-27 added security and infra, which
 # hold the threat model and the infra account IDs. This list said three for long
@@ -253,8 +261,29 @@ git rm --cached \
 # Confirm index is now clean — the pattern MUST stay identical to §1b's:
 git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
 
-# Commit "private: untrack methodology" then push.
+# Redact the live handover IN THIS REPO — §3b publishes this repo's own
+# index, so whatever the file holds is what strangers read. Restore
+# docs/doing/HANDOVER.md to the shipped stub: §2 WIP and §3 gotchas back to
+# their placeholders, no in-flight work, no persona names, no review state.
+# Keep the live notes untracked (.scratch/) until the push is done.
+git add docs/doing/HANDOVER.md
+
+# Gate — §2 WIP still carries its placeholder, so no in-flight work is
+# described. It checks the section that names the work, NOT every line:
+# §4's marker grep and your own read of the diff still apply.
+grep -q '^\*(Nothing yet\.' docs/doing/HANDOVER.md && echo "handover redacted" || echo "HANDOVER STILL LIVE — DO NOT PUSH"
+
+# Only once BOTH checks print clean: commit "private: untrack methodology"
+# (the redacted handover included) and push.
 ```
+
+**The permitted route is the gate, not the intent.** §3b hands the public
+remote this repository's index as it stands, so a tracked handover with
+content in it is a published handover — there is no publish-time step between
+the two to save you. If the project needs a live, continuously-updated
+handover on disk while still publishing, use **§3a**: only the fresh-repo flow
+can keep the file tracked here and absent there. §3b's price for staying
+in-place is that the handover stays a stub between pushes.
 
 Caveat: prior history still has the bootstrap commit. Anyone fetching
 your public repo can `git log --all` and see those file paths. Safer

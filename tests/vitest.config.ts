@@ -34,12 +34,14 @@ export default defineConfig({
     pool: 'forks',
     isolate: true,
 
-    // Serial by default. TASK-018-RULES R5 is that tests run in parallel with
-    // no serial category and no escape hatch — but R5 is a property R3's
-    // isolation has to earn first, suite by suite. Starting parallel today
-    // would turn latent races (staleness #8, pre-push-secrets #10, both of
-    // which pass largely BECAUSE the gate is serial) live on day one.
-    fileParallelism: false,
+    // Parallel (TASK-055), which is TASK-018-RULES R5: no serial category and
+    // no escape hatch. Every scenario owns its workspace, repos, shims and
+    // processes (tests/harness), so files share nothing to race on. Measured on
+    // 2026-09-16 over the 50 non-release files: 197.5 s serial, ~20 s parallel,
+    // three parallel runs green. staleness #8 and pre-push-secrets #10, once
+    // thought to pass only because the run was serial, bound the SUBJECT's own
+    // timeout (2 s and 3 s) and took the same 2.08 s and 3.08 s either way.
+    fileParallelism: true,
 
     // These drive real gates, real bootstraps and real daemons. The shell
     // suites they replace take up to ~180s (bootstrap-gate), and the host may

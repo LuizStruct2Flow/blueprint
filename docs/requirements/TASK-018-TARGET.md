@@ -39,7 +39,7 @@ home.
 
 ### 1.2 Tests run in PARALLEL — there is no serial category
 
-**Now:** `tests/vitest.config.ts` has `fileParallelism: false`.
+**Now:** `tests/vitest.config.ts` has `fileParallelism: true` (TASK-055, 2026-09-16).
 
 **Target:** `true`, with **no escape hatch** — no `describe.sequential`, no
 per-suite marker, nothing.
@@ -209,7 +209,7 @@ file stops existing.
 | R2 `scaffolding/`+`forge/`, co-located | **NOT STARTED** — §1.1, §2 |
 | R3 mock by default, sandbox otherwise | **done** — `tests/harness/`, with its own escape tests |
 | R4 no fixed waits | **partial** — harness polls; remaining shell suites sleep |
-| R5 parallel, no serial category | **NOT DONE** — `fileParallelism: false`, §1.2 |
+| R5 parallel, no serial category | **DONE** — `fileParallelism: true` (TASK-055), §1.2 |
 | R6 provably able to fail | **partial** — mutants for the migrated suites, not the rest |
 | R7 skipped/empty fails the build | **NOT STARTED** |
 

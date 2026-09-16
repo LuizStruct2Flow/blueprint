@@ -298,7 +298,9 @@ doc), or a new file. They go through the same guard and PR, and are marked
 one, an unmanaged file your project gitignores (tracked or not), a file named like
 a secret (`.env`, `*.pem`, `*.key`, `id_rsa*`, …), and any file in which `gitleaks`
 finds a secret. It also refuses a new path that differs from a blueprint path
-only by letter case.
+only by letter case. And it refuses when `gitleaks` is missing or cannot run:
+filing would publish bytes nothing scanned, and a later CI scan cannot
+un-disclose them.
 
 **The contamination guard.** It used to `cp` into the blueprint working tree,
 which is how both BUG-002 and A-09 entered. That write path is gone, and the

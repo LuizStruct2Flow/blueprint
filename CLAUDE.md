@@ -1075,8 +1075,14 @@ the project, a symlink or a path under a symlinked directory, anything inside a
 blueprint's own config), an unmanaged path the project gitignores (tracked or
 not), a file named like a secret (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`,
 `id_ed25519*`, `*.p12`, `*.pfx`), and any file, managed or not, in which
-`gitleaks` finds a secret. A missing `gitleaks` is skipped with a warning, as the
-pre-push gate skips it. After fetching, it also refuses a new path that differs
+`gitleaks` finds a secret. A missing `gitleaks` **refuses the request**, unlike
+the pre-push gate, which skips it: the gate's skip keeps unscanned bytes on your
+machine, while `a2bp` pushes a branch to the blueprint's remote, and CI scanning
+the pull request afterwards can refuse the merge but cannot un-disclose it
+(BUG-127). Install it with `bash scripts/install-toolchain.sh`. A scanner that
+cannot run — one too old for `gitleaks dir`, for instance — is reported as an
+incomplete scan rather than as a found secret, and blocks either way. After
+fetching, it also refuses a new path that differs
 from a blueprint path only by letter case. A request that is not yet a file change goes in
 `docs/backlog/feature-requests.md` in the blueprint.
 

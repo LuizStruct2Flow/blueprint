@@ -110,7 +110,6 @@
       "Bash(rm -rf dist*)",
       "Bash(rm -rf build*)",
       "Bash(rm -rf .vitest-cache*)",
-      "Bash(curl -s *)",
       "Bash(curl -sS *)",
       "Bash(ssh -T git@github.com)",
       "Bash(ssh -v git@github.com)",
@@ -122,15 +121,12 @@
       "Bash(docker info *)",
       "Bash(osascript -e 'quit app \"Docker\"')",
       "Bash(brew bundle*)",
-      "Bash(brew install *)",
       "Bash(nvm *)",
       "Bash(source ~/.nvm/nvm.sh)",
       "Bash(source .env)",
       "Bash(PATH=* *)",
       "Bash(AGENT_PERSONA=* bash scripts/agent-activity.sh*)",
       "Bash(blueprint *)",
-      "Bash(kill *)",
-      "Bash(pkill *)",
       "Bash(ln -sf *)",
       "Bash(rm -f logs/*)",
       "Read(//Users/**/**)",
@@ -206,7 +202,11 @@
       "Bash(git push -f *)",
       "Bash(git push *--force*)",
       "Bash(aws codepipeline put-approval-result *)",
-      "Bash(git push *:*)"
+      "Bash(git push *:*)",
+      "Bash(kill *)",
+      "Bash(pkill *)",
+      "Bash(curl -s *)",
+      "Bash(brew install *)"
     ],
     "additionalDirectories": [
       "../blueprint"

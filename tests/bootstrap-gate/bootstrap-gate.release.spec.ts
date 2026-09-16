@@ -425,7 +425,10 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // These carry the token as CODE and are exempt by design — the same list
       // bp_should_substitute holds. Named literally rather than sourced, so a
       // mistake that widens the exemption cannot also silence this check.
+      // `tests/` is exempt too: a suite's placeholder is fixture DATA (BUG-029).
+      // Since TASK-021 `blueprint files` lists those files one by one.
       const exempt = (f: string) =>
+        f.startsWith('tests/') ||
         /(scripts\/blueprint|scripts\/new-project\.sh|scripts\/lib\/placeholders\.sh|scripts\/lib\/contamination\.sh)$/.test(
           f,
         )

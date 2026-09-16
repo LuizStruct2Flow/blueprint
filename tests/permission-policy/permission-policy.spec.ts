@@ -349,4 +349,109 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       expect(got.permissions.allow).toContain('Bash(git log *)')
     })
   })
+
+  // --- Alexey's review of the fix, 2026-09-16, finding 4 -------------------
+
+  it('#12 a project file holding TWO JSON objects is refused, not read as one of them', async () => {
+    await scenario('permission-policy-12', async (s) => {
+      // The blueprint side is guarded; the project side is not. `jq -e` over a
+      // STREAM reports the LAST predicate, and the merge slurps and takes .[1]
+      // — the first object. So this passed its shape check on one object and
+      // merged the other, and the allow list came out empty.
+      const p = await fixture(s, 'i', null)
+      await s.fs.write(
+        join(p, LAYER),
+        `{}\n{"permissions":{"allow":[${JSON.stringify(PROJECT_RULE)}]}}\n`,
+      )
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(r.code, `a two-object project layer was accepted:\n${r.output}`).toBe(4)
+      expect(r.output, 'the refusal does not say what is wrong with the file').toMatch(
+        /single JSON object/i,
+      )
+    })
+  })
+
+  it('#12b a layer whose FIRST object is unsupported is refused, although the last one is fine', async () => {
+    await scenario('permission-policy-12b', async (s) => {
+      // `jq -e` reports the last value's truthiness, so a trailing `{}` waves
+      // an unsupported first object through.
+      const p = await fixture(s, 'j', null)
+      await s.fs.write(join(p, LAYER), '{"hooks":{"PreToolUse":[]}}\n{}\n')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(r.code, `an unsupported first object was accepted:\n${r.output}`).toBe(4)
+    })
+  })
+
+  it('#13 legacy settings holding TWO objects are refused, not migrated from the first', async () => {
+    await scenario('permission-policy-13', async (s) => {
+      const p = await fixture(s, 'k', null)
+      await s.fs.write(
+        join(p, '.claude/settings.json'),
+        `{}{"permissions":{"allow":[${JSON.stringify(PROJECT_RULE)}]}}\n`,
+      )
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(r.code, `a two-object settings.json was accepted:\n${r.output}`).toBe(4)
+      expect(r.output).toMatch(/single JSON object/i)
+    })
+  })
+
+  it('#14 a layer that is an array, a number or null is refused as the wrong SHAPE, not as broken JSON', async () => {
+    await scenario('permission-policy-14', async (s) => {
+      // They are perfectly valid JSON. Saying otherwise sends the operator
+      // looking for a syntax error that is not there.
+      for (const [tag, body] of [
+        ['array', '[]\n'],
+        ['number', '42\n'],
+        ['null', 'null\n'],
+      ] as const) {
+        const p = await fixture(s, `l-${tag}`, null)
+        await s.fs.write(join(p, LAYER), body)
+
+        const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+        expect(r.code, `a ${tag} layer was accepted:\n${r.output}`).toBe(4)
+        expect(r.output, `a ${tag} is valid JSON — the refusal must not call it invalid`).not.toMatch(
+          /not valid JSON/i,
+        )
+      }
+    })
+  })
+
+  it('#14b legacy settings that are an array or a number are refused as the wrong shape too', async () => {
+    await scenario('permission-policy-14b', async (s) => {
+      // This is the path Alexey's wording note is about: the migration branch
+      // reports a jq failure as "not valid JSON", which an array plainly is.
+      for (const [tag, body] of [
+        ['array', '[]\n'],
+        ['number', '42\n'],
+      ] as const) {
+        const p = await fixture(s, `n-${tag}`, null)
+        await s.fs.write(join(p, '.claude/settings.json'), body)
+
+        const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+        expect(r.code, `a ${tag} settings.json was accepted:\n${r.output}`).toBe(4)
+        expect(r.output, `a ${tag} is valid JSON — the refusal must not call it invalid`).not.toMatch(
+          /not valid JSON/i,
+        )
+      }
+    })
+  })
+
+  it('#15 legacy settings that are null are refused, not silently replaced', async () => {
+    await scenario('permission-policy-15', async (s) => {
+      const p = await fixture(s, 'm', null)
+      await s.fs.write(join(p, '.claude/settings.json'), 'null\n')
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(r.code, `null settings.json was overwritten without a word:\n${r.output}`).toBe(4)
+    })
+  })
 })

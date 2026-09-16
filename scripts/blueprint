@@ -718,6 +718,18 @@ BP_SETTINGS_UNSUPPORTED="$BP_SETTINGS_KEYS"' as $keys
                 else ($p[$k] | any(.[]; type != "string")) end)) ]
   | unique | map("permissions." + .) | join(", ")'
 
+# _bp_one_object FILE — true when FILE holds EXACTLY ONE JSON object.
+#
+# A settings file is one object. A STREAM is not, and neither is an array, a
+# number or null — all of which are valid JSON, so a refusal must not call them
+# invalid. This is checked before anything reads the file, because `jq -e` over
+# a stream reports only the LAST value while a slurping read takes whichever
+# index it names: that mismatch is how a project's permission rules vanished
+# with pull reporting success.
+_bp_one_object() {
+  jq -e -s 'length == 1 and (.[0] | type == "object")' "$1" >/dev/null 2>&1
+}
+
 # _bp_settings_layer BP_JSON OUT — OUT receives the blueprint's settings with the
 # project layer applied. Returns 1 with BP_PP_WHY (and maybe BP_PP_DETAIL) set
 # when pull must refuse settings.json. Never call it inside `$( )`.
@@ -741,12 +753,21 @@ _bp_settings_layer() {
   # downstream to catch them (Alexey's review, finding 4). ONE object, not a
   # stream: two concatenated objects are not a settings file either, and `jq .`
   # would accept them silently.
-  if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "$bp" >/dev/null 2>&1; then
+  if ! _bp_one_object "$bp"; then
     BP_PP_WHY="the blueprint's .claude/settings.json is not a single JSON object, so there is nothing safe to land"
     return 1
   fi
   if [ -f "$BP_SETTINGS_LAYER" ]; then
-    if ! jq -e "$BP_SETTINGS_SHAPE" "$BP_SETTINGS_LAYER" >/dev/null 2>&1; then
+    # ONE OBJECT FIRST, then its shape. `jq -e` over a STREAM reports only the
+    # LAST value, so `{}` followed by a real object passed the shape check on
+    # one of them while the merge below slurped and used the other — and a
+    # project's rules disappeared with pull reporting success (Alexey's review,
+    # 2026-09-16, finding 4). The shape is evaluated over that one value.
+    if ! _bp_one_object "$BP_SETTINGS_LAYER"; then
+      BP_PP_WHY="$BP_SETTINGS_LAYER must be a single JSON object — not several, and not an array, a number or null"
+      return 1
+    fi
+    if ! jq -e -s '.[0] | ('"$BP_SETTINGS_SHAPE"')' "$BP_SETTINGS_LAYER" >/dev/null 2>&1; then
       BP_PP_WHY="$BP_SETTINGS_LAYER must be a JSON object holding only permissions.allow, ask, deny and additionalDirectories, each a list of strings"
       return 1
     fi
@@ -757,8 +778,15 @@ _bp_settings_layer() {
     return 0
   fi
   if [ -f .claude/settings.json ]; then
+    # The same rule for the legacy file, and for the same reason: the migration
+    # read one object out of a stream and merged another, and `null` was
+    # replaced without a word.
+    if ! _bp_one_object .claude/settings.json; then
+      BP_PP_WHY="this project's .claude/settings.json is not a single JSON object, so its own rules cannot be told from the blueprint's"
+      return 1
+    fi
     if ! proposal=$(jq -s "$BP_SETTINGS_EXTRA" "$bp" .claude/settings.json 2>/dev/null); then
-      BP_PP_WHY="this project's .claude/settings.json is not valid JSON, so its own rules cannot be told from the blueprint's"
+      BP_PP_WHY="this project's .claude/settings.json could not be read, so its own rules cannot be told from the blueprint's"
       return 1
     fi
     unsupported=$(jq -r -s "$BP_SETTINGS_UNSUPPORTED" "$bp" .claude/settings.json 2>/dev/null) || unsupported=""

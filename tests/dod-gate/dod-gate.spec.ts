@@ -293,6 +293,52 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     })
   })
 
+  it('#3b BUG-130: an item whose only record is a findings.md pointer passes', async () => {
+    await scenario('dod-gate-3b', async (s) => {
+      // THE PUSH THAT PERFORMS A CANCELLATION IS THE PUSH THIS BLOCKED.
+      // docs/DoD.md:33 — a backlog item leaves by promotion or by CANCELLATION
+      // (delete the row + a one-line pointer in docs/config/findings.md). That
+      // commit names the item in its subject and deletes its row in the same
+      // breath, so a stage reading only the lifecycle files sees work with no
+      // item at all. TASK-023/F-003 was the live instance: a 161-commit push
+      // refused with `NO backlog row anywhere: TASK-23`.
+      //
+      // The padding is the other half of the case, and it is crossed on
+      // purpose: the subject yields TASK-23, the register writes TASK-023.
+      const f = await build(s, 'r3b')
+      await commit(s, f, 'a.txt', 'TASK#23: close the bridge suite, accepting the loss')
+      await s.fs.write(
+        join(f.dir, 'docs/config/findings.md'),
+        '## F-003 — the loss is accepted\n\n**Closes TASK-023**, which sat in `docs/backlog/BACKLOG.md` as `KEEP`.\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_rows', rangeOf(f))
+      expect(r.code, `a cancellation made exactly as the DoD prescribes was read as work with no item:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#3c BUG-130 GUARD: an item with no record anywhere still fails, register present', async () => {
+    await scenario('dod-gate-3c', async (s) => {
+      // GREEN BEFORE THE FIX AND AFTER IT, deliberately. #3b can be satisfied by
+      // making rule 1 toothless — skip the stage, or treat any findings.md as a
+      // blanket exemption — and every other case here would stay green. This one
+      // fails if that is how #3b was bought.
+      //
+      // The register EXISTS and names a NEIGHBOURING item, so the refusal cannot
+      // come from "no findings file" or from a sloppy number match.
+      const f = await build(s, 'r3c')
+      await commit(s, f, 'a.txt', 'TASK#23: work with no item anywhere')
+      await s.fs.write(
+        join(f.dir, 'docs/config/findings.md'),
+        '## F-003 — something else entirely\n\n**Closes TASK-024**, and mentions TASK-230 in passing.\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_rows', rangeOf(f))
+      expect(r.code, `rule 1 is toothless — an item with no record anywhere PASSED:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'it failed but did not say which item').toContain('TASK-23')
+    })
+  })
+
   it('#4 a BUG with no regression test fails the stage', async () => {
     await scenario('dod-gate-4', async (s) => {
       const f = await build(s, 'r4')
@@ -362,6 +408,24 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, 'the same BUG in doing/ with no test PASSED — the exemption is too broad').not.toBe(0)
+    })
+  })
+
+  it('#4d BUG-130: a cancelled BUG needs no regression test, for #4c\'s reason', async () => {
+    await scenario('dod-gate-4d', async (s) => {
+      // The same argument #4c makes about a PARKED bug: a cancelled bug has no
+      // fix, so it can have no test naming the fix. Teaching only the rows stage
+      // about cancellation would move the refusal one stage down instead of
+      // removing it — the push would clear rule 1 and then fail §7B.
+      const f = await build(s, 'r4d')
+      await commit(s, f, 'c.txt', 'BUG#42: cancel it, recorded in F-009')
+      await s.fs.write(
+        join(f.dir, 'docs/config/findings.md'),
+        '## F-009 — not worth fixing\n\n**Closes BUG-042**; the surface it guarded is gone.\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a cancelled bug was required to carry a test for a fix that does not exist:\n${r.output}`).toBe(0)
     })
   })
 

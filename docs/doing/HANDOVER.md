@@ -169,6 +169,19 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     dispatched 05:10, covering TASK-039, TASK-042, TASK-040, TASK-044, TASK-045, BUG-125 and
     BUG-124 → `.scratch/ALEXEY-fix-review.md`. BUG-126 and BUG-127 are excluded, still in flight.
     Codex quota came back (storm2flow ran three reviews in the half hour before 05:10).
+  - **CONFIRMED GAP, semgrep's `paths.skipped` is classified nowhere.** Reported by storm2flow's
+    orchestrator, then checked: `git grep -n "paths\.skipped" -- .githooks/pre-push
+    .github/workflows/security.yml` matches nothing, and every "skipped" hit in those files is
+    about a missing binary or a skipped CI job. A file semgrep never opened — too large, binary,
+    timed out, filtered out — appears there and produces **no error entry**, so BUG-126's fix,
+    which reads `.errors`, still calls that run clean. Same hole, one level over. Philipp has it;
+    if it is bigger than BUG-126 should carry, it becomes its own bug with storm2flow's evidence.
+    storm2flow's own stage excuses `PartialParsing`/`Syntax error` on a reviewed 22-path
+    allowlist and records `paths.skipped` as a known limit rather than claiming full coverage.
+  - **storm2flow confirmed TASK-039 costs them nothing:** their `tests/` holds no project files
+    (the last was deleted in `77c8f876`) and their E2E lives in `frontend/e2e` and `backend/e2e`,
+    never `tests/e2e`. They will declare seven roots, three of which hold a single bug-naming
+    file each — the easy ones to forget.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

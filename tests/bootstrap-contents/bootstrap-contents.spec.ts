@@ -48,6 +48,7 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { relativeLinkTargets } from '../doc-links/doc-links.js'
 
 const PROJECT = 'test-proj'
 
@@ -95,6 +96,12 @@ async function build(s: Scenario): Promise<Fixture> {
   await s.fs.write(
     join(blueprint, 'docs/doing/PLAN-BUG-999.md'),
     '# PLAN-BUG-999 — fixture work item\n\nMust NOT reach a derived project.\n',
+  )
+  // A requirement document no .gitattributes line names, so #11 judges the
+  // directory convention rather than a list of today's files.
+  await s.fs.write(
+    join(blueprint, 'docs/requirements/FIXTURE-999-SPEC.md'),
+    "# FIXTURE-999 — this repo's own requirement\n\nMust NOT reach a derived project.\n",
   )
 
   // The blueprint tracks several files that are ALSO in its .gitignore (the
@@ -481,6 +488,60 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
 
       const readme = await readFile(join(derived, 'README.md'), 'utf8')
       expect(readme, 'the delivered README links to a LICENSE the project does not have').not.toMatch(/\]\(LICENSE\)/)
+    })
+  })
+
+  it('#11 TASK-021: blueprint maintenance does not ship, by directory where it can, and protocol still does', async () => {
+    await scenario('bootstrap-contents-11', async (s) => {
+      const { derived } = await build(s)
+
+      // The split is by responsibility: what operates a project, or asks the
+      // blueprint for a change, ships. Deck publication, brand, the implementer's
+      // playbook and this repo's own requirements are the blueprint's.
+      const shipped: string[] = []
+      for (const f of [
+        'CLAUDE.blueprint.md',
+        'docs/requirements/FIXTURE-999-SPEC.md',
+        'docs/requirements/TASK-018-TARGET.md',
+        'docs/talk-enforcing-agentic-quality.md',
+        'docs/assets/brand/struct2flow-mark.svg',
+        'docs/way-of-working.md',
+        'scripts/build-deck.sh',
+        'docs/A2BP_PLAYBOOK.md',
+      ]) {
+        if (await s.fs.exists(join(derived, f))) shipped.push(f)
+      }
+      expect(shipped, 'blueprint maintenance reached a new project').toEqual([])
+
+      const missing: string[] = []
+      for (const f of ['docs/requirements/README.md', 'AGENT_SIGNAL.md']) {
+        if (!(await s.fs.exists(join(derived, f)))) missing.push(f)
+      }
+      expect(missing, 'protocol or a folder convention stopped shipping').toEqual([])
+
+      // Same mechanism as claude.internal.md (#3c): the import arrives, the file
+      // does not, and Claude Code skips an import whose file is missing.
+      const claudeMd = await readFile(join(derived, 'CLAUDE.md'), 'utf8')
+      expect(claudeMd, 'CLAUDE.md does not import the blueprint-only file').toContain('@CLAUDE.blueprint.md')
+    })
+  })
+
+  it('#12 TASK-021: every relative link in the delivered root CLAUDE.md and README.md resolves', async () => {
+    await scenario('bootstrap-contents-12', async (s) => {
+      const { derived } = await build(s)
+
+      // doc-links walks docs/ only, so the root files a project reads first were
+      // checked nowhere. Judged where they are delivered: a real bootstrap.
+      let examined = 0
+      const broken: string[] = []
+      for (const f of ['CLAUDE.md', 'README.md']) {
+        for (const target of relativeLinkTargets(await readFile(join(derived, f), 'utf8'))) {
+          examined++
+          if (target.startsWith('/') || !(await s.fs.exists(join(derived, target)))) broken.push(`${f} -> ${target}`)
+        }
+      }
+      expect(examined, 'no links examined, so a pass would mean nothing').toBeGreaterThan(5)
+      expect(broken, 'links a derived project cannot follow').toEqual([])
     })
   })
 })

@@ -181,7 +181,20 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
   Dispatch the three new-work reviews first. Codex quota ran out after ~3 runs last time.
   - **02:12 attempt: all three were refused on the spot** — "usage limit … try again at 3:22 AM".
     The 02:10 reset the earlier message named was a different window. **Dispatch ONE review at a
-    time** from now on, so one window is not spent on refusals. Next attempt 03:24.
+    time** from now on, so one window is not spent on refusals.
+  - **03:24, Alexey done** → `.scratch/ALEXEY-fr-code-review.md`. **BUG-122: push as is.**
+    **TASK-042: push after two fixes** (blueprint JSON unvalidated on the new-file `cp` path;
+    the printed migration proposal can carry unsupported keys) — **with Philipp**.
+    **TASK-039: rework** — **with Vitali**:
+    - exclusions cover ancestors but not descendants (`tests/shipped`, `docs/doing`, `scripts`
+      and a symlink root all certified a bug)
+    - declarations word-split and glob-expand, so `*`, `../outside` and absolute paths widen
+      the search outside the project
+    - the documented snapshot layout (`tests/` root, CLAUDE.md:466) is now rejected. The honest
+      fix is provenance: a file under `tests/` the blueprint does not ship is the project's.
+      **If no reliable provenance check exists at gate time, Vitali stops and the layout
+      decision goes to the founder.**
+  - **Jesko is reviewing the five late items now**; Alex's docs review is still queued.
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

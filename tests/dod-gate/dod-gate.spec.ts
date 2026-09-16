@@ -457,19 +457,31 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     // is a green standing in for a test; a file executed but not accepted
     // silently fails to satisfy the gate. Either drift is a defect, and this is
     // the only case that can see it.
+    // THREE SIDES, not two: accepted as evidence, DISCOVERED, and executed.
+    // Discovery is the side that fails quietly — a suite `suites.sh` does not
+    // find is never declared to the batch, so an assertion about "every runner"
+    // passes vacuously over it rather than failing. Christian named that risk
+    // for `.spec.tsx` in c5301c5 before it could happen.
     const lib = await readFile(join(REPO_ROOT, LIB), 'utf8')
     const config = await readFile(join(REPO_ROOT, 'tests/vitest.config.ts'), 'utf8')
+    const suites = await readFile(join(REPO_ROOT, 'scripts/lib/suites.sh'), 'utf8')
 
-    const counted = [...lib.matchAll(/-name '\*(\.spec\.tsx?)'/g)].map((m) => m[1]).sort()
-    const executed = [...config.matchAll(/'\*\*\/\*(\.spec\.tsx?)'/g)].map((m) => m[1]).sort()
+    const exts = (text: string, re: RegExp) => [...text.matchAll(re)].map((m) => m[1]).sort()
+    const counted = exts(lib, /-name '\*(\.spec\.tsx?)'/g)
+    const executed = exts(config, /'\*\*\/\*(\.spec\.tsx?)'/g)
+    const discovered = exts(suites, /-name '\*(\.spec\.tsx?)'/g)
 
     expect(counted, `${LIB} accepts no *.spec.ts* evidence at all — the extraction below is blind`).not.toEqual([])
     expect(
-      counted,
-      `the DoD gate counts ${JSON.stringify(counted)} but vitest runs ${JSON.stringify(executed)}.\n` +
-        'Whatever is accepted as a regression test must be a file the shipped runner\n' +
-        'executes, or the gate certifies bugs with tests that never ran (TASK-047).',
-    ).toEqual(executed)
+      { counted, discovered, executed },
+      'The extension rule must be ONE set on all three sides.\n' +
+        `  counted as evidence (${LIB}): ${JSON.stringify(counted)}\n` +
+        `  discovered (scripts/lib/suites.sh): ${JSON.stringify(discovered)}\n` +
+        `  executed (tests/vitest.config.ts): ${JSON.stringify(executed)}\n` +
+        'A file counted but not executed certifies a bug with a test that never ran.\n' +
+        'A file executed but not discovered is never declared to the batch, so an\n' +
+        'assertion about "every runner" passes over it silently (TASK-047).',
+    ).toEqual({ counted, discovered: counted, executed: counted })
   })
 
   it('#8b TASK-039: the gate reads subjects with the same rule the commit-msg hook applies', async () => {

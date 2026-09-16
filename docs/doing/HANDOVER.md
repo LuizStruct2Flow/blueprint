@@ -69,35 +69,20 @@ bash scripts/session-resume.sh
 
 ## 2. IN FLIGHT, IN ORDER
 
-**State at handover, 2026-09-16.**
+**State at handover, 2026-09-16 evening.**
 
-**Landed:** `1248230..71388b9`, 163 commits, gate green — TASK-039 through TASK-048 and
-BUG-122, 124, 125, 126, 127, 129, 130, 131. All eighteen rows are in
-`docs/waiting-acceptance/`, each carrying what to test, what its cross-provider review
-found, and when to re-open it. Read a row rather than this file: the rows are current and
-this section is deliberately short.
+**Landed and CI-green:** `1248230..c3e2044`. `released` is at `c3e2044` (run 35131958151).
+Nineteen rows are in `docs/waiting-acceptance/` — TASK-039..048, BUG-122, 124, 125, 126,
+127, 129, 130, 131 and **BUG-132** (CI's suites job never had gitleaks, so every a2bp
+scenario was red on `71388b9`; the job now runs `install-toolchain.sh`). Read a row rather
+than this file.
 
-**Not yet pushed: 19 local commits** — the eighteen row moves plus the handover note
-`01214b0`. They ride the next push, which runs the full ~900 s gate.
+**Not yet pushed:** the BUG-132 row move and this handover update. They ride the next push.
 
-**CI on `71388b9` was still `in_progress`** when this was written. Check it first:
+**storm2flow was told** (session `storm2flow-3b`) that TASK-039/040/042/043 are on
+`released`, including TASK-042's `settings.json` pull refusal.
 
-```
-gh run list --repo LuizStruct2Flow/blueprint --commit 71388b9b11fd3aaa17afe2489d19513fe3124c86 --json name,status,conclusion
-```
-
-### Do these, in order
-
-1. **Read the CI result above.** `released` fast-forwards only on a green `main`.
-2. **Push the 19 local commits.** One gate run carries them all.
-3. **Tell storm2flow** (Sylvia, session `storm2flow-3b`) that their four gating items —
-   TASK-039, TASK-040, TASK-042, TASK-043 — are on `main`, once `released` has moved.
-   **TASK-042's pull refusal reaches them with it:** the first pull after this refuses
-   `settings.json` in any project whose copy carries rules the blueprint does not ship,
-   and prints them as a ready `.claude/settings.project.json`.
-4. **Nothing else is in flight.** No agent is running, the working tree is clean, and this
-   repo's feed daemon was restarted on the fixed code (it had been executing a deleted
-   inode, so pre-BUG-124 labelling and pre-BUG-129 truncation).
+**Nothing else is in flight.** No agent is running.
 
 ### What is open, and whose call it is
 
@@ -129,8 +114,8 @@ were removed from this section on 2026-09-16 for exactly that reason.
   `git push` is enough again.**
   - Jesko (Codex) reviewed the first fix and asked for the 0700 tightening
     (`.scratch/JESKO-bug121-review.md`). Philipp added it in `18ed663`/`dbed972`.
-  - **Jesko's re-check of that delta did NOT run: Codex hit its usage limit.** Eto read it and
-    pushed. Re-dispatch `.scratch/brief-jesko-bug121-recheck.md` when the quota resets.
+  - **Jesko's re-check ran (2026-09-16): push as is** → `.scratch/JESKO-bug121-recheck2.md`.
+    Nothing to do; the reviewed commits were already on `main` and `released`.
   - Codex sandboxes cannot write `~/.cache` (EROFS), so a Codex reviewer running the harness
     needs `TMPDIR=/dev/shm`.
   - History (resolved):

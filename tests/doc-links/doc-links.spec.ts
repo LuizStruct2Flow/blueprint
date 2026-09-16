@@ -52,7 +52,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { scanDocLinks } from './doc-links.js'
 
@@ -69,6 +69,7 @@ async function scanTree(
   name: string,
   files: Record<string, string>,
   project: Record<string, string> = {},
+  links: Record<string, string> = {},
 ): Promise<ReturnType<typeof scanDocLinks>> {
   const root = await s.workspace.dir(name, 'docs')
   for (const [rel, content] of Object.entries(files)) {
@@ -77,6 +78,15 @@ async function scanTree(
   // Files beside docs/, at the project root: project_config_paths.md, a web root.
   for (const [rel, content] of Object.entries(project)) {
     await s.fs.write(join(name, rel), content)
+  }
+  // Symlinks at the project root: `path -> target`, target written verbatim, so
+  // a case can point one out of the workspace on purpose. `ln` rather than
+  // s.fs, which has no symlink verb and resolves a path's real parent by design.
+  for (const [rel, target] of Object.entries(links)) {
+    const at = s.workspace.path(join(name, rel))
+    await s.fs.mkdirp(dirname(join(name, rel)))
+    const r = await s.run('ln', ['-s', target, at], { cwd: s.workspace.root })
+    expect(r.code, `could not create the symlink ${rel} -> ${target}\n${r.output}`).toBe(0)
   }
   return scanDocLinks(root)
 }
@@ -375,6 +385,92 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
 
         expect(scan.broken).toHaveLength(1)
         expect(scan.broken[0]).toContain('/../../outside.md')
+      })
+    })
+
+    // CONTAINMENT WAS LEXICAL, AND `stat` FOLLOWS SYMLINKS. So `repo/escape ->
+    // ../outside` made `../escape/secret.md` read as a path inside the
+    // repository while the file it opened was not. The check must compare the
+    // PHYSICAL path.
+
+    it('#4 a FILE symlink pointing out of the repository is reported', async () => {
+      await scenario('doc-links-symlink-file', async (s) => {
+        await s.fs.write('outside/secret.md', '# not in the repository\n')
+        const scan = await scanTree(
+          s,
+          'bp',
+          { ...healthyTree(), 'ref.md': '[x](../escape.md)\n' },
+          {},
+          { 'escape.md': '../outside/secret.md' },
+        )
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('../escape.md')
+      })
+    })
+
+    it('#4 a DIRECTORY symlink pointing out of the repository is reported', async () => {
+      await scenario('doc-links-symlink-dir', async (s) => {
+        await s.fs.write('outside/secret.md', '# not in the repository\n')
+        const scan = await scanTree(
+          s,
+          'bp',
+          { ...healthyTree(), 'ref.md': '[x](../escape/secret.md)\n' },
+          {},
+          { escape: '../outside' },
+        )
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('../escape/secret.md')
+      })
+    })
+
+    it('#4 a web root that is a symlink out of the repository serves nothing', async () => {
+      await scenario('doc-links-symlink-webroot', async (s) => {
+        await s.fs.write('outside/secret.html', '<html></html>\n')
+        const scan = await scanTree(
+          s,
+          'bp',
+          { ...healthyTree(), 'ref.md': '[x](/secret.html)\n' },
+          { 'project_config_paths.md': '- BP_WEB_ROOT: `escape`\n' },
+          { escape: '../outside' },
+        )
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('/secret.html')
+      })
+    })
+
+    it('#4 a symlink inside the web root that leaves the SERVED directory is reported, though it stays in the repo', async () => {
+      await scenario('doc-links-symlink-served', async (s) => {
+        const scan = await scanTree(
+          s,
+          'bp',
+          { ...healthyTree(), 'ref.md': '[x](/priv/notes.md)\n' },
+          {
+            'project_config_paths.md': '- BP_WEB_ROOT: `site`\n',
+            'site/index.html': '<html></html>\n',
+            'private/notes.md': '# in the repo, not served\n',
+          },
+          { 'site/priv': '../private' },
+        )
+
+        expect(scan.broken).toHaveLength(1)
+        expect(scan.broken[0]).toContain('/priv/notes.md')
+      })
+    })
+
+    it('#4 a symlink that stays inside the repository still resolves — the check refuses escapes, not symlinks', async () => {
+      await scenario('doc-links-symlink-internal', async (s) => {
+        const scan = await scanTree(
+          s,
+          'bp',
+          { ...healthyTree(), 'ref.md': '[x](../alias.md)\n' },
+          { 'real.md': '# the file the alias points at\n' },
+          { 'alias.md': 'real.md' },
+        )
+
+        expect(scan.broken).toEqual([])
       })
     })
   })

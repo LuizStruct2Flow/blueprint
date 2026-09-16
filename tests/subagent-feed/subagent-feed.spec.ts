@@ -778,4 +778,141 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       )
     })
   })
+
+  // --- Alexey's review of the fix, 2026-09-16 ------------------------------
+
+  it('#12 twelve SIMULTANEOUS dispatches reserve at most the cap, and the knob cannot raise it', async () => {
+    await scenario('sf-12', async (s) => {
+      // #11 fires its twelve in sequence, so it only ever sees one claim at a
+      // time: it cannot fail on a check-then-create race, which is what the cap
+      // actually is. These twelve wait on a barrier and are released together.
+      // BP_SUBAGENT_DEFER_MAX is 999 here, so the ceiling must be the hook's own.
+      const f = await deferFixture(s)
+      const go = s.workspace.path('go')
+      const hook = join(f.repo, 'scripts/log-activity.sh')
+      const runs = []
+      for (let i = 0; i < 12; i += 1) {
+        const driver = await s.fs.write(
+          `race-${i}.sh`,
+          `while [ ! -e ${JSON.stringify(go)} ]; do sleep 0.02; done\n` +
+            `printf '%s' "$1" | sh ${JSON.stringify(hook)}\n`,
+        )
+        runs.push(
+          s.run('sh', [driver, start(s, f, `race${i}00000000`)], {
+            cwd: f.repo,
+            env: {
+              ...f.env,
+              AGENT_FEED_LOG: f.log,
+              BP_SUBAGENT_META_WAIT: '10',
+              BP_SUBAGENT_DEFER_MAX: '999',
+            },
+          }),
+        )
+      }
+      await s.fs.write('go', '')
+      for (const r of await Promise.all(runs)) expect(r.code, r.output).toBe(0)
+
+      expect(
+        await children(s, f.repo),
+        'more children than the cap: counting slots and then creating one is a race, not a limit',
+      ).toBeLessThanOrEqual(8)
+      await vi.waitFor(
+        async () => {
+          const n = await f.count('→ dispatched')
+          if (n !== 12) throw new Error(`${n} of 12 bookends have landed`)
+        },
+        { timeout: 40_000, interval: 250 },
+      )
+    })
+  })
+
+  for (const shell of ['sh', 'bash']) {
+    it(`#13 ${shell}: an inherited fd 19 is released AND the bookend still lands`, async () => {
+      await scenario(`sf-13-${shell}`, async (s) => {
+        // #8 uses fd 9. A multi-digit descriptor is the boundary: `eval "exec
+        // 19>&-"` under dash is an attempted exec of a command named 19, which
+        // exits 127 and takes the child with it — so the dispatch vanished with
+        // the foreground hook still returning 0.
+        const f = await deferFixture(s)
+        await s.fs.write('lock', '')
+        const lock = join(s.workspace.root, 'lock')
+        const driver = await s.fs.write(
+          `hold-19-${shell}.sh`,
+          `exec 19>${JSON.stringify(lock)}\n` +
+            `flock -n 19 || exit 3\n` +
+            `printf '%s' "$1" | ${shell} ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}\n` +
+            `exec 19>&-\n`,
+        )
+
+        // The DRIVER runs under bash, deliberately: dash cannot even open fd 19
+        // (`exec 19>file` is an attempted exec of `19`), so a dash driver would
+        // fail before the hook ran. The SUBJECT shell is the one that varies.
+        const r = await s.run('bash', [driver, start(s, f, 'abc123def456')], {
+          cwd: f.repo,
+          env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '5' },
+        })
+        expect(r.code, `the fixture never took the lock\n${r.output}`).toBe(0)
+
+        const probe = await s.run('flock', ['-w', '2', lock, 'true'], { cwd: f.repo })
+        expect(probe.code, 'fd 19 was still held after the hook returned').toBe(0)
+        await f.expectLine('→ dispatched', 15_000)
+      })
+    })
+  }
+
+  for (const wait of ['08', '0009', '99999999999999999999999999']) {
+    it(`#14 a wait of ${wait} keeps the bookend and leaves no child behind`, async () => {
+      await scenario(`sf-14-${wait.length}-${wait[1] ?? 'x'}`, async (s) => {
+        // Digit strings pass the old validation unnormalised: `08` is not a
+        // decimal 8 to shell arithmetic, it is a bad octal, and a 26-digit value
+        // makes the clamp comparison print "integer expected" and skip. Both
+        // lose the bookend — the silent-loss class `soon` was meant to close.
+        const f = await deferFixture(s)
+        const r = await s.run(
+          'sh',
+          [
+            '-c',
+            `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+            'x',
+            start(s, f, 'abc123def456'),
+          ],
+          { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: wait } },
+        )
+        expect(r.code, `a hook must always exit 0\n${r.output}`).toBe(0)
+        await f.expectLine('→ dispatched', 20_000)
+        await vi.waitFor(
+          async () => {
+            const n = await children(s, f.repo)
+            if (n > 0) throw new Error(`${n} deferred child(ren) still running`)
+          },
+          { timeout: 30_000, interval: 250 },
+        )
+      })
+    })
+  }
+
+  it('#15 a dispatch past the cap says so, instead of degrading the label in silence', async () => {
+    await scenario('sf-15', async (s) => {
+      // Alexey's informational 8: over the cap the line is kept but the persona
+      // is not, and nothing said so. A lost label with no notice reads exactly
+      // like a subagent that has no persona.
+      const f = await deferFixture(s)
+      const r = await s.run(
+        'sh',
+        [
+          '-c',
+          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+          'x',
+          start(s, f, 'abc123def456'),
+        ],
+        { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_DEFER_MAX: '0' } },
+      )
+      expect(r.code, r.output).toBe(0)
+      await f.expectLine('→ dispatched', 15_000)
+      expect(
+        r.stderr,
+        'the label was degraded with no notice — stderr is where a hook says such things (--debug shows it)',
+      ).toMatch(/cap|label/i)
+    })
+  })
 })

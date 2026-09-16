@@ -470,6 +470,23 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
     `dod-gate`, `suite-sync` and `ts-bridge` pass together at **121**, exactly as his commit
     message predicted. The extension rule is now one set on all four sides — counted, discovered,
     executed, and asserted by #17.
+  - **TASK-048 part-landed** (Christian): `2010ffd` puts Vitali's per-repository sentence in
+    CLAUDE.md, `9b1e409` cancels A-13 with **F-004** in `docs/config/findings.md` naming TASK-048
+    as where it went — and F-004 says plainly the finding was NOT overturned (nothing syncs
+    `.gitignore`); it is cancelled because two live records of one fact drift.
+    - **Held pending wording approval, now given:** `.gitignore`, six `docs/PUBLISHING.md` sites
+      (not two — §0:34-35, §1b:46-54 and its index grep :60, §3a:147/:167/:172-177, §3b:218-223),
+      the existing-project instruction, and two doc-links comments. He held the doc-links comment
+      because it would have stated something false until `.gitignore` lands.
+    - **Also stale, which the brief missed:** the `.gitignore` HEADER (lines 54-71) says only four
+      methodology files inside `docs/` are private and calls `docs/PUBLISHING.md` "itself
+      gitignored below". Both become false.
+    - **ETO'S DECISION, overrulable by the founder: `docs/doing/HANDOVER.md` STAYS in §3a's
+      publish scrub.** Tracking and publishing are different acts — the founder decided the six
+      are tracked in a project's repo; §3a governs publishing that repo publicly. A private repo
+      tracking its live handover exposes nothing; publishing it exposes in-flight work, persona
+      names and review state. The other five come out of the scrub, and §3a gains a sentence
+      saying this is publish-time redaction, not the privacy block surviving by the back door.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

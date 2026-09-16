@@ -118,26 +118,46 @@ bp_inputs_is_managed() {
 # {{PROJECT_NAME}} on lines the fetched base already holds, so a secret that
 # appears only in the staged form is already in the blueprint.
 #
-# Missing gitleaks is skipped with a named warning, exactly as the pre-push gate
-# skips it, and the PR still meets the blueprint's own CI secret-scan. A scan
-# that ran and could not finish is NOT a skip: it blocks (BUG-003).
+# A MISSING SCANNER REFUSES (BUG-127), and this is deliberately STRICTER than
+# the pre-push gate it otherwise mirrors. The gate's skip is defensible because
+# nothing leaves the machine. `a2bp` pushes a branch to the blueprint's remote,
+# so the same skip publishes unscanned bytes, and the CI secret-scan of the pull
+# request runs AFTER the upload: it can refuse the merge, it cannot un-disclose.
+# Alexey took gitleaks off PATH and both private-key probes reached the fetch.
+#
+# A scan that ran and could not finish is NOT a skip either: it blocks (BUG-003).
+#
+# `--exit-code 7` SEPARATES "found" FROM "could not run" (BUG-127). gitleaks
+# reports findings with whatever status that flag names, so 1 stops meaning
+# "secret" — and 1 is what a gitleaks too old for `dir` returns while printing
+# `unknown command dir`. That was reported to the operator as a found secret,
+# with rotation advice, for a file that had none. A tool that cries wolf is one
+# whose real findings stop being believed. 7 is arbitrary but must stay clear of
+# gitleaks' own statuses: 0 clean, 1 usage and other failures, 2+ tool failure.
 _bp_inputs_secret_scan() {
   local root="$1" accepted="$2" line canon out gl_rc rc=0
   if ! command -v gitleaks >/dev/null 2>&1; then
-    echo "bp_inputs: gitleaks not installed — secret scan skipped, as in the pre-push gate (install: bash scripts/install-toolchain.sh)" >&2
-    return 0
+    echo "bp_inputs: gitleaks is not installed, so nothing has scanned the bytes this request would publish." >&2
+    echo "  a2bp is stricter than the pre-push gate here, and deliberately so: the gate's skip" >&2
+    echo "  leaves unscanned bytes on this machine, while a2bp pushes a branch to the" >&2
+    echo "  blueprint's remote. CI scans the pull request afterwards, which can refuse the" >&2
+    echo "  merge but cannot un-disclose what the push already carried." >&2
+    echo "  Install it: bash scripts/install-toolchain.sh" >&2
+    return 1
   fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     canon=${line%:*}
     gl_rc=0
-    out=$(gitleaks dir --no-banner --no-color --redact --verbose -- "$root/$canon" 2>&1) || gl_rc=$?
+    out=$(gitleaks dir --no-banner --no-color --redact --exit-code 7 --verbose -- "$root/$canon" 2>&1) || gl_rc=$?
     case "$gl_rc" in
       0) : ;;
-      1) echo "bp_inputs: gitleaks found a secret in '$canon'; secrets are never filed. Rotate it if it was ever pushed anywhere." >&2
+      7) echo "bp_inputs: gitleaks found a secret in '$canon'; secrets are never filed. Rotate it if it was ever pushed anywhere." >&2
          printf '%s\n' "$out" | sed 's/^/    /' >&2
          rc=1 ;;
-      *) echo "bp_inputs: gitleaks could not complete on '$canon' (exit $gl_rc) — the secret scan did NOT run" >&2
+      *) echo "bp_inputs: gitleaks could not complete on '$canon' (exit $gl_rc) — the secret scan did NOT run." >&2
+         echo "  This is a scanner failure: not a clean scan, and not a finding either. An exit of 1" >&2
+         echo "  usually means this gitleaks predates 'gitleaks dir' (install: bash scripts/install-toolchain.sh)." >&2
          printf '%s\n' "$out" | tail -5 | sed 's/^/    /' >&2
          rc=1 ;;
     esac

@@ -194,7 +194,24 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       fix is provenance: a file under `tests/` the blueprint does not ship is the project's.
       **If no reliable provenance check exists at gate time, Vitali stops and the layout
       decision goes to the founder.**
-  - **Jesko is reviewing the five late items now**; Alex's docs review is still queued.
+  - **03:35, the five late items reviewed** → `.scratch/ALEX-fr-late-review.md` (written by Jesko
+    against Alex's brief, so the header names Alex). **All five: push after fixes.**
+    - **BUG-126** (S2 ×2, **Philipp**): `{"results":[],"errors":[42]}` passes — jq cannot index the
+      entry, empty stdout reads as "no unaccepted errors", and the gate even claims 1 accepted.
+      CI rejects it, so the copies disagree. And the shebang test matches
+      `#!/usr/bin/env -S node --require /tmp/bash`, so a Node file is accepted as shell.
+    - **BUG-124** (S2, **Philipp**): the detached child inherits descriptors — only 0/1/2 are
+      redirected — so an inherited flock stays held until it exits. No whole-child deadline, no
+      burst cap, and tests bound marker arrival rather than process exit.
+    - **TASK-044** (S3, **Christian**): `scripts/run-ts-suites.sh:411` caps notices at
+      `head -20`, so later skip reasons vanish behind twenty canary notes.
+    - **TASK-045 / BUG-125** (S3, **Christian**): `stat` follows symlinks, so `repo/escape ->
+      ../outside` and a symlinked `BP_WEB_ROOT` both pass containment.
+    - Also noted: the accepted shell exception leaves unanalysed shell that ShellCheck does not
+      cover (it only reads tracked `scripts/`+`.githooks/`); state that risk in the security
+      policy. And doc-sync landed in separate commits from the implementation, which is not the
+      DoD's same-commit rule — an artefact of agents not owning those files.
+  - **Alex is reviewing TASK-040/041/043 now.**
 - **All cross-owned doc text is applied:**
   - CLAUDE.md: settings paragraph `e747511` (TASK-042), test-roots note (TASK-039)
   - README and deck import lines: `0fcfe40` (TASK-043)

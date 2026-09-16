@@ -328,12 +328,14 @@ were removed from this section on 2026-09-16 for exactly that reason.
   `harness` › *reaps a background process the scenario forgot* red with nothing
   wrong in the change. If you retry a red push on that case, **cite BUG-111** —
   a quietly retried red is how merging over red starts.
-- **`fileParallelism` is still `false`** in `tests/vitest.config.ts`: two suites
-  pass partly *because* the run is serial. Measure before flipping.
+- **The suites run in parallel** (TASK-055): the 50 non-release files take
+  ~20 s instead of 197.5 s. More load per second makes BUG-111 above likelier;
+  cite it if it shows up.
 - **Flakes in the nested gate (BUG-065, parked).** If you retry a red gate, say
   so out loud — a quietly retried red is how merging over red starts.
-- **`bootstrap-gate` is half the gate** (~215 s of ~440 s). That is TASK-013,
-  parked until after the restructure.
+- **`bootstrap-gate` and four other expensive suites are release tier**
+  (TASK-054): they run in CI only, so a regression there shows as a red `main`,
+  not a refused push. Watch CI after pushing.
 
 ---
 

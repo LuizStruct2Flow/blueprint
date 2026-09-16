@@ -369,13 +369,32 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       reintroduced BUG-124 — the roster lookup lost its inputs — and the existing #4 caught it.
     - TASK-042 finding 4 landed (`1c8ce26`): `_bp_one_object` decides "exactly one JSON object"
       once, for the blueprint, the project layer and legacy settings alike.
-  - **BUG-129 filed: four feed daemons are running at once.** `pgrep -af agent-activity.sh` shows
-    PIDs 1154186, 3275474, 3373642, 3423373. CLAUDE.md tells every wake to start the feed and
-    promises a `flock` makes it a no-op; it plainly does not. **BUG-001 was this exact class** —
-    a broken idempotency guard, every-wake spawning, load 175 for 2.7 days. It is already red in
-    the gate: `subagent-feed` #9 fails because the team's own feed rotates the log mid-scenario
-    and the canary hard-fails on truncation while only noting baton writes. **Do not kill the
-    daemons before capturing what started them.**
+  - **BUG-129 — Eto's "four daemons" alarm was a MISREADING. Corrected by Vitali's evidence
+    (`0053592`), and the earlier text in this file was wrong.** The four PIDs are four
+    **repositories**, one supervisor each: 1154186 blueprint, 3275474 linkedin-watcher-agent,
+    3373642 storm2flow, 3423373 struct2flow-www — each holding its own
+    `$BP_STATE_ROOT/logs/.agent-activity.lock`, which is per-repository **by design** (the BUG-077
+    comment says so). `pgrep -af agent-activity.sh` spans repositories, so four projects means
+    four supervisors, exactly one each. `tests/agent-activity-bound` passes 36/36 including
+    **#1, 50 concurrent starts → exactly 1 supervisor**. **There is no guard defect and no
+    reproducer**; the daemons are untouched and none is a duplicate. All four are PPID 1 because
+    `start_daemon` uses `setsid`, so the process tree can never attribute them to a session.
+    - **What BUG-129 actually is, and it is the whole of it now:** the feed has exactly two
+      writers — `emit` appends, and `supervise_body` **truncates once at startup**. That is one
+      wipe per supervisor start, not ongoing rotation, and CLAUDE.md tells every wake to start the
+      feed, so a wake coinciding with a suite run turns `subagent-feed` #9 red for something the
+      pushed change never touched.
+    - **Approved fix (Vitali's inversion, better than the forwarded proposal): STOP TRUNCATING.**
+      A "feed restarted" banner instead of `: >"$out"`, so the append-only contract the canary
+      assumes becomes true. The canary then needs no new tolerance and keeps truncation as a hard
+      failure with no swallow risk. Size-capped rotation is explicitly NOT in scope (and a rename
+      trips the prefix check anyway); the banner-witness alternative stays recorded as the
+      fallback if the wipe ever returns.
+    - **Two live-state follow-ups:** PID 1154186 runs a **deleted inode** of
+      `scripts/agent-activity.sh`, so this repo's feed is executing pre-BUG-124 code — **restart
+      it after the push** (Eto's, not an agent's). And CLAUDE.md's idempotency claim should say
+      "per repository", which is what misled Eto; the wording goes to Christian with his other
+      CLAUDE.md work so the file takes one edit.
   - **Discovery landed, and `tests/manifest` is KNOWINGLY RED** (Vitali, `79771e7`, `0a9ddb8`).
     Discovery is spec-only and learned `*.spec.tsx` — `bp_suite_runners`' find and
     `bp_suites_with_spec`' awk both — because a component-only suite would otherwise be

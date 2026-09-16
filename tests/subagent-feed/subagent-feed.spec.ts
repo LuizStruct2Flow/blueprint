@@ -1094,4 +1094,58 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       )
     })
   })
+
+  it('#18 with no flock the bookend still lands, and the feed says why exactly once', async () => {
+    await scenario('sf-18', async (s) => {
+      // macOS ships no flock(1), and the founder works on a Mac. Deferral is off
+      // there, so every subagent bookend falls back to the agent type — which is
+      // the symptom BUG-124 was filed for ("I cannot see <persona>'s activity").
+      // The cap notice claimed "no deferred slot free (cap 8)", naming a
+      // mechanism that was working fine and hiding the one that was missing:
+      // the BUG-041/042 misdirection class.
+      //
+      // So the degradation has to be LEGIBLE where the founder is looking. The
+      // feed is that place — hook stderr is discarded outside --debug — and it
+      // says so ONCE, because a line per dispatch is noise that gets muted.
+      const f = await deferFixture(s)
+      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))
+      // BP_FLOCK_FALLBACKS is the test seam for the Homebrew keg paths the hook
+      // probes after PATH: `brew install util-linux` is keg-only, so flock is
+      // NOT symlinked onto PATH and the command name alone would miss it on the
+      // one platform that needs the probe. Emptied here so hiding flock from
+      // PATH hides it completely, on a Mac as well as on Linux.
+      const env = {
+        ...f.env,
+        AGENT_FEED_LOG: f.log,
+        PATH: await s.pathWithout(['flock']),
+        BP_FLOCK_FALLBACKS: '',
+      }
+      const call = (id: string) =>
+        s.run('sh', ['-c', `printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, id)], {
+          cwd: f.repo,
+          env,
+        })
+
+      const r1 = await call('nofl00000000')
+      expect(r1.code, `a hook must always exit 0\n${r1.output}`).toBe(0)
+      await f.expectLine('→ dispatched', 15_000)
+      expect(
+        r1.stderr,
+        'the notice blamed the cap for a missing tool — it must name flock, and say how to get it',
+      ).toMatch(/flock/i)
+
+      const r2 = await call('nofl11111111')
+      expect(r2.code, r2.output).toBe(0)
+      await vi.waitFor(
+        async () => {
+          if ((await f.count('→ dispatched')) !== 2) throw new Error('both bookends have not landed')
+        },
+        { timeout: 15_000, interval: 250 },
+      )
+      expect(
+        await f.count('flock'),
+        'the feed must explain the type-labelled bookends exactly once — never per dispatch, and never not at all',
+      ).toBe(1)
+    })
+  })
 })

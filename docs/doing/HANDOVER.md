@@ -392,6 +392,18 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
   - **BUG-129 assigned to Vitali.** Capture `ps -o pid,ppid,lstart,args` on the four PIDs into the
     row **before** changing anything — those processes are the only record of how four came to
     exist — and do not kill them without telling Eto.
+  - **The bootstrap-gate budget is raised** (Philipp, `4f23962`): `900_000` ms as a per-test
+    argument on #2, NOT `testTimeout` in `vitest.config.ts` — every other suite shares that
+    default and none boots a project, so widening it globally would hide slowness everywhere to
+    fix one case. Two reasons for the size, and the second is the load-bearing one: runs measured
+    364 s then 414.7 s (~14% swing on the same host), **and the derived gate's inner `s.run`
+    already allows 600 s**, so any outer budget below that makes the inner one unreachable — and
+    the inner one is what names *which* command hung. Verified 8/8 with no CLI override. The
+    comment says what to do on failure: read the per-stage timings first, because a gate that
+    grew a slow stage and a gate that hangs look identical from outside.
+  - **`tsc` is currently RED across the tests project, and it is not a regression:** every error
+    is in `tests/manifest/*` (`SHELL_SUITES`, `suitesWithSh`, `shInvoked` gone), which is
+    Christian mid-sequence on the `.sh` handling. It clears when he lands.
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

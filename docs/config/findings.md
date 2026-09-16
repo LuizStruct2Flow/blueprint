@@ -148,3 +148,44 @@ can say whether the two questions would have been enough. At that point it belon
 in CLAUDE.md, not here — six instances is past the point where the blueprint's
 "prove it downstream first" rule is asking for more evidence rather than for
 someone to write it down.
+
+---
+
+## F-003 — the bridge's only non-vitest assertion is gone, and the loss is accepted
+
+**Closes TASK-023**, which sat in `docs/backlog/BACKLOG.md` as `KEEP` from
+2026-09-10. Accepted by the founder on **2026-09-16**, deciding TASK-047
+(*"migrate the tests to be spec driven ts tests, we don't need exceptions"*):
+accept the loss on the record rather than keep a rule with a silent exception.
+
+**What is gone.** `tests/ts-bridge/test.sh`, retired in `da73f36` along with its
+`ts-bridge · BUG-055` stage in `.githooks/pre-push-project` and its CI job. It
+was the only assertion about the vitest bridge **not executed by the vitest that
+bridge starts**. Two properties went with it, and neither could survive a port,
+which is why this is a decision and not a migration:
+
+- **A silently dead bridge now produces no red case.** If the bridge stops
+  running, the spec that would report it does not run either. That is the exact
+  failure mode BUG-055 had — an absence, not an error.
+- **The no-toolchain property is unassertable.** `tests/manifest`'s retired #9
+  re-ran the control with `node`, `npm`, `npx`, `tsc` and `vitest` poisoned, so
+  the thing checking whether the toolchain ships did not depend on it. A vitest
+  spec cannot make that claim about itself.
+
+**What stands in its place, stated as weaker.** Its assertions live on in
+`tests/ts-bridge/ts-bridge.spec.ts` (#0, #1/#1c, #1b, #1d, #1e, #2/#2b/#2c, with
+a measured equivalence record), and `scripts/run-ts-suites.sh` BLOCKS rather than
+skips when `npx` or `tests/node_modules` is absent — so a toolchain-less checkout
+gets no answer and no push instead of a wrong answer it believes. That makes the
+absence loud; it does not prove independence.
+
+**The partial mitigation that remains:** `tests/bootstrap-gate` #2/#3 runs a
+bootstrapped project's entire gate as a subprocess and requires >= 25 stages, so
+a bridge dying silently inside that inner gate still truncates the stage list and
+turns a case red. What is unobservable is a failure that takes the outer run down
+too.
+
+**Re-open when** an assertion about the toolchain's own shipping boundary is
+needed again — that is the condition TASK-023 named, and it is now a deliberate
+gap rather than an oversight. Restoring it means accepting a second runner kind,
+which is a founder decision, not an agent's.

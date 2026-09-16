@@ -306,6 +306,12 @@ TEMPLATE_FILES=(
   "docs/backlog/BACKLOG.md"
   "docs/backlog/BUGS.md"
   "AGENT_ROSTER.md"
+  # Project-owned seeds a project edits freely. Listed for the same reason:
+  # Jesko reproduced a full `pull --yes` deleting all three once the blueprint
+  # stopped shipping them, because an unedited seed matched the shipped bytes.
+  "README.md"
+  ".gitignore"
+  ".gitattributes"
 )
 
 # --- ANSI ---

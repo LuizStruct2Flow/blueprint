@@ -113,6 +113,19 @@ else
   if [ -n "$tp" ] && [ -n "$aid" ]; then meta="${tp%.jsonl}/subagents/agent-$aid.meta.json"; fi
 fi
 
+# THE DEFERRED CHILD IS THIS SAME SCRIPT, re-executed under bash (see the block
+# at the end). It carries no payload on stdin, so what the bookend needs arrives
+# in the environment — and it must arrive HERE, above the roster lookup, which
+# resolves a persona only when $meta is already known. Restored below that, the
+# child looked up nothing and every deferred bookend fell back to the agent
+# type: the BUG-124 defect itself, reintroduced by the fix for it.
+if [ "${BP_SUBAGENT_DEFER_CHILD:-}" = 1 ]; then
+  event="${BP_DEFER_EVENT:-$event}"
+  meta="${BP_DEFER_META:-}"
+  summary="${BP_DEFER_SUMMARY:-}"
+  atype="${BP_DEFER_ATYPE:-}"
+fi
+
 tcmd=""
 if [ -r "$ROSTER_LIB" ] && [ -n "$meta" ]; then
   # The subshell is one guard and the timeout is the other; neither is style.
@@ -160,6 +173,7 @@ case "$event" in
   *)             marker="$event" ;;
 esac
 
+
 # feed_append supplies the timestamp and owns the rotation, so this line no
 # longer computes either. A hook must NEVER fail the tool call it observes, and
 # feed_append returns 0 on every path by design.
@@ -186,36 +200,54 @@ emit_bookend(){
 # the meta never comes. All its descriptors are closed so the client is not held
 # waiting on it. On stop the meta is already there, so the line is written
 # directly.
-# THE WAIT IS A NUMBER OF SECONDS, VALIDATED AND CAPPED. It reaches shell
-# arithmetic, where a non-numeric name is an error under `set -u`: the child died
-# before emitting anything and the dispatch went unlogged. A value out of range
-# is clamped rather than refused — this is a logging bound, and a hook must never
-# cost the call it observes (Alex's review, 2026-09-16, finding 4). The cap is
-# also the child's whole-life bound: the wait below plus the roster lookup, which
-# bp_staleness_timeout_cmd already bounds, is all it ever does.
-BP_SUBAGENT_META_WAIT_MAX=15
-case "${BP_SUBAGENT_META_WAIT:-}" in
-  '' | *[!0-9]*) BP_SUBAGENT_META_WAIT=5 ;;
-esac
-if [ "$BP_SUBAGENT_META_WAIT" -gt "$BP_SUBAGENT_META_WAIT_MAX" ]; then
-  BP_SUBAGENT_META_WAIT="$BP_SUBAGENT_META_WAIT_MAX"
-fi
+# THE WAIT AND THE CAP ARE DECIMAL INTEGERS, NORMALISED BEFORE ANY ARITHMETIC.
+# A digit string is not an integer to the shell: `08` and `0009` are bad octal,
+# and a 26-digit value makes `[ … -gt … ]` print "integer expected" and skip the
+# clamp entirely. Each killed the child before it emitted anything, which is the
+# silent-loss class this validation exists to close (Alexey's review,
+# 2026-09-16, finding 3). Out of range is clamped rather than refused: this is a
+# logging bound, and a hook must never cost the call it observes.
+bp_clamp_int() {
+  _ci_v="$1"; _ci_def="$2"; _ci_max="$3"
+  case "$_ci_v" in '' | *[!0-9]*) printf '%s\n' "$_ci_def"; return ;; esac
+  while :; do
+    case "$_ci_v" in 0?*) _ci_v="${_ci_v#0}" ;; *) break ;; esac
+  done
+  # LENGTH BEFORE VALUE: a number with more digits than the ceiling cannot be
+  # below it, and comparing it numerically is the thing that overflowed.
+  if [ "${#_ci_v}" -gt "${#_ci_max}" ]; then printf '%s\n' "$_ci_max"; return; fi
+  if [ "$_ci_v" -gt "$_ci_max" ]; then printf '%s\n' "$_ci_max"; return; fi
+  printf '%s\n' "$_ci_v"
+}
 
-# AT MOST THIS MANY children may be waiting at once. Past the cap the bookend is
-# written IMMEDIATELY, labelled by agent type: a burst of dispatches then costs
-# labels, never processes and never the line itself.
-: "${BP_SUBAGENT_DEFER_MAX:=8}"
-case "$BP_SUBAGENT_DEFER_MAX" in
-  '' | *[!0-9]*) BP_SUBAGENT_DEFER_MAX=8 ;;
-esac
+# The wait is the child's whole-life bound: this, plus the roster lookup that
+# bp_staleness_timeout_cmd already bounds, is all it ever does.
+BP_SUBAGENT_META_WAIT="$(bp_clamp_int "${BP_SUBAGENT_META_WAIT:-}" 5 15)"
+# AT MOST THIS MANY children may wait at once, and the knob cannot raise it: the
+# ceiling is the promise, so a larger value is clamped down to it.
+BP_SUBAGENT_DEFER_MAX="$(bp_clamp_int "${BP_SUBAGENT_DEFER_MAX:-}" 8 8)"
+
 defer_dir="$BP_STATE_ROOT/subagent-defer"
 
-# Slots left behind by a child that was killed are swept by age — a minute is
-# well past the capped life above — so a crash cannot silently use up the budget.
-defer_count() {
-  find "$defer_dir" -name '*.slot' -mmin +1 -exec rm -f {} + 2>/dev/null
-  set -- "$defer_dir"/*.slot
-  if [ "$#" -eq 1 ] && [ ! -e "$1" ]; then printf '0\n'; else printf '%s\n' "$#"; fi
+# RESERVE ATOMICALLY. Counting slots and then creating one is a race, not a
+# limit: twelve simultaneous dispatches each saw fewer than eight and each
+# claimed one, with no two sharing a name (finding 1). `mkdir` of a FIXED name
+# succeeds for exactly one caller, so the slot set IS the ceiling.
+#
+# Slots left by a child that died before releasing its own are swept by age —
+# a minute is well past the capped life above — so a crash cannot wedge the cap.
+defer_reserve() {
+  mkdir -p "$defer_dir" 2>/dev/null || return 1
+  find "$defer_dir" -maxdepth 1 -type d -name 'slot-*' -mmin +1 -exec rm -rf {} + 2>/dev/null
+  _dr_n=0
+  while [ "$_dr_n" -lt "$BP_SUBAGENT_DEFER_MAX" ]; do
+    if mkdir "$defer_dir/slot-$_dr_n" 2>/dev/null; then
+      printf '%s\n' "$defer_dir/slot-$_dr_n"
+      return 0
+    fi
+    _dr_n=$((_dr_n + 1))
+  done
+  return 1
 }
 
 # CLOSE EVERYTHING ABOVE 2 IN THE CHILD. Redirecting 0, 1 and 2 says nothing
@@ -223,6 +255,12 @@ defer_count() {
 # the child and stayed held for the whole wait — a dispatch or session lock kept
 # long after the hook returned. POSIX has no "close all", so the open ones are
 # read from the process's own descriptor directory where there is one.
+#
+# THIS RUNS UNDER BASH, always: dash accepts only single-digit descriptors in a
+# redirection, so `exec 19>&-` there is an attempted exec of a command named 19,
+# exits 127, and takes the child with it — the dispatch vanished while the hook
+# returned 0 (finding 2). The deferral below re-executes this script under bash
+# for exactly that reason.
 close_inherited() {
   fdd=/proc/self/fd
   [ -d "$fdd" ] || fdd=/dev/fd
@@ -234,27 +272,51 @@ close_inherited() {
   done
 }
 
+# THE CHILD ITSELF. It is this script again, so the bookend is written by the
+# one function that writes bookends.
+if [ "${BP_SUBAGENT_DEFER_CHILD:-}" = 1 ]; then
+  trap 'rm -rf "${BP_DEFER_SLOT:-}" 2>/dev/null' EXIT HUP INT TERM
+  close_inherited
+  _w="$(bp_clamp_int "${BP_DEFER_WAIT:-}" 5 15)"
+  i=0
+  while [ ! -e "$meta" ] && [ "$i" -lt $((_w * 10)) ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  emit_bookend
+  exit 0
+fi
+
 defer_slot=""
+bashcmd=""
 if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
-  mkdir -p "$defer_dir" 2>/dev/null || true
-  if [ -d "$defer_dir" ] && [ "$(defer_count)" -lt "$BP_SUBAGENT_DEFER_MAX" ]; then
-    defer_slot="$defer_dir/$$.slot"
-    : >"$defer_slot" 2>/dev/null || defer_slot=""
+  # No bash, no deferral: the line is written NOW, labelled by agent type. A
+  # wrong label beats a lost one, and beats holding a caller's descriptor.
+  bashcmd="$(command -v bash 2>/dev/null)" || bashcmd=""
+  if [ -n "$bashcmd" ]; then
+    defer_slot="$(defer_reserve)" || defer_slot=""
   fi
 fi
 
 if [ -n "$defer_slot" ]; then
-  (
-    trap 'rm -f "$defer_slot" 2>/dev/null' EXIT HUP INT TERM
-    close_inherited
-    i=0
-    while [ ! -e "$meta" ] && [ "$i" -lt $((BP_SUBAGENT_META_WAIT * 10)) ]; do
-      sleep 0.1
-      i=$((i + 1))
-    done
-    emit_bookend
-  ) </dev/null >/dev/null 2>&1 &
+  BP_SUBAGENT_DEFER_CHILD=1 \
+  BP_DEFER_SLOT="$defer_slot" \
+  BP_DEFER_META="$meta" \
+  BP_DEFER_EVENT="$event" \
+  BP_DEFER_SUMMARY="$summary" \
+  BP_DEFER_ATYPE="$atype" \
+  BP_DEFER_WAIT="$BP_SUBAGENT_META_WAIT" \
+    "$bashcmd" "$0" </dev/null >/dev/null 2>&1 &
 else
+  if [ "$event" = SubagentStart ] && [ -n "$tcmd" ] && [ ! -e "$meta" ]; then
+    # SAY SO. Past the cap the line is kept but the persona is not, and a
+    # degraded label with no notice reads exactly like a subagent that never had
+    # one (Alexey's informational 8). stderr, because Claude Code surfaces hook
+    # stderr under --debug and discards it otherwise — one line per overflow,
+    # never one per dispatch.
+    printf '[log-activity] no deferred slot free (cap %s) — labelling this dispatch by agent type\n' \
+      "$BP_SUBAGENT_DEFER_MAX" >&2
+  fi
   emit_bookend
 fi
 exit 0

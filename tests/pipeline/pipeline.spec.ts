@@ -369,43 +369,46 @@ pipe_finish`),
     })
   })
 
-  it('#9b BUG-083 — the colour literals carry NO escape byte, so the TTY branch prints them literally', async () => {
-    // THIS CASE PINS A DEFECT, and it exists because #9 cannot.
-    //
-    // `scripts/lib/pipeline.sh` sets `_C_DIM='[2m'` and friends with the ESC byte
-    // ABSENT — the file contains zero 0x1b bytes. Verified on a real pty (`script
-    // -qec`): the gate prints `[2m╭─ gate [0m`, `[32m✓[0m`, `[K` as literal text
-    // on every push from a terminal, and emits no ANSI at all.
-    //
-    // Two consequences, and the second is why this case is here rather than only
-    // in a bug row:
-    //
-    //   * cosmetic garbage on the founder's terminal on every push; and
-    //   * #9 and #17 are VACUOUS with respect to the branch they describe. They
-    //     assert no escape leaks from the colour path, and that path emits no
-    //     escape to leak. Proven: a mutant forcing `[ -t 1 ]` true survives BOTH
-    //     the retiring shell suite and this spec.
-    //
-    // So the defect is asserted rather than wished away — the same discipline
-    // #6 in tests/no-chain-guard applies to its documented false positive. WHEN
-    // BUG-083 IS FIXED THIS CASE GOES RED. That is the point: whoever restores
-    // the escape bytes is then required to replace this with a pty-driven
-    // assertion, at which moment #9 and #17 become live for the first time.
-    //
-    // `scripts/lib/pipeline.sh` is the Pipeline agent's file under
-    // docs/waiting-acceptance/TASK-018-CONVENTIONS.md, so this suite reports the defect and
-    // does not fix it.
-    const lib = await readFile(LIB, 'utf8')
+  it('#9b BUG-083: on a terminal the colour codes carry their escape byte, and off one there are none', async () => {
+    // BUG-083: the colour literals had lost their ESC byte, so on every push from
+    // a terminal the gate printed `[2m`, `[32m`, `[K` as literal text. This drives
+    // the renderer on a REAL pty (`script`), which is the only way to reach the
+    // `[ -t 1 ]` branch — and it is what makes #9 and #17 live: they assert no
+    // escape leaks off a terminal, which means nothing until one exists on it.
+    await scenario('pipeline-9b', async (s) => {
+      const driver = await s.fs.write(
+        'drivers/p9b.sh',
+        withLib(`pipe_init 'gate'
+pipe_stage 'a' true
+pipe_finish`),
+      )
+      // util-linux `script` takes -c; BSD `script` takes the command positionally.
+      const probe = await s.run('script', ['-qec', 'true', '/dev/null'], { cwd: s.workspace.root })
+      const args =
+        probe.code === 0
+          ? ['-qec', `sh '${driver}'`, '/dev/null']
+          : ['-q', '/dev/null', 'sh', driver]
+      const tty = await s.run('script', args, { cwd: s.workspace.root, env: {}, timeoutMs: 60_000 })
+      expect(tty.code, tty.output).toBe(0)
+      expect(tty.output, 'no gate output came through the pty').toContain('gate')
 
-    expect(
-      lib.includes(ESC),
-      'scripts/lib/pipeline.sh now contains an escape byte — BUG-083 is fixed. Replace this case with a pty-driven assertion and make #9/#17 live.',
-    ).toBe(false)
-    // Pin the literals themselves, so a partial fix is visible rather than
-    // passing on a technicality.
-    expect(lib, 'the colour literals are no longer in the shape BUG-083 describes').toContain(
-      "_C_DIM='[2m'",
-    )
+      expect(tty.output, 'the TTY branch emits no real ANSI colour code').toContain(`${ESC}[32m`)
+      expect(
+        tty.output.replaceAll(`${ESC}[`, ''),
+        'a colour code was printed WITHOUT its escape byte — BUG-083',
+      ).not.toMatch(/\[(?:[0-9]+m|K)/)
+
+      // Off a terminal: no escape byte AND no bare literal either.
+      const piped = await runPipe(
+        s,
+        'p9b-piped',
+        withLib(`pipe_init 'gate'
+pipe_stage 'a' true
+pipe_finish`),
+      )
+      expect(piped.output, 'escape codes in non-TTY output').not.toContain(ESC)
+      expect(piped.output, 'bare colour literals in non-TTY output').not.toMatch(/\[(?:[0-9]+m|K)/)
+    })
   })
 
   it('#10 the banner renders on both the passing and failing paths', async () => {

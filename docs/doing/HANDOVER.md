@@ -272,6 +272,24 @@ Each item needs a Codex review before it lands (DoD §1b rule 4); Codex's quota 
       tracking its own generic docs.
     - **Do not sweep up `project_config_*.md`** — A-27 put the threat model and infra account IDs
       there deliberately.
+  - **TASK-047 filed and promoted** (`dd5a934`), founder decision: *"migrate the tests to be
+    spec driven ts tests, we don't need exceptions"* — his answer to TASK-039 finding 6. One
+    extension, `*.spec.ts`, accepted AND discovered AND executed, with no set larger than
+    another. **Vitali** has `dod-gate.sh`, `suites.sh`, `vitest.config.ts`, guard #14 and DoD §2;
+    **Christian** has the port of `tests/ts-bridge/test.sh`, `run-ts-suites.sh`'s three checks,
+    `tests/manifest`, and the convention ripple in CLAUDE.md §"Test Layers" — which he reports
+    before rewriting, because whether co-located `src/` unit tests also become `*.spec.ts` is a
+    change for every project. `tests/helpers/proc-cwd.sh` stays shell: it is a helper, not a test.
+    **Ordering:** Vitali keeps `*.sh` discovery until Christian's port lands, so the gate never
+    declares a suite the runner cannot report.
+  - **TASK-048 filed and promoted**, founder decision "All six, no exceptions": derived projects
+    track `/CLAUDE.md`, `/AGENTS.md`, `/AGENT_SIGNAL.md`, `docs/DoD.md`, `docs/PUBLISHING.md`
+    **and** `docs/doing/HANDOVER.md`. The founder accepted publishing the live handover. It goes
+    to **Christian** after TASK-047. The evidence in its row is what makes it more than one
+    deletion: `.gitignore` is project-owned, so this reaches new projects only; `PUBLISHING.md`
+    encodes the exclusions in three places and must travel in the same commit; the reasoning
+    comment is replaced, not deleted, with wording shown to the founder; and
+    `project_config_*.md` stays ignored (A-27: threat model, infra account IDs).
   - **In flight right now:**
     - **Philipp:** the SAST policy blocks a fresh project's gate, because semgrep cannot parse
       `.github/workflows/security.yml`. He fixes the YAML or accepts that one diagnostic

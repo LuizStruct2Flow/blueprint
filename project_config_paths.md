@@ -23,9 +23,13 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 
 - BP_TEST_ROOTS: `tests`
 
-In the blueprint, `tests/` is this repo's own regression suites, so it counts
-here — `.blueprint-root` is what says so. In a derived project the same
-directory holds the suites this repo ships, and never counts there.
+In the blueprint, `tests/` is this repo's own regression suites, so all of it
+counts here — `.blueprint-root` is what says so. In a derived project the same
+directory holds the suites this repo ships, and only its top level counts there
+(founder rule, 2026-09-16): a runner directly in `tests/` is the project's,
+everything in a subdirectory is ours. `tests/dod-gate` #14 fails this repo's own
+push if a runner ever lands directly at `tests/`, because that rule depends on
+it.
 
 This is also the undeclared default. The line is written out so the declaration
 is visible here, as it is in every derived project. `docs/`, `.git/`, `scripts/`

@@ -147,15 +147,21 @@ dod_stage_rows() {
 # and a symlink resolving into `tests/` all certified project bugs on blueprint
 # material. Declaring a directory is not evidence of who wrote it.
 #
-# THE COST, recorded rather than hidden: `tests/e2e` and a snapshot at the
-# `tests/` root are the layouts CLAUDE.md documents, and neither counts in a
-# derived project now. The honest fix is PROVENANCE — the blueprint ships a known
-# set of files under `tests/`, so anything else there is the project's. That set
-# is not knowable at gate time: `blueprint files` prints `tests/` unexpanded, the
-# expansion lives in `read_blueprint_source` which FETCHES the remote, and
-# `.gitattributes` names only the suites that do NOT ship. A pre-push gate cannot
-# depend on the network. So the layout question is the founder's, and until it is
-# answered the gate refuses rather than trusts. tests #13 pins the cost.
+# THE ONE EXCEPTION IS DEPTH, and it is a founder decision (2026-09-16) resolving
+# Alexey finding 3. A runner sitting DIRECTLY in `tests/` is the project's own,
+# because the blueprint ships none there — only package.json, tsconfig.json,
+# vitest.config.ts and package-lock.json. So the shipped `tests/` is searched
+# SHALLOW: depth 1, runner files only. That restores CLAUDE.md's snapshot layout
+# (`tests/*.snap.test.ts`) without opening the suites one level down, which is
+# where every shipped suite lives. `tests/e2e` therefore still does not count.
+#
+# THE RULE RESTS ON A FACT ABOUT THIS REPO, so the fact is asserted rather than
+# assumed: tests/dod-gate #14 fails the blueprint's own push if a runner ever
+# lands directly at `tests/`. Provenance would be the stronger answer, but the
+# shipped set is not knowable at gate time — `blueprint files` prints `tests/`
+# unexpanded, the expansion lives in `read_blueprint_source` which FETCHES the
+# remote, and `.gitattributes` names only the suites that do NOT ship. A pre-push
+# gate cannot depend on the network. Depth is the property that is local.
 #
 # THE DECLARATION IS A LITERAL LIST (Alexey finding 2). Globs are refused rather
 # than expanded, a second declaration is refused rather than silently first-wins,
@@ -223,14 +229,16 @@ dod_stage_bugtests() {
 
   # Never evidence of a project test, in EITHER direction of containment.
   _dg_proj="$(pwd -P)"
+  _dg_tab="$(printf '\t')"
   _dg_never="$(cd -P docs 2>/dev/null && pwd)
 $(cd -P .git 2>/dev/null && pwd)
 $(cd -P scripts 2>/dev/null && pwd)
 $(cd -P .githooks 2>/dev/null && pwd)"
-  if [ ! -f .blueprint-root ]; then
-    _dg_never="$_dg_never
-$(cd -P "${BP_CODE_ROOT:-.}/tests" 2>/dev/null && pwd)"
-  fi
+  # The blueprint's own tests/ is its own regression suite and is searched whole.
+  # Anywhere else it is the SHIPPED directory: its top level is the project's
+  # (founder rule), everything below it is the blueprint's.
+  _dg_shipped=""
+  [ -f .blueprint-root ] || _dg_shipped="$(cd -P "${BP_CODE_ROOT:-.}/tests" 2>/dev/null && pwd)"
 
   _dg_plan=""
   _dg_searched=""
@@ -247,28 +255,47 @@ $(cd -P "${BP_CODE_ROOT:-.}/tests" 2>/dev/null && pwd)"
       *) _dg_skipped="$_dg_skipped $_dg_r(outside the project)"; continue ;;
     esac
     _dg_why=""
-    while IFS= read -r _dg_x; do
-      [ -n "$_dg_x" ] || continue
-      if [ "$_dg_rp" = "$_dg_x" ]; then
-        _dg_why="is ${_dg_x##*/}/"
-        break
+    _dg_mode="full"
+    if [ -n "$_dg_shipped" ]; then
+      if [ "$_dg_rp" = "$_dg_shipped" ]; then
+        _dg_mode="shallow"
+      else
+        case "$_dg_rp/" in
+          "$_dg_shipped"/*) _dg_why="inside tests/" ;;
+        esac
+        case "$_dg_shipped/" in
+          "$_dg_rp"/*) _dg_why="contains tests/" ;;
+        esac
       fi
-      case "$_dg_x/" in
-        "$_dg_rp"/*) _dg_why="contains ${_dg_x##*/}/"; break ;;
-      esac
-      case "$_dg_rp/" in
-        "$_dg_x"/*) _dg_why="inside ${_dg_x##*/}/"; break ;;
-      esac
-    done <<EOF
+    fi
+    if [ -z "$_dg_why" ]; then
+      while IFS= read -r _dg_x; do
+        [ -n "$_dg_x" ] || continue
+        if [ "$_dg_rp" = "$_dg_x" ]; then
+          _dg_why="is ${_dg_x##*/}/"
+          break
+        fi
+        case "$_dg_x/" in
+          "$_dg_rp"/*) _dg_why="contains ${_dg_x##*/}/"; break ;;
+        esac
+        case "$_dg_rp/" in
+          "$_dg_x"/*) _dg_why="inside ${_dg_x##*/}/"; break ;;
+        esac
+      done <<EOF
 $_dg_never
 EOF
+    fi
     if [ -n "$_dg_why" ]; then
       _dg_skipped="$_dg_skipped $_dg_r($_dg_why)"
       continue
     fi
-    _dg_plan="$_dg_plan$_dg_r
+    _dg_plan="$_dg_plan$_dg_r$_dg_tab$_dg_mode
 "
-    _dg_searched="$_dg_searched $_dg_r"
+    if [ "$_dg_mode" = shallow ]; then
+      _dg_searched="$_dg_searched $_dg_r(top level only)"
+    else
+      _dg_searched="$_dg_searched $_dg_r"
+    fi
   done <<EOF
 $_dg_rootlist
 EOF
@@ -298,8 +325,19 @@ EOF
     # paths above stay cwd-relative on purpose — those are the PROJECT's own
     # lifecycle files and do not move.
     _dg_hit=""
-    while IFS= read -r _dg_r; do
-      if [ -n "$_dg_r" ] && grep -raqE "BUG-0*${_dg_n}\b" "$_dg_r" 2>/dev/null; then
+    while IFS="$_dg_tab" read -r _dg_r _dg_mode; do
+      [ -n "$_dg_r" ] || continue
+      if [ "$_dg_mode" = shallow ]; then
+        # -maxdepth 1 IS the guarantee. One level down is where every shipped
+        # suite lives, so this must never become a recursive search.
+        if [ -n "$(find "$_dg_r" -maxdepth 1 -type f \
+                     \( -name '*.spec.ts' -o -name '*.spec.js' \
+                        -o -name '*.test.ts' -o -name '*.test.js' -o -name '*.sh' \) \
+                     -exec grep -laE "BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
+          _dg_hit=1
+          break
+        fi
+      elif grep -raqE "BUG-0*${_dg_n}\b" "$_dg_r" 2>/dev/null; then
         _dg_hit=1
         break
       fi

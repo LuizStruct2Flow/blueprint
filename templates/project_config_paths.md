@@ -30,15 +30,18 @@ Rules the gate applies to this list:
   A malformed or duplicated declaration is refused rather than guessed at.
 - **Inside this repo only.** A root that resolves outside it — `../elsewhere`,
   an absolute path, a symlink pointing away — is refused.
-- **`tests/`, `docs/`, `.git/`, `scripts/` and `.githooks/` never count**, and
-  neither does anything inside or containing them. `tests/` holds the suites the
-  blueprint ships, which name the blueprint's bug numbers; `docs/` holds the
-  bug's own row; the other two are blueprint-managed code. So do not list `.`,
-  and note that `tests/e2e` and snapshots at the `tests/` root do not count
-  either, pending a founder decision on the layout (TASK-039).
+- **`docs/`, `.git/`, `scripts/` and `.githooks/` never count**, and neither
+  does anything inside or containing them. `docs/` holds the bug's own row; the
+  other two are blueprint-managed code naming the blueprint's bug numbers. So
+  do not list `.`.
+- **Only the top level of `tests/` is yours.** A test file sitting directly in
+  `tests/` — the snapshot layout, `tests/own.snap.test.ts` — counts, because the
+  blueprint ships no test file there. Everything in a subdirectory of `tests/`
+  is a suite the blueprint ships, so `tests/e2e` does **not** count: put E2E
+  tests somewhere of their own, such as `e2e/`, and list it here.
 
-Put this project's tests somewhere of its own — `backend/src`, `frontend/src`,
-`e2e/` — and list those directories here.
+Put this project's other tests somewhere of its own — `backend/src`,
+`frontend/src`, `e2e/` — and list those directories here.
 
 ## CI
 

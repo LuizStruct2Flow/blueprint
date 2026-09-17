@@ -113,9 +113,9 @@ the 69-entry hand-kept array.
   now runs after that read and before any push. The secret checks still run
   before any remote contact.
 - `tests/blueprint-relocation` and `bp_blueprint_path`'s `scaffolding/` branch
-  are removed (§5, Stage 3 dropped). `bp_base_path`'s `scaffolding/` branches in
-  `scripts/lib/request.sh`, and their cases in `a2bp-build` and
-  `a2bp-contamination`, remain for that cleanup.
+  are removed (§5, Stage 3 dropped). The cleanup then removed `bp_base_path`
+  with its `a2bp-build` and `a2bp-contamination` cases, and the `scaffolding/`
+  probes in `.githooks/pre-push` and `.githooks/commit-msg`.
 
 ### 4.2 Retirement (decision 9, corrected)
 
@@ -241,6 +241,7 @@ the end.
 - linkedin-watcher-agent's matching `LICENSE` will be offered for retirement. Identical bytes prove eligibility, not intent, so the answer there is `n`.
 - Adoption baselines and partial pulls are not per-file provenance. An edited candidate is reported and retained.
 - The shipped `.gitattributes` carries blueprint-only lines, which are harmless downstream.
+- Pull replaces a symlinked managed file with a regular file, because the write is atomic. None of the three derived projects uses symlinks.
 
 ## 9. Founder questions
 

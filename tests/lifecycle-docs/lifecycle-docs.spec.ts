@@ -312,6 +312,54 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     })
   })
 
+  it('BUG-138 a TASK folder stranded in a state its row has left is named, not just a BUG one', async () => {
+    await scenario('lifecycle-138-task-folder', async (s) => {
+      const files = healthyTree()
+      // TASK-022's row lives in BACKLOG.md, not BUGS.md — the healthy tree
+      // already carries a BACKLOG.md row in backlog/, so add one for this state.
+      files['waiting-acceptance/BACKLOG.md'] =
+        TABLE_HEAD + '| **TASK-201** | a real row | fixed |\n'
+      files['done/TASK-201-stranded/PLAN.md'] = '# plan\n'
+
+      const scan = await scanTree(s, 'bp', files)
+
+      expect(scan.orphans).toEqual(['done/TASK-201-stranded'])
+    })
+  })
+
+  it('BUG-138 a PLAN-TASK-NNN.md travelling with its row is not flagged', async () => {
+    await scenario('lifecycle-138-plan-task', async (s) => {
+      const files = healthyTree()
+      files['waiting-acceptance/BACKLOG.md'] =
+        TABLE_HEAD + '| **TASK-202** | a real row | fixed |\n'
+      files['waiting-acceptance/PLAN-TASK-202.md'] = '# plan\n'
+
+      const scan = await scanTree(s, 'bp', files)
+
+      expect(scan.orphans).toEqual([])
+    })
+  })
+
+  it('BUG-138 two loose files sharing an item prefix in one state need a folder (DoD §1a)', async () => {
+    await scenario('lifecycle-138-loose-pair', async (s) => {
+      const files = healthyTree()
+      files['done/BACKLOG.md'] = TABLE_HEAD + '| **TASK-203** | a real row | fixed |\n'
+      // Two loose files for the same item, neither wrapped in a folder — the
+      // real-world shape is done/TASK-018-CONVENTIONS.md plus
+      // PLAN-TASK-018.md, both loose in the same state folder.
+      files['done/PLAN-TASK-203.md'] = '# plan\n'
+      files['done/TASK-203-notes.md'] = '# notes\n'
+
+      const scan = await scanTree(s, 'bp', files)
+
+      expect(scan.orphans).toEqual([])
+      expect(scan.looseGroups).toHaveLength(1)
+      expect(scan.looseGroups[0]).toBe(
+        'done/TASK-203: PLAN-TASK-203.md, TASK-203-notes.md',
+      )
+    })
+  })
+
   it('THE REAL TREE — artefacts sit with their rows, no table lies, every committed bug has a row', async () => {
     const docs = join(REPO_ROOT, 'docs')
     const scan = await scanLifecycleDocs(docs)

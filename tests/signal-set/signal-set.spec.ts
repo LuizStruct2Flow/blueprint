@@ -20,6 +20,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { join } from 'node:path'
 import { scenario, type Scenario } from '../harness/index.js'
 
 /** A baton with prose on both sides of the table, so "only the rows change" is checkable. */
@@ -42,9 +43,19 @@ async function publisher(s: Scenario, name: string) {
   const dir = `${name}/`
   const baton = await s.fs.write(`${dir}AGENT_SIGNAL.md`, SEED)
 
-  const publish = (args: string[]) =>
+  // BUG-140: signal-set.sh now validates --holder against a roster, read via
+  // AGENT_ROSTER_FILE when set (same shape as AGENT_SIGNAL_FILE/--file for the
+  // baton). Pointed at a path that does not exist, the check degrades to a
+  // no-op — the same way it does on a checkout with no live AGENT_ROSTER.md —
+  // so the plain "H"/"NEW"/"OLD" holders every other case in this file uses
+  // are unaffected. tests/signal-set/roster below overrides this per case to
+  // exercise the check itself.
+  const rosterFile = join(s.workspace.root, dir, 'AGENT_ROSTER.md')
+
+  const publish = (args: string[], env: Record<string, string> = {}) =>
     s.runScript('scripts/signal-set.sh', ['--file', baton, ...args], {
       cwd: s.workspace.root,
+      env: { AGENT_ROSTER_FILE: rosterFile, ...env },
     })
 
   /** How a reader recovers the cell: strip the row prefix and the trailing delimiter. */
@@ -255,10 +266,15 @@ describe('signal-set.sh publishes the whole baton in one atomic write', () => {
       )
       await s.fs.mkdirp('six/signal-history.log')
 
+      // BUG-140: this case builds its own baton rather than going through
+      // publisher(), so it needs the same AGENT_ROSTER_FILE-points-nowhere
+      // degrade by hand — unset, --holder NEW would be refused against the
+      // real checkout's roster before ever reaching the journal-append logic
+      // this case exists to exercise.
       const r = await s.runScript(
         'scripts/signal-set.sh',
         ['--file', baton, '--holder', 'NEW', '--state', 'NEWSTATE', '--task', 'flip'],
-        { cwd: s.workspace.root },
+        { cwd: s.workspace.root, env: { AGENT_ROSTER_FILE: join(s.workspace.root, 'six/AGENT_ROSTER.md') } },
       )
 
       expect(
@@ -274,6 +290,63 @@ describe('signal-set.sh publishes the whole baton in one atomic write', () => {
         r.output.toLowerCase(),
         'the message does not say the baton IS published — a caller may retry and double-publish',
       ).toContain('published')
+    })
+  })
+
+  describe('BUG-140 — Holder must be a persona the roster names', () => {
+    const ROSTER =
+      '# Agent Roster\n\n## Members\n\n| Role | Name | Backing agent |\n|---|---|---|\n' +
+      '| Orchestrator | Alisa | Claude Code |\n'
+
+    it('#140a an unrostered Holder is refused, and the previous baton is untouched', async () => {
+      await scenario('signal-set-140a', async (s) => {
+        const p = await publisher(s, '140a')
+        await s.fs.write('140a/AGENT_ROSTER.md', ROSTER)
+        const before = await p.content()
+
+        const r = await p.publish(['--holder', 'NoSuchPersona', '--state', 'S', '--task', 't'])
+        expect(r.code, 'signal-set.sh --holder NoSuchPersona PUBLISHED').not.toBe(0)
+        expect(r.output, 'the refusal does not name the roster file').toContain('AGENT_ROSTER.md')
+        expect(await p.content(), 'a refused publish modified the signal').toBe(before)
+      })
+    })
+
+    it('#140b a rostered Holder still publishes', async () => {
+      await scenario('signal-set-140b', async (s) => {
+        const p = await publisher(s, '140b')
+        await s.fs.write('140b/AGENT_ROSTER.md', ROSTER)
+
+        const r = await p.publish(['--holder', 'Alisa', '--state', 'S', '--task', 't'])
+        expect(r.code, `a rostered Holder was refused:\n${r.output}`).toBe(0)
+        expect(await p.content(), 'the Holder row was not rewritten').toMatch(/^\| Holder \| Alisa \|$/m)
+      })
+    })
+
+    it('#140c no roster on disk yet: any Holder still publishes (fresh-clone degrade), and the skip is announced', async () => {
+      await scenario('signal-set-140c', async (s) => {
+        // No AGENT_ROSTER.md is written for this case — the fixture's default,
+        // set up by publisher() itself. A checkout before
+        // `cp AGENT_ROSTER.example.md AGENT_ROSTER.md` must still be able to
+        // publish, or bootstrap itself is blocked. The degrade must SAY it
+        // skipped the check, though — a silent skip is the exact failure mode
+        // this whole batch (BUG-139/BUG-140) is about.
+        const p = await publisher(s, '140c')
+
+        const r = await p.publish(['--holder', 'AnyoneAtAll', '--state', 'S', '--task', 't'])
+        expect(r.code, `publishing with no roster on disk was refused:\n${r.output}`).toBe(0)
+        expect(r.output, 'the roster skip was not announced').toContain('skipped the roster check')
+      })
+    })
+
+    it('#140d Holder = Nobody is accepted as the sentinel for "the mic is free"', async () => {
+      await scenario('signal-set-140d', async (s) => {
+        const p = await publisher(s, '140d')
+        await s.fs.write('140d/AGENT_ROSTER.md', ROSTER)
+
+        const r = await p.publish(['--holder', 'Nobody', '--state', 'IDLE', '--task', 't'])
+        expect(r.code, `Holder=Nobody was refused against a real roster:\n${r.output}`).toBe(0)
+        expect(await p.content(), 'the Holder row was not rewritten').toMatch(/^\| Holder \| Nobody \|$/m)
+      })
     })
   })
 })

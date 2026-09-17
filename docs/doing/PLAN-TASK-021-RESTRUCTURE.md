@@ -177,6 +177,23 @@ it, with no classification of prose.
   root `CLAUDE.md` and `README.md` against the bootstrapped tree. `bootstrap-gate`
   #2/#3 still cover `docs/`.
 
+**As built (2026-09-17):**
+
+- Conventions, not file lines, where one exists: `docs/requirements/**` (keeping
+  its README), `docs/assets/**`, `docs/way-of-working.*` (replacing the PDF-only
+  line), `docs/talk-*`. Explicit: `docs/A2BP_PLAYBOOK.md`, `scripts/build-deck.sh`,
+  `CLAUDE.blueprint.md`. Proof: `bootstrap-contents` #11, with a fixture
+  requirement document no line names, and #12 (root links), which found
+  `CLAUDE.md -> templates/README.md` dead in every project since BUG-009.
+- `CLAUDE.blueprint.md` also took DOCUMENTATION.md's blueprint sections and the
+  root `project_config_*.md` note. Documentation capability 3 stays in CLAUDE.md,
+  stated generically. The a2bp output no longer names the playbook.
+- `doc-links`' real-tree floor dropped from 20 to 10: it ships, and a fresh
+  project's `docs/` now holds 17 links. `template-source` #import-1 names the
+  blueprint-only import.
+- Retirement needed no change. A Stage 1 bootstrap pulled forward was offered all
+  eight newly unshipped files.
+
 ### Stage 3 — the physical move: DROPPED, approved by the founder 2026-09-16
 
 It would take about 180 path moves and link rewrites. It would also need

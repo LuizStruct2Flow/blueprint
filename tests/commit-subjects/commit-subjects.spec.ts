@@ -529,7 +529,7 @@ describe('TASK-022 — CI checks every commit of a push', () => {
     await scenario('cs-t22-bugtest', async (s) => {
       const r = await pushRun(s, 'BUG#3: fixed with no test')
       expect(r.code, `a BUG with no test passed CI\n${r.output}`).not.toBe(0)
-      expect(r.output).toContain('No test under the searched roots names: BUG-3')
+      expect(r.output).toContain('No test TITLE and no row justification under the searched roots names: BUG-3')
       expect(r.output, 'the row stage failed too, so #2 proves nothing').toContain('items: BUG-2 BUG-3')
     })
   })

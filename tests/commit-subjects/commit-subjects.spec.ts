@@ -447,7 +447,15 @@ describe('TASK-022 — CI checks every commit of a push', () => {
   }
 
   /** Push the fixture, then run every push-only `run:` step of the workflow. */
-  async function pushRun(s: Scenario, middle: string, extra: Record<string, string> = {}) {
+  async function pushRun(
+    s: Scenario,
+    middle: string,
+    extra: Record<string, string> = {},
+    event: (sha: { base: string; tip: string }) => { before: string; after: string } = (x) => ({
+      before: x.base,
+      after: x.tip,
+    }),
+  ) {
     const repo = await s.gitRepo('repo')
     const files: Record<string, string> = {
       'docs/doing/BACKLOG.md': '| **TASK-1** | fixture |\n',
@@ -459,11 +467,11 @@ describe('TASK-022 — CI checks every commit of a push', () => {
       await s.fs.copyIn(join(REPO_ROOT, 'scripts', lib), join('repo/scripts', lib))
     }
     for (const [rel, body] of Object.entries(files)) await s.fs.write(join('repo', rel), body)
-    const sha = { before: await repo.commitAll('TASK#1: base'), after: '' }
+    const base = await repo.commitAll('TASK#1: base')
     await s.fs.write('repo/middle.txt', 'x\n')
     await repo.commitAll(middle)
     await s.fs.write('repo/tip.txt', 'y\n')
-    sha.after = await repo.commitAll('BUG#2: valid tip')
+    const sha = event({ base, tip: await repo.commitAll('BUG#2: valid tip') })
 
     const wf = parseDocument(
       await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
@@ -523,6 +531,24 @@ describe('TASK-022 — CI checks every commit of a push', () => {
       expect(r.code, `a BUG with no test passed CI\n${r.output}`).not.toBe(0)
       expect(r.output).toContain('No test under the searched roots names: BUG-3')
       expect(r.output, 'the row stage failed too, so #2 proves nothing').toContain('items: BUG-2 BUG-3')
+    })
+  })
+
+  it('#4 a force push is not refused: a rollback passes, a rewritten history checks the tip', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('cs-t22-force', async (s) => {
+      // Rollback: the new tip is an ancestor of the old one, so nothing new was pushed.
+      const back = await pushRun(s, 'no item named here', {}, (x) => ({ before: x.tip, after: x.base }))
+      expect(back.code, `a rollback push was refused\n${back.output}`).toBe(0)
+      expect(back.output).toContain('nothing new to check')
+    })
+    await scenario('cs-t22-rewrite', async (s) => {
+      // The old tip is not in the checkout, as after a history rewrite in a fresh clone.
+      const gone = 'f'.repeat(40)
+      const r = await pushRun(s, 'no item named here', {}, (x) => ({ before: gone, after: x.tip }))
+      expect(r.code, `a rewritten-history push was refused\n${r.output}`).toBe(0)
+      expect(r.output).toContain('checking the tip commit only')
     })
   })
 })

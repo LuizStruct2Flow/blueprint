@@ -48,7 +48,7 @@ struct2flow agent protocol; this file holds what's specific to
 
 ## Observability stack
 
-Implements the blueprint's §6.1 observability rule (CLAUDE.md
+Implements the blueprint's observability rule (CLAUDE.md
 §"Observability is a main concern"). The four capabilities are
 non-negotiable; the mechanism below is this project's choice. Pick a
 recipe from [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) and fill in

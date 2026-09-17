@@ -587,7 +587,7 @@ Each recipe delivers the same four capabilities — they just differ in plumbing
 
 # 4 · Observability — wired into the DoD
 
-For every new user-facing route, command, or job — `DoD.md` §6.1 requires:
+For every new user-facing route, command, or job — the per-push checklist in `docs/OBSERVABILITY.md`, walked at handoff:
 
 - [ ] **Error capture** — structured boundaries; no silent swallowing
 - [ ] **Agent-readable retrieval path** — one command gets the data
@@ -726,8 +726,8 @@ The **silent** failure mode: no exception, no alert, just compounding embarrassm
 2. **Internal artefacts move with the state they describe.**
    `FEATURES.md`, `findings.md`, threat-model entries, ADRs, runbooks — updated *as* the code changes, not after.
 
-3. **Blueprint-level changes update the deck + recipe doc in the same commit.**
-   `docs/way-of-working.md` is the pitch surface. It has self-violated **four times this week** (Cost; "six"→"seven"; Documentation itself; persona-team framing). Fix in flight: `docs/A2BP_PLAYBOOK.md`.
+3. **A rule change updates every document that restates the rule, in the same commit.**
+   In the blueprint that includes this deck: the slide moves with the rule, and the PDF is not rebuilt per change.
 
 4. **Drift is detected, not assumed away.**
    Promotion criteria for the sync list; pre-push grep-based hints for known drift patterns; handoff-time checklist box that refuses the mic flip if any sync-list file is stale.
@@ -747,7 +747,7 @@ The **silent** failure mode: no exception, no alert, just compounding embarrassm
 - **Recipe C — Customer help portal + status + privacy/TOS**
   Mature SaaS. Help portal (Intercom / Zendesk) with `help-index.md` in repo; public status page; **versioned** legal docs; ADRs; runbooks co-located with alerts.
 
-Two-table sync list (External / Internal) in `project_config_dod.md` §"Doc-sync list". DoD §6.4 is the per-push gate.
+Two-table sync list (External / Internal) in `project_config_dod.md` §"Doc-sync list". DoD §5 is the rule; the recipe doc's per-push checklist is walked at handoff.
 
 ---
 

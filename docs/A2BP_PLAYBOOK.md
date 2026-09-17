@@ -18,7 +18,7 @@ rows and pitch-surface entries travel with the change requires the blueprint's
 whole tree in front of you — so it belongs to the session that has it. A
 requester cannot do it, and the implementer cannot skip it.
 
-**Do every step here in one session.** Four self-violations of the §6.4 rule in
+**Do every step here in one session.** Four self-violations of the same-commit deck rule in
 a single week all came from deferring the ripples to "a later session in the
 blueprint". Later is where doc-sync goes to die.
 
@@ -154,13 +154,13 @@ which request is which:
 |---|---|---|
 | **A. Principle change** | New / changed `## X is a main concern` in CLAUDE.md | Deck intro slide concern count + that concern's slides; recipe doc; README hero concern table; CLAUDE.blueprint.md §"docs/way-of-working.md is the canonical pitch surface" mirror list |
 | **B. Recipe change** | Edit to `docs/OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md` / `DOCUMENTATION.md` | Deck recipes slide for that concern; possibly `project_config_overview.md` §"X stack" table if a new mechanism row was implied |
-| **C. Gate change** | Edit to `docs/DoD.md` (§4, §6.x, §7.D) | Deck Quality slides if §3 or §4 changed; `project_config_dod.md` if a new table row was implied; cross-references in other DoD subsections |
+| **C. Gate change** | Edit to `docs/DoD.md` (§4, §5, §6, §7) | Deck Quality slides if §3 or §4 changed; `project_config_dod.md` if a new table row was implied; cross-references in other DoD subsections |
 | **D. Pre-push change** | Edit to `.githooks/pre-push` or `scripts/install-toolchain.sh` | DoD §4; CLAUDE.md §"Before Every Push"; README "What's in the blueprint" tree; `project_config_dod.md` §"Pre-push gate — project commands" table |
 | **E. Sync layer change** | Edit to `scripts/blueprint`, `scripts/new-project.sh`, the `MANAGED_FILES` array | README §"The sync model"; CLAUDE.md §"Blueprint sync"; this playbook (if the calling pattern changed) |
 | **F. Agent layer change** | Edit to `AGENTS.md`, `AGENT_ROSTER.example.md`, `scripts/agent-activity.sh`, `scripts/start-codex-signal-watch.sh`, `scripts/start-gemini-signal-watch.sh`, `scripts/team-kickoff.sh` | Deck "persona team — radio-over" slide; CLAUDE.blueprint.md pitch-surface item #9; README hero paragraph if the framing changed |
 | **G. Stack / architecture default** | Edit to `STACK_DEFAULTS.md` | Deck Architecture slide; CLAUDE.md `## Architecture Principles`; any `project_config_overview.md §"Tech stack"` defaults that mirror it |
 | **H. Cosmetic / typo / doc-only** | Single-character fix, link repair, prose clarification | None usually; commit straight |
-| **I. New (or removed) concern** | Adding the Nth concern (Cost was; Documentation was). Removing one is the same shape inverted. | **Everything in A**, plus: intro slide concern count (search `\bsix\b`, `\bseven\b`, `\beight\b`, `\bnine\b`); "Where to read more" slide; README tree; possibly new `docs/<CONCERN>.md` recipe file; possibly new `project_config_<concern>.md` template; possibly new `project_config_overview.md` §"<X> stack" section. This class is heavy on purpose — it's the slowest path *and* the one most likely to slip §6.4. |
+| **I. New (or removed) concern** | Adding the Nth concern (Cost was; Documentation was). Removing one is the same shape inverted. | **Everything in A**, plus: intro slide concern count (search `\bsix\b`, `\bseven\b`, `\beight\b`, `\bnine\b`); "Where to read more" slide; README tree; possibly new `docs/<CONCERN>.md` recipe file; possibly new `project_config_<concern>.md` template; possibly new `project_config_overview.md` §"<X> stack" section. This class is heavy on purpose — it's the slowest path *and* the one most likely to slip the same-commit deck rule. |
 
 Most a2bp's are class A, B, or H.
 
@@ -175,8 +175,8 @@ staging the commit. Open them in this order:
    establish what the change means.
 2. **Templates next** — `project_config_*.md`. These reflect the change
    in per-project config.
-3. **Surface docs last** — README hero + concern table, the deck.
-4. **Generated artefacts dead last** — the PDF.
+3. **Surface docs last** — README hero + concern table, the deck markdown.
+   The PDF is not regenerated per change (founder, 2026-09-17).
 
 If you find yourself wanting to skip one because "it's a small change",
 that's the failure mode — skip none. The grep-based drift hints
@@ -187,18 +187,14 @@ are your friend for catching every callsite.
 
 ## Step C — The deck dance (if any class touched the deck)
 
-Always the same five steps, in this order:
+Always the same four steps, in this order:
 
 1. **Edit the slide(s)** in `$BLUEPRINT_ROOT/docs/way-of-working.md`.
 2. **Sweep prose mentions** of any count, name, or framing that changed.
    ```sh
    grep -niE "\bsix\b|\bseven\b|\beight\b" $BLUEPRINT_ROOT/docs/way-of-working.md $BLUEPRINT_ROOT/README.md
    ```
-3. **Rebuild the PDF.**
-   ```sh
-   cd $BLUEPRINT_ROOT && scripts/build-deck.sh
-   ```
-4. **Visual check** the changed slides by rendering PNGs and reading
+3. **Visual check** the changed slides by rendering PNGs and reading
    them — overflow is real and not caught by the build.
    ```sh
    rm -rf /tmp/deck-check && mkdir /tmp/deck-check
@@ -206,7 +202,7 @@ Always the same five steps, in this order:
      $BLUEPRINT_ROOT/docs/way-of-working.md -o /tmp/deck-check/p.png
    # Read the slide(s) you changed.
    ```
-5. **Stage the slide source + PDF** for the commit.
+4. **Stage the slide source** for the commit. The PDF is not rebuilt.
 
 ---
 
@@ -214,7 +210,7 @@ Always the same five steps, in this order:
 
 You are working in the blueprint, so how the request's content gets in is your
 call: merge the PR, cherry-pick it, or retype the change. **What must not happen
-is the request landing and the ripples following later** — that is the §6.4
+is the request landing and the ripples following later** — that is the same-commit deck rule
 failure mode, and it is why this is one commit rather than two.
 
 If you merge the PR, the ripples still need a commit of their own on top, in the
@@ -253,7 +249,7 @@ Commit message conventions:
   the rule verbatim; the deck wording needed rework because the slide already
   said something narrower" is the sentence a future reader needs.
 - **List every ripple** — the bulleted list of files-touched is what proves
-  §6.4 was respected. Reviewers (you, later) read this list to verify.
+  the same-commit deck rule was respected. Reviewers (you, later) read this list to verify.
 
 ---
 
@@ -289,7 +285,6 @@ follow-up. This is the loop closing properly.
 - A commit in the blueprint that contains only the `a2bp`'d file. Class A,
   B, C, D, E, F, G, and I all imply at least one ripple. Class H is the
   only one that legitimately ships alone.
-- A PDF that wasn't rebuilt. The `.md` and `.pdf` must move together.
 - A push to the blueprint without verifying drift in the originating
   project afterward. If the loop didn't close, the rule didn't hold.
 
@@ -297,7 +292,7 @@ follow-up. This is the loop closing properly.
 
 ## The recursive joke (running tally)
 
-The §6.4 rule self-violated **four times** the week it was added; each
+The same-commit deck rule self-violated **four times** the week it was added; each
 violation was a missing deck or recipe-doc update after a
 back-propagation:
 

@@ -15,6 +15,27 @@
 #   Linux   unpack the CLI from sonarqube.org into ~/.local/bin
 #   or add it to scripts/install-toolchain-project.sh if your project wants it
 #   installed with the rest of the toolchain.
+#
+# Pass --no-coverage to skip regenerating coverage/lcov.info when the pre-push
+# gate just ran. SonarQube has no shell analyser, so this also imports
+# ShellCheck findings over the files the gate lints (SC2317 left out); files
+# under a dot-directory such as .githooks/ are never indexed and stay with the
+# gate's ShellCheck stage.
+#
+# Triage workflow (agent-driven; the founder rarely opens the UI):
+#   1. Scan: npm run sonar. The first run creates the project if the token may.
+#   2. Triage in severity order — BUG, then BLOCKER/CRITICAL, MAJOR, MINOR smells:
+#        bash scripts/sonar-api.sh "/api/issues/search?componentKeys=<projectKey>&types=BUG&ps=20"
+#        bash scripts/sonar-api.sh "/api/issues/search?componentKeys=<projectKey>&types=CODE_SMELL&severities=BLOCKER,CRITICAL&ps=20"
+#   3. Fix each finding, or defer it with the rule, the count and the reason in
+#      the commit message. A silent deferral is a smell of its own.
+#   4. Re-scan and check the Quality Gate:
+#        bash scripts/sonar-api.sh "/api/qualitygates/project_status?projectKey=<projectKey>"
+#      OK is the bar; ERROR blocks the handoff.
+#   5. Re-scan after each fix commit: the gate judges new-code violations on
+#      their own, so touching a line can re-flag it.
+# Coverage comes from the same lcov report the project's runner writes, so
+# SonarQube shows coverage across time while the gate enforces it per push.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

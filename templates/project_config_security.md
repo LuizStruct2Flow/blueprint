@@ -10,7 +10,7 @@ project's security DoD.
 
 ---
 
-## Stack recipe (DoD §6.2)
+## Stack recipe (docs/SECURITY.md)
 
 > Pick exactly one — these are the three recipes in `docs/SECURITY.md`.
 > Combinations are fine (e.g. an AWS backend + a desktop companion app);

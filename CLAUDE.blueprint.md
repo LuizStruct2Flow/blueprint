@@ -143,9 +143,9 @@ What this means for the agent:
 
 The deck at [`docs/way-of-working.md`](docs/way-of-working.md) is how
 struct2flow is presented to customers, investors, hires, and at talks.
-**Every change to a blueprint-level concern lands in the deck in the
-same commit** — not "I'll update the deck later". The concerns the
-deck currently mirrors:
+**Every change to a blueprint-level concern refreshes the deck markdown in the
+same commit** — not "I'll update the deck later" (founder, 2026-09-17). The PDF
+is not regenerated per change. The concerns the deck mirrors:
 
 1. Architecture (DDD + Clean + Hexagonal — `STACK_DEFAULTS.md`)
 2. Lifecycle (four states — `docs/DoD.md` §1)
@@ -154,56 +154,20 @@ deck currently mirrors:
 5. Security (`docs/SECURITY.md` + CLAUDE.md §"Security is a main concern")
 6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
 7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
-8. Documentation (`docs/DOCUMENTATION.md` + CLAUDE.md §"Documentation is a main concern" + DoD §6.4)
+8. Documentation (`docs/DOCUMENTATION.md` + DoD §5)
 9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
 10. Blueprint sync (CLAUDE.md §"Blueprint sync" + this file + README.md §"The sync model" + `scripts/blueprint`)
 
-Tightening a rule in DoD §3? Touch the matching deck slide. Adding a
-new principle to CLAUDE.md? New slide(s) under the right section
-number. Adding a new CLI to `scripts/`? Update the agent-layer or
-sync slide. **Drift between deck and reality reads to a customer the
-same way a stale README reads to a new hire** — and the deck is the
-pitch surface, so drift is more costly here than anywhere else.
+In the same commit as a concern change:
 
-If a change is genuinely internal-only and the deck doesn't need to
-mention it (e.g. a typo fix in a comment), say so in the commit
-message. Default to updating the deck.
+- **The deck slide** that states the rule, count or recipe matches it. A change
+  that is genuinely internal-only says so in the commit message.
+- **The concern's recipe doc** (`docs/<CONCERN>.md`) matches, if the change
+  touched Observability, Security, IaC, Documentation or Cost.
+- **The README concern table** matches, if a concern was added, removed or
+  renamed.
 
-### The blueprint's handoff boxes for a concern change
-
-In addition to DoD §6.4, every push that **changes a blueprint-level concern**:
-
-- [ ] **Deck updated in the same commit** — `docs/way-of-working.md`
-      reflects the new concern count, principle, or recipe. PDF
-      regenerated (`scripts/build-deck.sh`).
-- [ ] **Per-concern recipe doc updated** — if the change touched
-      Observability, Security, IaC, Documentation, or Cost, the
-      corresponding `docs/<CONCERN>.md` matches.
-- [ ] **README concern table matches** — if the change added,
-      removed, or renamed a concern, the README table reflects the
-      new shape.
-
-What you don't ship: a blueprint-level concern change with the deck left at the
-old count (it self-violated twice in one week — this gate is the third-time
-backstop), or a deck slide that names "six concerns" when there are seven.
-
-### The blueprint's own documentation stack
-
-The blueprint is itself a project that ships documentation. It uses
-Recipe A (single-repo README-only) with extras: `docs/way-of-working.md`
-as the public pitch surface, `docs/DoD.md` as the methodology, and the
-per-concern recipe docs (`OBSERVABILITY.md` / `SECURITY.md` /
-`INFRASTRUCTURE.md` / `DOCUMENTATION.md`).
-
-The same-commit rule applies: any blueprint-level concern change touches
-the deck + the per-concern recipe doc + the README concern table in the
-same commit. This rule has self-violated **four** times in one week
-(Cost concern, "six" → "seven", Documentation itself, persona-team
-framing); the gate above is meant to catch the next occurrence at commit
-time.
-
-Every one of those was the same shape: a file landed in the blueprint via
-`a2bp` (or a direct edit), and the ripples were deferred to "a future session
-in the blueprint", which never happened. The fix is procedural:
+The rule self-violated four times in the week it was added, each time as a
+change landing with its ripples deferred to a later session that never came.
 [`docs/A2BP_PLAYBOOK.md`](docs/A2BP_PLAYBOOK.md) walks the ripple checklist, and
-§"Implementing a back-propagation request" above forbids the context-switch.
+§"Implementing a back-propagation request" above forbids the context switch.

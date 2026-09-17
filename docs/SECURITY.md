@@ -1,7 +1,7 @@
 # Security — keep secrets out, find vulns fast, fix before deploy
 
 The principle lives in [CLAUDE.md](../CLAUDE.md) §"Security is a main
-concern" and the DoD checklist in [DoD.md](DoD.md) §6.2. Both are
+concern", and its per-push checklist closes this file. Both are
 runtime-agnostic. This file holds the **recipes** — concrete patterns per
 runtime so projects don't reinvent the wheel.
 
@@ -325,3 +325,48 @@ When a security finding hits production:
 - A `findings.md` entry left untriaged across two consecutive
   grooming passes — either fix, defer with a date, or mark
   `Status: Accepted` with a sign-off.
+
+## Per-push checklist
+
+Walked with the handoff (DoD §7). These are judgement: only the scans the
+gate runs are checked by a mechanism.
+
+For every push:
+
+- [ ] **Secret scan clean** — `gitleaks detect` over the commits being
+      pushed passed in pre-push. No `--no-verify` shortcut. If a secret was
+      *ever* committed, it's been rotated, not just removed — the commit
+      does not have to reach `origin` for the credential to be burned.
+      (Not `protect --staged`: that scans the index, which is empty once the
+      commit exists, so it scanned nothing at all — A-03.)
+- [ ] **SAST clean** — Semgrep + lint security plugins ran clean
+      (or every suppression has a justification comment naming the
+      threat-model entry that makes it safe).
+- [ ] **SCA clean** — `osv-scanner` reports zero `MEDIUM`+ vulnerabilities
+      (CVSS >= 4.0) in project dependencies. This is what the pre-push hook
+      and CI both block on. Anything below `MEDIUM` is reported, not
+      blocking, and tracked in `docs/config/findings.md` with a planned
+      upgrade date.
+- [ ] **IaC clean** (if the push touches CDK / Terraform / k8s
+      manifests) — `trivy config` reports zero `HIGH`+ findings.
+
+For every push that adds a **new public surface** (route, command,
+container with ingress):
+
+- [ ] **Threat-model entry exists** — `project_config_security.md`
+      §"Trust boundaries" / §"Auth surfaces" / §"Sensitive data
+      classes" covers the new surface.
+- [ ] **DAST baseline scheduled** — CI ZAP baseline against the
+      preview environment is wired and passing (Recipe A / C) OR a
+      written justification why no DAST applies (Recipe B).
+- [ ] **Findings register reviewed** — every `[SEC]` finding in
+      `docs/config/findings.md` is either fixed, deferred with a
+      date, or `Status: Accepted` with a sign-off.
+
+What you don't ship:
+- Hard-coded secrets, even "just for local dev".
+- `// eslint-disable-next-line` / `// nosemgrep` / `# nosec`
+  without a justification comment.
+- A new public route without a corresponding ZAP baseline run.
+- A dep upgrade that introduces a new `MEDIUM`+ CVE without an
+  immediate rollback or pin.

@@ -89,7 +89,7 @@ one missing tool must not block the others.
   process if any of the thresholds above aren't met. The pre-push hook
   blocks on this.
 
-## Doc-sync list (DoD §6.4)
+## Doc-sync list (DoD §5)
 
 > The files that must move together with code changes. The blueprint
 > names the rule; you name the file set. The agent uses these lists
@@ -136,7 +136,7 @@ one missing tool must not block the others.
 | `project_config_infra.md` (rollback) | Team / on-call | New prod resource | Same commit as the IaC change |
 | `docs/architecture/ADR-*.md` *(Recipe C)* | Team / new hire | Architectural decision taken or reversed | Numbered, dated, same commit as embodying code |
 | `docs/runbooks/*.md` *(Recipe C)* | On-call / agent | New alert wired | Same PR as the alert; link in the alert payload |
-| `docs/done/INCIDENT-YYYY-MM-DD.md` | Team / regulator | Production incident | Within 48h of resolution (DoD §6.2) |
+| `docs/done/INCIDENT-YYYY-MM-DD.md` | Team / regulator | Production incident | Within 48h of resolution (docs/SECURITY.md §"Incident response") |
 | `docs/doing/HANDOVER.md` | Future-self / next session | End of any meaningful unit of work | Overwrite in place (DoD §10) |
 | | | | |
 

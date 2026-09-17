@@ -177,273 +177,33 @@ from the feed and from `blueprint drift`, and reports it on every run.
 
 ## §5 Documentation in sync
 
-> **Canonical treatment lives in §6.4 + `docs/DOCUMENTATION.md`.** This
-> section is the short-form rule that originated the discipline; §6.4
-> is the per-push gate with two tables (External / Internal); the
-> recipes doc names mechanisms per project shape.
+- **A user-facing change** (a user can see, click or read it) updates every file
+  in the project's doc-sync list, `project_config_dod.md` §"Doc-sync list", in
+  the same commit as the code. `README.md` is on that list by default: if a
+  visitor would notice the change, the README moves with it. Release notes are
+  append-only. *Judgement.*
+- **A code-state change moves the internal artefact that describes it**, in the
+  same commit: a fixed review finding gets `Status: Fixed` in
+  `docs/config/findings.md`, not just its row; a new trust boundary gets its
+  threat-model entry before the route ships. *Judgement.*
+- **A rule change updates every document that restates the rule**, in the same
+  commit. *Judgement.*
+- **Project user-surface rules** (localization parity, no internal customer
+  names on public pages, head invariants) live in `project_config_dod.md`
+  §"User-surface rules" and are gated like tests.
 
-For any **user-facing** change (new feature, changed behavior, new error
-the user can see), the project's **doc-sync list** moves in lockstep with
-the code commit.
+Recipes per project shape, and the per-push checklist:
+[`docs/DOCUMENTATION.md`](DOCUMENTATION.md).
 
-The struct2flow framework names this rule but each project owns its sync
-list. Define it in `project_config_dod.md` under "Doc-sync list". Typical
-entries:
-- Internal feature catalog (e.g. `docs/config/FEATURES.md`)
-- Customer-facing help page (e.g. `frontend/public/help.html`)
-- Customer-facing pricing / landing page bullets
-- Internal product / strategy doc (e.g. `docs/product-analysis.md`)
-- Internal release-notes source of truth (`docs/RELEASE-NOTES.md`)
-- Customer-facing in-app release notes (e.g. `frontend/public/release-notes.html`)
-- QA acceptance test catalog (e.g. `docs/config/ACCEPTANCE_TESTS.md`)
-- Localization files (i18n key sets per language)
+## §6 Quality and the engineering concerns
 
-**Rule of thumb**: if a user can see / click / read the change, every file
-in the project's sync list gets touched in the same commit as the code.
-New feature → new entries everywhere. Changed behavior → updated entries
-+ a "Changed" / "Improved" release-notes entry. Removed feature → delete
-+ a "Removed" / "Sunset" entry (release notes are append-only history).
-
-**Findings sync**: if you fix a Codex review finding tracked in
-`docs/config/findings.md` (or the project's equivalent), update the finding
-block there with a "Status: Fixed" section — not just the backlog row.
-
-**Project-specific user-surface rules** (localization key parity, no
-internal customer references on public pages, standard `<head>` invariants
-for static HTML, etc.) live in `project_config_dod.md` §"User-surface
-rules". Gate them like tests.
-
-### §5.1 README updates on every push
-
-The repo's top-level `README.md` is part of the doc-sync list **by
-default for every struct2flow project**. Treat it as the canonical
-entry point a new visitor reads first; if a push changes anything a
-visitor would notice, the README moves with the code.
-
-Specifically, before any `git push` to a public remote:
-
-- **New feature or new CLI surface** → README's Quick Start, command
-  list, or feature table mentions it.
-- **Removed feature / deprecated flag** → README no longer claims
-  the feature works.
-- **Architecture change** (e.g. layer reorganization, port/adapter
-  swap) → README's Architecture / Stack section reflects it.
-- **New dependency or runtime requirement** (Node version bump,
-  external service, new env var) → README install / setup section
-  covers it.
-- **Phase / status change** (e.g. SLICE-XX moved waiting-acceptance
-  → done) → README "Status" / "Phases" section updates.
-
-Internal-only changes (refactors that don't change the public
-surface, dev-tooling tweaks, documentation reorganization) do not
-require a README touch — but the founder is the judge. **When in
-doubt, update the README**: a stale README is a worse signal than a
-slightly over-broad commit. The pre-push checklist in §7 includes
-"README updated if user-visible". The reviewer in §7 should refuse
-the handoff if the README claim disagrees with the code state.
-
-## §6 Quality is non-negotiable
-
-The product's value is the quality of what it generates. Therefore:
-
-- If a fix "works" but the approach is ugly, brittle, or stitched from
-  overlapping fallbacks, it's **not a fix** — it's a deferred
-  regression. Stop, find the solution that belongs in the codebase.
-- Patch-on-patch stacks are a signal the architecture is being worked
-  around, not fixed. When you catch yourself adding a third fallback,
-  escalate to clean redesign with Codex + founder alignment.
-- Pick the **most evolutionary solution** — the one that composes well
-  with existing primitives, survives adjacent changes, and removes
-  surface area rather than adding it. Especially on the core USP paths
-  named in `project_config_overview.md`.
-- Acceptance is not "the test passes" — it is "the founder and the
-  customer would show this to someone else." Anything short is
-  unfinished work.
-
-When in doubt between quick patch and slower clean rewrite: pick the
-clean rewrite. Document why in the plan file and push for team + Codex
-alignment before committing.
-
-### §6.1 Observability — speed-to-fix is the quality differential
-
-The quality of working software is measured by how quickly we can find
-and fix errors when they happen. The difference between good and bad
-systems is the speed-to-fix differential. See CLAUDE.md §"Observability
-is a main concern" for the principle and `docs/OBSERVABILITY.md` for the
-recipes.
-
-For every new user-facing route, command, or job:
-
-- [ ] **Error capture** — structured error boundaries (level, event,
-      correlation id, error.message, error.stack). No silent swallowing,
-      no default-value fallbacks that hide failures.
-- [ ] **Agent-readable retrieval path** — the project's MALT-equivalent
-      pattern is documented and works: the agent can run one command (a
-      log-grep, an admin debug route, a `--diagnose` CLI flag) and get
-      the last N failures with full context. **No "paste me the log"
-      asks to the founder.**
-- [ ] **Alert wired** — threshold + destination declared in
-      `project_config_dod.md` §"Alerting". A capability live in
-      production without an alarm is not done.
-- [ ] **Diagnosis runbook** — the agent has tried-and-true diagnosis
-      steps for this error class, documented in CLAUDE.md (project
-      section), a memory entry, or `docs/diagnosis.md`.
-
-What you don't ship:
-- Silent fallbacks that swallow errors with a default value.
-- Unstructured log lines that can't be queried by field.
-- Errors the user sees but the agent can't.
-
-The §7 handoff checklist §E pulls these boxes in for any push that adds
-a new user-facing capability.
-
-### §6.2 Security — secrets out, vulns fixed before deploy
-
-Quality of working software degrades to zero the moment something is
-exploited in production. See CLAUDE.md §"Security is a main concern"
-for the principle and `docs/SECURITY.md` for the recipes per stack.
-
-For every push:
-
-- [ ] **Secret scan clean** — `gitleaks detect` over the commits being
-      pushed passed in pre-push. No `--no-verify` shortcut. If a secret was
-      *ever* committed, it's been rotated, not just removed — the commit
-      does not have to reach `origin` for the credential to be burned.
-      (Not `protect --staged`: that scans the index, which is empty once the
-      commit exists, so it scanned nothing at all — A-03.)
-- [ ] **SAST clean** — Semgrep + lint security plugins ran clean
-      (or every suppression has a justification comment naming the
-      threat-model entry that makes it safe).
-- [ ] **SCA clean** — `osv-scanner` reports zero `MEDIUM`+ vulnerabilities
-      (CVSS >= 4.0) in project dependencies. This is what the pre-push hook
-      and CI both block on. Anything below `MEDIUM` is reported, not
-      blocking, and tracked in `docs/config/findings.md` with a planned
-      upgrade date.
-- [ ] **IaC clean** (if the push touches CDK / Terraform / k8s
-      manifests) — `trivy config` reports zero `HIGH`+ findings.
-
-For every push that adds a **new public surface** (route, command,
-container with ingress):
-
-- [ ] **Threat-model entry exists** — `project_config_security.md`
-      §"Trust boundaries" / §"Auth surfaces" / §"Sensitive data
-      classes" covers the new surface.
-- [ ] **DAST baseline scheduled** — CI ZAP baseline against the
-      preview environment is wired and passing (Recipe A / C) OR a
-      written justification why no DAST applies (Recipe B).
-- [ ] **Findings register reviewed** — every `[SEC]` finding in
-      `docs/config/findings.md` is either fixed, deferred with a
-      date, or `Status: Accepted` with a sign-off.
-
-What you don't ship:
-- Hard-coded secrets, even "just for local dev".
-- `// eslint-disable-next-line` / `// nosemgrep` / `# nosec`
-  without a justification comment.
-- A new public route without a corresponding ZAP baseline run.
-- A dep upgrade that introduces a new `MEDIUM`+ CVE without an
-  immediate rollback or pin.
-
-The §7 handoff checklist §E pulls these boxes in alongside §6.1's
-observability boxes.
-
-### §6.3 Infrastructure as Code — defined, reviewable, reproducible
-
-Quality of working software depends on the environment matching its
-definition. See CLAUDE.md §"Infrastructure as Code is a main concern"
-for the principle and `docs/INFRASTRUCTURE.md` for the recipes.
-
-For every push that touches `infra/` (CDK / Terraform / Helm):
-
-- [ ] **Synth/plan clean** — `cdk synth` / `terraform validate` /
-      `helm lint` succeeds. The pre-push gate (§4) blocks otherwise.
-- [ ] **Reviewable diff in the PR** — `cdk diff` / `terraform plan` /
-      `helm diff upgrade` output is attached as a PR comment. The
-      diff is the review artifact, not the TypeScript / HCL alone.
-- [ ] **No out-of-band resources referenced** — no hand-created ARNs
-      being imported by string, no "create this in the console first"
-      steps assumed.
-- [ ] **Environment parity** — change applies cleanly to all declared
-      envs (dev / staging / prod) per `project_config_infra.md`, not
-      just one.
-- [ ] **Cost impact named** — if change adds resources whose monthly
-      cost exceeds the threshold in `project_config_infra.md`
-      §"Cost ceilings", PR body calls it out and the founder
-      approves explicitly before merge.
-- [ ] **Drift report from last nightly scan attached** if a relevant
-      drift alert is open on a resource the PR touches.
-
-For every push that adds a **new prod resource** (anything
-customer-traffic-bearing or state-holding):
-
-- [ ] **Rollback procedure named** — `project_config_infra.md`
-      §"Rollback procedure" covers the new resource, including any
-      stateful-resource reversal steps.
-- [ ] **Deploy traversal documented** — PR shows the dev → staging →
-      prod path the change will take. Emergency-fix exceptions land
-      in the next `docs/done/INCIDENT-YYYY-MM-DD.md`.
-
-What you don't ship:
-- A resource clicked together in the cloud console with "I'll codify
-  it later".
-- An IaC string literal containing a real secret (use Secrets Manager
-  / SSM / Vault).
-- A prod apply / deploy from a laptop. Ever.
-- An infra change deployed straight to prod without traversing
-  dev → staging → prod, unless it's an emergency fix documented as
-  such.
-- A drift alert left open >24h without either a "codify" or
-  "revert + add alarm" PR linked.
-
-The §7 handoff checklist §E pulls these boxes in alongside §6.1's
-observability boxes and §6.2's security boxes.
-
-### §6.4 Documentation — internal + external in sync
-
-Working software with stale documentation is software no one trusts.
-See CLAUDE.md §"Documentation is a main concern" for the principle and
-`docs/DOCUMENTATION.md` for the recipes.
-
-The project's sync list lives in `project_config_dod.md` §"Doc-sync
-list" as **two tables**: External (customer-facing) and Internal
-(team-facing). Both tables are non-optional.
-
-For every push that includes a **user-facing change** (a customer can
-see / click / read it):
-
-- [ ] **External sync clean** — every file in the External table
-      touched in the same commit as the code. README, release notes,
-      feature page, help article (or index entry), pricing,
-      changelog, API docs — whichever rows apply. Same commit, not
-      "same PR".
-- [ ] **Privacy / TOS check** — if the change adds a new data class
-      collected, a new processor, a new region, or material liability
-      / pricing terms, the privacy policy / TOS gets the matching
-      clause **in the same commit**, with a `legal-reviewed` label
-      requested.
-- [ ] **Public roadmap moves** — if the project uses one (Recipe C),
-      the roadmap status (`backlog/` → `doing/` → `waiting-acceptance/`)
-      is reflected publicly in the same week.
-
-For every push that **changes code state** (regardless of user
-visibility):
-
-- [ ] **Internal sync clean** — every file in the Internal table
-      affected by the change is updated in the same commit.
-      `FEATURES.md`, `ACCEPTANCE_TESTS.md`, `findings.md` (with
-      `Status: Fixed`), `PLAN-*.md` lifecycle move, threat-model
-      entry, ADR (if architectural), runbook (if new alert).
-- [ ] **`HANDOVER.md` current** — per §10, which means **WIP, ephemeral
-      state and live hazards only**. A fresh prompt reading it plus the
-      lifecycle folders and `git log` can resume. If you added anything a
-      command already answers, take it back out.
-
-What you don't ship:
-- A user-facing change without the matching external sync-list entry.
-- A doc that quotes a flag, route, or feature that no longer exists.
-- A new data class collected without a privacy clause.
-
-The §7 handoff checklist §D pulls these boxes in for any push that
-modifies tracked code or docs.
+The quality bar is `CLAUDE.md` §"Quality is non-negotiable". Each engineering
+concern's capabilities are in `CLAUDE.md`, and its per-push checklist is in its
+recipe doc: [`OBSERVABILITY.md`](OBSERVABILITY.md), [`SECURITY.md`](SECURITY.md),
+[`INFRASTRUCTURE.md`](INFRASTRUCTURE.md) and
+[`DOCUMENTATION.md`](DOCUMENTATION.md). Cost is declared per billable path in
+`project_config_overview.md` §"Cost stack". *Judgement*, apart from the scans the
+gate runs.
 
 ## §7 Handoff checklist (walk BEFORE flipping the mic)
 

@@ -257,266 +257,51 @@ Codex alignment before committing.
 
 ## Observability is a main concern
 
-**Since quality is non-negotiable, the quality of the working software is
-fundamental. The difference between good and bad systems is how quickly
-we can find and fix errors when they happen — the speed-to-fix
-differential.** Observability is therefore a first-class concern, not an
-afterthought.
-
-Four capabilities are non-negotiable for every struct2flow project:
-
-1. **Every error path is captured.** No silent swallowing, no
-   default-value fallbacks that hide failures, no `try/catch` that
-   returns success. If it broke, it logs.
-2. **Every captured error is agent-queryable** without human ferrying.
-   The agent has a documented retrieval path (log query, debug route,
-   CLI flag — project's choice) and uses it **before** asking the
-   founder. Cf. memory `feedback_use_malt_dont_ask_for_logs`.
-3. **Every shipped capability is alertable** when it starts failing in
-   production. Threshold + destination are declared in
-   `project_config_dod.md`.
-4. **The agent diagnoses first.** Humans get pinged only when the agent
-   can't resolve autonomously — not as the first responder. The agent's
-   diagnosis runbook is documented somewhere it can find (CLAUDE.md
-   project section, memory entry, or the project's `docs/diagnosis.md`).
-
-The **mechanism** is project-specific — choose one of the three recipes
-in [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md):
-
-- **AWS-hosted / serverless** — CloudWatch structured logs + a MALT-style
-  admin debug route + CloudWatch alarms → SNS → Slack.
-- **Local app / desktop / CLI** — rotating file logs + a `--diagnose` CLI
-  flag + a crash-time Slack webhook.
-- **Containerized service** — journald or stdout JSON + a log aggregator
-  + the same Slack/email alert routing.
-
-The **capabilities** are non-negotiable. The mechanism row goes in
-`project_config_overview.md` §"Observability stack" — every project
-declares its choice.
+Quality is how fast errors are found and fixed. Every project captures every
+error path (no silent fallback, no `try/catch` that returns success); makes every
+captured error agent-queryable, and the agent uses that path before asking the
+founder for logs; alerts when a shipped capability fails in production; and has
+the agent diagnose first, pinging a human only when it cannot resolve the problem.
+The mechanism is a recipe in [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md),
+declared in `project_config_overview.md` §"Observability stack".
 
 ## Cost is a main concern
 
-**Working software that quietly bankrupts the founder is broken software.**
-Any code path that calls a metered third-party API (LLM, search, OCR,
-storage, egress) burns real money on every invocation, and the failure
-mode is silent until the bill arrives. Cost is therefore a first-class
-concern, encoded in the design — not a number the founder watches
-manually.
-
-The pattern that bites: a previously-broken call path gets fixed (good!)
-and now processes an unbounded backlog of work that built up while it
-was broken. The fix is correct; the absence of a guardrail turns the
-correctness into a runaway charge. **Every billable path must be
-priced + capped + alertable BEFORE it is wired into a loop.**
-
-Four capabilities are non-negotiable for every struct2flow project with
-a billable code path:
-
-1. **Every billable code path declares a budget cap.** Per-call,
-   per-batch, per-tick, or per-day — the limit is in code and enforced
-   as a hard stop, not a soft warning. Cap reached → halt the loop, do
-   not just log. The cap value (in dollars or tokens) is declared in
-   `project_config_overview.md` §"Cost stack" alongside the model /
-   service it applies to.
-2. **Every billable code path logs its actual spend per invocation.**
-   Input tokens, output tokens, dollars-or-currency-units, model id —
-   all structured so the agent can answer "how much did we spend
-   yesterday / this tick / on this source?" without the founder
-   ferrying numbers from a vendor dashboard. Cf.
-   `feedback_use_malt_dont_ask_for_logs`.
-3. **Every billable code path alerts when spend exceeds the cap, or
-   when daily spend trends to exceed budget.** Same Slack lane as
-   observability alerts; same transition-edge contract — fire once on
-   the rising edge, not every tick the cap is still hit.
-4. **Backlog-replay paths require explicit opt-in.** "Process
-   everything that has piled up since the last successful run" is
-   never the default. The founder (or the operator running the CLI)
-   types a flag — `--catch-up`, `--first-run`, `--replay-since=…` —
-   that says "I have looked at the size of this backlog and I'm
-   willing to pay for it." Implicit replay is a defect.
-
-The **mechanism** is project-specific. Typical recipes:
-
-- **LLM-backed agent** — Anthropic/OpenAI token-cost SDK helper,
-  per-tick budget gate that halts further calls when cumulative
-  spend > cap, structured `{model, input_tokens, output_tokens, usd}`
-  log line per call, transition-edge Slack alert when daily cap is
-  hit. The freshness gate and dedup store are the upstream defences
-  that prevent the call from happening in the first place; the cap
-  is the last-line backstop.
-- **External API consumer** (Twilio, Stripe webhooks fan-out, etc.) —
-  same shape: declared cap, per-call cost logged, alert on transition,
-  explicit opt-in for backlog replay.
-- **Storage / egress** — per-tick byte budget, structured per-call
-  size log, alert on transition, explicit opt-in for large historical
-  syncs.
-
-The **capabilities** are non-negotiable. The mechanism row goes in
-`project_config_overview.md` §"Cost stack" — every project with a
-billable path declares its choice (model + cap + monitoring path +
-backlog-replay flag).
-
-A real incident shows the shape: the linkedin-watcher-agent took a <!-- a2bp-allow: historical incident record; the blueprint names this project deliberately as the worked example and already carries this line verbatim — substituting the placeholder here would make every project claim the incident -->
-single $10 hit when a fetcher bug fix (BUG-001) unblocked a 374-post
-backlog and the freshness gate didn't exist yet (BUG-003). BUG-003
-became the canonical capability-#4 instance (explicit opt-in needed
-for backlog replay); the freshness gate is enforced before any
-billable call. Future projects should design the cap + the explicit-
-opt-in flag together, not retrofit them after the first surprise bill.
+Every billable path (LLM, paid API, metered storage or egress) is priced, capped
+and alertable **before** it is wired into a loop: a budget cap in code that halts
+rather than logs; structured spend per call (`{model, input_tokens,
+output_tokens, usd}`); a rising-edge alert when spend passes the cap; and backlog
+replay only behind an explicit operator flag (`--catch-up`,
+`--replay-since=…`), because a repaired path must never silently bill for the
+backlog that piled up while it was broken. Each path is declared in
+`project_config_overview.md` §"Cost stack".
 
 ## Security is a main concern
 
-**Quality of working software degrades to zero the moment something is
-exploited in production.** Security is therefore a first-class concern,
-not a checkbox at the end. It lives next to observability — both protect
-the working software, just at different timescales.
-
-Four capabilities are non-negotiable for every struct2flow project:
-
-1. **No secrets in code or git history.** `gitleaks` blocks the push;
-   if one slips through, the credential is rotated **before** the
-   commit is investigated. A leaked secret is compromised the moment
-   it lands on `origin`.
-2. **Static analysis catches the OWASP top-10 patterns at commit
-   time.** Semgrep + the lint security plugins run in pre-push and
-   block on `WARNING+` findings. Suppressions need a justification
-   comment naming the threat-model entry that makes them safe.
-3. **Dependencies and infra are scanned continuously.** `osv-scanner`
-   on every push for new CVEs in pinned deps; `trivy config` over IaC
-   before any deploy; nightly re-scan catches CVEs that drop *after*
-   we shipped.
-4. **The agent fixes security findings autonomously when possible.**
-   Same pattern as the MALT diagnosis-first rule (§"Observability is
-   a main concern"): the agent triages, patches, and verifies before
-   pinging the founder — humans get pulled in only for risk-acceptance
-   decisions or supply-chain incidents.
-
-The **mechanism** is project-specific — choose one of the three
-recipes in [`docs/SECURITY.md`](docs/SECURITY.md):
-
-- **AWS-hosted / serverless** — gitleaks + Semgrep + osv-scanner in
-  pre-push; trivy + ZAP baseline in CI; nightly active scan + new-CVE
-  watcher.
-- **Local app / desktop / CLI** — same SAST + SCA + secret-scan; signed
-  releases instead of DAST (no remote surface).
-- **Containerized service** — same SAST + SCA + secret-scan; `trivy
-  image` blocks vulnerable base images; ZAP against the service's
-  HTTP surface.
-
-The **capabilities** are non-negotiable. The mechanism row goes in
-`project_config_overview.md` §"Security stack" and the threat model
-+ thresholds live in `project_config_security.md` — every project
-declares its choice.
+No secrets in code or git history, and a leaked one is rotated before it is
+investigated. Static analysis blocks OWASP top-10 patterns at `WARNING+`, and
+every suppression carries a justification naming the threat-model entry that
+makes it safe. Dependencies and infrastructure are scanned on every push and
+nightly. The agent triages and fixes findings itself, pulling the founder in only
+for a risk-acceptance decision or a supply-chain incident. The mechanism is a
+recipe in [docs/SECURITY.md](docs/SECURITY.md); the threat model and thresholds
+live in `project_config_security.md`.
 
 ## Infrastructure as Code is a main concern
 
-**Quality of working software depends on the environment matching its
-definition.** Drift between code and prod is the silent killer of
-reproducibility — and reproducibility is what makes "it worked in
-staging" meaningful. IaC is therefore a first-class concern, sitting
-alongside observability and security at the runtime edge.
-
-Four capabilities are non-negotiable for every struct2flow project:
-
-1. **Everything in prod is defined in code.** No console clicks, no
-   out-of-band changes that "we'll codify later." If a resource exists
-   in prod and isn't in CDK/Terraform/Helm, it's either imported into
-   the IaC tree within the same week or it's deleted.
-2. **Every change is reviewable as a diff.** `cdk diff` / `terraform
-   plan` / `helm diff` is the artifact reviewers look at, not the
-   TypeScript/HCL source. A PR touching `infra/` without that diff
-   attached is incomplete.
-3. **Environments are reproducible from the same code.** Dev /
-   staging / prod are *parameters*, not copy-pasted apps. Spinning a
-   new env is one command + one row of config, never a hand-crafted
-   sandbox that diverges.
-4. **Drift is detected, not assumed away.** A nightly diff/plan job
-   alerts on out-of-band changes; the resolution is always "codify"
-   or "revert + add an alarm," never "ignore and hope." Drift open
-   >24h becomes a `findings.md` entry.
-
-The **mechanism** is project-specific — choose one of the three
-recipes in [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md):
-
-- **AWS-first / CDK TypeScript** — struct2flow default. Single CDK
-  app, multiple stacks, CodePipeline-driven applies, manual approval
-  before prod, CDK Nag + Infracost gating cost + posture.
-- **Multi-cloud / portable (Terraform / Pulumi)** — when the project
-  ships into customer-managed accounts or stays cloud-agnostic. S3 +
-  DynamoDB state/lock, pipeline-only prod-apply, `tfsec` + `infracost`
-  gating.
-- **Kubernetes-native (Helm + ArgoCD / Flux)** — GitOps. ArgoCD pulls
-  cluster state from a branch; PR diff = the plan; `OutOfSync` is the
-  native drift detector.
-
-The **capabilities** are non-negotiable. The mechanism row goes in
-`project_config_overview.md` §"Infra stack"; the environments,
-ownership, drift cadence, cost ceilings, and rollback procedure go in
-`project_config_infra.md` — every project declares its choices.
+Everything in prod is defined in code, and a resource created out of band is
+imported or deleted within the week. Every change is reviewed as its plan diff
+(`cdk diff`, `terraform plan`, `helm diff`), environments are parameters of the
+same code, and drift is detected nightly and resolved by codifying or reverting,
+never ignored; drift open over 24 h is a `findings.md` entry. The mechanism is a
+recipe in [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md); environments, cost
+ceilings and rollback live in `project_config_infra.md`.
 
 ## Documentation is a main concern
 
-**Working software with stale documentation is software no one trusts.**
-Customers stop believing the help page; investors stop believing the
-deck; new hires can't onboard; agents make wrong assumptions and ship
-regressions. Documentation drift is the *silent* failure mode of every
-otherwise-healthy project — there's no exception thrown, no alert
-firing. Just compounding embarrassment until someone notices.
-
-Two distinct audiences, both non-negotiable:
-
-- **External (customer-facing)** — README, help page, release notes,
-  pricing / landing copy, public status page, privacy policy, terms,
-  API docs, pitch decks. A user can see / click / read
-  the surface change; if the doc disagrees with the running product,
-  the doc is wrong.
-- **Internal (team-facing)** — feature catalog, acceptance test list,
-  findings register, threat model, architecture decision records,
-  plan docs. The code's state changed; the artefact that *describes*
-  the state must move with it.
-
-Four capabilities are non-negotiable for every struct2flow project:
-
-1. **Every user-facing change touches every external doc in the
-   project's sync list, in the same commit.** New feature → feature
-   table + release notes + help page in one PR. Removed feature →
-   delete from feature table, "Sunset" entry in release notes,
-   delete from help page. Same-commit rule is what stops "I'll do
-   docs later" from rotting.
-2. **Every code-state-changing internal artefact moves with the
-   state it describes.** New bug → row in `BUGS.md` *and* the fix
-   commit references it. Codex finding fixed → finding block gets
-   `Status: Fixed` (not just the backlog row). Threat-model entry
-   added → `project_config_security.md` updated *before* the route
-   ships.
-3. **Every rule change updates every document that restates the rule,
-   in the same commit.** A rule restated in a recipe doc, a runbook or a
-   pitch deck drifts from the rule exactly as prod drifts from code, and
-   is treated the same way.
-4. **Drift is detected, not assumed away.** Promotion criteria for
-   adding a doc to the sync list, a pre-push grep-based drift hint
-   for known mismatch patterns (e.g. new route under
-   `frontend/pages/` with no entry in `FEATURES.md`), and a
-   handoff-time checklist box that refuses the mic flip if any
-   sync-list file is stale. Same recipe as security drift, just
-   for prose.
-
-The **mechanism** is project-specific — choose one of the three
-recipes in [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md):
-
-- **Single-repo README-only** — small projects, internal tools, CLIs.
-  Sync list is short: README, RELEASE-NOTES, FEATURES catalog.
-- **Static-site marketing + docs** — most struct2flow projects with a
-  customer-facing app. Docs in `docs-site/` (Mintlify / Astro Starlight
-  / Nextra), customer help + release notes generated from markdown,
-  per-page-type sync rules.
-- **Customer help portal + public status + privacy/TOS** — mature
-  SaaS. Separate `help.html` / `status.html` / `privacy.html` /
-  `terms.html`, each with its own sync trigger and editorial owner.
-
-The **capabilities** are non-negotiable. The project's sync list goes
-in `project_config_dod.md` §"Doc-sync list" with two tables (Internal /
-External), and the per-stack mechanism row goes in
+Stale documentation fails silently, so keeping it in sync is a rule:
+[docs/DoD.md](docs/DoD.md) §5. Recipes per project shape are in
+[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md), declared in
 `project_config_overview.md` §"Documentation stack".
 
 ## Code Quality
@@ -525,74 +310,10 @@ External), and the per-stack mechanism row goes in
 - Eliminate redundant DB reads — cache data in middleware, don't re-fetch
 - Remove dead code: unused imports, parameters, constants, state fields
 - Don't duplicate logic — extract shared helpers
-
-### Static-analysis audit — SonarQube
-
-Every struct2flow project ships with a SonarQube wiring so the agent
-can audit bugs, vulnerabilities, code smells, and coverage without
-asking the founder to interpret raw output.
-
-**Files** (synced from blueprint, project-owned after bootstrap):
-
-- `scripts/sonar.sh` — runs `npm run test:coverage` to regenerate
-  `coverage/lcov.info`, then invokes `sonar-scanner`. Sources
-  `SONAR_TOKEN` + `SONAR_HOST_URL` from gitignored `.env`. Skip
-  the coverage regen with `--no-coverage` when you just ran the
-  pre-push gate and want to re-upload. SonarQube has no shell analyser, so
-  it also runs ShellCheck over the files the gate lints and imports the
-  findings as external issues (`external_shellcheck:SC…`); SC2317 is left
-  out. Files under a dot-directory such as `.githooks/` are never indexed by
-  the scanner, so their findings stay with the gate's ShellCheck stage.
-- `scripts/sonar-api.sh` — calls SonarQube's REST API with auth
-  from `.env`. Usage: `bash scripts/sonar-api.sh /api/<path>?<query>`.
-  The wrapper exists so Claude can query the API without chaining
-  the env-load + curl + jq across permission prompts.
-- `sonar-project.properties` — projectKey + scanner config. Template
-  in the blueprint uses `{{PROJECT_NAME}}`; `new-project.sh`
-  substitutes on bootstrap.
-
-**Workflow** (agent-driven, founder rarely opens the UI):
-
-1. **Run the scan.** `npm run sonar` (wraps `scripts/sonar.sh`).
-   Auto-creates the project on the SonarQube instance on first
-   push if the token has create-on-the-fly privileges.
-2. **Triage by severity.** Query via the helper:
-
-   ```bash
-   bash scripts/sonar-api.sh "/api/issues/search?componentKeys={{PROJECT_NAME}}&types=BUG&ps=20" | jq '.issues[] | {severity, component, line, rule, message}'
-   bash scripts/sonar-api.sh "/api/issues/search?componentKeys={{PROJECT_NAME}}&types=CODE_SMELL&severities=BLOCKER,CRITICAL&ps=20" | jq '.issues[] | {severity, component, line, rule, message}'
-   ```
-
-   Priority order: **BUG → BLOCKER/CRITICAL code smell → MAJOR
-   code smell → MINOR code smell**. Fix in that order.
-3. **Fix or defer with rationale.** Each finding is either:
-   - **Fixed** — narrow edit + tests stay green.
-   - **Deferred** — commit message names the rule, the count, and
-     the reason (e.g. "S7735 negated condition — 17 sites; defer
-     until each can be reviewed in context"). Silent deferral is
-     a smell of its own.
-4. **Re-scan + verify Quality Gate.** `npm run sonar` again, then
-   `bash scripts/sonar-api.sh "/api/qualitygates/project_status?projectKey={{PROJECT_NAME}}"`.
-   Gate `OK` is the bar; `ERROR` blocks the handoff to the founder.
-5. **Per-commit hygiene.** The Sonar gate evaluates "new code
-   period" violations independently — touching a line can re-flag
-   it even when the rest of the file improves. After each fix
-   commit, re-scan and check the gate; if it goes ERROR on new
-   violations, address those before moving on.
-
-**Coverage gating.** SonarQube's coverage measure mirrors the
-project's `--coverage` reporter — vitest writes `coverage/lcov.info`,
-sonar reads `sonar.javascript.lcov.reportPaths=coverage/lcov.info`
-(the JS scanner covers both `.js` and `.ts`). The pre-push gate
-enforces the same threshold locally; SonarQube is the
-post-commit / cross-time-window view (e.g. "did this PR drop
-new-code coverage below 80%?").
-
-**Mechanism row goes in `project_config_overview.md`** §"Code
-quality stack" — alongside the observability/security/cost/infra
-declarations. The mechanism is project-specific (the SonarQube
-instance URL, the projectKey, the quality-profile chosen); the
-capability is non-negotiable.
+- **SonarQube** audits bugs, vulnerabilities, smells and coverage: `npm run sonar`
+  scans (`scripts/sonar.sh`) and `scripts/sonar-api.sh` queries the results. The
+  triage workflow is in the header of `scripts/sonar.sh`; a Quality Gate `ERROR`
+  blocks the handoff to the founder.
 
 ## Architecture Principles
 

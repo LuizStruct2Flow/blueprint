@@ -154,11 +154,14 @@ fi
 # quietly is the failure this exists to stop. A holder that is not a Codex
 # persona with a Model cell dispatches on the codex default model, and says so.
 set --
+REQUESTED_MODEL="" REQUESTED_EFFORT=""
 if command -v bp_roster_model_for_name >/dev/null 2>&1; then
   __m="$(bp_roster_model_for_name "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-}" 2>&1)"
   case $? in
     0) case "$__m" in
-         Codex*) set -- -m "$(printf "%s" "$__m" | cut -f2)" -c "model_reasoning_effort=$(printf "%s" "$__m" | cut -f3)" ;;
+         Codex*) REQUESTED_MODEL="$(printf "%s" "$__m" | cut -f2)"
+                 REQUESTED_EFFORT="$(printf "%s" "$__m" | cut -f3)"
+                 set -- -m "$REQUESTED_MODEL" -c "model_reasoning_effort=$REQUESTED_EFFORT" ;;
          *) __m="[roster] ${AGENT_SIGNAL_HOLDER:-}: not a Codex persona" ;;
        esac ;;
     1) printf "%s — dispatch refused\n" "$__m" | tee -a "$RUN_LOG" >&2
@@ -167,6 +170,31 @@ if command -v bp_roster_model_for_name >/dev/null 2>&1; then
   esac
   [ "$#" -eq 0 ] && printf "%s — codex runs its configured default model\n" "$__m" | tee -a "$RUN_LOG"
 fi
+
+# WHAT WAS ACTUALLY RUN (TASK-060). `-m`/`-c model_reasoning_effort=` above is
+# the REQUEST; Codex is free to fall back, and an operator config.toml can
+# override it at runtime, so the roster cell is not proof of what ran. The
+# Codex session file is the actual record, found by the THREAD ID the dispatch
+# itself announces on its own `--json` stream (`thread.started`), never by
+# guessing at a file — see scripts/lib/codex-session.sh for what is confirmed
+# and what is still pending a live dispatch. Logged once at dispatch time
+# (what was requested) and once more once the actual run is known (below,
+# after the dispatch finishes); the feed keeps the roster-resolved label
+# until then, exactly as before TASK-060.
+if [ -n "$REQUESTED_MODEL" ]; then
+  printf "[roster] requested model=%s effort=%s\n" "$REQUESTED_MODEL" "$REQUESTED_EFFORT" | tee -a "$RUN_LOG"
+else
+  printf "[roster] requested model=<codex default>\n" | tee -a "$RUN_LOG"
+fi
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+if [ -r "$ROOT/scripts/lib/codex-session.sh" ]; then
+  . "$ROOT/scripts/lib/codex-session.sh"
+fi
+# A copy of codex exec raw --json stream, so the thread id can be read back
+# after the fact without disturbing the feed-filter pipe below. /dev/null on a
+# failed mktemp: the tee then just discards, and thread-id resolution degrades
+# to "unknown" exactly like a missing lib — never costs the dispatch.
+RAW_JSON="$(mktemp "${TMPDIR:-/tmp}/bp-codex-raw.XXXXXX" 2>/dev/null)" || RAW_JSON="/dev/null"
 
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
@@ -183,11 +211,47 @@ feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
   --output-last-message "$OUTPUT_LAST" \
   "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. Commit your changes if appropriate." \
   2>>"$RUN_LOG" \
+  | tee -a "$RAW_JSON" \
   | bash "$ROOT/scripts/codex-feed-filter.sh" \
   | while IFS= read -r __line; do
       printf "%s\n" "$__line" >>"$RUN_LOG"
       [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
     done
+
+# RESOLVE THE ACTUAL MODEL/EFFORT (TASK-060), from the thread id codex itself
+# announced on its own --json stream (RAW_JSON, captured above via tee) — an IDENTITY
+# lookup, never a guess. Any step that comes up empty (no thread.started seen,
+# no jq, no rollout matching that exact id, no turn_context inside it) reports
+# "unknown" with why, and the roster label already in FEED_LABEL is kept —
+# this never invents a model.
+ACTUAL_MODEL="" ACTUAL_EFFORT="" __rollout="" __thread_id="" __reason="no thread.started event observed"
+if command -v bp_codex_thread_id_from_stream >/dev/null 2>&1; then
+  __thread_id="$(bp_codex_thread_id_from_stream "$RAW_JSON" 2>/dev/null)"
+fi
+if [ -n "$__thread_id" ] && command -v bp_codex_rollout_for_thread >/dev/null 2>&1; then
+  __rollout="$(bp_codex_rollout_for_thread "$CODEX_HOME_DIR" "$__thread_id" 2>/dev/null)"
+  [ -n "$__rollout" ] || __reason="no rollout file matched thread $__thread_id"
+fi
+if [ -n "$__rollout" ] && command -v bp_codex_model_effort >/dev/null 2>&1; then
+  __me="$(bp_codex_model_effort "$__rollout" 2>/dev/null)"
+  if [ -n "$__me" ]; then
+    ACTUAL_MODEL="$(printf "%s" "$__me" | cut -f1)"
+    ACTUAL_EFFORT="$(printf "%s" "$__me" | cut -f2)"
+  else
+    __reason="rollout $__rollout has no turn_context"
+  fi
+fi
+[ "$RAW_JSON" = "/dev/null" ] || rm -f "$RAW_JSON" 2>/dev/null
+if [ -n "$ACTUAL_MODEL" ]; then
+  printf "[roster] actual model=%s effort=%s (session %s)\n" "$ACTUAL_MODEL" "$ACTUAL_EFFORT" "$__rollout" | tee -a "$RUN_LOG"
+  if command -v bp_roster_label >/dev/null 2>&1; then
+    __actual_label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Codex}" "$ACTUAL_MODEL" "$ACTUAL_EFFORT" 2>/dev/null)"
+    [ -n "$__actual_label" ] && FEED_LABEL="$__actual_label"
+  fi
+else
+  printf "[roster] actual model: unknown (%s) — feed keeps the roster label\n" "$__reason" | tee -a "$RUN_LOG" >&2
+fi
+
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
 feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"

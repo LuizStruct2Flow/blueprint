@@ -317,17 +317,27 @@ _bp_roster_subagent_who(){
 # worse than an unqualified one; bp_roster_backing_for_name already warns once
 # per unresolved name, so the miss is reported without being fatal.
 # TASK-059: "<Name> - <model> - <effort>" once the persona has a Model cell. The
-# optional third argument is the model a Claude subagent actually ran on, which
-# wins over the configured alias. A roster with no Model cell keeps the old
-# "<Name> - <Backing>"; an INVALID cell also does, and warns naming the persona.
+# optional third argument is the model a subagent/dispatch actually ran on,
+# which wins over the configured alias — first used for a Claude subagent's own
+# transcript, TASK-060 reuses it verbatim for a Codex dispatch's own session
+# file rather than forking a second label rule. Deliberately NOT gated to a
+# particular backing: the requested model can differ from the one that ran
+# under any backing that can tell us so, and a caller that never has a "ran"
+# value (nearly everyone — two-arg calls) is unaffected, because it stays
+# empty and the configured alias wins exactly as before.
+# The optional fourth argument likewise overrides the EFFORT actually run
+# with — usually unnecessary (a dispatch typically gets the effort it asked
+# for), but the session is the source of truth when it differs, same as model.
+# A roster with no Model cell keeps the old "<Name> - <Backing>"; an INVALID
+# cell also does, and warns naming the persona.
 bp_roster_label(){
-  local src="${1:-.}" name="${2:-}" ran="${3:-}" backing r rc
+  local src="${1:-.}" name="${2:-}" ran="${3:-}" ran_effort="${4:-}" backing r rc effort
   [ -n "$name" ] || return 1
   r="$(bp_roster_model_for_name "$src" "$name" 2>&1)"; rc=$?
   if [ "$rc" -eq 0 ]; then
-    backing="$(printf '%s' "$r" | cut -f1)"
-    [ "$backing" = "Claude Code" ] && [ -n "$ran" ] || ran="$(printf '%s' "$r" | cut -f2)"
-    printf '%s - %s - %s' "$name" "$ran" "$(printf '%s' "$r" | cut -f3)"
+    [ -n "$ran" ] || ran="$(printf '%s' "$r" | cut -f2)"
+    effort="${ran_effort:-$(printf '%s' "$r" | cut -f3)}"
+    printf '%s - %s - %s' "$name" "$ran" "$effort"
     return 0
   fi
   [ "$rc" -eq 1 ] && bp_roster_warn "model:$name" "${r#\[roster\] }"

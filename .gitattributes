@@ -85,6 +85,11 @@ templates/                         export-ignore
 scripts/new-project.sh             export-ignore
 LICENSE                            export-ignore
 
+# TASK-021 Stage 2 — the rules for maintaining the blueprint (its trunk,
+# integrating a2bp requests, the deck). CLAUDE.md imports it, and a project skips
+# the import because the file is missing, as it does claude.internal.md.
+CLAUDE.blueprint.md                export-ignore
+
 # BUG-028 — blueprint-ONLY machinery must not ship, and the suites that test it
 # must not ship either.
 #

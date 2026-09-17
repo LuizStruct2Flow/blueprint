@@ -350,7 +350,9 @@ project owns, so bootstrap and pull deliver the same files by construction and
 `.gitattributes` alone decides (TASK-021). That is `CLAUDE.md`, `DoD.md`, every
 recipe doc, the agent scripts, the pre-push hook, `AGENT_SIGNAL.md` — **and the
 shipped `tests/` suites**, because a suite that guards managed machinery has to
-move forward with the machinery it guards.
+move forward with the machinery it guards. What maintains the blueprint itself —
+this deck, the brand, the a2bp implementer's playbook, `CLAUDE.blueprint.md` —
+does not ship.
 
 **What's NOT managed** — `project_config_*.md` (templates seeded once
 at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so

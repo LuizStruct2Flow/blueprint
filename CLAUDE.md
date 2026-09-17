@@ -10,6 +10,7 @@ session loads them with this file:
 - @project_config_security.md
 - @project_config_infra.md
 - @claude.internal.md
+- @CLAUDE.blueprint.md
 
 A project that has not created one of them yet still gets a working session:
 Claude Code skips an import whose file is missing. Project rules belong in these
@@ -28,12 +29,11 @@ framework reads it or depends on the choice. This is what makes the split
 possible: the generic protocol can be tracked and public, because the private
 half has a home of its own.
 
-**In the blueprint itself, those root files are THIS repo's own config and do
-not ship** — the seed source a new project is built from lives in
-[`templates/`](templates/README.md). They used to be the same files, so anything
-the blueprint wrote about itself propagated to every project (BUG-009). If you
-are editing one, ask which you mean: `templates/` if it belongs to every
-project, the root copy if it is about this one.
+**`CLAUDE.blueprint.md` exists only in the blueprint.** It holds the rules for
+maintaining the blueprint itself: its trunk, implementing a back-propagation
+request, publishing the deck. It does not ship, so in a project the import is
+skipped exactly as a missing `claude.internal.md` is, and this file carries only
+what operates a project or asks the blueprint for a change (TASK-021).
 
 ## Agent Coordination
 
@@ -336,8 +336,8 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
      `waiting-acceptance/BACKLOG.md`.
 
    **The trigger is landing on `main`.** For most work that is the push
-   itself, since §"The blueprint's `main` is its trunk" means you push straight
-   to it. When a change does travel on a branch — a risky one you chose to
+   itself, since trunk-based development (§"Team Workflow") means you push
+   straight to it. When a change does travel on a branch — a risky one you chose to
    isolate, or an `a2bp` request from a derived project — the trigger is the
    MERGE, not the push: an item whose PR is still open belongs in `doing/`,
    because it is not waiting on the founder, it is waiting on review.
@@ -422,21 +422,12 @@ per the normal team workflow below.
 - **Commit-message convention — ENFORCED.** Every commit subject STARTS with the backlog item it serves: `BUG#20:`, `FEATURE#3:`, `TASK#1:`. `.githooks/commit-msg` rejects anything else, so this is a gate rather than a habit. **One item per commit** — a commit serving two items is two commits, which the hook cannot check and DoD §1b rule 3 states. The body explains *why*, not what: the "what" is in the diff, and the "why" is what a future reader (or `git blame`) actually needs. There is no such thing as a commit with no item — if work has no backlog row it is not ready to commit (DoD §1b rule 1). This REPLACES the Conventional Commits form (`fix(BUG-XXX):`) that this file used to prescribe; that form does not start with the item and is now refused.
 - **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `BUG#XX: minimal reproducer (failing)` → `BUG#XX: <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
 - Trunk-based development only — no branches, use feature toggles instead.
-  **This holds in the blueprint too** — see §"The blueprint's `main` is its
-  trunk". The axis that decides is the **contributor, not the repo**: a
+  The axis that decides is the **contributor, not the repo**: a
   maintainer of a repo pushes its trunk, and an **external** contribution
   arrives as a pull request — which for the blueprint is what
   `blueprint a2bp` files (§"Back-propagating"). A pull request exists so the
   people who maintain a repo are not forced to accept a change from outside
   it, not so an author can review themselves.
-
-  This bullet used to say the opposite — that the blueprint was exempt and
-  every contribution there needed a branch and a PR. TASK-019 removed that,
-  and the line survived pointing at a section that no longer exists, so this
-  file contradicted itself for a while: the rule below still said a PR was
-  never required. **When a workflow changes, every rule that referenced the
-  old one has to be re-read** — they do not fail loudly, they just quietly
-  describe something that no longer happens.
 - Run and report test coverage before every commit/push
 - **Coverage thresholds** (enforced in the pre-push gate):
   - **Measure over the WHOLE source tree, not a curated subset.** A high
@@ -886,7 +877,7 @@ Two distinct audiences, both non-negotiable:
 
 - **External (customer-facing)** — README, help page, release notes,
   pricing / landing copy, public status page, privacy policy, terms,
-  API docs, the way-of-working deck. A user can see / click / read
+  API docs, pitch decks. A user can see / click / read
   the surface change; if the doc disagrees with the running product,
   the doc is wrong.
 - **Internal (team-facing)** — feature catalog, acceptance test list,
@@ -908,14 +899,10 @@ Four capabilities are non-negotiable for every struct2flow project:
    `Status: Fixed` (not just the backlog row). Threat-model entry
    added → `project_config_security.md` updated *before* the route
    ships.
-3. **Every blueprint-level concern change updates the deck + the
-   per-concern recipe doc in the same commit.** `docs/way-of-working.md`
-   is the canonical pitch surface (§"docs/way-of-working.md is the
-   canonical pitch surface" below); drift between deck and rule is
-   treated the same as drift between code and prod — and it has
-   self-violated twice this week alone. The same applies to the
-   per-concern recipe docs (`OBSERVABILITY.md`, `SECURITY.md`,
-   `INFRASTRUCTURE.md`, `DOCUMENTATION.md`).
+3. **Every rule change updates every document that restates the rule,
+   in the same commit.** A rule restated in a recipe doc, a runbook or a
+   pitch deck drifts from the rule exactly as prod drifts from code, and
+   is treated the same way.
 4. **Drift is detected, not assumed away.** Promotion criteria for
    adding a doc to the sync list, a pre-push grep-based drift hint
    for known mismatch patterns (e.g. new route under
@@ -1092,41 +1079,6 @@ After a non-empty pull, **review with `git diff` and commit in the
 project repo**. `.blueprint-source` bootstrap_sha is updated by
 `blueprint pull` automatically — don't edit it by hand.
 
-### The blueprint's `main` is its trunk
-
-**Commit and push to `main` like any other struct2flow project.** No branch is
-required, no pull request is required, and nothing enforces one.
-
-This used to say the opposite, emphatically, and pre-closed three
-rationalisations for ignoring it. It was removed on 2026-09-10 by founder
-decision, and the reason is worth keeping because the rule was not silly:
-
-- **What it was protecting is real.** The blueprint's `main` is the trunk every
-  derived project pulls from, so anything landing there fans out on their next
-  `blueprint pull`. That reach is exactly what a review step would gate.
-- **What it got wrong is who was being gated.** A pull request is a request
-  made OF someone. On this repo the author, the reviewer and the owner are the
-  same person, so the PR was a step taken against oneself — and one that
-  `git push` refused to let you skip. **Pull requests exist for external
-  collaboration, which is what `blueprint a2bp` files.** That door still works
-  exactly as before and is still the only way a derived project reaches this
-  repo (§"Back-propagating").
-- **The enforcement had become the problem.** A `pre-commit` hook refused the
-  commit, `pre-push` refused the push, and `tests/branch-guard` pinned both. So
-  the owner's ordinary workflow required disabling a guard, and a gate someone
-  must route around to do their job protects nothing — the same argument BUG-031
-  makes about a red CI everyone merges over, and BUG-045 about a local scan
-  harsher than CI.
-
-**What still holds, and is now the whole protection:** the pre-push gate runs on
-every push, `blueprint a2bp` is still a request rather than a delivery, and a
-back-propagation from a derived project still requires a human to merge it.
-Nothing about the reach of `main` changed — only who is asked for permission to
-use it.
-
-If you want isolation for a risky change, a branch is still available and still
-works. It is a tool now, not a rule.
-
 ### Back-propagating (apply-to-blueprint)
 
 When you improve a generic rule in a blueprint-managed file (a tighter
@@ -1244,21 +1196,14 @@ explicitly in that case and names the branch to open a PR from by hand.
 proposal that an improvement proved itself downstream; the blueprint owner then
 **implements it in the blueprint** — merging it as-is, adapting it, or rewriting
 it. This is the same rule the repo already applies to spikes ("*re-implemented*
-… never `mv`'d wholesale from the spike folder", §"Documentation Structure") and
-to promotion generally (§"The blueprint is derived, not designed").
+… never `mv`'d wholesale from the spike folder", §"Documentation Structure").
+Nothing merges it automatically, and filing it is not integrating it: the
+blueprint's own rules for that decision live in the blueprint.
 
-Three consequences, stated because the property is behavioural and evaporates
-quietly:
-
-- **No automatic merge.** No auto-merge setting, no bot, no tool verb that lands
-  a back-propagation.
-- **No self-integration without a distinct decision step.** The same person is
-  usually on both ends — that is normal — but filing and integrating are two
-  acts, separated by reading the diff in the blueprint's context. Landing a
-  proposal seconds after raising it is the thing this rule exists to stop, and
-  nothing mechanical prevents it.
-- **Merging as-is is legitimate *because someone judged it trivial*.** That
-  judgement is the step that must not be skipped.
+**Propose what has held up.** The blueprint is derived, not designed: a
+capability is admitted after it proved itself in a real project. "We tightened
+the rule and it worked one time" usually isn't enough; "we tightened the rule
+and the next two bugs in this area didn't regress" usually is.
 
 **It is guarded (A-07), and the guard is now advisory.** Before a request is
 filed, `a2bp` restores `{{PROJECT_NAME}}` on the lines a positional diff against
@@ -1308,13 +1253,10 @@ cannot be a git ref component (`foo\bar`, `x*y`) can file no request at all, and
 is told so explicitly. Rename the directory, or make the change in the blueprint
 directly.
 
-**The ripples are the implementer's, not the requester's.** Deciding which deck
-slides, recipe docs and README rows travel with a change is part of implementing
-it in the blueprint — so it belongs to whoever does that, in that session, with
-the blueprint's whole tree in front of them. Filing a request does not put you on
-the hook for the blueprint's doc-sync, and it does not let the implementer skip
-it: [`docs/A2BP_PLAYBOOK.md`](docs/A2BP_PLAYBOOK.md) addresses them, and its
-"same session, no context switch" rule applies to the implementation session.
+**The ripples are the implementer's, not the requester's.** Deciding which
+blueprint documents travel with a change is part of implementing it in the
+blueprint, with the blueprint's whole tree in front of you. Filing a request does
+not put you on the hook for the blueprint's doc-sync.
 
 See what is currently asked of the blueprint owner with `blueprint prs`. It
 reports drafts and closed-but-branch-present distinctly, and on a `gh` API
@@ -1327,49 +1269,6 @@ project-specific** if it names the project, an internal customer, an
 incident specific to this codebase, or a path/URL belonging to this
 project. Project-specific edits go in the `project_config_*.md` files,
 never back-propagated.
-
-### The blueprint is derived, not designed
-
-The blueprint is a **living operating system**, not a top-down
-specification. Its capabilities are admitted only after they have
-**proved themselves in a real project**:
-
-1. A project hits a real requirement (a customer ask, an incident,
-   a bug that couldn't have been caught by what already existed).
-2. The team builds the fix and captures it as a pattern in that
-   project's `project_config_*.md` or `docs/` tree.
-3. Once the pattern has survived contact with production — typically
-   after the next round of bugs has *not* regressed on it — the
-   generic core is back-propagated via `blueprint a2bp`.
-4. The next project bootstrapped from the blueprint inherits the
-   capability as a default.
-
-What this means for the agent:
-
-- **Do not invent capabilities directly in the blueprint.** New
-  capabilities land in a project first, prove themselves, then
-  travel up. The exception is when the founder explicitly asks for
-  a blueprint-level edit (this file, `docs/DoD.md`, the recipe docs,
-  etc.) — those are evolutionary improvements based on lessons
-  already accumulated. Commit them to `main` like anything else
-  (§"The blueprint's `main` is its trunk`").
-- **There is a third class the two rules above do not cover:
-  blueprint-only machinery.** `scripts/new-project.sh` runs only ever
-  *from* the blueprint, because bootstrapping is the one thing a derived
-  project never does; the same is true of the code paths that behave
-  differently inside the blueprint (`drift`'s self-detection, `a2bp`'s
-  own plumbing). "Prove it downstream first" is not merely inconvenient
-  for these — it is impossible, since no downstream executes them. Fix
-  them in the blueprint directly, with a reproducer that runs in
-  `tests/`, and file it as a PR like anything else. Say in the commit
-  body why the change could not be proven downstream.
-- **Don't over-engineer the blueprint** trying to anticipate
-  every project's future needs. Intentional incompleteness is a
-  feature — what the blueprint *does* carry, you can rely on.
-- **When proposing a `blueprint a2bp`**, the founder will ask: has
-  this pattern actually held up here? "We tightened the rule and
-  it worked one time" usually isn't enough; "we tightened the rule
-  and the next two bugs in this area didn't regress" usually is.
 
 ### What blueprint sync covers
 
@@ -1417,33 +1316,3 @@ merged in, and `drift` compares that merged result. The blueprint's `ask` and
 blueprint tightened (BUG-118) cannot be re-allowed from a project. Never
 hand-edit `settings.json` for a project rule — the next pull refuses it until
 the rule moves to the project file (TASK-042).
-
-### docs/way-of-working.md is the canonical pitch surface
-
-The deck at [`docs/way-of-working.md`](docs/way-of-working.md) is how
-struct2flow is presented to customers, investors, hires, and at talks.
-**Every change to a blueprint-level concern lands in the deck in the
-same commit** — not "I'll update the deck later". The concerns the
-deck currently mirrors:
-
-1. Architecture (DDD + Clean + Hexagonal — `STACK_DEFAULTS.md`)
-2. Lifecycle (four states — `docs/DoD.md` §1)
-3. Quality (DoD — `docs/DoD.md`)
-4. Observability / MALT (`docs/OBSERVABILITY.md` + CLAUDE.md §"Observability is a main concern")
-5. Security (`docs/SECURITY.md` + CLAUDE.md §"Security is a main concern")
-6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
-7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
-8. Documentation (`docs/DOCUMENTATION.md` + CLAUDE.md §"Documentation is a main concern" + DoD §6.4)
-9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
-10. Blueprint sync (this section + README.md §"The sync model" + `scripts/blueprint`)
-
-Tightening a rule in DoD §3? Touch the matching deck slide. Adding a
-new principle to CLAUDE.md? New slide(s) under the right section
-number. Adding a new CLI to `scripts/`? Update the agent-layer or
-sync slide. **Drift between deck and reality reads to a customer the
-same way a stale README reads to a new hire** — and the deck is the
-pitch surface, so drift is more costly here than anywhere else.
-
-If a change is genuinely internal-only and the deck doesn't need to
-mention it (e.g. a typo fix in a comment), say so in the commit
-message. Default to updating the deck.

@@ -14,8 +14,8 @@ stack" and `project_config_dod.md` §"Doc-sync list".
 > recipes below all deliver the same four capabilities; they just differ
 > in tooling and surface area: external docs touched in the same commit
 > as the user-facing change → internal artefacts moved with the state
-> they describe → blueprint-level concerns reflected in the deck +
-> recipe docs → drift detected, not assumed away.
+> they describe → every document restating a rule moved with the rule
+> → drift detected, not assumed away.
 
 ---
 
@@ -79,7 +79,6 @@ Astro Starlight / Nextra / Docusaurus.
 | `docs-site/content/legal/privacy.md` | Customer / regulator | New data class collected, new processor, new region | Same commit as the data-collection code; legal review required |
 | `docs-site/content/legal/terms.md` | Customer / regulator | Pricing / liability / dispute terms change | Same commit as the relevant product / billing change; legal review required |
 | `docs-site/content/api/*.md` | Customer / integrator | API surface change (new endpoint, new field, removal) | OpenAPI spec generated from code; markdown summaries hand-curated and synced same commit |
-| `docs/way-of-working.md` (this repo: blueprint) | Customer / investor / hire | Any blueprint-level concern change | Same commit (CLAUDE.md §"docs/way-of-working.md is the canonical pitch surface") |
 
 ### Internal docs (sync list)
 
@@ -246,37 +245,6 @@ explicitly before flipping `OVER_TO_USER`. If a sync-list file claims
 "feature X works" but the commit log shows feature X was removed, the
 handoff is a lie.
 
-### Blueprint-level docs (this repo: blueprint)
-
-The blueprint itself is a project that ships documentation. It uses
-Recipe A (single-repo README-only) with extras: `docs/way-of-working.md`
-as the public pitch surface, `docs/DoD.md` as the methodology, and the
-per-concern recipe docs (`OBSERVABILITY.md` / `SECURITY.md` /
-`INFRASTRUCTURE.md` / `DOCUMENTATION.md`).
-
-The same-commit rule applies: any blueprint-level concern change touches
-the deck + the per-concern recipe doc + the README concern table in the
-same commit. This rule has self-violated **four** times in the past week
-(Cost concern, "six" → "seven", Documentation itself, persona-team
-framing); the §6.4 gate is meant to catch the next occurrence at commit
-time.
-
-### Back-propagation: the same rule applies, from a different session
-
-When a generic improvement is `blueprint a2bp`-ed from a downstream
-project into the blueprint, the same-commit rule applies to **that
-back-propagation commit** — touched in the originating project's
-session, not a new prompt opened in the blueprint repo.
-
-Every one of the four self-violations above was the same shape: a file
-landed in the blueprint via `a2bp` (or a direct edit), and the
-ripples were deferred to "a future session in the blueprint", which
-never happened. The fix is procedural: [`docs/A2BP_PLAYBOOK.md`](A2BP_PLAYBOOK.md)
-walks the post-`a2bp` ripple checklist; `scripts/blueprint a2bp`
-output emits class-based hints per file copied; CLAUDE.md §"Back-propagating"
-forbids the context-switch. Read all three before committing a
-back-propagation.
-
 ---
 
 ## What you don't ship (cross-recipe)
@@ -288,5 +256,4 @@ back-propagation.
   actually collects (a `[SEC]` finding by definition — escalate per
   DoD §6.2).
 - A release notes file that skips a push.
-- A deck slide that names "six concerns" when there are seven (it
-  already happened twice this week — the guardrail is the §6.4 gate).
+- A deck slide that states a count or a rule the code no longer has.

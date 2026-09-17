@@ -2128,7 +2128,7 @@ cmd_a2bp() {
   echo "${C_DIM}  The blueprint owner implements it upstream — merging as-is, adapting,${C_RESET}"
   echo "${C_DIM}  or rewriting — and decides which ripples travel with it. Merging as-is${C_RESET}"
   echo "${C_DIM}  is legitimate BECAUSE someone judged it trivial; that judgement is the${C_RESET}"
-  echo "${C_DIM}  step that must not be skipped. See docs/A2BP_PLAYBOOK.md.${C_RESET}"
+  echo "${C_DIM}  step that must not be skipped.${C_RESET}"
 
   # Non-zero on purpose: filed is not landed, and a script must not be able to
   # read "request opened" as "the blueprint now has this".

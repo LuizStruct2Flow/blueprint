@@ -47,14 +47,6 @@ upstream so every other project inherits it.
 | **Cost** — billable paths capped, logged, alerted; backlog-replay opt-in | [CLAUDE.md §"Cost is a main concern"](CLAUDE.md) | — |
 | **Documentation** — internal + external, same-commit rule | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) + [docs/DoD.md §6.4](docs/DoD.md) | per-project grep hints in `pre-push-project` |
 
-## Read the deck
-
-The full pitch — 30 slides — covering all eight concerns plus the two
-meta-layers (agent + blueprint):
-
-- **Source:** [`docs/way-of-working.md`](docs/way-of-working.md) (Marp markdown)
-- **Render to PDF:** `scripts/build-deck.sh` (needs `node`)
-
 ## Status
 
 This repo is a **framework / template**, not a runnable application. It
@@ -115,6 +107,7 @@ After bootstrap:
 blueprint/
 ├── README.md                       ← this file
 ├── CLAUDE.md                       ← generic agent protocol (uses {{PROJECT_NAME}})
+├── CLAUDE.blueprint.md             ← blueprint maintenance: trunk, a2bp integration, deck (not shipped)
 ├── AGENTS.md                       ← Codex wake-up rules
 ├── AGENT_SIGNAL.md                 ← signal template (Task field is a stub)
 ├── STACK_DEFAULTS.md               ← default tech stack for new struct2flow projects
@@ -136,8 +129,7 @@ blueprint/
 │   ├── codex-signal-watch.sh       ← signal poller (whole-file generic)
 │   ├── start-codex-signal-watch.sh ← Codex CLI launcher (uses {{PROJECT_NAME}})
 │   ├── new-project.sh              ← bootstrap a new project
-│   ├── blueprint                   ← sync CLI: drift / pull / a2bp (add to PATH)
-│   └── build-deck.sh               ← render docs/way-of-working.md → PDF (via marp-cli)
+│   └── blueprint                   ← sync CLI: drift / pull / a2bp (add to PATH)
 ├── config/
 │   └── README.md                   ← two-file config convention (committed *.example, gitignored *)
 └── docs/
@@ -146,9 +138,6 @@ blueprint/
     ├── SECURITY.md                 ← secret-scan / SAST / SCA / DAST recipes per runtime
     ├── INFRASTRUCTURE.md           ← IaC recipes per stack (CDK / Terraform / Helm-ArgoCD)
     ├── DOCUMENTATION.md            ← doc-sync recipes (internal + external; per-project shape)
-    ├── A2BP_PLAYBOOK.md            ← post-`blueprint a2bp` ripple checklist (no context-switch)
-    ├── way-of-working.md           ← Marp deck source: how struct2flow ships software (8 concerns + 2 meta-layers)
-    ├── assets/brand/               ← struct2flow CI: logo SVGs (blueprint-only; not synced to projects)
     ├── PUBLISHING.md               ← runbook for publishing a project (or part of it) publicly
     ├── backlog/
     │   ├── README.md               ← parked-state lifecycle + categories (KEEP/DEFER/OBSOLETE)
@@ -345,7 +334,7 @@ decides what ships. Run `blueprint files` to print it. Current contents include:
 
 - **Top-level:** `CLAUDE.md`, `AGENTS.md`, `STACK_DEFAULTS.md`
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
-  `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`, `way-of-working.md`
+  `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`
 - **`scripts/`:** `install-toolchain.sh`, `codex-signal-watch.sh`,
   `start-codex-signal-watch.sh`, `blueprint` itself
 - **`tests/`** — every suite the archive ships (BUG-029). The regression suites guard blueprint-managed machinery your
@@ -438,7 +427,7 @@ different speeds:
   locally, so make sure `bash scripts/install-toolchain.sh` has been run
   and `.githooks/pre-push` passes before opening the PR.
 - **Slower track — new capabilities or new concerns.** The blueprint
-  is **derived, not designed** ([CLAUDE.md](CLAUDE.md) §"The
+  is **derived, not designed** (`CLAUDE.blueprint.md` §"The
   blueprint is derived, not designed"): capabilities are admitted
   only after they have proven themselves in a real struct2flow
   project. If you want to propose a new recipe / gate / concern,
@@ -462,7 +451,5 @@ hard-code such content will be asked to refactor.
 - `.githooks/pre-push` to run the full gate locally (security +
   build + lint + format + tests + IaC validate).
 - For any change to [docs/DoD.md](docs/DoD.md), [CLAUDE.md](CLAUDE.md),
-  or a recipe doc, also update [docs/way-of-working.md](docs/way-of-working.md) in
-  the same commit — the deck is the canonical pitch surface and
-  must stay current with the rules (see CLAUDE.md §"docs/way-of-working.md
-  is the canonical pitch surface").
+  or a recipe doc, follow `CLAUDE.blueprint.md`: the deck and every other
+  document that restates the rule move in the same commit.

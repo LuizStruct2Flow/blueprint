@@ -41,17 +41,13 @@ because another machine only sees what is pushed.
 ### The founder's
 
 - **Acceptance.** Everything in `docs/waiting-acceptance/` (TASK-021, TASK-022,
-  TASK-050..058, BUG-083, BUG-111, BUG-133..136) carries what to test.
-- **BUG-111 was reopened and fixed again** (2026-09-17): harness teardown now gives a
-  group 250 ms before calling it a survivor. Watch whether subagent-feed #4 and #17
-  stay green on CI. **BUG-133:** the founder "doesn't know". The recommendation is to
-  keep it: the product is sound, and the test gap is closed.
-- **Open questions to the founder:**
-  - Should the Codex feed label read the model from Codex's own session file? Today
-    it shows the roster's resolution. Jesko's real run recorded `gpt-5.6-terra` /
-    `medium` in `~/.codex/sessions`, but `codex-runs.log` does not record the model.
-  - Should AGENTS.md say a Codex persona hands the mic back to the Orchestrator's
-    persona name? Jesko handed back as `Claude Code`, as the docs say.
+  TASK-050..058, TASK-060, TASK-061, BUG-083, BUG-133, BUG-134) carries what to
+  test. BUG-133 stays there by founder decision ("keep it").
+- **Running a suite by hand from a VS Code terminal:** unset `GIT_ASKPASS` too, or
+  the harness refuses to start:
+  `env -u GIT_ASKPASS -u GIT_EDITOR -u GIT_PAGER -u AGENT_PERSONA tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>`.
+- **Reopen or new bug:** the same root cause reopens its row. A different cause is
+  a new bug that links the old one.
 - **Dispatching personas (TASK-059, accepted):**
   - A Claude persona: `subagent_type: <name-lowercase>` (e.g. `philipp`), with no
     `model` override.

@@ -376,6 +376,7 @@ EOF
   _dg_untested=""
   _dg_parked=""
   _dg_tested=""
+  _dg_justified=""
   for _dg_n in $_dg_bugs; do
     _dg_n="$(printf '%s' "$_dg_n" | sed 's/^0*//')"
     # A bug PARKED in backlog/ has no fix yet, so it can have no regression
@@ -414,6 +415,14 @@ EOF
     #
     # -maxdepth 1 on the shipped tests/ is still the guarantee that one level down
     # — where every shipped suite lives — cannot be reached.
+    #
+    # BUG-139 — a mention anywhere in the file used to satisfy this (a comment
+    # `// BUG-9999` passed). Now the bug number must appear in a test TITLE: the
+    # string literal opening an `it(...)`/`describe(...)` call (optionally
+    # `.only`/`.skip`/`.each`, etc). `[^)]*` stops at the callback's own `()`,
+    # which is fine — the title always comes before it on the same line in every
+    # convention this codebase uses; a title split across lines is not matched,
+    # same limitation the old single-line grep already had.
     _dg_hit=""
     while IFS="$_dg_tab" read -r _dg_r _dg_mode; do
       [ -n "$_dg_r" ] || continue
@@ -422,7 +431,7 @@ EOF
       # shellcheck disable=SC2086 # $_dg_depth is one literal flag pair or empty
       if [ -n "$(find "$_dg_r" $_dg_depth -type f \
                    \( -name '*.spec.ts' -o -name '*.spec.tsx' \) \
-                   -exec grep -laE "BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
+                   -exec grep -laE "(it|describe)(\.[A-Za-z]+)?\([^)]*BUG-0*${_dg_n}\b" {} + 2>/dev/null | head -n 1)" ]; then
         _dg_hit=1
         break
       fi
@@ -431,19 +440,39 @@ $_dg_plan
 EOF
     if [ -n "$_dg_hit" ]; then
       _dg_tested="$_dg_tested BUG-$_dg_n"
+      continue
+    fi
+    # BUG-139's other half — BUG-017's real shape: a bug that genuinely has no
+    # test (does not reproduce, or similar) stays checkable rather than hiding
+    # in a comment nobody greps. The escape lives on the bug's OWN row, where a
+    # reader already looks, and it must carry an actual reason: the marker alone
+    # (nothing, or only trailing pipe/whitespace, before the next `|` or EOL)
+    # does not count.
+    _dg_marker_hit=""
+    for _dg_mf in docs/backlog/BUGS.md docs/doing/BUGS.md docs/waiting-acceptance/BUGS.md docs/done/BUGS.md; do
+      [ -f "$_dg_mf" ] || continue
+      if grep -aE "^\| \*\*BUG-0*${_dg_n}\*\*.*\*\*No regression test:\*\*[[:space:]]*[^[:space:]|]" "$_dg_mf" >/dev/null 2>&1; then
+        _dg_marker_hit=1
+        break
+      fi
+    done
+    if [ -n "$_dg_marker_hit" ]; then
+      _dg_justified="$_dg_justified BUG-$_dg_n"
     else
       _dg_untested="$_dg_untested BUG-$_dg_n"
     fi
   done
   [ -n "$_dg_parked" ] && pipe_note "parked, no fix to test yet:$_dg_parked"
   if [ -n "$_dg_untested" ]; then
-    echo "No test under the searched roots names:$_dg_untested"
+    echo "No test TITLE and no row justification under the searched roots names:$_dg_untested"
     echo "  searched:${_dg_searched:- nothing}"
     [ -n "$_dg_skipped" ] && echo "  not searched:$_dg_skipped"
     echo ""
-    echo "DoD §2 — every bug fix carries a regression test that references the"
-    echo "bug number, so 'it is fixed' is checkable later by something other"
-    echo "than trust. Declare where this project's tests live in"
+    echo "DoD §2 — every bug fix carries a regression test whose TITLE names the"
+    echo "bug (a comment does not count), so 'it is fixed' is checkable later by"
+    echo "something other than trust. A bug that genuinely has no test — it does"
+    echo "not reproduce, or similar — carries '**No regression test:** <reason>'"
+    echo "on its own row instead. Declare where this project's tests live in"
     echo "project_config_paths.md:  - BP_TEST_ROOTS: \`backend/src frontend/e2e\`"
     echo "Outside the blueprint, tests/ holds the blueprint's suites and never counts."
     return 1
@@ -452,7 +481,11 @@ EOF
   # "tests found" would be the stage lying about its own coverage.
   if [ -n "$_dg_tested" ]; then
     printf 'regression tests found for:%s\n' "$_dg_tested"
-  else
+  fi
+  if [ -n "$_dg_justified" ]; then
+    printf 'no regression test, justified on the row for:%s\n' "$_dg_justified"
+  fi
+  if [ -z "$_dg_tested" ] && [ -z "$_dg_justified" ]; then
     echo "every BUG in this push is parked — nothing to test yet"
   fi
 }

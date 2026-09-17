@@ -27,14 +27,10 @@
  * perturbed copy of the blueprint. The catalogue is docs/waiting-acceptance/TASK-018-EQUIVALENCE-a2bp/ — 17 of 17
  * assertions here have a mutant that was RUN and OBSERVED to turn them red.
  *
- * TWO THINGS THAT PASS AND SHOULD NOT BE READ AS COVERAGE. `B4` removes the
+ * ONE THING THAT PASSES AND SHOULD NOT BE READ AS COVERAGE. `B4` removes the
  * hermetic scrub from around `commit-tree` and nothing goes red, correctly: the
  * command already pins autocrlf, signing, encoding, identity and dates on its
- * own line, so at THAT call site the scrub is redundant. `B15` points
- * `bp_file_base_content` at the root coordinate instead of the resolved one and
- * nothing goes red either — and that one IS a hole: no case in any of the six
- * suites drives a2bp end to end against a base that has moved under
- * `scaffolding/`. See the catalogue's §4.
+ * own line, so at THAT call site the scrub is redundant.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -108,17 +104,6 @@ async function upstream(s: Scenario): Promise<{ dir: string; base: string }> {
   await s.fs.write('upstream/docs/SECURITY.md', 'security recipe\n')
   await s.fs.write('upstream/scripts/lib/state-dir.sh', 'unrelated helper\n')
   await s.fs.write('upstream/README.md', '# readme\n')
-  await up.commitAll('base')
-  const full = await up.git(['rev-parse', 'HEAD'])
-  return { dir: up.dir, base: full.stdout.trim() }
-}
-
-/** A HALF-MOVED blueprint: one file under scaffolding/, one still at the root. */
-async function scaffoldedUpstream(s: Scenario): Promise<{ dir: string; base: string }> {
-  const up = await s.gitRepo('upstream-scaffolded')
-  await s.fs.write('upstream-scaffolded/scaffolding/docs/DoD.md', 'the DoD\n')
-  await s.fs.write('upstream-scaffolded/scripts/blueprint', 'not yet moved\n')
-  await s.fs.write('upstream-scaffolded/README.md', '# forge readme\n')
   await up.commitAll('base')
   const full = await up.git(['rev-parse', 'HEAD'])
   return { dir: up.dir, base: full.stdout.trim() }
@@ -489,102 +474,6 @@ describe('a2bp request commits are deterministic, minimal, and assert their own 
       expect(r.output.toLowerCase(), 'refused, but not for the changed-path-set reason').toContain(
         'different set of paths',
       )
-    })
-  })
-
-  // =========================================================================
-  // TASK-021 — the base's own shape decides where a request is filed.
-  //
-  // The blueprint is moving everything a project receives under `scaffolding/`.
-  // a2bp takes PROJECT-relative paths and, unlike drift and pull, does not die
-  // when the blueprint moves — it does something quieter and worse: it proposes
-  // creating a SECOND `docs/DoD.md` at the blueprint root, beside the real one,
-  // in a PR that looks entirely plausible.
-  //
-  // The oracle is the FETCHED BASE, not a local checkout. Resolution is PER
-  // PATH, so a HALF-MOVED blueprint — the state the real one is in for the
-  // duration of a sliced restructure — passes #9a and #9b and fails a
-  // tree-level probe at #9c.
-  // =========================================================================
-
-  it("#9a a project-relative path resolves to the base's scaffolding/ coordinate", async () => {
-    await scenario('a2bp-build-9a', async (s) => {
-      const { dir, base } = await scaffoldedUpstream(s)
-      const bare = await bareClone(s, dir)
-      expect(await outFn(s, 'bp_base_path', [bare, base, 'docs/DoD.md'])).toBe(
-        'scaffolding/docs/DoD.md',
-      )
-    })
-  })
-
-  it('#9b a creation follows the tree the base actually has', async () => {
-    await scenario('a2bp-build-9b', async (s) => {
-      const { dir, base } = await scaffoldedUpstream(s)
-      const bare = await bareClone(s, dir)
-      expect(await outFn(s, 'bp_base_path', [bare, base, 'docs/NEW.md'])).toBe(
-        'scaffolding/docs/NEW.md',
-      )
-    })
-  })
-
-  it('#9c a half-moved base resolves each path on its own merits', async () => {
-    await scenario('a2bp-build-9c', async (s) => {
-      // The case a `[ -e scaffolding ]` tree probe gets wrong, and getting it
-      // right is what lets the restructure land as slices instead of one atomic
-      // 185-file commit.
-      const { dir, base } = await scaffoldedUpstream(s)
-      const bare = await bareClone(s, dir)
-      expect(await outFn(s, 'bp_base_path', [bare, base, 'scripts/blueprint'])).toBe(
-        'scripts/blueprint',
-      )
-    })
-  })
-
-  it('#9d the request edits the file the blueprint actually has, not a new root copy', async () => {
-    await scenario('a2bp-build-9d', async (s) => {
-      const { dir, base } = await scaffoldedUpstream(s)
-      const bare = await bareClone(s, dir)
-      const s9 = await spec(s, 'docs/DoD.md', '100644', 'the DoD, improved')
-      const c9 = await outFn(s, 'bp_build_request', [bare, base, 'a2bp/acme/test9', 'acme', s9])
-
-      const changed = await out(s, 'bp_request_hermetic git -C "$1" diff --name-only "$2" "$3"', [
-        bare,
-        base,
-        c9,
-      ])
-      expect(changed).toBe('scaffolding/docs/DoD.md')
-
-      const asserted = await call(s, 'bp_build_assert', [bare, base, c9, s9])
-      expect(
-        asserted.code,
-        `the build assertion rejected its own correctly-placed commit\n${asserted.output}`,
-      ).toBe(0)
-    })
-  })
-
-  it("#9e 'identical to the blueprint' is asked at the coordinate the blueprint uses", async () => {
-    await scenario('a2bp-build-9e', async (s) => {
-      // Asked at the wrong coordinate this finds nothing, so nothing is ever
-      // dropped and every request carries files the blueprint already has.
-      const { dir, base } = await scaffoldedUpstream(s)
-      const bare = await bareClone(s, dir)
-      const same = await spec(s, 'docs/DoD.md', '100644', 'the DoD\n')
-      const r = await call(s, 'bp_inputs_drop_unchanged', [bare, base, same])
-      expect(
-        r.code,
-        'a file identical to the moved blueprint copy was not dropped',
-      ).not.toBe(0)
-    })
-  })
-
-  it('#9f a flat base resolves exactly as it always did', async () => {
-    await scenario('a2bp-build-9f', async (s) => {
-      const { dir, base } = await upstream(s)
-      const bare = await bareClone(s, dir)
-      expect(
-        await outFn(s, 'bp_base_path', [bare, base, 'docs/DoD.md']),
-        'a flat base gained a prefix it has no directory for',
-      ).toBe('docs/DoD.md')
     })
   })
 })

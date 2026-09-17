@@ -166,54 +166,6 @@ bp_request_transport_env() {
   env "${BP_REQUEST_TRANSPORT_UNSET[@]}" "$@"
 }
 
-# --- bp_base_path BARE BASE PROJECT_RELATIVE --------------------------------
-# Where does this project-relative path live in the BLUEPRINT's tree?
-#
-# TASK-021 Stage A′. The blueprint is being restructured so that everything a
-# project receives lives under `scaffolding/`. `scaffolding/` is shaped exactly
-# like a project root, so a request for `docs/DoD.md` has to be filed against
-# `scaffolding/docs/DoD.md` once the move lands — otherwise a2bp proposes
-# creating a second `docs/DoD.md` at the blueprint root, next to the real one.
-# That is quieter than a crash and worse: a plausible-looking PR at the wrong
-# coordinate.
-#
-# THE ORACLE IS THE FETCHED BASE, NOT A LOCAL CHECKOUT. a2bp deliberately needs
-# no local blueprint at all (see bp_file_base_content), and a stale local
-# checkout would misplace the request in exactly the situation this exists for —
-# the days around the move. The base is the tree the request is diffed against,
-# so it is the only tree whose shape can be right.
-#
-# PER PATH, not per tree: during the move some files are under `scaffolding/`
-# and some are still at the root, and asking per path is what lets the move land
-# as slices instead of one atomic commit.
-#
-# The last branch is the only guess in here, and it is confined to CREATIONS —
-# a path neither half holds. There is nothing to align against, so it follows
-# the tree: if the base has a `scaffolding/` at all, a new MANAGED file belongs
-# inside it.
-#
-# TASK-037 — a creation may instead be a new blueprint-only file, which ships
-# to nobody and so belongs at the root. cmd_a2bp exports that answer as
-# BP_REQUEST_UNSHIPPED, one project-relative path per line. It is read HERE
-# because every caller (base content, validation, no-op detection, build,
-# assert) asks this function, so one reading keeps them all at one coordinate.
-# The variable is not a spec field, because the spec feeds the request key.
-# Unset means "managed", which is what a direct caller of the libs gets.
-bp_base_path() {
-  local bare="$1" base="$2" path="$3" unshipped=0
-  case $'\n'"${BP_REQUEST_UNSHIPPED:-}" in *$'\n'"$path"$'\n'*) unshipped=1 ;; esac
-  if bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding/$path" 2>/dev/null; then
-    printf 'scaffolding/%s' "$path"
-  elif bp_request_hermetic git -C "$bare" cat-file -e "$base:$path" 2>/dev/null; then
-    printf '%s' "$path"
-  elif [ "$unshipped" -eq 0 ] && \
-       bp_request_hermetic git -C "$bare" cat-file -e "$base:scaffolding" 2>/dev/null; then
-    printf 'scaffolding/%s' "$path"
-  else
-    printf '%s' "$path"
-  fi
-}
-
 # --- Minimum git version ----------------------------------------------------
 # 2.32 is set by GIT_CONFIG_GLOBAL, which is how the global config is scrubbed
 # without editing the operator's files. `init --object-format` needs 2.29 and

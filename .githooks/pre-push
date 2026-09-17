@@ -47,13 +47,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
 # --- BUG-066: the CODE root ---------------------------------------------------
 #
-# Every path below used to be written cwd-relative — `scripts/lib/pipeline.sh`,
-# `tests/<suite>/test.sh`, `scripts/run-ts-suites.sh`. That is correct exactly
-# while the code tree sits at the repository root, and TASK-021 moves it to
-# `scaffolding/`. Measured in a post-move tree: the gate returned rc=0 printing
-# `PASSED · 0 stages · 39 skipped`, and a real `git push` was accepted.
-#
-# So the hook needs to resolve WHERE ITS CODE IS. Three constraints shaped this:
+# Every path below is anchored on BP_CODE_ROOT, which pipeline.sh,
+# pre-push-project, run-ts-suites and dod-gate read. It is the work-tree root:
 #
 #   * NOT from $0. `core.hooksPath` and a symlinked .git/hooks both give the
 #     right answer, but a COPIED .git/hooks/pre-push gives `<repo>/.git` — a
@@ -62,44 +57,18 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 #   * FROM CWD, which git guarantees: hooks run at the work-tree root. `pwd` is
 #     a syscall, so unlike `git rev-parse --show-toplevel` no exported GIT_DIR
 #     can move it (BUG-077).
-#   * NOT "the file I source exists here". That is a proxy — it is evidence
-#     about the renderer and gets USED as a claim about the suites, which is
-#     FEATURE-002's mistake one level up. A code root is ranked on BOTH things
-#     the gate actually consumes: the renderer it sources AND the suite tree it
-#     runs. Nothing is inferred from anything else.
 #
-# RANKING, and it is what answers "mid-move, when both trees exist, which wins":
-#   rank 1  renderer AND tests/   — a directory that can actually run this gate
-#   rank 2  renderer only         — it can render; the suite stages will fail by
-#                                   their own guards, naming the path
-#   none    no renderer           — refuse the push
-# Candidates are tried scaffolding-first, so a COMPLETE root always beats a
-# half-built one and, between two complete ones, the destination wins. A
-# derived project has no scaffolding/ (bootstrap strips it), so downstream this
-# resolves to `.` exactly as before.
-#
-# A no-match REFUSES. It does not fall through to a skip: this whole block
-# exists because a gate reported PASSED having run nothing.
-BP_CODE_ROOT=''
-_pp_cr_partial=''
-_pp_cr_tried=''
-for _pp_cr in scaffolding .; do
-  [ -d "$_pp_cr" ] || continue
-  _pp_cr_tried="$_pp_cr_tried $_pp_cr"
-  [ -r "$_pp_cr/scripts/lib/pipeline.sh" ] || continue
-  if [ -d "$_pp_cr/tests" ]; then BP_CODE_ROOT="$_pp_cr"; break; fi
-  [ -n "$_pp_cr_partial" ] || _pp_cr_partial="$_pp_cr"
-done
-[ -n "$BP_CODE_ROOT" ] || BP_CODE_ROOT="$_pp_cr_partial"
-if [ -z "$BP_CODE_ROOT" ]; then
-  echo "❌ no code root: scripts/lib/pipeline.sh is not readable under any of:$_pp_cr_tried"
-  echo "   (probed from $(pwd), which git guarantees is the work-tree root)"
+# A missing renderer REFUSES. It does not fall through to a skip: this whole
+# block exists because a gate reported PASSED having run nothing.
+BP_CODE_ROOT="$(pwd -P)"
+if [ ! -r "$BP_CODE_ROOT/scripts/lib/pipeline.sh" ]; then
+  echo "❌ no code root: scripts/lib/pipeline.sh is not readable under $BP_CODE_ROOT"
+  echo "   (git guarantees a hook runs at the work-tree root)"
   echo "   Run: blueprint pull scripts/lib/pipeline.sh"
   echo "   Blocking the push: a gate that cannot find its own code has not run"
   echo "   its stages, and a gate that skips them all still reports green."
   exit 1
 fi
-BP_CODE_ROOT="$(cd -P "$BP_CODE_ROOT" && pwd)"
 export BP_CODE_ROOT
 [ -d "$BP_CODE_ROOT/tests" ] || \
   echo "⚠ code root $BP_CODE_ROOT has no tests/ — the suite stages will say so."

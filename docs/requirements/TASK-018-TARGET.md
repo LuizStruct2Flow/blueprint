@@ -93,7 +93,7 @@ permanent source-to-project path translation in sync and a2bp, a prefix in
 test-root discovery, and root-versus-shipped copies of the workflow, the
 `settings.json` hook commands and the Sonar sources: GitHub Actions and Claude
 Code only read those at the root. Once the archive decides what ships, the move
-adds legibility, not consistency. Plan: `docs/waiting-acceptance/PLAN-TASK-021-RESTRUCTURE.md`.
+adds legibility, not consistency. Plan: `docs/done/PLAN-TASK-021-RESTRUCTURE.md`.
 
 ---
 

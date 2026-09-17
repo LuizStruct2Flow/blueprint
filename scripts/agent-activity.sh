@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Unified agent activity feed — ONE tail-able stream, one [Persona - Backing]
-# prefix per line, merging:
+# Unified agent activity feed — ONE tail-able stream, one [Persona - model - effort]
+# prefix per line (TASK-059; [Persona - Backing] for a persona with no Model cell),
+# merging:
 #   - AGENT_SIGNAL.md mic changes           → [<Holder>] <State> — <Task>
 #   - $AGENT_STATE_HOME/codex-runs.log      → [CODEX]  <line>
 #   - $AGENT_STATE_HOME/gemini-runs.log     → [GEMINI] <line>
-#   - this repo's newest Claude transcript  → [<persona> - <backing>] <line>
-#   - each Agent-tool subagent's transcript → [<persona> - Claude Code] <line>
+#   - this repo's newest Claude transcript  → [<persona> - <model> - <effort>] <line>
+#   - each Agent-tool subagent's transcript → [<persona> - <model it ran on> - <effort>] <line>
 #
 # Usage:
 #   bash scripts/agent-activity.sh            # foreground; Ctrl-C stops
@@ -126,8 +127,11 @@ resolve_identity(){
     # with a plausible name is indistinguishable from a correct one.
     [ -n "$persona" ] || persona="Orchestrator"
   fi
-  backing="${AGENT_BACKING:-$(bp_roster_backing_for_name "$BP_STATE_ROOT" "$persona")}"
-  self_label="$persona${backing:+ - $backing}"
+  if [ -n "${AGENT_BACKING:-}" ]; then
+    self_label="$persona - $AGENT_BACKING"
+  else
+    self_label="$(bp_roster_label "$BP_STATE_ROOT" "$persona")"
+  fi
 }
 
 # Cheap change token for the roster: which file, how big, when touched. Same

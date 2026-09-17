@@ -6,8 +6,10 @@
 # no separate transcript for scripts/agent-activity.sh's claude_feed() to tail).
 #
 # Reads the hook payload JSON on stdin. Emits ONE line:
-#   HH:MM:SS [<label> - Claude Code] <event>: <summary>
-# matching the feed's existing "[Persona - Backing Agent] …" format.
+#   HH:MM:SS [<Persona> - <model> - <effort>] <event>: <summary>
+# matching the feed's "[Persona - model - effort] …" format (TASK-059): the model
+# the subagent actually ran on once its transcript records one, else the roster's
+# configured alias. A dispatch naming no persona stays "[<type> - Claude Code]".
 #
 # Self-rotating (the founder's "delete older entries" requirement): after each
 # append, if the log exceeds AGENT_FEED_MAX_LINES it is RENAMED to `<feed>.1` and

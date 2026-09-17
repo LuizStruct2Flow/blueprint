@@ -4,7 +4,7 @@
 #
 # WHY: piping raw `codex exec` (non-json) into the feed echoed EVERYTHING codex
 # printed — including every line of every file it read — drowning the
-# [Persona - Backing Agent] feed. With `--json`, codex emits structured events
+# [Persona - model - effort] feed. With `--json`, codex emits structured events
 # and file CONTENTS are no longer feed lines (only the command is). This filter
 # keeps just the high-level beats: codex's prose messages, the commands it runs,
 # file changes, and a per-turn token tally. Reasoning + raw output are dropped.

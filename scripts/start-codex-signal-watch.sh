@@ -131,6 +131,26 @@ else
   feed_append(){ :; }
 fi
 
+# THE MODEL AND EFFORT, from the Model cell of the holder persona (TASK-059).
+# A Codex persona passes `-m <slug> -c model_reasoning_effort=<effort>`. A cell
+# that does not resolve REFUSES the dispatch, visibly: running the wrong model
+# quietly is the failure this exists to stop. A holder that is not a Codex
+# persona with a Model cell dispatches on the codex default model, and says so.
+set --
+if command -v bp_roster_model_for_name >/dev/null 2>&1; then
+  __m="$(bp_roster_model_for_name "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-}" 2>&1)"
+  case $? in
+    0) case "$__m" in
+         Codex*) set -- -m "$(printf "%s" "$__m" | cut -f2)" -c "model_reasoning_effort=$(printf "%s" "$__m" | cut -f3)" ;;
+         *) __m="[roster] ${AGENT_SIGNAL_HOLDER:-}: not a Codex persona" ;;
+       esac ;;
+    1) printf "%s — dispatch refused\n" "$__m" | tee -a "$RUN_LOG" >&2
+       feed_append "[$FEED_LABEL] dispatch refused: $__m"
+       exit 8 ;;
+  esac
+  [ "$#" -eq 0 ] && printf "%s — codex runs its configured default model\n" "$__m" | tee -a "$RUN_LOG"
+fi
+
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
@@ -139,7 +159,7 @@ feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 # action (codex prose, commands, file changes) instead of echoing every file
 # codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
 # --output-last-message still captures the final message for verdict reading.
-"$CODEX_BIN" exec --json \
+"$CODEX_BIN" exec --json "$@" \
   --cd "$ROOT" \
   --sandbox workspace-write \
   --skip-git-repo-check \

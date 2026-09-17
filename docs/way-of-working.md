@@ -372,7 +372,9 @@ two things that are only a suite together (BUG-029). There is deliberately no
 third: a suite used to also need a row in a `tests/SUITES.md` catalogue, and a
 second description of a test is a copy that drifts.
 
-The agent calls `blueprint drift` on every wake. Drift between blueprint
+A Claude Code `SessionStart` hook (`scripts/session-start.sh`) starts the
+activity feed and runs `blueprint drift` on every session start, and agents
+without Claude hooks run the same two steps by hand. Drift between blueprint
 and project is treated like drift between code and prod: **detected, not
 assumed away**. And a check that could not run says so: when the blueprint's
 address cannot be read, nothing is compared, and the agent must not report the

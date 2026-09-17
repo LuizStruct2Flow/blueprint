@@ -65,57 +65,29 @@ then `tail -F logs/agent-activity.log` streams
 a single `[Persona - Backing Agent]` feed. `bash scripts/team-kickoff.sh` runs a
 round-robin kick-off to confirm the roster after editing it.
 
-### On wake — the primary session is the Orchestrator (do this first)
+### On wake — the primary session is the Orchestrator
 
-The Claude Code prompt the founder talks to **directly** (not a spawned persona) is
-the **Orchestrator**. The moment you wake as this session, before anything else:
+The Claude Code prompt the founder talks to **directly** is the **Orchestrator**.
+Its name is the `Name` cell of the `Orchestrator` row in
+[AGENT_ROSTER.md](AGENT_ROSTER.md) (`bash scripts/agent-activity.sh --whoami`
+prints it); never assume it. That name is your `Holder`, and handoffs to you are
+`OVER_TO_<NAME>`.
 
-1. **Adopt the Orchestrator persona — read its name from the roster, do not
-   assume it.** The name is the `Name` cell of the `Orchestrator` row in
-   [AGENT_ROSTER.md](AGENT_ROSTER.md); `bash scripts/agent-activity.sh --whoami`
-   prints it along with the roster it came from. That roster is per-engineer and
-   gitignored, so **no two fleets share persona names** and any name written here
-   would be wrong for someone. Your `Holder` on the live baton is that name;
-   handoffs to you are `OVER_TO_<NAME>`. The feed resolves the same row by
-   itself — `AGENT_PERSONA` is an override for spawned personas, not something
-   the Orchestrator needs to set (BUG-010: it used to be the *only* thing that
-   worked, which made renaming a persona appear to do nothing).
-2. **Ensure the live team feed is running.** Run
-   `bash scripts/agent-activity.sh --daemon`. This is *"ensure running"*, not
-   *"run"*: it is idempotent **per repository** — the lock lives at
-   `$BP_STATE_ROOT/logs/.agent-activity.lock`, so a second call in this project
-   is a no-op, while each project you have checked out legitimately runs its own
-   supervisor (so `pgrep -af agent-activity.sh` showing several is normal, and
-   counts them across repositories rather than within one). It returns
-   immediately. It cleans the activity log and streams the one
-   `[Persona - Backing Agent]` feed of every agent's work. **Watch it with
-   `tail -F logs/agent-activity.log`** — the feed does not open a terminal for
-   you. Stop it with `--stop`; check with `--status`.
+**A `SessionStart` hook does the rest of the wake** (`scripts/session-start.sh`,
+wired in `.claude/settings.json`): it starts the activity feed and runs
+`blueprint drift`, and its report is in your context. A drift line reading
+`UNKNOWN` means nothing was compared: tell the founder, and never report the
+project as in sync. If drift shows changes, summarise them and offer
+`blueprint pull`; do not pull silently.
 
-   > Spawned, non-primary personas must **not** start it. Every-wake spawning is
-   > what turned a broken idempotency guard into BUG-001 (load 175 for 2.7 days).
-3. **Arm the wake-time Monitors.** Reactivity is a `Monitor`, not a habit of
-   remembering to look:
+**Then arm the wake-time Monitors**, `persistent: true`, each emitting only on
+change: the mic (`logs/state/signal.md`, every `Holder`/`State` change, not just
+`OVER_TO_<you>`), and whatever `project_config_paths.md` §"Wake-time Monitors"
+declares. Then orchestrate the roster.
 
-   - **The mic** (generic, every project) — watch `logs/state/signal.md` and emit on
-     any change to `Holder` / `State`. Without it you discover a dispatched
-     agent has finished only when the founder tells you, which turns every
-     hand-off into a manual poll. Emit on **every** state change, not just
-     `OVER_TO_<you>`: a watcher that only matches the happy path is silent
-     when a dispatch dies.
-   - **Whatever `project_config_paths.md` §"Wake-time Monitors" declares** —
-     cross-stream exchange boards, shared queues, anything a second stream
-     writes that nothing else will notify you about.
-
-   Both are `persistent: true` and must emit **only on change**. A raw tail is
-   noise, and a monitor that floods gets muted — which leaves you exactly as
-   blind as having none.
-4. **Then orchestrate** the roster — dispatch the Codex/Gemini personas, spawn / hand
-   off to the other Claude personas, integrate their work.
-
-A **spawned, non-primary** Claude session does the opposite: it adopts the persona
-it was assigned, and does NOT re-run these orchestrator steps (the feed is already
-up; it just participates).
+**Agents without Claude hooks (Codex, Gemini) wake by hand:** run
+`bash scripts/blueprint drift` and report a non-zero exit as unknown, then
+`bash scripts/agent-activity.sh --daemon` regardless of the drift result.
 
 ## Running commands — one per call, chains only when dependent
 
@@ -289,56 +261,13 @@ written by `bash scripts/install-toolchain.sh` and runs the CLI of the project
 you are standing in, so it names no checkout. The agent uses it directly; do
 not hand-roll `diff -ru` invocations.
 
-### Wake-time drift check (mandatory on every fresh session)
+### Drift and pull
 
-```bash
-blueprint drift
-```
-
-**Run it exactly like that — one plain command, not wrapped.** Do not build
-`(command -v blueprint >/dev/null && blueprint drift || bash scripts/blueprint
-drift) | tail -40` or any variant. The allowlist grants `Bash(blueprint *)`; a
-compound wrapper does not match that pattern, so wrapping it is *routing around
-the permission prompt rather than asking* — which is the founder's standing rule,
-not a style preference. If `blueprint` is not on PATH, run
-`bash scripts/blueprint drift` as its own command and fix the PATH afterwards.
-
-In the blueprint repo itself there is no `.blueprint-source` — it is the source —
-and `drift` reports exactly that and exits 0 (BUG-007). It still arms the gate,
-and it still reports whether the checkout is behind its own remote.
-
-Output: which managed files differ from the blueprint, plus the
-commit log in the blueprint since this project's `.blueprint-source`
-bootstrap_sha. The blueprint is read **by its address** — `blueprint_remote`,
-fetched fresh on every run — never from a local folder, so the header names the
-remote, the branch and the full SHA it compared against. The one exception is an
-exported `BLUEPRINT_ROOT`, and then the header says `LOCAL CHECKOUT …
-(BLUEPRINT_ROOT override)`. Four cases:
-
-1. **Clean** — `blueprint drift` reports `✓ All blueprint-managed files
-   match the blueprint HEAD.` → proceed with founder's task.
-2. **Drifted** — surface a short summary to the founder ("blueprint has
-   N commit(s); files M, P drifted"). Offer to pull. Do **not**
-   silently pull — the founder may want to vet a specific change.
-3. **Stale blueprint** — `blueprint drift` reports commits ahead but no
-   file-level drift (rare; happens if the project already back-propagated
-   everything). Bump `.blueprint-source` bootstrap_sha to the new HEAD
-   (next `blueprint pull` does this automatically) and proceed.
-4. **Unreachable** — non-zero (exit 5), and it says so: `could not read the
-   blueprint … This is NOT a clean drift report`. Tell the founder the drift
-   check did not run. Do **not** report the project as in sync.
-
-### Pulling forward
-
-```bash
-blueprint pull                # interactive: y/n/quit per file
-blueprint pull docs/DoD.md    # single file
-blueprint pull --yes          # batch, no prompt (only when founder asks for it)
-```
-
-After a non-empty pull, **review with `git diff` and commit in the
-project repo**. `.blueprint-source` bootstrap_sha is updated by
-`blueprint pull` automatically — don't edit it by hand.
+`blueprint drift` compares this project with the blueprint's fetched tip; the
+session-start hook runs it (§"On wake"). Exit 5 means the blueprint could not be
+read, which is **not** a clean report. After a non-empty `blueprint pull`
+(`--yes` only when the founder asks), review with `git diff` and commit;
+`.blueprint-source` is updated by the pull, never by hand.
 
 ### Back-propagating (apply-to-blueprint)
 

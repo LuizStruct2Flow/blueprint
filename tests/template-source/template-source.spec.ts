@@ -73,6 +73,13 @@ const CONFIGS = [
 const UNSEEDED_IMPORT = 'claude.internal.md'
 
 /**
+ * TASK-021 Stage 2 — the blueprint's own maintenance rules. The mirror image of
+ * UNSEEDED_IMPORT: the blueprint writes it and no project ever has it, because it
+ * is export-ignored. `tests/bootstrap-contents` #11 proves that half.
+ */
+const BLUEPRINT_ONLY_IMPORT = 'CLAUDE.blueprint.md'
+
+/**
  * What bootstrap actually ships.
  *
  * Asserted against `git archive`, never against `.gitattributes`: the export
@@ -86,8 +93,8 @@ async function archiveListing(s: Scenario): Promise<string[]> {
   return r.stdout.split('\n').filter(Boolean)
 }
 
-describe('TASK-043 — CLAUDE.md imports the five project configs, and only those plus one', () => {
-  it('#import-1 the @-imports are the seeded configs plus the unseeded project-owned file, and the root copies exist', async () => {
+describe('TASK-043 — CLAUDE.md imports the five project configs, and only those plus two', () => {
+  it('#import-1 the @-imports are the seeded configs plus the unseeded project-owned file and the blueprint-only one, and the root copies exist', async () => {
     const doc = await readFile(join(REPO_ROOT, 'CLAUDE.md'), 'utf8')
     // Claude Code ignores code blocks and code spans when it looks for imports, so this does too.
     const prose = doc.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
@@ -98,8 +105,9 @@ describe('TASK-043 — CLAUDE.md imports the five project configs, and only thos
     // an unexplained sixth import is exactly what this case caught last time.
     expect(
       imports.sort(),
-      `CLAUDE.md must import the five seeded configs plus ${UNSEEDED_IMPORT}, and nothing else`,
-    ).toEqual([...CONFIGS, UNSEEDED_IMPORT].sort())
+      `CLAUDE.md must import the five seeded configs plus ${UNSEEDED_IMPORT} and ${BLUEPRINT_ONLY_IMPORT}, and nothing else`,
+    ).toEqual([...CONFIGS, UNSEEDED_IMPORT, BLUEPRINT_ONLY_IMPORT].sort())
+    await expect(readFile(join(REPO_ROOT, BLUEPRINT_ONLY_IMPORT), 'utf8'), `${BLUEPRINT_ONLY_IMPORT} is missing`).resolves.toBeTruthy()
 
     // CONFIGS only: UNSEEDED_IMPORT has no root copy to require — whether this
     // repo has written one is its own business, and a missing one is the

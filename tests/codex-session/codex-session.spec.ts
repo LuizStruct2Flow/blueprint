@@ -101,7 +101,7 @@ function fixtureRawJsonStream(threadId: string | null): string {
   return lines.join('\n') + '\n'
 }
 
-async function lib(s: Scenario, snippet: string): Promise<{ stdout: string; code: number; stderr: string }> {
+async function lib(s: Scenario, snippet: string) {
   const runner = await s.fs.write('run.sh', `. "${LIB}"\n${snippet}\n`)
   return s.run('bash', [runner], { cwd: s.workspace.root })
 }

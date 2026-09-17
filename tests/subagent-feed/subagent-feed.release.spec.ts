@@ -443,6 +443,65 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
     })
   })
 
+  it('BUG-137 a subagent transcript that already has a line when the supervisor first discovers it is not truncated', async () => {
+    await scenario('sf-137', async (s) => {
+      // Live probe, 2026-09-17 19:52: a nested helper's transcript held TWO
+      // Bash-call records by the time the supervisor's glob scan found it, and
+      // the feed showed only the second. `seed_offset` seeded the file at its
+      // CURRENT size on discovery — correct for a file that predates the
+      // supervisor, wrong for one born while it is already running, since
+      // every byte in it was written during this supervisor's own lifetime.
+      const f = await feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren' })
+      const mainRel = sessionRel(f)
+      await s.fs.write(mainRel, '', { append: true })
+
+      await f.withFeed(async () => {
+        // Prove the supervisor has completed at least one full scan cycle
+        // BEFORE the subagent transcript exists at all. Without this, the
+        // file could land on the supervisor's very first scan by chance,
+        // which is the OTHER case (see the control case below) and would
+        // prove nothing about a later discovery.
+        await f.readerReady(mainRel, { wrap: (tag) => rec(tag, false) })
+
+        const agentId = 'bug137aaaaaa'
+        const subRel = mainRel.replace(/\.jsonl$/, `/subagents/agent-${agentId}.jsonl`)
+        await writeMeta(s, mainRel, agentId, { description: "Nadia implements Pike's prescription" })
+        // Written as ONE call, with its first record already in it — exactly
+        // like a nested helper whose transcript is created mid-run, already
+        // carrying whatever it wrote before the next scan finds it. Never
+        // `{ append: true }` against an empty file first: that would give the
+        // supervisor a chance to discover an EMPTY file before this content
+        // lands, which is a different (and already-covered) race.
+        await s.fs.write(subRel, rec('FIRST-BUG137-LINE', true))
+
+        await f.expectLine('FIRST-BUG137-LINE')
+
+        await s.fs.write(subRel, rec('SECOND-BUG137-LINE', true), { append: true })
+        await f.expectLine('SECOND-BUG137-LINE')
+      })
+    })
+  })
+
+  it('BUG-137 control: a subagent transcript present at the supervisor\'s first scan is still not replayed', async () => {
+    await scenario('sf-137-control', async (s) => {
+      // The fix must not turn EVERY subagent transcript into a zero-seed —
+      // only ones discovered after the supervisor's first pass. A file that
+      // is already there when the supervisor starts (a finished agent from
+      // an earlier run, say) must keep the old EOF-seed behaviour.
+      const f = await feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren' })
+      const t = await transcripts(s, f, 'bug137control')
+      await s.fs.write(t.subRel, rec('PRE-EXISTING-BUG137-must-not-replay', true))
+
+      await f.withFeed(async () => {
+        await f.readerReady(t.subRel, { wrap: (tag) => rec(tag, true) })
+        await s.fs.write(t.subRel, rec('BUG137-CONTROL-SENTINEL', true), { append: true })
+        await f.expectLine('BUG137-CONTROL-SENTINEL')
+
+        expect(await f.count('PRE-EXISTING-BUG137-must-not-replay')).toBe(0)
+      })
+    })
+  })
+
   it("#3 the session transcript's own records still stream", async () => {
     await scenario('sf-3a', async (s) => {
       const f = await feedFixture(s, 'repo', { source: SUBJECT, roster: ROSTER, holder: 'Wren' })

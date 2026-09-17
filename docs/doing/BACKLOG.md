@@ -10,7 +10,8 @@ a missing file.
 
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
-| **TASK-059** | **Each persona runs on a model tier from the roster, never a hardcoded version.** Founder-approved 2026-09-17. The roster gains a `Model` cell, `<tier>:<effort>`: `frontier` is the provider's best model, `frontier-N` is N places down its ranked list. Codex ranks from `~/.codex/models_cache.json` (visibility `list`, by priority); Claude from one roster line, `Claude models, best first: fable, opus, sonnet, haiku`, whose aliases Claude Code resolves to the newest version. `bp_roster_model_for_name` in `scripts/lib/roster.sh` resolves it; an invalid tier, an unsupported effort or a missing list is an error naming the persona. Codex dispatch passes `-m` and `model_reasoning_effort`, and refuses a cell that does not resolve. `scripts/claude-agents.sh`, run from `scripts/session-start.sh`, writes `.claude/agents/<name>.md` with `model:` and `effort:` for every Claude persona but the Orchestrator. Feed lines read `[Name - model - effort]`, with the model a Claude subagent actually ran on once its transcript records one. | S2 | Agent team | **In progress.** **What to test:** start a session: `.claude/agents/` holds one file per Claude persona with its resolved model and effort; dispatch a Codex persona: the run log shows `-m <slug>`; the feed labels both `[Name - model - effort]`. **Re-open if** a persona runs on a model its `Model` cell does not name, or a bad cell is used without an error. |
+
+*(Empty.)*
 
 
 ## TASK-012 — how to run it, and why not a fork

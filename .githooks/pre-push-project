@@ -31,8 +31,8 @@
 # the gate renderer). Without them a regression to any of it pushes green —
 # audit finding A-15.
 #
-# There is NO wall-clock ceiling (CLAUDE.md §"Pre-push tolerance", founder
-# decision 2026-08-02 closing BUG-005). The gate reports its total and slowest
+# There is NO wall-clock ceiling (founder decision 2026-08-02 closing BUG-005;
+# docs/DoD.md §3). The gate reports its total and slowest
 # stage every run. Suites named `*.release.spec.ts` run in CI only (TASK-054),
 # and the vitest stage prints a skip line for each.
 

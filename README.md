@@ -40,7 +40,7 @@ upstream so every other project inherits it.
 |---|---|---|
 | **Architecture** — DDD + Clean + Hexagonal | [STACK_DEFAULTS.md](STACK_DEFAULTS.md) | — |
 | **Lifecycle** — four founder-gated states | [docs/DoD.md](docs/DoD.md) §1 | — |
-| **Quality** — DoD, two-commit pattern, ≥90% coverage | [docs/DoD.md](docs/DoD.md) §3, §6 | build · lint · prettier · test:coverage |
+| **Quality** — DoD, reproducer-first bug fixes, project-declared coverage | [docs/DoD.md](docs/DoD.md) §3, §4 | build · lint · prettier · test:coverage |
 | **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | — |
 | **Security** — secret-scan, SAST, SCA, IaC scan, DAST | [docs/SECURITY.md](docs/SECURITY.md) | gitleaks · semgrep · osv-scanner |
 | **Infrastructure as Code** — defined, reviewable, reproducible | [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | cdk synth / terraform / helm lint |

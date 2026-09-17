@@ -416,7 +416,7 @@ backlog/  →  doing/  →  waiting-acceptance/  →  done/
 |---|---|
 | `backlog/` | Parked work — every row marked `KEEP` / `DEFER` / `OBSOLETE` |
 | `doing/` | Active. Bugs, plans, in-flight work |
-| `waiting-acceptance/` | Pushed to main, awaiting founder test |
+| `waiting-acceptance/` | Landed on main with CI green, awaiting founder test |
 | `done/` | Founder-accepted. Source of truth for *delivered* |
 
 ---
@@ -442,18 +442,18 @@ describing it can only ever drift.
 Eight rules, each the gate to the next (`docs/DoD.md` §1b):
 
 1. **All work refers to a backlog item** — `TASK-`, `FEATURE-` or `BUG-`. No exceptions, including a defect found mid-session
-2. **Promote to `doing/` BEFORE starting** — the folder answers "what is being worked on", which only works if the move precedes the work
+2. **The row lands in `doing/` with the first work commit** — no separate filing or promotion commit
 3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`)
-4. **A review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude. A finding becomes work only if it is real and practical; a hypothetical is one "known limit" line
-5. **All gates green** — no demotions, no bypass flags
-6. **Land it** — trunk-based push, for a product repo and for the blueprint alike. A branch is a tool for a change you want isolated, not a rule
-7. **Landing moves it to `waiting-acceptance/`**
+4. **Major bugs, core-path changes and new features get a review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude, on named commits. A finding becomes work only if it is real and practical; a hypothetical is one "known limit" line
+5. **All gates green** — no bypass flags
+6. **Land it** — a maintainer pushes to `main`; an outside contribution is a pull request
+7. **Landing with CI green moves it to `waiting-acceptance/`** — batched into the next work commit, never ahead of the push
 8. **Artefacts always travel with their parent item** — the half that gets forgotten, because a row is one line and a folder is not
 
-> Rule 4 is not a preference. Across two changes the cross-provider reviewer
-> raised **15 findings, every one real** — including two guards that passed
-> because they watched the wrong thing, which is the error an author cannot
-> see by definition.
+> The review is not a preference where it applies. Across two changes the
+> cross-provider reviewer raised **15 findings, every one real** — including two
+> guards that passed because they watched the wrong thing, which is the error an
+> author cannot see by definition.
 
 > The lifecycle answers **"what has been delivered?"** —
 > not "what has been merged?" Those are different questions.
@@ -462,7 +462,8 @@ Eight rules, each the gate to the next (`docs/DoD.md` §1b):
 
 # 3 · Quality — Definition of Done
 
-`docs/DoD.md` is the canonical handoff gate. Eight checklist sections.
+`docs/DoD.md` is the canonical handoff gate. What a mechanism checks is off the
+checklist; what remains is labelled *judgement*.
 
 **Non-optional rules:**
 

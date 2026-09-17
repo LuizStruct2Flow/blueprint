@@ -107,7 +107,7 @@ Per-slice decisions live in the relevant
   the state value, e.g. `OVER_TO_CODEX`.
 - Use `OVER_TO_USER` when founder acceptance, rejection, or product direction is
   needed.
-- Before flipping to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md) §A–§H. If
+- Before flipping to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md) §7. If
   `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task` field
   claims are waiting, the handoff is not done.
 - **Every work item you name to the founder carries a link and a plain line.** A
@@ -136,7 +136,7 @@ each other — no provider both writes and blesses-for-push the same code. The l
 2. A **flips the mic to a Provider-B persona** (`OVER_TO_<B>`), naming the
    commit(s) to review.
 3. **B reviews.** The reviewer's job is **both** code correctness **and** ensuring
-   the change honors the **blueprint rules and the DoD** (`docs/DoD.md` §A–§H:
+   the change honors the **blueprint rules and the DoD** (`docs/DoD.md` §7:
    co-located tests, coverage tiers, lint/format, two-commit reproducer for
    bug-class fixes, doc-sync, etc.). A change that is "correct" but violates a
    blueprint/DoD rule is **not** clean.

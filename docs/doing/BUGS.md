@@ -33,7 +33,8 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
-| **BUG-137** | **The feed drops a subagent's first lines when its transcript appears after the feed started.** Observed 2026-09-17 19:52 on a live probe: Klaus's nested general-purpose helper ran `wc -l CLAUDE.md` then `wc -l README.md` (both in its transcript, `agent-a3b9e55dba265076c.jsonl`), and `logs/agent-activity.log` shows only the README line. `seed_offset` (`scripts/agent-activity.sh:524`) starts every newly discovered file at its current size. That is correct for files that already existed when the supervisor started (a restart must not replay history), but a transcript born while the feed runs loses whatever was written before the next scan. | S2 | **OPEN** | **Fix:** only files present at the supervisor's first scan start at end of file; a file first seen later is read from its start. **Regression test:** named BUG-137. **Re-open if** a subagent's first tool call is in its transcript but not in the feed. |
+
+*(Empty.)*
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

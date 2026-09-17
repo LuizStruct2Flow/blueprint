@@ -10,7 +10,7 @@ it.
 
 Watch every agent live in one place: `bash scripts/agent-activity.sh --daemon`,
 then `tail -F logs/agent-activity.log`. One tail-able
-`[Persona - Backing agent]` feed (mic changes + each agent's actual work) written
+`[Persona - model - effort]` feed (mic changes + each agent's actual work) written
 to `logs/agent-activity.log`. `--stop` ends it; `--status` reports whether it runs.
 
 ## On wake — minimum read
@@ -231,7 +231,12 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
 
    It polls every 2 s; on each poll where `State = OVER_TO_CODEX` with a
    `Holder|State|Task` key it hasn't fired yet, it runs `codex exec` with the
-   verbatim `Task` field wrapped in the radio-over preamble. **Trigger is
+   verbatim `Task` field wrapped in the radio-over preamble. **The model is the
+   `Holder` persona's:** its roster `Model` cell resolves to
+   `-m <slug> -c model_reasoning_effort=<effort>` (`bp_roster_model_for_name`).
+   A cell that does not resolve refuses the dispatch in the run log and the feed;
+   a `Holder` that is not a Codex persona runs the codex default and says so.
+   So name the Codex persona in `--holder`, as below. **Trigger is
    state-based:** starting the dispatcher while the signal is already
    `OVER_TO_CODEX` fires it on the first poll — no re-flip needed.
 
@@ -270,6 +275,13 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
    (trigger log). Codex flips the signal back to
    `Holder=Claude Code / State=OVER_TO_CLAUDE` itself. Keep a signal-change
    `Monitor` (mechanism 1) armed so Claude Code wakes on the flip-back.
+
+**Claude personas (TASK-059).** Claude Code has no signal dispatcher: the
+Orchestrator spawns them. `scripts/claude-agents.sh`, run on every session start,
+writes `.claude/agents/<name-lowercase>.md` for each Claude Code persona except the
+Orchestrator, with `model:` and `effort:` from its `Model` cell. Dispatch a persona
+with `subagent_type: <name-lowercase>` so it runs on its own model; do not pass a
+`model` override, which would replace it.
 
 **Codex binary discovery** (in `start-codex-signal-watch.sh`): `$CODEX_BIN`, then
 `codex` on `PATH`, then `~/.vscode/extensions/*/bin/*/codex`. Set

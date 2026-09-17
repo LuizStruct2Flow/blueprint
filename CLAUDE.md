@@ -62,7 +62,7 @@ roster, not a bare agent type.
 
 Watch the whole team live in one terminal: `bash scripts/agent-activity.sh --daemon`
 then `tail -F logs/agent-activity.log` streams
-a single `[Persona - Backing Agent]` feed. `bash scripts/team-kickoff.sh` runs a
+a single `[Persona - model - effort]` feed. `bash scripts/team-kickoff.sh` runs a
 round-robin kick-off to confirm the roster after editing it.
 
 ### On wake — the primary session is the Orchestrator

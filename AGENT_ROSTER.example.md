@@ -19,7 +19,7 @@
 > [AGENTS.md](AGENTS.md) ship with, but the `Backing agent` column is free text
 > — put `Gemini`, `GitHub Copilot`, `Qwen`, or anything else you actually run.
 > Only two things depend on the value: the live feed prints it as the label
-> `[Persona - Backing agent]`, and any agent you want *dispatched autonomously*
+> `[Persona - model - effort]` once the persona has a `Model` cell, and any agent you want *dispatched autonomously*
 > needs a signal watcher (see [AGENTS.md](AGENTS.md) §Dispatching). An agent
 > with no watcher still works — you drive it yourself and it participates in the
 > baton normally.
@@ -40,23 +40,28 @@ one's backing agent to whatever you actually run.
 
 ## Members (default)
 
-| Role | Name | Backing agent |
-|---|---|---|
-| Orchestrator | Sylvia | Claude Code |
-| PO | Klaus | Claude Code |
-| BA | Kathrin | Codex |
-| Senior Architect | Christian | Claude Code |
-| Architect | Slava | Codex |
-| UX | Nicole | Claude Code |
-| Front-End-1 | Yannik | Claude Code |
-| Front-End-2 | Alex | Codex |
-| Back-End-1 | Matthias | Claude Code |
-| Back-End-2 | Andreas | Codex |
-| QA-1 | Vitali | Claude Code |
-| QA-2 | Jesko | Codex |
-| Security-1 | Markus | Claude Code |
-| Infrastructure-1 | Philipp | Claude Code |
-| Infrastructure-2 | Elias | Codex |
+| Role | Name | Backing agent | Model |
+|---|---|---|---|
+| Orchestrator | Sylvia | Claude Code | frontier:high |
+| PO | Klaus | Claude Code | frontier-1:medium |
+| BA | Kathrin | Codex | frontier-1:medium |
+| Senior Architect | Christian | Claude Code | frontier:high |
+| Architect | Slava | Codex | frontier:high |
+| UX | Nicole | Claude Code | frontier-1:medium |
+| Front-End-1 | Yannik | Claude Code | frontier-1:medium |
+| Front-End-2 | Alex | Codex | frontier-1:medium |
+| Back-End-1 | Matthias | Claude Code | frontier-1:medium |
+| Back-End-2 | Andreas | Codex | frontier-1:medium |
+| QA-1 | Vitali | Claude Code | frontier-1:medium |
+| QA-2 | Jesko | Codex | frontier-1:medium |
+| Security-1 | Markus | Claude Code | frontier-1:medium |
+| Infrastructure-1 | Philipp | Claude Code | frontier-1:medium |
+| Infrastructure-2 | Elias | Codex | frontier-1:medium |
+
+Claude models, best first: fable, opus, sonnet, haiku
+
+**Model** is `<tier>:<effort>`: `frontier` is the provider's best model and
+`frontier-N` is N places down its ranked list, so no cell names a model version.
 
 Default backing-agent totals: **9 Claude Code, 6 Codex.** This default uses only
 Claude Code + Codex. **Gemini and GitHub Copilot are fully supported** (see
@@ -97,11 +102,15 @@ the Orchestrator or by the founder as needed.
 
 ## Dispatch (backing agent → how the persona is launched)
 
-- **Claude Code** personas: interactive sessions. Each watches the signal and
-  self-activates when the mic is for its persona.
+- **Claude Code** personas: spawned by the Orchestrator as
+  `subagent_type: <name-lowercase>`. `scripts/claude-agents.sh` writes each one's
+  `.claude/agents/<name>.md` (model and effort from the `Model` cell) on every
+  session start; the Orchestrator row gets none, since the founder picks that
+  session's model.
 - **Codex / Gemini** personas: launched by their dispatcher
   (`start-codex-signal-watch.sh` / `start-gemini-signal-watch.sh`). The dispatch
-  task names the persona/role for the run.
+  task names the persona/role for the run; a Codex persona in `Holder` runs on
+  the model and effort its `Model` cell resolves to.
 - **GitHub Copilot** personas: notify-only unless a headless Copilot CLI is
   installed — a human operator drives Copilot in the IDE (see AGENTS.md).
 
@@ -113,7 +122,7 @@ acting as the Architect. Until then, route Codex/Gemini personas via
 
 ## Live team feed
 
-`scripts/agent-activity.sh` streams one tail-able `[Persona - Backing Agent]` feed
+`scripts/agent-activity.sh` streams one tail-able `[Persona - model - effort]` feed
 (every agent's mic moves + Codex/Gemini run output + the orchestrator's session
 output). The first agent to wake starts it; it cleans its log and opens a tail
 terminal. `scripts/team-kickoff.sh` runs a round-robin kick-off where each persona

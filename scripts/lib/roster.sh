@@ -36,11 +36,12 @@
 # Usage:
 #   . scripts/lib/roster.sh
 #   bp_roster_file            <repo-root|file>
-#   bp_roster_rows            <repo-root|file>            # role<TAB>name<TAB>backing
+#   bp_roster_rows            <repo-root|file>            # role<TAB>name<TAB>backing<TAB>model
 #   bp_roster_name_for_role   <repo-root|file> <role>
 #   bp_roster_backing_for_name <repo-root|file> <name>
 #   bp_roster_name_in_text    <repo-root|file> <free text>   # BUG-027
 #   bp_roster_subagent_label  <repo-root|file> <agent-<id>.meta.json>   # BUG-124
+#   bp_roster_model_for_name  <repo-root|file> <name>     # TASK-059: backing<TAB>model<TAB>effort
 
 # --- warning memo -----------------------------------------------------------
 # Deliberately a space-delimited string rather than an associative array: this
@@ -90,7 +91,7 @@ bp_roster_file(){
 }
 
 # --- the member rows --------------------------------------------------------
-# Emits one `role<TAB>name<TAB>backing` per member. ONLY the Members table is
+# Emits one `role<TAB>name<TAB>backing<TAB>model` per member (model may be empty). ONLY the Members table is
 # read: a roster carries other tables, and parsing every pipe-row would let an
 # unrelated one shadow a real member — a silently wrong answer, which is the
 # exact failure mode this bug was made of.
@@ -114,10 +115,11 @@ bp_roster_rows(){
       n = split($0, f, "|")
       if (n < 5) next                       # | role | name | backing | => 5 parts
       role = trim(f[2]); name = trim(f[3]); backing = trim(f[4])
+      model = (n >= 6) ? trim(f[5]) : ""
       if (role == "" || name == "")  next
       if (tolower(role) == "role")   next   # header row
       if (role ~ /^[-:[:space:]]+$/) next   # separator row
-      print role "\t" name "\t" backing
+      print role "\t" name "\t" backing "\t" model
     }
   ' "$file"
 }
@@ -233,10 +235,19 @@ bp_roster_subagent_label(){
   local who
   who="$(_bp_roster_subagent_who "$1" "$2" 0)"
   case $? in
-    0) bp_roster_label "$1" "$who" ;;
+    0) bp_roster_label "$1" "$who" "$(_bp_roster_ran_model "$2")" ;;
     2) printf '%s - Claude Code' "$who" ;;
     *) return 1 ;;
   esac
+}
+
+# TASK-059: the model a subagent ACTUALLY ran on, read from its transcript beside
+# the meta file. No hook payload and no meta file carries it; the transcript's
+# assistant records do, once the first one is written. Empty before that, and the
+# label then shows the configured alias.
+_bp_roster_ran_model(){
+  jq -r 'select(.type == "assistant") | .message.model // empty | select(startswith("<") | not)' \
+    "${1%.meta.json}.jsonl" 2>/dev/null | head -1
 }
 
 # rc 0: a roster name. rc 2: a type, possibly prefixed by its parent. rc 1: nothing.
@@ -271,9 +282,21 @@ _bp_roster_subagent_who(){
 # Degrades to the bare NAME rather than failing. A feed line with no label is
 # worse than an unqualified one; bp_roster_backing_for_name already warns once
 # per unresolved name, so the miss is reported without being fatal.
+# TASK-059: "<Name> - <model> - <effort>" once the persona has a Model cell. The
+# optional third argument is the model a Claude subagent actually ran on, which
+# wins over the configured alias. A roster with no Model cell keeps the old
+# "<Name> - <Backing>"; an INVALID cell also does, and warns naming the persona.
 bp_roster_label(){
-  local src="${1:-.}" name="${2:-}" backing
+  local src="${1:-.}" name="${2:-}" ran="${3:-}" backing r rc
   [ -n "$name" ] || return 1
+  r="$(bp_roster_model_for_name "$src" "$name" 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    backing="$(printf '%s' "$r" | cut -f1)"
+    [ "$backing" = "Claude Code" ] && [ -n "$ran" ] || ran="$(printf '%s' "$r" | cut -f2)"
+    printf '%s - %s - %s' "$name" "$ran" "$(printf '%s' "$r" | cut -f3)"
+    return 0
+  fi
+  [ "$rc" -eq 1 ] && bp_roster_warn "model:$name" "${r#\[roster\] }"
   backing="$(bp_roster_backing_for_name "$src" "$name" 2>/dev/null)"
   printf '%s%s' "$name" "${backing:+ - $backing}"
 }
@@ -281,7 +304,7 @@ bp_roster_label(){
 bp_roster_backing_for_name(){
   local src="${1:-.}" want="${2:-}" role name backing
   [ -n "$want" ] || return 1
-  while IFS="$(printf '\t')" read -r role name backing; do
+  while IFS="$(printf '\t')" read -r role name backing _; do
     if [ "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" \
        = "$(printf '%s' "$want" | tr '[:upper:]' '[:lower:]')" ]; then
       printf '%s' "$backing"; return 0
@@ -292,4 +315,81 @@ EOF
   bp_roster_warn "name:${want// /_}" \
     "'$want' is not on $(bp_roster_file "$src" 2>/dev/null || echo '<no roster>') — labelling without a backing agent"
   return 1
+}
+
+# --- name -> model and effort (TASK-059) -------------------------------------
+# The Model cell is `<tier>:<effort>`. `frontier` is the provider's best model and
+# `frontier-N` is N places down that provider's ranked list, so the roster never
+# names a model version and a new release needs no edit.
+#
+#   Codex       — the ranked list is ${CODEX_HOME:-~/.codex}/models_cache.json:
+#                 visibility "list", ordered by priority ascending. The effort
+#                 must be in that model's supported_reasoning_levels.
+#   Claude Code — no local list. The roster carries one line, best first:
+#                   Claude models, best first: fable, opus, sonnet, haiku
+#                 and Claude Code resolves each family alias to its newest
+#                 version. Efforts are the ones a subagent definition accepts.
+#
+# Prints `backing<TAB>model<TAB>effort`. Every failure prints an error naming the
+# persona on stderr — never a silent default. rc 2 means there is nothing to
+# resolve (not on the roster, or no Model cell); rc 1 means the cell is wrong.
+# POSIX on purpose: the Codex wake command sources this lib under `sh`.
+BP_CLAUDE_EFFORTS="low medium high xhigh max"
+
+bp_roster_claude_order(){
+  local file
+  file="$(bp_roster_file "${1:-.}" 2>/dev/null)" || return 1
+  sed -n 's/^[[:space:]]*Claude models, best first:[[:space:]]*//p' "$file" | head -1 | tr ',' ' '
+}
+
+# One `slug<TAB>level level …` per listed Codex model, best first.
+bp_roster_codex_models(){
+  local cache="${CODEX_HOME:-$HOME/.codex}/models_cache.json"
+  [ -r "$cache" ] || return 1
+  jq -r '[.models[] | select(.visibility == "list")] | sort_by(.priority)[]
+         | .slug + "\t" + ([.supported_reasoning_levels[]? | (.effort // .)] | join(" "))' \
+    "$cache" 2>/dev/null
+}
+
+bp_roster_model_for_name(){
+  local src="${1:-.}" want="${2:-}" role name backing cell found="" tier effort n line model="" levels
+  while IFS="$(printf '\t')" read -r role name backing cell; do
+    if [ "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" \
+       = "$(printf '%s' "$want" | tr '[:upper:]' '[:lower:]')" ]; then
+      found=1; break
+    fi
+  done <<EOF
+$(bp_roster_rows "$src" 2>/dev/null)
+EOF
+  [ -n "$found" ] || { printf "[roster] %s: not on the roster — no model to resolve\n" "$want" >&2; return 2; }
+  [ -n "$cell" ] || { printf "[roster] %s: no Model cell — no model to resolve\n" "$name" >&2; return 2; }
+  tier="${cell%%:*}"; effort="${cell#*:}"
+  case "$cell" in *:?*) ;; *) printf "[roster] %s: Model '%s' is not <tier>:<effort>\n" "$name" "$cell" >&2; return 1 ;; esac
+  case "$tier" in
+    frontier) n=0 ;;
+    frontier-[1-9]|frontier-[1-9][0-9]) n="${tier#frontier-}" ;;
+    *) printf "[roster] %s: tier '%s' is not frontier or frontier-N\n" "$name" "$tier" >&2; return 1 ;;
+  esac
+  case "$backing" in
+    "Claude Code")
+      line="$(bp_roster_claude_order "$src")"
+      [ -n "$line" ] || { printf "[roster] %s: the roster has no 'Claude models, best first:' line\n" "$name" >&2; return 1; }
+      # shellcheck disable=SC2086
+      set -- $line
+      if [ "$n" -lt "$#" ]; then shift "$n"; model="$1"; fi
+      levels="$BP_CLAUDE_EFFORTS" ;;
+    Codex)
+      line="$(bp_roster_codex_models)"
+      [ -n "$line" ] || { printf "[roster] %s: no Codex model list at %s (needs jq)\n" "$name" "${CODEX_HOME:-$HOME/.codex}/models_cache.json" >&2; return 1; }
+      line="$(printf '%s\n' "$line" | sed -n "$((n + 1))p")"
+      model="$(printf '%s' "$line" | cut -f1)"
+      levels="$(printf '%s' "$line" | cut -f2)" ;;
+    *) printf "[roster] %s: no model list for backing agent '%s'\n" "$name" "$backing" >&2; return 1 ;;
+  esac
+  [ -n "$model" ] || { printf "[roster] %s: tier '%s' is past the end of the %s model list\n" "$name" "$tier" "$backing" >&2; return 1; }
+  case " $levels " in
+    *" $effort "*) ;;
+    *) printf "[roster] %s: effort '%s' is not supported by %s (supported: %s)\n" "$name" "$effort" "$model" "$levels" >&2; return 1 ;;
+  esac
+  printf '%s\t%s\t%s\n' "$backing" "$model" "$effort"
 }

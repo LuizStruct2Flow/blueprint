@@ -44,5 +44,12 @@ else
   echo "drift: UNKNOWN — scripts/blueprint not present, so nothing was compared."
 fi
 
+# 3. Claude persona subagent definitions, from the roster's Model cells (TASK-059).
+if [ -f scripts/claude-agents.sh ]; then
+  bash scripts/claude-agents.sh 2>&1 | head -40
+else
+  echo "claude-agents: scripts/claude-agents.sh not present — persona agents not generated."
+fi
+
 echo "Next: arm the wake-time Monitors (CLAUDE.md §\"On wake\")."
 exit 0

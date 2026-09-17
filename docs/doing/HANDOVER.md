@@ -41,24 +41,23 @@ because another machine only sees what is pushed.
 ### The founder's
 
 - **Acceptance.** Everything in `docs/waiting-acceptance/` (TASK-021, TASK-022,
-  TASK-050..059, BUG-083, BUG-133, BUG-134) carries what to test.
-- **TASK-059 is back for acceptance** after its rejection. Its row quotes the live
-  feed lines that show each persona's model.
+  TASK-050..058, BUG-083, BUG-111, BUG-133..136) carries what to test.
+- **BUG-111 was reopened and fixed again** (2026-09-17): harness teardown now gives a
+  group 250 ms before calling it a survivor. Watch whether subagent-feed #4 and #17
+  stay green on CI. **BUG-133:** the founder "doesn't know". The recommendation is to
+  keep it: the product is sound, and the test gap is closed.
 - **Open questions to the founder:**
-  - Should one real Codex dispatch prove a Codex persona's model in the log? It
-    costs quota.
-  - Should session start restart a feed daemon that runs stale roster code?
-  - Should the gate keep osv-scanner's stderr? An exit 127 on CI was transient, but
-    the log could not say why.
-- **BUG-133's re-open trigger fired** on 2026-09-17: #17 reported a leftover process
-  twice on CI. The founder decides whether it stays in acceptance. The row carries the
-  diagnosis (a test gap, not the product) and the fix `9a8a6fd`.
-- **Dispatching personas (TASK-059):**
+  - Should the Codex feed label read the model from Codex's own session file? Today
+    it shows the roster's resolution. Jesko's real run recorded `gpt-5.6-terra` /
+    `medium` in `~/.codex/sessions`, but `codex-runs.log` does not record the model.
+  - Should AGENTS.md say a Codex persona hands the mic back to the Orchestrator's
+    persona name? Jesko handed back as `Claude Code`, as the docs say.
+- **Dispatching personas (TASK-059, accepted):**
   - A Claude persona: `subagent_type: <name-lowercase>` (e.g. `philipp`), with no
     `model` override.
-  - A Codex persona: pass the persona as `--holder` so its model resolves.
+  - A Codex persona: pass the persona as `--holder` so its model resolves. Start the
+    dispatcher first. A `Monitor` that expires kills it.
   - The Orchestrator's `Model` cell is `session-based`.
-  - The first real Codex dispatch proves the service accepts `-m` and the effort flag.
 - **TASK-049 (backlog):** managed vs project placement for a guard that refuses to
   publish a live handover.
 

@@ -94,6 +94,42 @@ const TERM_GRACE_MS = 2_000
  */
 const KILL_GRACE_MS = 5_000
 
+/**
+ * How long a group gets to finish dying on its own before `disposeAll` records
+ * it as a survivor at all.
+ *
+ * BUG-111, reopened. That row fixed only the TIMEOUT path in `run()`: a group
+ * `run()` itself had just SIGKILLed could still be mid-reap when `disposeAll`
+ * sampled it, so `run()` was made to await `waitGroupGone` before its promise
+ * settles. `disposeAll`'s OWN first sample (this loop, before either signal is
+ * sent) had the identical shape and was left as-is — a single
+ * `groupAlive(pgid)` call, decided and recorded in `survivors` before any
+ * grace is given. Two more cases hit it under CI load in the following days
+ * (tests/subagent-feed BUG-133 #17, then BUG-124 #4): a scenario's own process
+ * — a deferred bookend child that had already written its output and reached
+ * `exit`, or a background `sleep` a trap had just signalled — was still in the
+ * kernel's process table for a few milliseconds while init/the subreaper
+ * caught up, and `disposeAll` recorded that instant as a permanent defect
+ * regardless of what happened a moment later.
+ *
+ * MEASURED, not guessed: instrumenting this exact spot against both failing
+ * cases under 4-core-pinned load (`taskset -c 0-3`) plus 18 CPU-bound busy
+ * loops pinned to the same 4 cores (heavier than the 6-loop rig that
+ * reproduced the CI failure at all) — every group caught alive on the first
+ * sample resolved within 10-15ms (`waitGroupGone`'s own 10ms poll granularity
+ * is the only reason it was not measured sub-10ms). 250ms is therefore >15x
+ * the worst observed case, while staying far below what any REAL leaked
+ * process shows: every orphan this suite has ever caught (the daemons in
+ * "reaps a background process the scenario forgot", `harness-slow-reap`'s
+ * zombie) is still alive well past a second. `TERM_GRACE_MS` (2s) or
+ * `KILL_GRACE_MS` (5s) could not serve this role without hiding an actual
+ * multi-second leak for the whole first phase.
+ *
+ * A group still alive after this grace is exactly as much a defect as before
+ * — this delays the VERDICT, not the definition of one.
+ */
+const PROCESS_SNAPSHOT_GRACE_MS = 250
+
 export interface SpawnOptions {
   cwd: string
   env?: Record<string, string | undefined>
@@ -251,12 +287,20 @@ export class ProcessRegistry {
    * Reap everything. Returns the pids that had to be killed — a non-empty
    * result is a DEFECT in the scenario, not routine housekeeping, and the
    * harness fails the test on it.
+   *
+   * BUG-111 (reopened): a group found alive on the FIRST sample gets
+   * `PROCESS_SNAPSHOT_GRACE_MS` to finish on its own before it is recorded as
+   * a survivor at all — see that constant for why the number is safe. A group
+   * still alive after the grace is recorded exactly as before, and everything
+   * downstream (the SIGTERM/SIGKILL escalation, the returned list, the
+   * scenario failing) is unchanged.
    */
   async disposeAll(): Promise<number[]> {
     const survivors: number[] = []
 
     for (const pgid of this.groups) {
       if (!groupAlive(pgid)) continue
+      if (await waitGroupGone(pgid, PROCESS_SNAPSHOT_GRACE_MS)) continue
       survivors.push(pgid)
       try {
         process.kill(-pgid, 'SIGTERM')

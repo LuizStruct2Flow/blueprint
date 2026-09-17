@@ -10,7 +10,8 @@ a missing file.
 
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
-| **TASK-060** | **A Codex persona's feed label shows the model Codex actually ran, not the roster's resolution.** Founder decision 2026-09-17 ("the model actually running"). On Jesko's real dispatch the feed read `[Jesko - gpt-5.6-terra - medium]`, but that label is computed from the roster cell. The only record of what ran is Codex's own session file, `~/.codex/sessions/…/rollout-*.jsonl` (`"model":"gpt-5.6-terra"`, `"reasoning_effort":"medium"`), and `logs/state/codex-runs.log` records no model at all. A Claude subagent's label already reads the model from its transcript. | S2 | Agent team | **In progress.** **What to test:** dispatch a Codex persona; its feed lines and `codex-runs.log` name the model and effort from that run's Codex session file. **Re-open if** a Codex label names a model that run's session did not record. |
+
+*(Empty.)*
 
 ## TASK-012 — how to run it, and why not a fork
 

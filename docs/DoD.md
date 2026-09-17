@@ -691,26 +691,10 @@ visibility):
       lifecycle folders and `git log` can resume. If you added anything a
       command already answers, take it back out.
 
-For every push that **changes a blueprint-level concern** (this repo:
-blueprint only):
-
-- [ ] **Deck updated in the same commit** — `docs/way-of-working.md`
-      reflects the new concern count, principle, or recipe. PDF
-      regenerated (`scripts/build-deck.sh`).
-- [ ] **Per-concern recipe doc updated** — if the change touched
-      Observability, Security, IaC, Documentation, or Cost, the
-      corresponding `docs/<CONCERN>.md` matches.
-- [ ] **README concern table matches** — if the change added,
-      removed, or renamed a concern, the README table reflects the
-      new shape.
-
 What you don't ship:
 - A user-facing change without the matching external sync-list entry.
 - A doc that quotes a flag, route, or feature that no longer exists.
 - A new data class collected without a privacy clause.
-- A blueprint-level concern change with the deck left at the old
-  count (it self-violated twice this week — this gate is the third-
-  time backstop).
 
 The §7 handoff checklist §D pulls these boxes in for any push that
 modifies tracked code or docs.

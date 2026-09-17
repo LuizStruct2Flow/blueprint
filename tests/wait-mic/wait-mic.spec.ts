@@ -52,11 +52,16 @@
 
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
 import { startWatcher, until, type Watcher } from '../harness/watcher.js'
 
 const WAIT_MIC = join(REPO_ROOT, 'scripts/wait-mic.sh')
 const SIGNAL_SET = join(REPO_ROOT, 'scripts/signal-set.sh')
+
+/** BUG-140: a minimal roster, for the one case that needs a REAL one on disk. */
+const ROSTER =
+  '# Agent Roster\n\n## Members\n\n| Role | Name | Backing agent |\n|---|---|---|\n' +
+  '| Orchestrator | Alisa | Claude Code |\n'
 
 /** A well-formed baton nobody has handed off yet. */
 const SEED =
@@ -100,6 +105,8 @@ interface Mic {
   hand(content: string): Promise<void>
   /** Publish through the only sanctioned writer, i.e. by atomic rename. */
   publish(args: string[]): Promise<void>
+  /** Same call, raw — for a case that expects signal-set.sh to REFUSE. */
+  publishRaw(args: string[], env?: Record<string, string>): Promise<RunResult>
   /** Wait until the waiter has compared QUIET_ITERATIONS times since now. */
   settle(): Promise<void>
 }
@@ -160,10 +167,22 @@ async function mic(s: Scenario, name: string, seeded = true): Promise<Mic> {
       await s.fs.write(`${name}/state/signal.md`, content)
     },
 
-    async publish(args) {
+    async publishRaw(args, env = {}) {
+      // BUG-140: this runs the REAL repo's signal-set.sh, which validates
+      // --holder against a roster. AGENT_ROSTER_FILE defaults to a path that
+      // does not exist in THIS fixture, degrading to a no-op — the arbitrary
+      // holders ('OLD', 'NEW', …) every case here uses before this change are
+      // otherwise unaffected. A case that means to exercise the roster check
+      // itself (e.g. #13) overrides it.
       const r = await s.run('bash', [SIGNAL_SET, '--file', signal, ...args], {
         cwd: s.workspace.root,
+        env: { AGENT_ROSTER_FILE: join(dir, 'AGENT_ROSTER.md'), ...env },
       })
+      return r
+    },
+
+    async publish(args) {
+      const r = await this.publishRaw(args)
       expect(r.code, `publishing the fixture baton failed: ${r.output}`).toBe(0)
     },
 
@@ -379,25 +398,23 @@ describe('FEATURE-005 — the mic waiter fires once on a real handoff and exits'
     })
   })
 
-  it("#13 a real State flip under a Holder containing '|' fires — the case rejecting the row would MISS", async () => {
+  it("#13 BUG-140: a Holder containing '|' can never be a roster row, so the real setter now REFUSES it", async () => {
     await scenario('wait-mic-13', async (s) => {
-      // `signal-set.sh` escapes `|` in `Task` ONLY; Holder and State are printed
-      // raw. So `--holder 'A|B'` publishes cleanly through the only supported
-      // writer, and this baton is REACHABLE rather than hand-edited — it is
-      // published here through the real setter to say so.
-      //
-      // Under the old extra-column check both readings were empty, so a genuine
-      // IDLE → ACTIVE flip was invisible: the check introduced a missed handoff
-      // on the very axis it was added to protect.
+      // Was "signal-set.sh escapes `|` in Task ONLY; Holder and State are
+      // printed raw, so `--holder 'A|B'` publishes cleanly and this baton is
+      // REACHABLE rather than hand-edited." BUG-140 changes that premise: a `|`
+      // cannot appear inside a roster's Name cell without breaking the table
+      // itself (same reason Task's escaping exists), so once a roster is on
+      // disk 'A|B' is unreachable through the real writer — not a fixture gap,
+      // a correct refusal. The READ side this case used to cover — the waiter
+      // recovering a piped Holder verbatim — stays covered by #11, which hands
+      // the baton directly rather than going through signal-set.sh.
       const m = await mic(s, 'thirteen')
-      await m.publish(['--holder', 'A|B', '--state', 'IDLE', '--task', 'seed'])
+      await s.fs.write('thirteen/state/AGENT_ROSTER.md', ROSTER)
 
-      const out = await fires(m, 'a State flip under a piped Holder did not fire — missed handoff', () =>
-        m.publish(['--holder', 'A|B', '--state', 'ACTIVE', '--task', 'go']),
-      )
-      expect(out, 'fired but did not recover the piped Holder verbatim').toContain(
-        'MIC: Holder=A|B State=ACTIVE',
-      )
+      const r = await m.publishRaw(['--holder', 'A|B', '--state', 'ACTIVE', '--task', 'go'])
+      expect(r.code, `--holder 'A|B' PUBLISHED against a real roster:\n${r.output}`).not.toBe(0)
+      expect(r.output, 'the refusal does not name the roster file').toContain('AGENT_ROSTER.md')
     })
   })
 })

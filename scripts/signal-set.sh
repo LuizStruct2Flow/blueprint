@@ -54,7 +54,16 @@ _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
 BP_CODE_ROOT="$_bp_root"
 
 . "$_bp_root/scripts/lib/state-dir.sh"
-. "$_bp_root/scripts/lib/roster.sh"
+# BUG-140 — roster.sh is OPTIONAL infrastructure for this script, not required
+# infrastructure like state-dir.sh above: a fixture that copies only
+# signal-set.sh (to test the baton mechanics, not the roster check) must still
+# be able to publish. Same degrade as the no-AGENT_ROSTER.md case below, one
+# level up — the LIB itself missing, not just the roster file it reads.
+_bp_have_roster_lib=""
+if [ -r "$_bp_root/scripts/lib/roster.sh" ]; then
+  . "$_bp_root/scripts/lib/roster.sh"
+  _bp_have_roster_lib=1
+fi
 BP_STATE_ROOT="$(bp_state_root)" || exit 9
 SIGNAL="$(agent_signal_file)"
 # JOURNAL is derived AFTER argument parsing, from the baton actually in use.
@@ -106,6 +115,8 @@ done
 # alongside a roster match, never in place of the roster lookup.
 if [ "$HOLDER" = "Nobody" ]; then
   :
+elif [ -z "$_bp_have_roster_lib" ]; then
+  echo "signal-set: scripts/lib/roster.sh not found — skipped the roster check for --holder '$HOLDER'" >&2
 else
   _bp_roster_src="${AGENT_ROSTER_FILE:-$BP_STATE_ROOT}"
   if _bp_roster_f="$(bp_roster_file "$_bp_roster_src" 2>/dev/null)"; then

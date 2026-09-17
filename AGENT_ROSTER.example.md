@@ -42,7 +42,7 @@ one's backing agent to whatever you actually run.
 
 | Role | Name | Backing agent | Model |
 |---|---|---|---|
-| Orchestrator | Sylvia | Claude Code | frontier:high |
+| Orchestrator | Sylvia | Claude Code | session-based |
 | PO | Klaus | Claude Code | frontier-1:medium |
 | BA | Kathrin | Codex | frontier-1:medium |
 | Senior Architect | Christian | Claude Code | frontier:high |
@@ -62,6 +62,8 @@ Claude models, best first: fable, opus, sonnet, haiku
 
 **Model** is `<tier>:<effort>`: `frontier` is the provider's best model and
 `frontier-N` is N places down its ranked list, so no cell names a model version.
+The Orchestrator row is the one exception: its cell is `session-based`, because
+the founder picks that session's model at start, not the roster.
 
 Default backing-agent totals: **9 Claude Code, 6 Codex.** This default uses only
 Claude Code + Codex. **Gemini and GitHub Copilot are fully supported** (see

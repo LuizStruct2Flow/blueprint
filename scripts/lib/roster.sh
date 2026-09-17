@@ -332,7 +332,10 @@ EOF
 #
 # Prints `backing<TAB>model<TAB>effort`. Every failure prints an error naming the
 # persona on stderr — never a silent default. rc 2 means there is nothing to
-# resolve (not on the roster, or no Model cell); rc 1 means the cell is wrong.
+# resolve (not on the roster, no Model cell, or the Orchestrator's `session-based`
+# cell — the founder picks the session model at start, so there is no tier to
+# resolve); rc 1 means the cell is wrong, which includes `session-based` on any
+# non-Orchestrator role.
 # POSIX on purpose: the Codex wake command sources this lib under `sh`.
 BP_CLAUDE_EFFORTS="low medium high xhigh max"
 
@@ -363,6 +366,12 @@ $(bp_roster_rows "$src" 2>/dev/null)
 EOF
   [ -n "$found" ] || { printf "[roster] %s: not on the roster — no model to resolve\n" "$want" >&2; return 2; }
   [ -n "$cell" ] || { printf "[roster] %s: no Model cell — no model to resolve\n" "$name" >&2; return 2; }
+  if [ "$cell" = "session-based" ]; then
+    if [ "$role" = "Orchestrator" ]; then
+      printf "[roster] %s: Model 'session-based' — no model to resolve\n" "$name" >&2; return 2
+    fi
+    printf "[roster] %s: Model 'session-based' is only valid for the Orchestrator role\n" "$name" >&2; return 1
+  fi
   tier="${cell%%:*}"; effort="${cell#*:}"
   case "$cell" in *:?*) ;; *) printf "[roster] %s: Model '%s' is not <tier>:<effort>\n" "$name" "$cell" >&2; return 1 ;; esac
   case "$tier" in

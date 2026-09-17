@@ -7,7 +7,8 @@
  *   #1 the resolver maps tiers for both providers;
  *   #2 an effort the model does not support is refused, naming the persona;
  *   #3 the generator writes the Claude subagent definition;
- *   #4 a feed line carries the model and the effort.
+ *   #4 a feed line carries the model and the effort;
+ *   #5 `session-based` resolves only on the Orchestrator role.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -139,6 +140,39 @@ describe('TASK-059 — roster Model tiers', () => {
       )
       expect(r.code, r.output).toBe(0)
       expect(await readFile(log, 'utf8')).toContain('[Nadia - claude-ran-7 - medium] ← finished')
+    })
+  })
+
+  it('#5 session-based resolves only on the Orchestrator role', async () => {
+    await scenario('rm-5', async (s) => {
+      const roster = `# Roster
+
+## Members
+
+| Role | Name | Backing agent | Model |
+|---|---|---|---|
+| Orchestrator | Sylvia | Claude Code | session-based |
+| QA-1 | Nadia | Claude Code | session-based |
+
+Claude models, best first: fable, opus, sonnet, haiku
+`
+      const dir = await s.fs.mkdirp('proj')
+      await s.fs.write('proj/AGENT_ROSTER.md', roster)
+      await s.fs.write('proj/.blueprint-source', '')
+      const run = (snippet: string) =>
+        s.run('bash', ['-c', `. "${LIB}"; ${snippet.replace(/@/g, dir)}`], { cwd: s.workspace.root })
+
+      const orch = await run('bp_roster_model_for_name "@" Sylvia')
+      expect(orch.code, orch.output).toBe(2)
+      expect(orch.stdout).toBe('')
+
+      const label = await run('bp_roster_label "@" Sylvia')
+      expect(label.stdout, label.output).toBe('Sylvia - Claude Code')
+      expect(label.stderr).toBe('')
+
+      const persona = await run('bp_roster_model_for_name "@" Nadia')
+      expect(persona.code).not.toBe(0)
+      expect(persona.stderr).toMatch(/Nadia:.*session-based.*Orchestrator/)
     })
   })
 })

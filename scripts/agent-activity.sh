@@ -190,16 +190,25 @@ persona_label(){
 # Falls back to a truncated id rather than failing. A stable, unhelpful label
 # beats a feed that stops.
 #
-# Resolved ONCE per transcript and cached by the caller, because the meta file is
-# written at dispatch and the transcript only becomes interesting after that. The
-# known ceiling: if a transcript were ever discovered before its meta file
-# existed, that stream keeps the fallback label for its whole life. Re-resolving
-# every tick would cost a jq per subagent per tick forever — pay that only if the
-# race is ever actually observed.
+# Cached by the caller (LABEL[]), because the meta file is written at dispatch
+# and re-resolving it every tick would cost a jq per subagent per tick forever.
+# The MODEL is a separate story (TASK-059): a transcript discovered before its
+# first assistant record has no ran model yet, so bp_roster_subagent_label falls
+# back to the configured alias (or, for a nested subagent, no model at all) —
+# and that fallback used to get cached FOREVER, so a stream never picked up the
+# real model even after the transcript started recording one. The caller tracks
+# whether the model was known at resolution time (label_model_known) and keeps
+# re-resolving — one jq check per tick, same cost as any other cached lookup —
+# until it is, then the label is stable for the stream's life exactly as before.
 subagent_label(){
   local f="$1" aid="$2"
   bp_roster_subagent_label "$BP_STATE_ROOT" "${f%.jsonl}.meta.json" 2>/dev/null ||
     printf 'sub:%s - Claude Code' "${aid:0:6}"
+}
+
+# rc 0: the transcript beside this meta file already has a ran model recorded.
+label_model_known(){
+  [ -n "$(_bp_roster_ran_model "${1%.jsonl}.meta.json")" ]
 }
 
 # Resolve once now; the supervisor re-resolves whenever the roster changes.
@@ -385,7 +394,7 @@ cmd_daemon(){
 # The supervisor
 # ===========================================================================
 
-declare -A OFFSET INODE LABEL
+declare -A OFFSET INODE LABEL LABEL_MODEL_KNOWN
 
 emit(){
   # The supervisor writes BOTH sinks itself — no `tee` process, so the
@@ -700,7 +709,12 @@ supervise_body(){
         if [ -z "${LABEL[$f]+set}" ]; then
           aid="$(basename "$f" .jsonl | sed 's/^agent-//')"
           LABEL["$f"]="$(subagent_label "$f" "$aid")"
+          label_model_known "$f" && LABEL_MODEL_KNOWN["$f"]=1
           seed_offset "$f"
+        elif [ -z "${LABEL_MODEL_KNOWN[$f]+set}" ]; then
+          aid="$(basename "$f" .jsonl | sed 's/^agent-//')"
+          LABEL["$f"]="$(subagent_label "$f" "$aid")"
+          label_model_known "$f" && LABEL_MODEL_KNOWN["$f"]=1
         fi
         pump "$f" jsonl-sub "${LABEL[$f]}"
       done

@@ -257,11 +257,21 @@ EOF
 # rc 1 when the meta is unreadable or says nothing, so a caller keeps its own
 # fallback. Needs jq; without it everything is empty and that is rc 1 too.
 bp_roster_subagent_label(){
-  local who
+  local who ran
   who="$(_bp_roster_subagent_who "$1" "$2" 0)"
   case $? in
     0) bp_roster_label "$1" "$who" "$(_bp_roster_ran_model "$2")" ;;
-    2) printf '%s - Claude Code' "$who" ;;
+    2)
+      # $who here is a TYPE, or a parent-chain ending in one — never a roster
+      # name, so there is no roster Model cell and so no effort to show: the
+      # `- Claude Code` suffix was standing in for "no model known", and stayed
+      # even once the transcript recorded one. Neither a meta file nor a hook
+      # payload carries this agent's effort; the transcript is the only source
+      # that ever will, and it doesn't carry effort — only the model.
+      ran="$(_bp_roster_ran_model "$2")"
+      if [ -n "$ran" ]; then printf '%s - %s' "$who" "$ran"
+      else printf '%s - Claude Code' "$who"
+      fi ;;
     *) return 1 ;;
   esac
 }

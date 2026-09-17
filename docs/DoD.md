@@ -96,8 +96,9 @@ Every bug, minor or major:
    A defect-shaped change (something the founder would call broken) is a
    `BUG-` row, never a backlog row: `BUGS.md` is what the founder tests.
 3. **A regression test names the bug**: `it('BUG-007: <one-line summary>', …)`.
-   *Checked by the gate and by CI*, over the roots `project_config_paths.md` declares as
-   `BP_TEST_ROOTS` (default `tests/`):
+   The bug number must be in the test's **title** — a comment mentioning it does
+   not count (BUG-139). *Checked by the gate and by CI*, over the roots
+   `project_config_paths.md` declares as `BP_TEST_ROOTS` (default `tests/`):
    - only a `*.spec.ts` or `*.spec.tsx` counts, because that is what the runner
      executes;
    - `docs/`, `.git/`, `scripts/` and `.githooks/` never count, nor does a root
@@ -105,6 +106,9 @@ Every bug, minor or major:
    - outside the blueprint, only the top level of `tests/` counts, because its
      subdirectories are shipped suites. Declare a root of your own, such as
      `e2e/`.
+   - a bug that genuinely has no test — it does not reproduce, or similar —
+     carries `**No regression test:** <reason>` on its own row instead, and the
+     reason must be non-empty.
 
    A parked bug needs no test yet.
 4. **No recurring bugs**: a bug that comes back means its regression test was

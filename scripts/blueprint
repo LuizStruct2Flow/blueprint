@@ -1464,8 +1464,13 @@ _bp_cli_libs() {
 # list of retired files either — the archive at each commit is the record.
 #
 # CONTENT PROOF. Deleted only when the project's bytes equal a version the
-# blueprint shipped, substituted for this project, and only after pull's y/N
-# prompt (or --yes). Anything else is the project's now: one line, never deleted.
+# blueprint COMMITTED at that path, substituted for this project, and only after
+# pull's y/N prompt (or --yes). Anything else is the project's now: one line,
+# never deleted. Committed, not shipped: an old CLI's hand-kept list read listed
+# files from the checkout even when export-ignored, so its full pull installed
+# versions that never shipped — scripts/new-project.sh in every project (Alexey,
+# S1-S2 review; tests/managed-references #4b). Those bytes are still the
+# blueprint's own.
 #
 # Known limit: a kept candidate is asked about, or reported, on every full pull.
 # Sets refused_no_tty in cmd_pull's scope when it could not ask.
@@ -1484,18 +1489,25 @@ _bp_retire() {
     [ -f "$p" ] || continue
     case " ${TEMPLATE_FILES[*]} " in *" $p "*) continue ;; esac
     local shipped=0 match=0
-    while IFS= read -r c; do
-      # Shipped at c? An export-ignored or deleted path archives nothing.
-      _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar "$c" -- ":(literal)$p" 2>/dev/null \
-        | tar -t 2>/dev/null | grep -xF "$p" >/dev/null || continue
-      shipped=1
+    local commits=()
+    mapfile -t commits < <(_bp_git -C "$BLUEPRINT_ROOT" log --format=%H --no-renames HEAD -- ":(literal)$p")
+    for c in ${commits[@]+"${commits[@]}"}; do
       _bp_git -C "$BLUEPRINT_ROOT" show "$c:$p" > "$blob" 2>/dev/null || continue
       if bp_should_substitute "$p"; then
         bp_substitute_stream "$blob" "$name" > "$blob.s" 2>/dev/null || continue
         mv "$blob.s" "$blob"
       fi
       if cmp -s "$blob" "$p"; then match=1; break; fi
-    done < <(_bp_git -C "$BLUEPRINT_ROOT" log --format=%H --no-renames HEAD -- ":(literal)$p")
+    done
+    # Kept silently unless the blueprint once SHIPPED the path: a project file
+    # that merely shares a path with blueprint-only history was never ours.
+    if [ "$match" -eq 0 ]; then
+      for c in ${commits[@]+"${commits[@]}"}; do
+        # Shipped at c? An export-ignored or deleted path archives nothing.
+        if _bp_git -C "$BLUEPRINT_ROOT" archive --format=tar "$c" -- ":(literal)$p" 2>/dev/null \
+          | tar -t 2>/dev/null | grep -xF "$p" >/dev/null; then shipped=1; break; fi
+      done
+    fi
     if [ "$match" -eq 1 ]; then same+=("$p")
     elif [ "$shipped" -eq 1 ]; then edited+=("$p"); fi
   done < <(LC_ALL=C comm -23 "$hist" "$cur")

@@ -41,46 +41,22 @@ because another machine only sees what is pushed.
 ### The founder's
 
 - **Acceptance.** Everything in `docs/waiting-acceptance/` (TASK-021, TASK-022,
-  TASK-050..058, BUG-083, BUG-133, BUG-134) carries what to test.
-- **TASK-059 (roster model tiers) was pushed as `f6340ea`, with CI still running at
-  handover.** FIRST THING: check CI with the full SHA:
-  `gh run list --repo LuizStruct2Flow/blueprint --commit f6340ea28d171649ed1bcb028ab738a0a3ec18a6 --json conclusion`.
-  If CI is green, move the TASK-059 row
-  from `doing/` to `waiting-acceptance/`, with what to test. If it is red, read the
-  log before changing anything.
-  - **What it does:** each roster `Model` cell is `<tier>:<effort>`, and `frontier-N`
-    is N places down a ranked list. Codex's list comes from
-    `~/.codex/models_cache.json`. Claude's comes from the roster line
-    `Claude models, best first: fable, opus, sonnet, haiku`, using aliases, so new
-    versions need no edit. `scripts/session-start.sh` regenerates
-    `.claude/agents/<persona>.md` (model and effort, both documented subagent
-    fields). Codex dispatch passes `-m` and `-c model_reasoning_effort`. Feed labels
-    read `[Name - model - effort]`.
-  - **Reviews:** Jesko (Codex) reviewed it. He found and reproduced one bug: a
-    hand-written agent file was overwritten. It is fixed in `f6340ea`.
-  - **Unverified:** whether the Codex service accepts the model and effort flags at
-    runtime (Jesko's sandbox blocked `codex exec`). The next real Codex dispatch
-    proves it.
-  - **How to dispatch now:**
-    - A Claude persona: `subagent_type: <name-lowercase>` (e.g. `philipp`), with no
-      `model` override.
-    - A Codex persona: pass the persona as `--holder` so its model resolves.
-
-    This session is new, so the agent files are visible to it.
-  - **What the founder's roster resolves to:**
-    - Christian: opus/high.
-    - Markus: fable/high.
-    - The other Claude personas: sonnet/medium.
-    - Alexey: gpt-5.6-sol/high.
-    - The other Codex personas: gpt-5.6-terra/medium.
-    - The Orchestrator row is informational only: the founder picks the session's
-      model at start.
+  TASK-050..059, BUG-083, BUG-133, BUG-134) carries what to test.
+- **BUG-133's re-open trigger fired** on 2026-09-17: #17 reported a leftover process
+  twice on CI. The founder decides whether it stays in acceptance. The row carries the
+  diagnosis (a test gap, not the product) and the fix `9a8a6fd`.
+- **Dispatching personas (TASK-059):**
+  - A Claude persona: `subagent_type: <name-lowercase>` (e.g. `philipp`), with no
+    `model` override.
+  - A Codex persona: pass the persona as `--holder` so its model resolves.
+  - The Orchestrator's `Model` cell is `session-based`.
+  - The first real Codex dispatch proves the service accepts `-m` and the effort flag.
 - **TASK-049 (backlog):** managed vs project placement for a guard that refuses to
   publish a live handover.
 
 ### Nobody's in flight
 
-`docs/doing/` holds only TASK-059, which is waiting on CI (above). No agent is running.
+`docs/doing/` is empty. No agent is running.
 
 ### Derived projects
 

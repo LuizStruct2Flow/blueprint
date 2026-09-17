@@ -520,6 +520,41 @@ dod_stage_signal() {
       return 1
     }
   done
+  # BUG-140 — a well-formed ROW is not a well-formed VALUE. An empty Holder, or
+  # one no roster names, passed every check above and dispatched against
+  # nobody. Same rule signal-set.sh now enforces on publish; checked again here
+  # because a hand-edited baton never goes through that script.
+  _dg_holder="$(sed -n 's/^| Holder | \(.*\) |[[:space:]]*$/\1/p' "$_dg_sig" | head -n 1)"
+  _dg_holder="$(printf '%s' "$_dg_holder" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  if [ -z "$_dg_holder" ]; then
+    echo "the live baton's Holder row is empty: $_dg_sig"
+    echo "Publish a persona name with scripts/signal-set.sh — never by hand."
+    return 1
+  fi
+  # `Nobody` is signal-set.sh's own seed-template value — "the mic is free," not
+  # a typo'd persona — and is accepted here for the same reason it is accepted
+  # there, never in place of the roster lookup for anything else.
+  #
+  # Reuses roster.sh's own lookup — no second resolver. Absent roster (no live
+  # AGENT_ROSTER.md yet) SKIPS this half rather than failing every push before
+  # bootstrap, the same degrade signal-set.sh's own check applies — and SAYS so,
+  # rather than folding a skip silently into "baton well-formed": a check that
+  # looks like it ran and did not is the exact failure mode this batch is about.
+  if [ "$_dg_holder" != "Nobody" ]; then
+    if [ -f "${BP_CODE_ROOT:-.}/scripts/lib/roster.sh" ]; then
+      # shellcheck source=scripts/lib/roster.sh
+      . "${BP_CODE_ROOT:-.}/scripts/lib/roster.sh"
+      if bp_roster_file "$BP_STATE_ROOT" >/dev/null 2>&1; then
+        if ! bp_roster_backing_for_name "$BP_STATE_ROOT" "$_dg_holder" >/dev/null 2>&1; then
+          echo "the live baton's Holder '$_dg_holder' names nobody on the roster: $_dg_sig"
+          echo "AGENT_SIGNAL.md says Holder is a persona name from AGENT_ROSTER.md, or 'Nobody' when nobody holds the mic."
+          return 1
+        fi
+      else
+        echo "no AGENT_ROSTER.md found — skipped the roster check for Holder '$_dg_holder'"
+      fi
+    fi
+  fi
   printf 'baton well-formed: %s\n' "${_dg_sig#"$(pwd)/"}"
 }
 

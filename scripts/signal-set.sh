@@ -54,6 +54,7 @@ _bp_root="$(cd -P "$(dirname "$_bp_self")/.." && pwd)"
 BP_CODE_ROOT="$_bp_root"
 
 . "$_bp_root/scripts/lib/state-dir.sh"
+. "$_bp_root/scripts/lib/roster.sh"
 BP_STATE_ROOT="$(bp_state_root)" || exit 9
 SIGNAL="$(agent_signal_file)"
 # JOURNAL is derived AFTER argument parsing, from the baton actually in use.
@@ -82,6 +83,38 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$HOLDER" ] || die "--holder is required"
+# BUG-140 — Holder must be a roster persona, or `--holder NoSuchPersona`
+# publishes a baton nothing can claim. AGENT_SIGNAL.md says Holder is a persona
+# name from AGENT_ROSTER.md.
+#
+# AGENT_ROSTER_FILE overrides where the roster is read from, same shape as
+# AGENT_SIGNAL_FILE/--file for the baton itself: `bp_roster_file` already
+# accepts a literal file path as its "src" argument, so this reuses that rather
+# than adding a second resolver. Unset, the check reads BP_STATE_ROOT, which for
+# a script run from its own physical location (BUG-019) is the real checkout.
+#
+# Absent roster (a fresh clone before `cp AGENT_ROSTER.example.md
+# AGENT_ROSTER.md`, or a derived project that has not copied one yet) SKIPS the
+# check rather than blocking every publish before bootstrap — the same degrade
+# `bp_roster_file` itself already uses (it warns, it does not fail, when only
+# the shipped example exists). The skip is announced, not silent — a silent
+# skip is the exact failure mode this baton-validation batch (BUG-139/BUG-140)
+# is about: a check that looks like it ran and did not.
+#
+# `Nobody` is the one non-persona value this script itself seeds (the fresh-baton
+# template above): "the mic is free," not a typo'd persona. It is accepted
+# alongside a roster match, never in place of the roster lookup.
+if [ "$HOLDER" = "Nobody" ]; then
+  :
+else
+  _bp_roster_src="${AGENT_ROSTER_FILE:-$BP_STATE_ROOT}"
+  if _bp_roster_f="$(bp_roster_file "$_bp_roster_src" 2>/dev/null)"; then
+    bp_roster_backing_for_name "$_bp_roster_src" "$HOLDER" >/dev/null 2>&1 \
+      || die "--holder '$HOLDER' is not a persona in $_bp_roster_f — AGENT_SIGNAL.md says Holder is a roster persona name, or 'Nobody' when nobody holds the mic"
+  else
+    echo "signal-set: no AGENT_ROSTER.md found — skipped the roster check for --holder '$HOLDER'" >&2
+  fi
+fi
 [ -n "$STATE" ]  || die "--state is required"
 # The live baton is untracked per-checkout state (BUG-019), so a fresh clone has
 # none and this is its first writer. Seed it rather than refusing: "no signal

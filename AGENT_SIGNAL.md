@@ -45,7 +45,10 @@ untracked, the tracked artefact carries what every checkout shares.
 ## The protocol
 
 `Holder` is a **persona name** from [AGENT_ROSTER.md](AGENT_ROSTER.md) — read
-yours with `--whoami`, never assume it, since the roster is per-engineer.
+yours with `--whoami`, never assume it, since the roster is per-engineer. The
+one other legal value is `Nobody`, the seed value meaning the mic is free.
+`scripts/signal-set.sh` and the gate both refuse anything else (BUG-140): a
+Holder naming nobody dispatches against nobody.
 `State` is `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`. On claiming the mic, set
 `State = ACTIVE` first. The full protocol is in [AGENTS.md](AGENTS.md).
 

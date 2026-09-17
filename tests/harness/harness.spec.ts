@@ -1446,6 +1446,50 @@ describe('harness — process ownership', () => {
     })
   })
 
+  it('BUG-111 reopened: disposeAll gives its OWN first sample a grace — a group gone within it is not a survivor', async () => {
+    // The row above fixed only run()'s timeout path. disposeAll()'s own
+    // survivor loop had the identical proxy-for-the-property shape at its
+    // first `groupAlive(pgid)` check — decided and recorded before either
+    // signal is sent — and two more cases (tests/subagent-feed BUG-133 #17,
+    // BUG-124 #4) hit it under CI load: the scenario's OWN process backgrounds
+    // a short-lived grandchild and returns, so the grandchild is certainly
+    // still in the process table at the very next tick, finishing on its own
+    // a few ms later.
+    //
+    // THE REDIRECTION IS LOAD-BEARING, not decoration: `run()`'s stdio is
+    // ['ignore','pipe','pipe'], and Node's `close` only fires once every
+    // holder of those pipe fds is gone. A bare `sleep 0.15 &` INHERITS them,
+    // so `s.run` would not resolve until the background job itself exited —
+    // measured directly: the wrapper's `close` fired at +150ms, not
+    // immediately, which would make this case pass for the wrong reason (the
+    // grandchild is already gone BY THE TIME the scenario body returns, so no
+    // grace is exercised at all). `</dev/null >/dev/null 2>&1` is exactly the
+    // redirection `scripts/log-activity.sh`'s own deferred child uses for the
+    // same reason — it closes the inherited pipe immediately, so the wrapper
+    // (and the scenario body) returns in a few ms while the grandchild keeps
+    // running, which is the actual shape #17 and #4 hit under CI load.
+    await expect(
+      scenario('harness-grace-resolves', async (s) => {
+        await s.run('sh', ['-c', 'sleep 0.15 </dev/null >/dev/null 2>&1 &'], { cwd: s.workspace.root })
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('BUG-111 reopened: disposeAll still fails teardown for a group genuinely still running past the grace', async () => {
+    // The grace this reopening added must absorb a dying process, never hide
+    // a leaked one. `sleep 5` outlives PROCESS_SNAPSHOT_GRACE_MS (250ms) by
+    // over an order of magnitude, so this is squarely the "orphaned
+    // supervisor" case the survivor check exists for — it must still fail.
+    // Same redirection, same reason as the case above: without it `s.run`
+    // blocks for the full 5s and the grandchild is already gone by the time
+    // the scenario body returns, testing nothing.
+    await expect(
+      scenario('harness-grace-still-fails', async (s) => {
+        await s.run('sh', ['-c', 'sleep 5 </dev/null >/dev/null 2>&1 &'], { cwd: s.workspace.root })
+      }),
+    ).rejects.toThrow(/left 1 process\(es\) running/)
+  })
+
   it('a timed-out process does not survive', async () => {
     await scenario('harness-timeout', async (s) => {
       const started = Date.now()

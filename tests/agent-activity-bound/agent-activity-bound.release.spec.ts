@@ -660,6 +660,45 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     })
   })
 
+  it('BUG-135 --daemon restarts a running supervisor whose code changed', async () => {
+    await scenario('aab-135', async (s) => {
+      // A running daemon sourced scripts/lib/roster.sh (and its own script) at
+      // start. Editing a sourced lib underneath it — what a fix, or a
+      // `blueprint pull` in a derived project, does — must make the NEXT
+      // `--daemon` replace it, instead of leaving it running the old bytes
+      // forever ("already running — leaving it").
+      const b = await bound(s)
+      try {
+        await b.f.cli(['--daemon'])
+        await b.f.expectSupervisors(1)
+        const before = await b.f.supervisorPid()
+        expect(before).not.toBe('')
+
+        // Change a file the daemon sources, but not agent-activity.sh itself —
+        // proving the identity check covers the LIBS, not just the entry point.
+        await s.fs.write('repo/scripts/lib/roster.sh', '\n# BUG-135 test perturbation\n', {
+          append: true,
+        })
+
+        const restart = await b.f.cli(['--daemon'])
+        expect(restart.stdout, restart.output).toMatch(/code has changed.*restart/i)
+
+        await b.f.expectSupervisors(1)
+        const after = await b.f.supervisorPid()
+        expect(after, 'still the pre-change pid — the daemon was not restarted').not.toBe(before)
+
+        // An immediate second --daemon, with nothing further changed, is a no-op.
+        const again = await b.f.cli(['--daemon'])
+        expect(again.stdout, again.output).toMatch(/already running/)
+        await b.f.expectSupervisors(1)
+        expect(await b.f.supervisorPid()).toBe(after)
+      } finally {
+        await b.f.cli(['--stop'])
+        await b.f.expectSupervisors(0)
+      }
+    })
+  })
+
   it('#14 mismatched start-token → refused to signal an unrelated process', async () => {
     await scenario('aab-14', async (s) => {
       // PRECONDITION: a feed MUST be running, or `--stop` short-circuits on

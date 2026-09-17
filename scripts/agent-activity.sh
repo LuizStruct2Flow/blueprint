@@ -518,14 +518,29 @@ pump(){
   rm -f "$tmp"
 }
 
-# New files start at EOF so a feed started now never replays a finished agent's
-# history (matches the old `tail -n0`). AGENT_SIGNAL.md is the exception: it
-# emits its current state once at startup so the feed opens showing the baton.
+# Files present at the supervisor's FIRST scan start at EOF so a feed started
+# now never replays a finished agent's history (matches the old `tail -n0`).
+# AGENT_SIGNAL.md is the exception: it emits its current state once at startup
+# so the feed opens showing the baton.
+#
+# BUG-137: a file first DISCOVERED on a later scan is a different case — it was
+# created (or first matched a glob) while the supervisor was already running,
+# so any bytes it holds now were written during this supervisor's lifetime.
+# Seeding it at EOF silently drops whatever a subagent wrote between the file's
+# creation and the scan that finds it (a nested helper's first Bash call, in
+# the case that surfaced this). Callers pass mode="zero" for that case; default
+# stays "eof" for everything seeded before the loop's first pass, and for the
+# `$out`-pointer files (see supervise_body) where zero-seeding on a later
+# switch would replay an already-populated file instead of skipping ahead.
 seed_offset(){
-  local f="$1"
+  local f="$1" mode="${2:-eof}"
   [ -f "$f" ] || return 0
   if [ -z "${OFFSET[$f]+set}" ]; then
-    OFFSET["$f"]="$(f_size "$f")"
+    if [ "$mode" = "zero" ]; then
+      OFFSET["$f"]=0
+    else
+      OFFSET["$f"]="$(f_size "$f")"
+    fi
     INODE["$f"]="$(f_inode "$f")"
   fi
 }
@@ -660,6 +675,13 @@ supervise_body(){
   # "already caught up" if the pump were ever restored.
   seed_offset "$state_dir/gemini-runs.log"
 
+  # BUG-137 — true only for the loop's first pass. A subagent transcript that
+  # the glob below matches on THIS pass existed (or was already fully written)
+  # before the supervisor took its first look, same as every other file seeded
+  # above; one discovered on a LATER pass was born under a running supervisor,
+  # so it is zero-seeded instead (see seed_offset's own comment).
+  local first_scan=1
+
   while [ "$stop" -eq 0 ]; do
     # Roster: re-resolve WHO WE ARE when it changes. Emits only when the label
     # actually moves, so re-saving the file without renaming anyone is silent.
@@ -698,6 +720,12 @@ supervise_body(){
     pump "$state_dir/gemini-runs.log" raw   "GEMINI"
 
     if command -v jq >/dev/null 2>&1; then
+      # "newest" always EOF-seeds, deliberately, even past first_scan: the
+      # newest-session pointer can SWITCH to a file that already existed (a
+      # resumed old session regaining the newest mtime), and that file can
+      # carry a whole prior conversation. Zero-seeding on the switch would
+      # replay that history into the feed, which is exactly what seeding
+      # exists to prevent — so this call keeps the old, single behaviour.
       newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1)
       if [ -n "$newest" ]; then
         seed_offset "$newest"
@@ -710,7 +738,11 @@ supervise_body(){
           aid="$(basename "$f" .jsonl | sed 's/^agent-//')"
           LABEL["$f"]="$(subagent_label "$f" "$aid")"
           label_model_known "$f" && LABEL_MODEL_KNOWN["$f"]=1
-          seed_offset "$f"
+          # BUG-137: zero-seed a subagent transcript discovered after the
+          # supervisor's first scan — it was created under a running
+          # supervisor, so whatever it holds at discovery was written during
+          # this run and must be delivered, not skipped.
+          seed_offset "$f" "$([ "$first_scan" -eq 1 ] && echo eof || echo zero)"
         elif [ -z "${LABEL_MODEL_KNOWN[$f]+set}" ]; then
           aid="$(basename "$f" .jsonl | sed 's/^agent-//')"
           LABEL["$f"]="$(subagent_label "$f" "$aid")"
@@ -720,6 +752,7 @@ supervise_body(){
       done
     fi
 
+    first_scan=0
     sleep "$TICK"
   done
 

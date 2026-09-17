@@ -782,4 +782,4 @@ and let your incidents grow them.**
 **Luiz Scheidegger**
 luiz@struct2flow.com
 
-<span class="small">Every number here comes from an audit of the live repository,<br>reproducible from <code>docs/doing/TASK-022-rule-enforcement.xlsx</code></span>
+<span class="small">Every number here comes from an audit of the live repository,<br>reproducible from <code>git show dc225c9:docs/doing/TASK-022-rule-enforcement.xlsx</code></span>

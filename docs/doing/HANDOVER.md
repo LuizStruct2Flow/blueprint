@@ -21,9 +21,9 @@ because another machine only sees what is pushed.
 ## 0. THE THINGS THAT WILL COST YOU FIRST
 
 1. **Run vitest with the pinned binary and a scrubbed env**, from anywhere:
-   `env -u GIT_EDITOR -u GIT_PAGER -u AGENT_PERSONA tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>`.
-   The harness refuses ambient `GIT_*` / `AGENT_*` variables, and the repo root has
-   no vitest config.
+   `env -u GIT_ASKPASS -u GIT_EDITOR -u GIT_PAGER -u AGENT_PERSONA tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>`.
+   The harness refuses ambient `GIT_*` / `AGENT_*` variables (a VS Code terminal sets
+   `GIT_ASKPASS`), and the repo root has no vitest config.
 2. **The gate is fast now** (~30 s): suites run in parallel, five
    `*.release.spec.ts` suites run in CI only, and a push of only `.md` files skips the
    code stages. **CI is the release gate**: `released` moves only on green, and the
@@ -41,14 +41,11 @@ because another machine only sees what is pushed.
 ### The founder's
 
 - **Acceptance.** Everything in `docs/waiting-acceptance/` (TASK-021, TASK-022,
-  TASK-050..058, TASK-060, TASK-061, BUG-083, BUG-133, BUG-134) carries what to
+  TASK-050..058, BUG-083, BUG-133, BUG-134) carries what to
   test. BUG-133 stays there by founder decision ("keep it").
-- **Running a suite by hand from a VS Code terminal:** unset `GIT_ASKPASS` too, or
-  the harness refuses to start:
-  `env -u GIT_ASKPASS -u GIT_EDITOR -u GIT_PAGER -u AGENT_PERSONA tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>`.
 - **Reopen or new bug:** the same root cause reopens its row. A different cause is
   a new bug that links the old one.
-- **Dispatching personas (TASK-059, accepted):**
+- **Dispatching personas (TASK-059..061, accepted):**
   - A Claude persona: `subagent_type: <name-lowercase>` (e.g. `philipp`), with no
     `model` override.
   - A Codex persona: pass the persona as `--holder` so its model resolves. Start the

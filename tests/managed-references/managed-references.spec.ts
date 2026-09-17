@@ -332,6 +332,72 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
     })
   })
 
+  // Alexey, S1-S2 implementation review, second finding. The old CLI's hand-kept
+  // list names scripts/new-project.sh, and an explicit entry is read from the
+  // checkout even when export-ignored. So its full pull installs a version the
+  // blueprint committed AFTER it stopped shipping the file, and a proof that
+  // accepted only shipped versions kept that unedited copy as "yours now" in
+  // all three real projects. The same real old CLI as #4.
+  it('#4b old CLI installs a file the blueprint edited after it stopped shipping it, then the new CLI retires it', async () => {
+    await scenario('managed-references-4b', async (s) => {
+      const introduced = (
+        await s.run('git', ['-C', REPO_ROOT, 'log', '--reverse', '--format=%H', '-S', '_bp_retire', '--', 'scripts/blueprint'], {
+          cwd: s.workspace.root,
+        })
+      ).stdout.split('\n')[0]
+      const oldRev = introduced ? `${introduced}^` : 'HEAD'
+
+      const old = await s.workspace.dir('old')
+      const extracted = await s.run(
+        'bash',
+        ['-c', 'git -C "$1" archive --format=tar "$2" scripts | tar -x -C "$3"\n', 'old', REPO_ROOT, oldRev, old],
+        { cwd: s.workspace.root },
+      )
+      expect(extracted.code, `could not read the old CLI (a shallow clone? ts-tests needs fetch-depth: 0)\n${extracted.output}`).toBe(0)
+      const oldCli = await readFile(join(old, 'scripts/blueprint'), 'utf8')
+      expect(oldCli, 'the "old" CLI already retires, so this proves nothing').not.toContain('_bp_retire')
+      expect(oldCli, 'the old CLI no longer lists the bootstrapper, so this proves nothing').toContain('"scripts/new-project.sh"')
+
+      const tool = 'scripts/new-project.sh'
+      const bp = await s.workspace.dir('bp')
+      await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\n')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(join(bp, tool), 'echo bootstrap {{PROJECT_NAME}}\n', { mode: 0o755 })
+      await initRepo(s, bp)
+      const first = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+      // Stops shipping it AND edits it: the edited version never shipped.
+      await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE\nfor {{PROJECT_NAME}}\nnewer\n')
+      await s.fs.write(join(bp, '.gitattributes'), `${tool} export-ignore\n`)
+      await s.fs.write(join(bp, tool), 'echo bootstrap {{PROJECT_NAME}}, edited after export-ignore\n', { mode: 0o755 })
+      await s.run('git', ['add', '-A'], { cwd: bp })
+      await s.run('git', ['commit', '-q', '-m', 'stop shipping new-project.sh, then edit it'], { cwd: bp })
+
+      const proj = await s.workspace.dir('proj')
+      await s.fs.write(join(proj, 'CLAUDE.md'), '# CLAUDE\nfor proj\n')
+      await s.fs.write(join(proj, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(join(proj, tool), 'echo bootstrap proj\n', { mode: 0o755 })
+      await s.fs.write(
+        join(proj, '.blueprint-source'),
+        ['config_version   = 2', `blueprint_remote = ${bp}`, `bootstrap_sha    = ${first}`, 'bootstrap_date   = 2026-01-01', ''].join('\n'),
+      )
+      await initRepo(s, proj)
+
+      const byOld = await s.run(join(old, 'scripts/blueprint'), ['pull', '--yes'], { cwd: proj })
+      expect(byOld.code, byOld.output).toBe(0)
+      expect(
+        await s.fs.read(join(proj, tool)),
+        `fixture broken: the old CLI did not install the never-shipped version\n${byOld.output}`,
+      ).toContain('edited after export-ignore')
+
+      const byNew = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+      expect(byNew.code, byNew.output).toBe(0)
+      expect(
+        await s.fs.exists(join(proj, tool)),
+        `the unedited copy the old CLI installed was kept instead of retired\n${byNew.output}`,
+      ).toBe(false)
+    })
+  })
+
   // Alexey, S1-S2 implementation review: the CLI wrote pulled files with
   // `cat > DEST`, so a pull that replaced scripts/blueprint rewrote the script
   // bash was still reading. After the dispatch returned, bash read the NEW bytes

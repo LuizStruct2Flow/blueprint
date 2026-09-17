@@ -1,7 +1,7 @@
 # Documentation — internal + external, in sync with reality
 
 The principle lives in [CLAUDE.md](../CLAUDE.md) §"Documentation is a main
-concern" and the DoD gate in [DoD.md](DoD.md) §6.4. Both are
+concern", and its per-push checklist closes this file. Both are
 runtime-agnostic. This file holds the **recipes** — concrete patterns per
 project shape so projects don't reinvent the wheel.
 
@@ -51,7 +51,7 @@ release notes; that's it.
   `frontend/` and `docs/RELEASE-NOTES.md` didn't — unless the commit
   message carries `[no-release-notes]` (per the existing release-notes
   guard pattern in `.githooks/pre-push-project.example`).
-- **README is the canonical entry point** per DoD §5.1.
+- **README is the canonical entry point** per DoD §5.
 
 ### What you don't ship
 
@@ -146,7 +146,7 @@ All of Recipe B's internal docs, plus:
 |---|---|---|---|
 | `docs/architecture/ADR-*.md` (Architecture Decision Records) | Team / agent / new hire | Architectural decision taken (or reversed) | Same commit as the code change that embodies the decision; numbered ADR-NNN |
 | `docs/runbooks/*.md` | On-call / agent | New on-call scenario observed; new alert fires for the first time | Same week as the alert wiring |
-| `docs/done/INCIDENT-YYYY-MM-DD.md` | Team / regulator | Production incident | Within 48h of resolution (DoD §6.2 §"Incident response") |
+| `docs/done/INCIDENT-YYYY-MM-DD.md` | Team / regulator | Production incident | Within 48h of resolution (SECURITY.md §"Incident response") |
 | Project-specific compliance docs (SOC 2 / ISO 27001 / GDPR DPA) | Auditor | Control change, evidence requirement | Same week as the control change; quarterly review |
 
 ### Mechanism
@@ -254,6 +254,50 @@ handoff is a lie.
 - A help article whose URL 404s.
 - A privacy policy that doesn't reflect the data classes the code
   actually collects (a `[SEC]` finding by definition — escalate per
-  DoD §6.2).
+  SECURITY.md §"Incident response").
 - A release notes file that skips a push.
 - A deck slide that states a count or a rule the code no longer has.
+
+## Per-push checklist
+
+Walked with the handoff (DoD §7). These are judgement: only the scans the
+gate runs are checked by a mechanism.
+
+The project's sync list lives in `project_config_dod.md` §"Doc-sync
+list" as **two tables**: External (customer-facing) and Internal
+(team-facing). Both tables are non-optional.
+
+For every push that includes a **user-facing change** (a customer can
+see / click / read it):
+
+- [ ] **External sync clean** — every file in the External table
+      touched in the same commit as the code. README, release notes,
+      feature page, help article (or index entry), pricing,
+      changelog, API docs — whichever rows apply. Same commit, not
+      "same PR".
+- [ ] **Privacy / TOS check** — if the change adds a new data class
+      collected, a new processor, a new region, or material liability
+      / pricing terms, the privacy policy / TOS gets the matching
+      clause **in the same commit**, with a `legal-reviewed` label
+      requested.
+- [ ] **Public roadmap moves** — if the project uses one (Recipe C),
+      the roadmap status (`backlog/` → `doing/` → `waiting-acceptance/`)
+      is reflected publicly in the same week.
+
+For every push that **changes code state** (regardless of user
+visibility):
+
+- [ ] **Internal sync clean** — every file in the Internal table
+      affected by the change is updated in the same commit.
+      `FEATURES.md`, `ACCEPTANCE_TESTS.md`, `findings.md` (with
+      `Status: Fixed`), `PLAN-*.md` lifecycle move, threat-model
+      entry, ADR (if architectural), runbook (if new alert).
+- [ ] **`HANDOVER.md` current** — per [DoD.md](DoD.md) §10, which means **WIP, ephemeral
+      state and live hazards only**. A fresh prompt reading it plus the
+      lifecycle folders and `git log` can resume. If you added anything a
+      command already answers, take it back out.
+
+What you don't ship:
+- A user-facing change without the matching external sync-list entry.
+- A doc that quotes a flag, route, or feature that no longer exists.
+- A new data class collected without a privacy clause.

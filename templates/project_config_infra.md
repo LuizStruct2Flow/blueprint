@@ -13,7 +13,7 @@ model). All three define the project's runtime DoD.
 
 ---
 
-## Stack recipe (DoD §6.3)
+## Stack recipe (docs/INFRASTRUCTURE.md)
 
 > Pick exactly one — these are the three recipes in
 > `docs/INFRASTRUCTURE.md`. Combinations are fine (e.g. an AWS-first

@@ -1,7 +1,7 @@
 # Observability — capture, retrieve, alert, diagnose
 
 The principle lives in [CLAUDE.md](../CLAUDE.md) §"Observability is a main
-concern" and the DoD checklist in [DoD.md](DoD.md) §6.1. Both are
+concern", and its per-push checklist closes this file. Both are
 runtime-agnostic. This file holds the **recipes** — concrete patterns per
 runtime so projects don't reinvent the wheel.
 
@@ -307,3 +307,29 @@ These are the things the **principle** demands regardless of mechanism:
    analytics — what users did. Error observability covers what broke.
    Don't mix them; they have different retention, different access
    patterns, and different privacy treatment.
+
+## Per-push checklist
+
+Walked with the handoff (DoD §7). These are judgement: only the scans the
+gate runs are checked by a mechanism.
+
+For every new user-facing route, command, or job:
+
+- [ ] **Error capture** — structured error boundaries (level, event,
+      correlation id, error.message, error.stack). No silent swallowing,
+      no default-value fallbacks that hide failures.
+- [ ] **Agent-readable retrieval path** — the project's MALT-equivalent
+      pattern is documented and works: the agent can run one command (a
+      log-grep, an admin debug route, a `--diagnose` CLI flag) and get
+      the last N failures with full context. **No "paste me the log"
+      asks to the founder.**
+- [ ] **Alert wired** — threshold + destination declared in
+      `project_config_dod.md` §"Alerting". A capability live in
+      production without an alarm is not done.
+- [ ] **Diagnosis runbook** — the agent has tried-and-true diagnosis
+      steps for this error class, documented in CLAUDE.md (project
+      section), a memory entry, or `docs/diagnosis.md`.
+
+What you don't ship:
+- Silent fallbacks that swallow errors with a default value.
+- Unstructured log lines that can't be queried by field.

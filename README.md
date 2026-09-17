@@ -45,7 +45,7 @@ upstream so every other project inherits it.
 | **Security** — secret-scan, SAST, SCA, IaC scan, DAST | [docs/SECURITY.md](docs/SECURITY.md) | gitleaks · semgrep · osv-scanner |
 | **Infrastructure as Code** — defined, reviewable, reproducible | [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | cdk synth / terraform / helm lint |
 | **Cost** — billable paths capped, logged, alerted; backlog-replay opt-in | [CLAUDE.md §"Cost is a main concern"](CLAUDE.md) | — |
-| **Documentation** — internal + external, same-commit rule | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) + [docs/DoD.md §6.4](docs/DoD.md) | per-project grep hints in `pre-push-project` |
+| **Documentation** — internal + external, same-commit rule | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) + [docs/DoD.md §5](docs/DoD.md) | per-project grep hints in `pre-push-project` |
 
 ## Status
 

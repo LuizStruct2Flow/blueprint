@@ -37,6 +37,12 @@ while IFS="$(printf '\t')" read -r role name backing _; do
   model="$(printf '%s' "$r" | cut -f2)"
   effort="$(printf '%s' "$r" | cut -f3)"
   slug="$(printf '%s' "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z-')"
+  # A file this script did not write is the project's: keep it, say so.
+  if [ -f "$dir/$slug.md" ] && ! grep -qxF "$marker" "$dir/$slug.md"; then
+    echo "claude-agents: $slug.md is not generated (no marker) — kept; persona $name uses it as written"
+    written="$written$slug.md "
+    continue
+  fi
   cat >"$dir/$slug.md" <<EOF
 ---
 name: $slug

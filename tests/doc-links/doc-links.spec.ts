@@ -483,14 +483,17 @@ describe('doc-links — a relative link under docs/ resolves, or the scan says w
     // No scenario(): this reads the repository and writes nothing, so a
     // workspace would be theatre. The floor is asserted first for the same
     // reason the shell suite asserted it first — a scan that examined nothing
-    // would otherwise report a clean docs tree.
+    // would otherwise report a clean docs tree. This suite ships, so the floor
+    // is what a FRESH project's docs hold: 17 once the blueprint's own documents
+    // stopped shipping (TASK-021 Stage 2). The perturbation cases above prove
+    // the extractor; the floor only has to catch one that finds nothing.
     const scan = await scanDocLinks(join(REPO_ROOT, 'docs'))
 
     expect(
       scan.examined,
       `only ${scan.examined} relative link(s) examined — the extractor is ` +
         `probably broken, so a pass proves nothing`,
-    ).toBeGreaterThanOrEqual(20)
+    ).toBeGreaterThanOrEqual(10)
     expect(scan.broken, scan.broken.join('\n')).toEqual([])
   })
 })

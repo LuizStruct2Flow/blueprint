@@ -398,7 +398,6 @@ project as in sync.
 - **Domain stays pure and testable** — no framework imports in the core
 - **Adapter swaps are bounded** — DynamoDB → Mongo, REST → GraphQL, sync → event-driven
 - **Infrastructure pushed to the edges** — core survives stack changes
-- **Coverage is measured whole-tree, tiered by layer** — domain/app ≥90%, adapters ≥80%, CLI ≥75% (a high % over a curated slice is theatre)
 
 The point isn't dogma. It's that the *most expensive layer to get wrong*
 (the domain) is the *easiest to keep clean* — if you keep frameworks out of it.
@@ -467,8 +466,8 @@ checklist; what remains is labelled *judgement*.
 
 **Non-optional rules:**
 
-- **Two-commit pattern** — reproducer test (failing) → fix
-- **Coverage thresholds** — whole-tree, tiered: domain/app ≥90%, adapters ≥80%, CLI ≥75% (brownfield ratcheted)
+- **Two-commit pattern** — reproducer test (failing) → fix, for product bugs
+- **Coverage thresholds** — declared by each project and enforced by its own test runner
 - **ESLint + Prettier** — both blocking, independent gates
 - **Expensive suites are release tier** — `*.release.spec.ts` runs in CI only, CI gates the `released` branch projects pull, and the gate names every suite it leaves to CI
 - **Snapshots are approval-based** — CI never runs with `-u`
@@ -479,20 +478,19 @@ checklist; what remains is labelled *judgement*.
 
 Every product/runtime bug fix lands as **two** commits, in this order:
 
-1. `test(BUG-XXX): minimal reproducer (failing)`
-2. `fix(BUG-XXX): <fix>`
+1. `BUG#XX: minimal reproducer (failing)`
+2. `BUG#XX: <fix>`
 
-The reproducer **must fail** on the parent commit.
-Verified by stash-test-restore — `git log` proves it.
+The reproducer **must fail** before the fix — `git log` proves it.
 
 > "I added a regression test" is only credible when `git log`
 > shows the test failing before the fix.
 
 This single rule kills the "I'll write the test later" anti-pattern at source.
 
-**Commit-message convention.** Every commit subject is prefixed with the
-bug or feature number it serves (`fix(BUG-XXX):` / `feat(FEATURE-YYY):` /
-`test(BUG-XXX):`), and the body explains **why** the change is being made,
+**Commit-message convention.** Every commit subject starts with the item it
+serves (`BUG#20:` / `FEATURE#3:` / `TASK#1:`, refused otherwise by
+`.githooks/commit-msg`), and the body explains **why** the change is being made,
 not just what changed. The "what" is in the diff; the "why" is the reason
 the diff exists — what a future reader (or `git blame`) actually needs.
 
@@ -769,7 +767,7 @@ Two-table sync list (External / Internal) in `project_config_dod.md` §"Doc-sync
 Each rule is small. The compounding is the point:
 
 - **Hexagonal** keeps the domain pure → tests stay cheap.
-- **Cheap tests** make the **90% coverage bar** affordable.
+- **Cheap tests** make **high coverage** affordable.
 - **High coverage** + **two-commit pattern** means regressions are caught at commit, not in prod.
 - **MALT** means the ones that *do* reach prod are diagnosed by the agent in minutes.
 - **Lifecycle gates** mean "done" actually means delivered, not merged.

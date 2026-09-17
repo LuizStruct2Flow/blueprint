@@ -73,7 +73,7 @@ with a justification comment.
 
 **ESLint** carries `eslint-plugin-security` +
 `eslint-plugin-no-unsanitized` in the workspace's eslint config.
-Already part of the lint gate (§4.2 in DoD), so cost is zero
+Already part of the lint gate (DoD §4), so cost is zero
 incremental.
 
 CI runs the deeper Semgrep pack
@@ -254,7 +254,7 @@ These bind every project regardless of stack.
 
 ### Pre-push gate — what runs locally
 
-Per the blueprint pre-push hook (DoD §4 enriched in §4.7):
+Per the blueprint pre-push hook (DoD §4):
 
 1. `gitleaks detect --log-opts=<remote>..<local>` — fails on any secret in
    the commits being pushed (**not** `protect --staged`, which scans an index
@@ -263,9 +263,8 @@ Per the blueprint pre-push hook (DoD §4 enriched in §4.7):
 3. `osv-scanner scan source --recursive .` — fails on a `MEDIUM+` vulnerability (CVSS >= 4.0); lower ones are reported, not blocking
 4. (lint security plugins ride inside `npm run lint` — already wired)
 
-Budget: all four must fit inside the §3.7 pre-push ≤30 s ceiling.
-If they don't, move the offender to CI (Semgrep deep packs are the
-usual offender, not gitleaks).
+There is no wall-clock ceiling. A scan too slow for every push moves to
+CI (Semgrep deep packs are the usual offender, not gitleaks).
 
 ### CI / pipeline gate — what runs after push
 

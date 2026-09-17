@@ -137,7 +137,7 @@ each other — no provider both writes and blesses-for-push the same code. The l
    commit(s) to review.
 3. **B reviews.** The reviewer's job is **both** code correctness **and** ensuring
    the change honors the **blueprint rules and the DoD** (`docs/DoD.md` §7:
-   co-located tests, coverage tiers, lint/format, two-commit reproducer for
+   co-located tests, lint/format, two-commit reproducer for
    bug-class fixes, doc-sync, etc.). A change that is "correct" but violates a
    blueprint/DoD rule is **not** clean.
 4. If B needs **no changes** → **B is the only one allowed to `push`.**

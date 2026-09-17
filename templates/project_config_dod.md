@@ -67,7 +67,7 @@ there too if your tools need it (`uname -s`), and follow the parent script's
 convention of reporting a per-tool failure rather than aborting the whole run —
 one missing tool must not block the others.
 
-## Coverage mode (DoD §3.6)
+## Coverage mode
 
 > Pick exactly one. Greenfield projects must hit the 90% bar from the
 > first push; brownfield projects start wherever they are and ratchet

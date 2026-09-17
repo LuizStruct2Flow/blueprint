@@ -73,8 +73,8 @@
 # suite field rather than being dropped — a discovery that silently ignores what
 # it does not recognise is how a file ends up executing nowhere.
 #
-# tests/helpers/ and tests/__helpers__/ are NOT suites (CLAUDE.md §"Test
-# directory layout"): they are sourced, never run, and carry no assertions.
+# tests/helpers/ and tests/__helpers__/ are NOT suites (docs/DoD.md §3): they
+# are sourced, never run, and carry no assertions.
 # Deliberately literal, never a prefix match. tests/manifest #1b is the
 # compensating control that stops the exemption becoming a place to hide code.
 bp_suite_runners() {

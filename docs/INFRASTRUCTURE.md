@@ -323,10 +323,9 @@ bucket/table on a fresh account.
 | IaC validate | `cdk synth` / `terraform validate` / `helm lint` | syntax / missing imports / template errors |
 | IaC config scan | `trivy config` (see `docs/SECURITY.md` §6.2) | HIGH+ misconfig |
 
-Both fit inside the §3.7 ≤30 s pre-push budget for typical project
-sizes. For very large CDK apps, `cdk synth` can drift past 10 s — move
-to CI if it bites the budget, but keep `trivy config` local (it's
-fast).
+Both are fast for typical project sizes. For very large CDK apps,
+`cdk synth` can drift past 10 s — move it to CI if it slows every push,
+but keep `trivy config` local (it's fast).
 
 ### CI gate — what runs after push
 

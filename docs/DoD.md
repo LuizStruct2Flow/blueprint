@@ -86,55 +86,30 @@ The pass makes the non-gated moves itself (`doing/`↔`backlog/`, landed work to
 
 ## §2 Bug management
 
-Every bug — minor or major — follows this:
+Every bug, minor or major:
 
-1. **Sequential numbering**: `BUG-001`, `BUG-002`, … Don't reuse numbers.
-2. **Row in `docs/{state}/BUGS.md`** matching the lifecycle (§1).
+1. **Sequential numbering**: `BUG-001`, `BUG-002`, … Numbers are never reused.
+2. **One row in a `docs/{state}/BUGS.md`** matching the lifecycle (§1).
    The bug exists in exactly **one** of the BUGS.md files at any time.
    A defect-shaped change (something the founder would call broken) is a
    `BUG-` row, never a backlog row: `BUGS.md` is what the founder tests.
-3. **Numbered regression test** with the bug number in the test name:
-   ```js
-   it('BUG-007: <one-line summary>', () => { … })
-   ```
-   The pre-push gate checks this (`§2 every BUG has a regression test`). It
-   searches the test roots the project declares in `project_config_paths.md`:
+3. **A regression test names the bug**: `it('BUG-007: <one-line summary>', …)`.
+   *Checked by the gate*, over the roots `project_config_paths.md` declares as
+   `BP_TEST_ROOTS` (default `tests/`):
+   - only a `*.spec.ts` or `*.spec.tsx` counts, because that is what the runner
+     executes;
+   - `docs/`, `.git/`, `scripts/` and `.githooks/` never count, nor does a root
+     inside or containing one, and a root must resolve inside the project;
+   - outside the blueprint, only the top level of `tests/` counts, because its
+     subdirectories are shipped suites. Declare a root of your own, such as
+     `e2e/`.
 
-   ```
-   - BP_TEST_ROOTS: `backend/src frontend/e2e`
-   ```
-
-   The list is literal and relative to the project root, and exactly one
-   `BP_TEST_ROOTS` line may exist. With no declaration, the gate searches
-   `tests/`. The rules that keep the match honest:
-   - **`docs/`, `.git/`, `scripts/` and `.githooks/` never count**, and neither
-     does a root that contains one or sits inside one. `docs/` holds the bug's
-     own backlog row, so declaring `.` would pass every bug; the other two are
-     blueprint-managed code naming *blueprint* bug numbers.
-   - **Only a `*.spec.ts` counts**, because that is the only thing the shipped
-     `tests/vitest.config.ts` runs (TASK-047). A `*.test.ts` or a `.js` test is
-     not evidence: accepting a file the runner never executes would certify a
-     bug with a test that cannot fail.
-   - **Outside the blueprint, only the TOP LEVEL of `tests/` counts.** A spec
-     sitting directly in `tests/` — `tests/own.snap.spec.ts`, the snapshot
-     layout — is the project's own, because the blueprint ships none there.
-     Everything in a subdirectory is a shipped suite, so `tests/e2e` does
-     **not** count in a derived project: put E2E tests in a root of their own
-     and declare it.
-   - **A root must resolve inside the project.** `../elsewhere`, an absolute
-     path outside it, and a symlink pointing away are refused. Roots resolve
-     physically, so a symlink is judged by the directory it reaches.
-   - **A malformed, duplicated or glob-bearing declaration is refused**, not
-     guessed at and not defaulted — defaulting would search the blueprint's
-     own suites.
-
-   A parked bug in `backlog/` needs no test yet.
-4. **No recurring bugs**: if it's fixed, it stays fixed. A bug coming
-   back means the regression test was wrong, not "oh well, refile it".
+   A parked bug needs no test yet.
+4. **No recurring bugs**: a bug that comes back means its regression test was
+   wrong, not "refile it".
 
 **Minor vs major**:
-- **Minor bug** (cosmetic, clearly scoped, low-impact) → fix directly
-  per the normal team workflow.
+- **Minor bug** (cosmetic, clearly scoped, low-impact) → fix directly.
 - **Major bug** (affects a core USP path defined in
   `project_config_overview.md`, or has already had a failed fix attempt) →
   **plan first**, do NOT jump to implementation. Create
@@ -142,167 +117,63 @@ Every bug — minor or major — follows this:
   fix approach, tests needed, rollback strategy. **Wait for Codex +
   Claude Code consensus** before implementing.
 
-## §3 Test coverage (non-negotiable)
+## §3 Tests
 
-The shipped code is only as good as the tests that gate it.
+1. **Reproducer first for product bugs.** A product or runtime bug fix lands as
+   two commits, `BUG#XX: minimal reproducer (failing)` and then `BUG#XX: <fix>`.
+   The reproducer fails before the fix, and `git log` is the evidence. *Judgement.*
+2. **Determinism.** The project names its non-deterministic stages in
+   `project_config_dod.md`. Everything downstream of them is tested without
+   calling them, from captured fixtures with provenance metadata.
+3. **Test layers.** One convention, `*.spec.ts` and `*.spec.tsx` (a JSX spec is
+   the same TypeScript spec), in `src/` and `tests/` alike:
 
-1. **Every bug fix has a regression test** (unit / integration / E2E).
-   The bug number is in the test name (§2.3).
-2. **Two-commit pattern** for product/runtime bug fixes:
-   - `BUG#XX: minimal reproducer (failing)`
-   - `BUG#XX: <fix>`
-
-   The reproducer must **fail** on the parent commit. Verify by stashing
-   the fix, running the test, restoring the fix — `git log` must show
-   the test failing before the fix.
-
-   **Documented exceptions** (call out which in the commit message):
-   - Docs-only fixes
-   - Test-only refactors with no production change
-   - Trivial typo fixes (single-character / single-word source changes)
-   - Emergency grouped repairs (each underlying defect's reproducer
-     still committed within the branch before its fix)
-
-   Anything else — including "the bug was easy to reason about so I
-   just fixed it" — does not qualify.
-
-3. **Determinism is non-negotiable.** Identify the project's
-   non-deterministic stages in `project_config_dod.md`; everything
-   downstream of them must be tested without invoking the non-deterministic
-   layer (use captured fixtures with provenance metadata). Mystery fixtures
-   get rejected at PR review.
-4. **Test layer matrix** — each project declares its layout in
-   `project_config_dod.md`. The minimum struct2flow set:
-
-   | Layer | Path convention | Runs in |
+   | Layer | Where | Runs in |
    |---|---|---|
-   | Minimal reproducer | sibling of the `*.spec.ts` it reproduces | pre-push |
-   | Unit | `*.spec.ts` | pre-push |
-   | Integration / wire | `*.integration.spec.ts` | pre-push |
-   | Data snapshot | `*.snap.spec.ts` | pre-push |
-   | Component (JSX) | `*.spec.tsx` | pre-push |
-   | Pixel snapshot | project-defined | manual + CI pipeline |
-   | E2E / acceptance | project-defined | CI pipeline |
+   | Unit | `*.spec.ts`, next to its source file | pre-push |
+   | Integration / wire | `*.integration.spec.ts`, near its subject | pre-push |
+   | Component (JSX) | `*.spec.tsx`, next to its source file | pre-push |
+   | Data snapshot | `*.snap.spec.ts`, at the top of `tests/` | pre-push |
+   | Pixel snapshot | project-defined | manual + CI |
+   | E2E / acceptance | `tests/e2e/` in the blueprint; a declared root such as `e2e/` in a project | CI |
 
-   **One convention — `*.spec.ts` and `*.spec.tsx` — in `src/` as well as
-   `tests/`** (founder, 2026-09-16: *"migrate the tests to be spec driven ts
-   tests, we don't need exceptions"*). Every layer above ends in `.spec.ts` or
-   `.spec.tsx`, so the files a runner executes and the files the DoD gate counts
-   as evidence are one set. That is the whole point: a `*.test.ts` accepted as a
-   regression test but never run is a green standing in for a test (TASK-047,
-   from Alexey's TASK-039 finding 6).
+   Shared helpers, mocks and fixtures live in `tests/helpers/`. The runner's
+   `include` names both spellings, and a layering lint such as
+   `eslint-plugin-boundaries` exempts spec files.
+4. **Snapshots are approval-based.** Approve locally, commit, review the diff.
+   CI never runs with `-u` / `--update-snapshots`.
+5. **Coverage thresholds are the project's**, declared in `project_config_dod.md`
+   and enforced by its own test runner.
+6. **An expensive suite is release tier:** named `*.release.spec.ts`, it runs in
+   CI only, which gates the `released` branch projects pull. `tests/manifest`
+   fails the push if CI stops running any suite or the gate any other. A cheap
+   suite belongs in the gate.
+7. **A check that cannot judge this project skips out loud**, printing
+   `SKIP-NOTE: <case>: <reason>` via `skipVisibly` / `skipNote` in
+   `tests/helpers/project-config.ts`. A bare `ctx.skip` reads as a pass.
 
-   **`.tsx` is not an exception to that rule.** It is the same TypeScript spec
-   with JSX syntax, and a React project cannot write a component test without
-   it — so excluding it would not enforce spec-driven tests, it would only make
-   component tests uncountable while they ran perfectly well. Both extensions
-   are accepted as evidence, both are discovered, and both are executed; a
-   project whose runner covers only one of them has a gap the gate cannot see.
+## §4 Pre-push gate
 
-5. **Snapshot tests are approval-based.** A snapshot diff is a *change*,
-   not necessarily a *break*. Update locally via the project's approve
-   command, commit the updated file, review the diff in PR. **CI never
-   runs with `-u` / `--update-snapshots`.**
-6. **Coverage report** before every commit/push: know what your change
-   adds to (or removes from) coverage before you ship it. Project
-   declares its mode in `project_config_dod.md`:
-   Coverage is measured over the **whole `src/**` tree**, not a curated
-   subset — a high % over a hand-picked slice is theatre (cf. CLAUDE.md
-   §"Coverage thresholds"). Thresholds are **tiered + ratcheted**:
-   - **Greenfield** — domain / application **≥90%**, adapters **≥80%**,
-     CLI entry points **≥75%** (statements + branches, aggregate per layer).
-   - **Brownfield** — start each tier at its current true number and
-     **ratchet**; new / modified files clear the greenfield bar for
-     their layer.
-   Exclude only genuinely non-executable / unit-untestable files,
-   per-file with a stated reason (`*.d.ts`, pure schema files, bootstrap
-   entry points, live-browser drivers) — never a wholesale directory
-   exclude — and mirror that set into the SAST tool's coverage
-   exclusions. The exact `--coverage` invocation + per-layer globs live
-   in `project_config_dod.md`. The pre-push gate fails the push if any
-   tier's threshold isn't met.
-7. **Expensive suites run in CI, and the tier is in the file name.** There is
-   no wall-clock ceiling. A suite named `*.release.spec.ts` runs in CI only
-   (TASK-054, founder decision 2026-09-16, reversing BUG-005's "never CI-only").
-   CI gates what ships: derived projects pull `released`, which moves only to a
-   commit on which every CI job passed. The gate names every release suite it
-   skips. **This is enforced, not merely stated:** `tests/manifest/` derives the
-   suite set from the runners on disk and fails the push when CI does not run
-   every suite, when the gate does not run every non-release suite, or when the
-   export boundary does not behave as `.gitattributes` declares. A non-blocking
-   SLO warns past 120 s total / 45 s per stage. A ≤30 s ceiling was removed on
-   2026-08-02 (BUG-005) after it silently moved a 41-assertion suite out of the
-   gate for growing by 3.7 s; the release tier differs because it is visible in
-   the file name and checked in CI.
+`.githooks/pre-push` blocks a push when any stage fails, and prints every stage
+with its duration and skip reason; CI runs the same checks as the backstop. It
+binds only a checkout whose `core.hooksPath` is `.githooks`: `arm_gate` sets that
+from the feed and from `blueprint drift`, and reports it on every run.
 
-## §4 Pre-push gate (fail-fast)
-
-The shared pre-push hook at `.githooks/pre-push` enforces (in order, per
-struct2flow convention — the project's exact targets are wired in
-`project_config_dod.md`):
-
-**Text-only pushes (TASK-053).** When every file the push changes ends in `.md`
-(root files such as `CLAUDE.md` included), the gate runs gitleaks, the host-path
-guard, the four DoD checklist stages and one stage of the document suites
-(`doc-links`, `lifecycle-docs`, `bug-numbers`). semgrep, osv-scanner, the
-backend, frontend and IaC stages, ShellCheck, the typecheck and the vitest batch
-skip with a `text-only push:` reason. An unknown push range, an empty file list
-or any other file gives the full gate.
-
-1. Build (e.g. `tsc` — catches missing imports)
-2. Lint (`--max-warnings` ratcheted; never loosen)
-3. **Formatter check** (`prettier --check` or equivalent — fails if
-   any tracked file is unformatted). Auto-format locally with
-   `npm run format` before pushing; CI never rewrites files.
-4. Tests (unit + integration + data snapshot) + **coverage gate**
-   (whole-tree, tiered per §3.6: domain/app ≥90%, adapters ≥80%, CLI
-   ≥75%; brownfield ratcheted — the project declares its per-layer
-   thresholds in `project_config_dod.md`)
-5. **`.claude/settings.json` host-path guard** — fails the push if the
-   COMMITTED `settings.json` contains absolute paths under `/Users/<name>/`
-   or `/home/<name>/`. Host-specific entries belong in
-   `.claude/settings.local.json` (gitignored). Rules the whole team shares
-   that are this project's own belong in `.claude/settings.project.json`
-   (tracked, never pulled), which `blueprint pull` merges into
-   `settings.json`; the guard scans the merged, committed `settings.json`, so
-   it covers them too. Three drift cycles in a row
-   landed `~/.ssh`, `~/sources/`, and `~/Library/Containers/...` in the
-   shared settings via Claude Code's auto-allowlist; this guard prevents
-   the fourth.
-6. Project-specific guards (loaded from
-   `.githooks/pre-push-project` if it exists — placeholder guards,
-   placeholder-injection checks, asset invariants, release-notes guard, etc.)
-   The file's blueprint-managed region, between its `BLUEPRINT:BEGIN` and
-   `BLUEPRINT:END` markers, runs the blueprint's own stages, and its last three
-   run in this order:
-   - **ShellCheck** (TASK-033): `sh_lint` from `scripts/run-ts-suites.sh` runs
-     `shellcheck --severity=warning` over every file git tracks under
-     `scripts/` and `.githooks/` that is shell by extension or shebang, through
-     the same scrub. CI's ts-tests job runs the same function. ShellCheck is
-     required: a missing one blocks the push and names
-     `bash scripts/install-toolchain.sh`. A finding is fixed, or disabled inline
-     with a reason; the severity is never lowered. The ts-tests job prepares
-     its machine with that installer (BUG-132), so a tool the suites need is
-     declared there once and reaches CI and every developer machine together.
-     `tests/ts-bridge` #9 runs those provisioning steps offline, with downloads
-     and package commands stubbed: it checks the wiring (guards, step exit
-     codes, the declared tool set), and it is not a real install smoke test.
-     semgrep's install is not pinned.
-   - **TypeScript typecheck of `tests/`** (TASK-031): `ts_typecheck` from
-     `scripts/run-ts-suites.sh`, which runs the pinned
-     `tests/node_modules/.bin/tsc --noEmit -p tests` through `ts_scrubbed`,
-     the same environment scrub the vitest batch uses. CI's ts-tests job runs
-     the same function. A project without `tests/package.json` skips it with
-     that reason; a compiler that is not installed blocks the push.
-   - **The vitest batch**, one stage per suite.
-
-**Lint warnings are ratcheted** — fix any new warnings before pushing;
-never loosen `--max-warnings` without explicit justification.
-**ESLint and Prettier are both blocking** — semantic checks
-(ESLint) and style checks (Prettier) are independent gates and
-neither can be skipped.
-**Never use `--no-verify`** unless the founder explicitly asks. After
-pushing, watch the project's CI pipeline; if red, fix before moving on.
+- **Never `--no-verify`** unless the founder asks. After pushing, watch CI, and
+  fix a red run before moving on.
+- **Lint warnings are ratcheted:** never loosen `--max-warnings` without a stated
+  reason. ESLint and Prettier `--check` both block, and CI never rewrites files.
+- **Project guards go after the `BLUEPRINT:END` marker** in
+  `.githooks/pre-push-project`. The region between the markers is the
+  blueprint's and a pull replaces it, so an edit there goes upstream with
+  `blueprint a2bp`.
+- **A ShellCheck finding is fixed, or disabled inline with a reason.** The
+  severity is never lowered.
+- **A tool the suites need goes in `scripts/install-toolchain.sh`**, which
+  provisions CI and every developer machine alike.
+- **Host-specific permission entries go in `.claude/settings.local.json`**, and a
+  project's shared rules in `.claude/settings.project.json`. The gate refuses a
+  committed `settings.json` that carries a home path.
 
 ## §5 Documentation in sync
 

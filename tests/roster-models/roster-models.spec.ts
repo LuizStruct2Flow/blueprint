@@ -143,6 +143,43 @@ describe('TASK-059 — roster Model tiers', () => {
     })
   })
 
+  it('#4b a REAL dispatch-by-persona meta (agentType is the persona slug, description names the task, not the persona)', async () => {
+    // TASK-059 rejected: a real `Agent({subagent_type: "nadia", ...})` dispatch
+    // writes agentType: "nadia" (the slug scripts/claude-agents.sh names
+    // .claude/agents/nadia.md by) and a description that is the TASK, which
+    // routinely does not mention "Nadia" at all — unlike #4's fixture, which
+    // borrowed the general-purpose-agent shape (agentType left generic,
+    // persona only in free-text description) and so never exercised this path.
+    await scenario('rm-4b', async (s) => {
+      const { dir, env } = await project(s)
+      await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.sh'), 'proj/scripts/log-activity.sh')
+      for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
+        if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
+      }
+      const sub = 'proj/sess/subagents/agent-feed02'
+      await s.fs.write(
+        `${sub}.meta.json`,
+        JSON.stringify({ agentType: 'nadia', description: 'Fix persona model label in feed', toolUseId: 'toolu_x', spawnDepth: 1 }),
+      )
+      await s.fs.write(`${sub}.jsonl`, JSON.stringify({ type: 'assistant', message: { model: 'claude-ran-9' } }) + '\n')
+      const log = join(await s.fs.mkdirp('proj/logs'), 'feed.log')
+      const payload = JSON.stringify({
+        hook_event_name: 'SubagentStop',
+        agent_id: 'feed02',
+        agent_type: 'nadia',
+        transcript_path: join(dir, 'sess.jsonl'),
+        agent_transcript_path: join(dir, `${sub.slice('proj/'.length)}.jsonl`),
+      })
+      const r = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh "${join(dir, 'scripts', 'log-activity.sh')}"`, 'x', payload],
+        { cwd: dir, env: { ...env, AGENT_FEED_LOG: log } },
+      )
+      expect(r.code, r.output).toBe(0)
+      expect(await readFile(log, 'utf8')).toContain('[Nadia - claude-ran-9 - medium] ← finished')
+    })
+  })
+
   it('#5 session-based resolves only on the Orchestrator role', async () => {
     await scenario('rm-5', async (s) => {
       const roster = `# Roster

@@ -214,6 +214,31 @@ bp_roster_name_in_text(){
   printf '%s' "$hit"
 }
 
+# name -> the file/agent-type slug scripts/claude-agents.sh writes it under
+# (.claude/agents/<slug>.md, and Claude Code's SubagentStart payload names that
+# slug as `agentType` when a persona is dispatched by name, `subagent_type:
+# <slug>`). THE one slug rule, reused by claude-agents.sh so the writer and the
+# reader of `.claude/agents/*.md` cannot drift apart.
+bp_roster_slug(){
+  printf '%s' "${1:-}" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z-'
+}
+
+# slug -> the roster Name whose slug matches it, case-insensitively (slugging
+# already lowercases). rc 1 when no persona's slug matches.
+bp_roster_name_for_slug(){
+  local src="${1:-.}" want_slug="${2:-}" role name backing rest
+  [ -n "$want_slug" ] || return 1
+  while IFS="$(printf '\t')" read -r role name backing rest; do
+    [ -n "$name" ] || continue
+    if [ "$(bp_roster_slug "$name")" = "$want_slug" ]; then
+      printf '%s' "$name"; return 0
+    fi
+  done <<EOF
+$(bp_roster_rows "$src")
+EOF
+  return 1
+}
+
 # --- a Claude subagent's meta file -> its feed label (BUG-124) ---------------
 # THE one way a subagent is labelled, for the streamed lines (agent-activity.sh)
 # and for both hook bookends (log-activity.sh). They used to derive it apart —
@@ -258,6 +283,15 @@ _bp_roster_subagent_who(){
     printf '%s' "$name"; return 0
   fi
   type="$(jq -r '.agentType // empty' "$meta" 2>/dev/null)"
+  # A dispatch BY PERSONA (`subagent_type: <slug>`, TASK-059's generated
+  # .claude/agents/<slug>.md) carries the persona's OWN slug as agentType, not
+  # a description that happens to name them — most dispatch descriptions are
+  # the task, not the persona. bp_roster_name_in_text alone therefore missed
+  # this case and fell all the way to "<type> - Claude Code" with a lowercase,
+  # unrostered-looking type. Check the slug before falling further.
+  if [ -n "$type" ] && name="$(bp_roster_name_for_slug "$src" "$type" 2>/dev/null)"; then
+    printf '%s' "$name"; return 0
+  fi
   parent="$(jq -r '.parentAgentId // empty' "$meta" 2>/dev/null)"
   # The depth cap only guards against a meta file that names itself as an ancestor.
   if [ -n "$parent" ] && [ "$depth" -lt 8 ]; then

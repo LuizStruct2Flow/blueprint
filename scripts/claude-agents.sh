@@ -36,7 +36,7 @@ while IFS="$(printf '\t')" read -r role name backing _; do
   r="$(bp_roster_model_for_name "$BP_STATE_ROOT" "$name")" || { rc=1; continue; }
   model="$(printf '%s' "$r" | cut -f2)"
   effort="$(printf '%s' "$r" | cut -f3)"
-  slug="$(printf '%s' "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z-')"
+  slug="$(bp_roster_slug "$name")"
   # A file this script did not write is the project's: keep it, say so.
   if [ -f "$dir/$slug.md" ] && ! grep -qxF "$marker" "$dir/$slug.md"; then
     echo "claude-agents: $slug.md is not generated (no marker) — kept; persona $name uses it as written"

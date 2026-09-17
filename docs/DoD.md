@@ -38,11 +38,13 @@ docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
 
 1. **All work refers to a backlog item** — a `TASK-`, `FEATURE-` or `BUG-` number
    with a row, including a defect found mid-session. A cancelled item's pointer
-   in `docs/config/findings.md` is its record. *Checked by the gate.*
+   in `docs/config/findings.md` is its record. *Checked by the gate, and by CI
+   over every commit of a push.*
 2. **A new item's row lands in `doing/` with its first work commit.** There is no
    separate filing or promotion commit (founder, 2026-09-16).
 3. **One item per commit.** The subject starts with the item (`BUG#20:`,
-   `FEATURE#3:`, `TASK#1:`), which `.githooks/commit-msg` enforces. A commit
+   `FEATURE#3:`, `TASK#1:`), which `.githooks/commit-msg` enforces and CI
+   checks for every commit of a push. A commit
    serving two items is two commits; the hook reads only the subject, so that
    part is yours. The body says *why*, since the diff already says what.
 4. **Cross-provider review for major bugs, core-path changes and new features**
@@ -94,7 +96,7 @@ Every bug, minor or major:
    A defect-shaped change (something the founder would call broken) is a
    `BUG-` row, never a backlog row: `BUGS.md` is what the founder tests.
 3. **A regression test names the bug**: `it('BUG-007: <one-line summary>', …)`.
-   *Checked by the gate*, over the roots `project_config_paths.md` declares as
+   *Checked by the gate and by CI*, over the roots `project_config_paths.md` declares as
    `BP_TEST_ROOTS` (default `tests/`):
    - only a `*.spec.ts` or `*.spec.tsx` counts, because that is what the runner
      executes;
@@ -208,7 +210,7 @@ gate runs.
 ## §7 Handoff checklist (walk BEFORE flipping the mic)
 
 Shipping is checked by the gate and CI, every item's row and every BUG's test by
-the gate's DoD stages, and the folders by `tests/lifecycle-docs`. What remains:
+the gate's DoD stages and CI, and the folders by `tests/lifecycle-docs`. What remains:
 
 - **D. Docs in sync** — a user-facing change updated the doc-sync list in the
   same commit (§5). *Judgement.*

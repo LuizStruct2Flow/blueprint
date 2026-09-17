@@ -170,7 +170,7 @@ bug numbering, regression tests and the plan-first process for a major bug are
 - **Commits:** the subject starts with the item it serves (`BUG#20:`,
   `FEATURE#3:`, `TASK#1:`), one item per commit, and the body says why
   ([docs/DoD.md](docs/DoD.md) §1b rules 1 and 3). `.githooks/commit-msg` refuses
-  any other subject.
+  any other subject, and CI checks every commit of a push to `main`.
 - Trunk-based development: a maintainer pushes to `main` and uses feature
   toggles, not branches. An external contribution is a pull request, which for
   the blueprint is what `blueprint a2bp` files (§"Back-propagating").

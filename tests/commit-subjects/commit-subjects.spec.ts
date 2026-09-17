@@ -67,7 +67,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { scanWiring, type WiringScan } from './commit-subjects.js'
-import { notGithubActions, skipNote } from '../helpers/project-config.js'
+import { notGithubActions, skipNote, skipVisibly } from '../helpers/project-config.js'
+import { parseDocument } from 'yaml'
 
 const RULE_LIB = join(REPO_ROOT, 'scripts/lib/commit-subject.sh')
 const CHECKER = join(REPO_ROOT, 'scripts/check-commit-subjects.sh')
@@ -420,6 +421,108 @@ describe('TASK-002 R6 — each wiring check is provably able to fail', () => {
         f['.github/workflows/security.yml'] = 'on:\n  pull_request:\njobs: {}\n'
       })
       expect(scan.ciInvokesChecker).toBe(false)
+    })
+  })
+})
+
+/**
+ * TASK-022 — on a push to main, CI checks EVERY pushed commit, not the tip.
+ *
+ * The workflow's own push steps are executed, as GitHub runs a `run:` block,
+ * over a three-commit fixture push whose TIP is valid and whose middle commit
+ * breaks one rule. Each control is broken on its own, so one failing cannot
+ * hide another that is disconnected.
+ */
+describe('TASK-022 — CI checks every commit of a push', () => {
+  interface Step {
+    name?: string
+    if?: unknown
+    env?: Record<string, string>
+    run?: string
+  }
+
+  const EVENT: Record<string, 'before' | 'after'> = {
+    '${{ github.event.before }}': 'before',
+    '${{ github.event.after }}': 'after',
+  }
+
+  /** Push the fixture, then run every push-only `run:` step of the workflow. */
+  async function pushRun(s: Scenario, middle: string, extra: Record<string, string> = {}) {
+    const repo = await s.gitRepo('repo')
+    const files: Record<string, string> = {
+      'docs/doing/BACKLOG.md': '| **TASK-1** | fixture |\n',
+      'docs/doing/BUGS.md': '| **BUG-2** | fixture |\n| **BUG-3** | fixture |\n',
+      'tests/bug.spec.ts': "it('BUG-2: fixture')\n",
+      ...extra,
+    }
+    for (const lib of ['check-commit-subjects.sh', 'lib/commit-subject.sh', 'lib/dod-gate.sh', 'lib/pipeline.sh']) {
+      await s.fs.copyIn(join(REPO_ROOT, 'scripts', lib), join('repo/scripts', lib))
+    }
+    for (const [rel, body] of Object.entries(files)) await s.fs.write(join('repo', rel), body)
+    const sha = { before: await repo.commitAll('TASK#1: base'), after: '' }
+    await s.fs.write('repo/middle.txt', 'x\n')
+    await repo.commitAll(middle)
+    await s.fs.write('repo/tip.txt', 'y\n')
+    sha.after = await repo.commitAll('BUG#2: valid tip')
+
+    const wf = parseDocument(
+      await readFile(join(REPO_ROOT, '.github/workflows/security.yml'), 'utf8'),
+    ).toJS() as { jobs: Record<string, { steps?: Step[] }> }
+    const steps = Object.values(wf.jobs)
+      .flatMap((job) => job.steps ?? [])
+      .filter((step) => step.if === "github.event_name == 'push'" && typeof step.run === 'string')
+    expect(steps.length, 'no push-only run step in the workflow').toBeGreaterThan(0)
+
+    let code = 0
+    let output = ''
+    for (const [i, step] of steps.entries()) {
+      const exports = Object.entries(step.env ?? {}).map(([k, v]) => {
+        const from = EVENT[v]
+        if (!from) throw new Error(`step "${step.name}" env ${k}=${v} is not modelled here`)
+        return `export ${k}=${sha[from]}\n`
+      })
+      const script = await s.fs.write(`step-${i}.sh`, step.run ?? '')
+      const driver = await s.fs.write(
+        `driver-${i}.sh`,
+        `${exports.join('')}exec bash --noprofile --norc -eo pipefail ${JSON.stringify(script)}\n`,
+      )
+      const r = await s.run('sh', [driver], { cwd: repo.dir })
+      output += r.output
+      if (r.code !== 0) code = r.code ?? 1
+    }
+    return { code, output }
+  }
+
+  it('#1 a bad subject that is not the tip fails the push', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('cs-t22-subject', async (s) => {
+      const r = await pushRun(s, 'no item named here')
+      expect(r.code, `an earlier bad subject passed CI\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('got: no item named here')
+    })
+  })
+
+  it('#2 an item with no row, not at the tip, fails the push', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('cs-t22-row', async (s) => {
+      const r = await pushRun(s, 'TASK#9: no row anywhere')
+      expect(r.code, `an item with no row passed CI\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('NO backlog row anywhere: TASK-9')
+      // The other stage passed on the same fixture, so its failure in #3 is real.
+      expect(r.output).toContain('regression tests found for: BUG-2')
+    })
+  })
+
+  it('#3 a BUG with no test, not at the tip, fails the push', async (ctx) => {
+    const notGithub = await notGithubActions(REPO_ROOT)
+    if (notGithub) skipVisibly(ctx, notGithub)
+    await scenario('cs-t22-bugtest', async (s) => {
+      const r = await pushRun(s, 'BUG#3: fixed with no test')
+      expect(r.code, `a BUG with no test passed CI\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('No test under the searched roots names: BUG-3')
+      expect(r.output, 'the row stage failed too, so #2 proves nothing').toContain('items: BUG-2 BUG-3')
     })
   })
 })

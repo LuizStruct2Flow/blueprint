@@ -631,8 +631,8 @@ pull_file() {
       echo "  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}" ;;
   esac
 
-  # `cat >`, not `mv`: the destination keeps its own inode and mode, and only the
-  # executable bit is mirrored from the blueprint (BUG-008). Shielded (TASK-025),
+  # Atomic, and the destination keeps its own mode: only the executable bit is
+  # mirrored from the blueprint (BUG-008). Shielded (TASK-025),
   # the bit together with the bytes: a Ctrl-C reaches the whole process group,
   # and a writer or `chmod` killed part-way leaves a file that is not what the
   # pull promised.
@@ -734,13 +734,28 @@ _bp_sync_cleanup() {
 # pull lands, and a `chmod` after the shield was killed by a group signal,
 # leaving complete bytes at the old mode (Alexey, S1; tests #23c).
 #
+# ATOMIC: bytes and bit go to a temp file beside DEST, which one `mv` then puts
+# in DEST's place. Writing DEST in place rewrote a script that was still RUNNING
+# when pull replaced scripts/blueprint: bash read the new bytes at its old offset
+# and failed after reporting success (Alexey, S1-S2 review; tests/
+# managed-references #5). A rename leaves the running process its old inode.
+# `cp -p` first keeps DEST's own mode, as the in-place write did.
+#
 # tests/sync-by-address #23b reads this function's TEXT: the ignore must open the
-# subshell and the redirect must sit inside it. Keep that shape.
+# subshell, and every write must sit inside it. Keep that shape.
 _bp_shielded_write() {
   (
     trap '' INT TERM
-    cat "$1" > "$2"
-    if [ -n "${3:-}" ]; then _bp_sync_exec_bit "$3" "$2"; fi
+    tmp="$2.bp-new.$$"
+    rm -f "$tmp"
+    if { [ ! -e "$2" ] || cp -p "$2" "$tmp"; } \
+      && cat "$1" > "$tmp" \
+      && { [ -z "${3:-}" ] || _bp_sync_exec_bit "$3" "$tmp"; } \
+      && mv -f "$tmp" "$2"; then
+      exit 0
+    fi
+    rm -f "$tmp"
+    exit 1
   )
 }
 

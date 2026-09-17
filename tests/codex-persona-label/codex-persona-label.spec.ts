@@ -242,6 +242,86 @@ describe('BUG-021 — Codex output carries the persona that produced it', () => 
     ).toMatch(/feed_append\(\)\{ :; \}/)
   })
 
+  it('#6 the hand-back preamble no longer hardcodes Holder=Claude Code (TASK-061)', async () => {
+    expect(
+      await code(LAUNCHER),
+      'the launcher still tells Codex to hand back to a literal "Claude Code" holder',
+    ).not.toMatch(/--holder set to Claude Code/)
+  })
+
+  it('#6 the hand-back preamble resolves the Orchestrator from the roster (TASK-061)', async () => {
+    expect(
+      await code(LAUNCHER),
+      'the launcher does not resolve Holder from the roster’s Orchestrator row',
+    ).toMatch(/bp_roster_name_for_role\s+"\$BP_STATE_ROOT"\s+Orchestrator/)
+  })
+
+  it('#6 the resolved Holder names the fixture roster’s Orchestrator', async () => {
+    // Behavioural, not just a source check: run the launcher's own resolution
+    // block (extracted verbatim, bounded by its own start/end markers so a
+    // future edit that widens or narrows it is caught rather than silently
+    // testing stale lines) against the fixture roster, and assert it lands on
+    // Jesko — the fixture's Orchestrator — never a hardcoded name.
+    await scenario('codex-label-6a', async (s) => {
+      const dir = await s.fs.mkdirp('proj')
+      await s.fs.write('proj/AGENT_ROSTER.md', FIXTURE_ROSTER)
+
+      const src = await readFile(LAUNCHER, 'utf8')
+      const block = src.match(
+        /ORCHESTRATOR_NAME=""[\s\S]*?\nfi\nif \[ -z "\$ORCHESTRATOR_NAME" \][\s\S]*?\nfi\n/,
+      )
+      expect(block, 'could not locate the Orchestrator-resolution block to extract').not.toBeNull()
+
+      // Written to a script file rather than a `bash -c` string: the extracted
+      // block's own printf carries an apostrophe, and a giant interpolated
+      // one-liner is the wrong place to reason about shell quoting.
+      const runner = await s.fs.write(
+        'run.sh',
+        `. "${ROSTER_LIB}"\nBP_STATE_ROOT="${dir}"\nRUN_LOG=/dev/null\n${block![0]}\nprintf '%s' "$ORCHESTRATOR_NAME"\n`,
+      )
+      const r = await s.run('bash', [runner], { cwd: s.workspace.root })
+      expect(r.stdout).toBe('Jesko')
+    })
+  })
+
+  it('#6 a roster with no Orchestrator row falls back visibly, not to a hardcoded name', async () => {
+    await scenario('codex-label-6b', async (s) => {
+      const dir = await s.fs.mkdirp('proj')
+      await s.fs.write(
+        'proj/AGENT_ROSTER.md',
+        '# Roster\n\n## Members\n\n| Role | Name | Backing agent |\n|---|---|---|\n| QA-2 | Slava | Codex |\n',
+      )
+
+      const src = await readFile(LAUNCHER, 'utf8')
+      const block = src.match(
+        /ORCHESTRATOR_NAME=""[\s\S]*?\nfi\nif \[ -z "\$ORCHESTRATOR_NAME" \][\s\S]*?\nfi\n/,
+      )
+      expect(block).not.toBeNull()
+
+      const runLog = join(s.workspace.root, 'run.log')
+      const runner = await s.fs.write(
+        'run.sh',
+        `. "${ROSTER_LIB}"\nBP_STATE_ROOT="${dir}"\nRUN_LOG="${runLog}"\n${block![0]}\nprintf '%s' "$ORCHESTRATOR_NAME"\n`,
+      )
+      const r = await s.run('bash', [runner], { cwd: s.workspace.root })
+      expect(r.stdout, 'an unresolved Orchestrator must not silently pick a real persona name').toBe(
+        'Orchestrator',
+      )
+      const log = await readFile(runLog, 'utf8').catch(() => '')
+      expect(log, 'the fallback must be logged, not silent').toMatch(/no Orchestrator row resolved/)
+    })
+  })
+
+  it('AGENTS.md no longer documents a hardcoded Claude Code hand-back (TASK-061)', async () => {
+    const agentsMd = await code(join(SUBJECT, 'AGENTS.md'))
+    expect(agentsMd, 'AGENTS.md still says the hand-back Holder is literally "Claude Code"').not.toMatch(
+      /Holder=Claude Code \/ State=OVER_TO_CLAUDE/,
+    )
+    expect(agentsMd, 'AGENTS.md does not explain the Holder is the Orchestrator’s roster name').toMatch(
+      /Orchestrator.{0,40}roster name/,
+    )
+  })
+
   it('#5 the Gemini run log is still merged — its lines are not dropped', async () => {
     // SCOPE DISCIPLINE: fix the one that has a fix. Gemini routes through its own
     // run log and has no launcher doing per-dispatch labelling, so removing ITS

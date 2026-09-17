@@ -10,8 +10,7 @@ a missing file.
 
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
-
-*(Empty.)*
+| **TASK-061** | **A Codex persona hands the mic back to the Orchestrator's persona, resolved from the roster.** Founder decision 2026-09-17: "to the orchestrator, it can vary from environment to environment and project to project." Jesko set `Holder = Claude Code`, because the Codex run preamble in `scripts/start-codex-signal-watch.sh` and `AGENTS.md` both name "Claude Code", while `Holder` is a persona name. The Orchestrator's name comes from the roster's `Orchestrator` row (`agent-activity.sh --whoami`), never a hardcoded value. | S3 | Agent team | **In progress.** **What to test:** dispatch a Codex persona; it flips back with `Holder` = the Orchestrator's roster name (here `Eto`). **Re-open if** a Codex hand-back names anything but the roster's Orchestrator. |
 
 ## TASK-012 — how to run it, and why not a fork
 

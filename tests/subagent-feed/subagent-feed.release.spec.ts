@@ -1092,6 +1092,19 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         ).stdout.includes('YES')
 
       expect(await running(), `pid ${pid} was already gone before the signal`).toBe(true)
+
+      // THE GROUP, captured before the signal — by this point the deferred
+      // child is a double-forked orphan (its `defer_spawn` subshell parent
+      // already exited), so its process group has exactly two members: the
+      // child itself and its current `sleep 0.1 &`. Measured directly against
+      // this fixture: `ps -eo pid,ppid,pgid,args` filtered to this pgid showed
+      // only those two lines, never the scenario's own top-level `sh` (already
+      // reaped by the time this poll finds the child). Asserting non-empty
+      // catches the case where that assumption stops holding on some host.
+      const pgidR = await s.run('sh', ['-c', 'ps -o pgid= -p "$1" | tr -d " "', 'x', pid], { cwd: f.repo })
+      const pgid = pgidR.stdout.trim()
+      expect(pgid, `could not read a process group for pid ${pid}`).not.toBe('')
+
       await s.run('kill', ['-TERM', pid], { cwd: f.repo })
 
       // WELL INSIDE THE 15 s WAIT, so "it is gone" means the signal ended it
@@ -1100,6 +1113,32 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         async () => {
           if (await running()) {
             throw new Error(`pid ${pid} released its slot and kept running`)
+          }
+        },
+        { timeout: 5_000, interval: 100 },
+      )
+
+      // THE TITLE'S OWN CLAIM: "leaves no sleep behind". The check above only
+      // proves the CHILD is gone — its background `sleep` is a separate
+      // process that the trap signals but does not wait on, so it can still be
+      // dying (or, on a stale-pid trap, never signalled at all) after the
+      // child's own pid has vanished. Poll the whole group, not the one pid:
+      // `kill -0 -- -<pgid>` fails only once every member — child and sleep
+      // alike — is gone. Without this, the scenario's own teardown is what
+      // ends up sampling the still-dying sleep, under CI-level host load
+      // (BUG-133's CI flake).
+      await vi.waitFor(
+        async () => {
+          const groupRunning = (
+            await s.run('sh', ['-c', 'kill -0 -- "-$1" 2>/dev/null && echo YES || echo NO', 'x', pgid], {
+              cwd: f.repo,
+            })
+          ).stdout.includes('YES')
+          if (groupRunning) {
+            throw new Error(
+              `process group ${pgid} outlived the signalled child ${pid} — a member ` +
+                `(the sleep) is still running after its owner exited`,
+            )
           }
         },
         { timeout: 5_000, interval: 100 },

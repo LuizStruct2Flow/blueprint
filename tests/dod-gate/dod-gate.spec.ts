@@ -533,6 +533,92 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     })
   })
 
+  it('#5-empty-holder BUG-140: a baton with an empty Holder fails', async () => {
+    await scenario('dod-gate-5-empty-holder', async (s) => {
+      // dod_stage_signal used to check only that the Holder ROW exists, not
+      // that it carries a name. A hand-written baton with the row present and
+      // empty passed as "well-formed" and would dispatch against nobody.
+      const f = await build(s, 'r5eh')
+      await s.fs.write(
+        join(f.dir, 'logs/state/signal.md'),
+        '| Field | Value |\n|---|---|\n| Holder |  |\n| State | ACTIVE |\n| Task | t |\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_signal', '')
+      expect(r.code, 'a baton with an EMPTY Holder PASSED').not.toBe(0)
+    })
+  })
+
+  it('#5-unrostered-holder BUG-140: a baton naming nobody on the roster fails', async () => {
+    await scenario('dod-gate-5-unrostered', async (s) => {
+      const f = await build(s, 'r5ur')
+      await s.fs.write(
+        join(f.dir, 'AGENT_ROSTER.md'),
+        '# Agent Roster\n\n## Members\n\n| Role | Name | Backing agent |\n|---|---|---|\n' +
+          '| Orchestrator | Alisa | Claude Code |\n',
+      )
+      await s.fs.write(
+        join(f.dir, 'logs/state/signal.md'),
+        '| Field | Value |\n|---|---|\n| Holder | NoSuchPersona |\n| State | ACTIVE |\n| Task | t |\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_signal', '')
+      expect(r.code, 'a baton naming an UNROSTERED Holder PASSED').not.toBe(0)
+    })
+  })
+
+  it('#5-no-roster-skip-announced BUG-140: no AGENT_ROSTER.md says so, rather than passing silently', async () => {
+    await scenario('dod-gate-5-no-roster', async (s) => {
+      const f = await build(s, 'r5nr')
+      await s.fs.write(
+        join(f.dir, 'logs/state/signal.md'),
+        '| Field | Value |\n|---|---|\n| Holder | X |\n| State | ACTIVE |\n| Task | t |\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_signal', '')
+      expect(r.code, `a well-formed baton with no roster was rejected:\n${r.output}`).toBe(0)
+      expect(r.output, 'the roster skip was not announced').toContain('skipped the roster check')
+    })
+  })
+
+  it('#5-nobody BUG-140: Holder = Nobody is accepted as "the mic is free"', async () => {
+    await scenario('dod-gate-5-nobody', async (s) => {
+      const f = await build(s, 'r5nb')
+      await s.fs.write(
+        join(f.dir, 'AGENT_ROSTER.md'),
+        '# Agent Roster\n\n## Members\n\n| Role | Name | Backing agent |\n|---|---|---|\n' +
+          '| Orchestrator | Alisa | Claude Code |\n',
+      )
+      await s.fs.write(
+        join(f.dir, 'logs/state/signal.md'),
+        '| Field | Value |\n|---|---|\n| Holder | Nobody |\n| State | IDLE |\n| Task | t |\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_signal', '')
+      expect(r.code, `Holder=Nobody was rejected against a real roster:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#5-rostered-holder BUG-140: a baton naming a roster persona still passes', async () => {
+    await scenario('dod-gate-5-rostered', async (s) => {
+      // Paired with #5-unrostered-holder: a roster present and a VALID name
+      // must not become collateral damage of the stricter check.
+      const f = await build(s, 'r5rh')
+      await s.fs.write(
+        join(f.dir, 'AGENT_ROSTER.md'),
+        '# Agent Roster\n\n## Members\n\n| Role | Name | Backing agent |\n|---|---|---|\n' +
+          '| Orchestrator | Alisa | Claude Code |\n',
+      )
+      await s.fs.write(
+        join(f.dir, 'logs/state/signal.md'),
+        '| Field | Value |\n|---|---|\n| Holder | Alisa |\n| State | ACTIVE |\n| Task | t |\n',
+      )
+
+      const r = await runStage(s, f, 'dod_stage_signal', '')
+      expect(r.code, `a rostered Holder was rejected:\n${r.output}`).toBe(0)
+    })
+  })
+
   it('#6 the judgement stage prints that it does NOT verify', async () => {
     await scenario('dod-gate-6', async (s) => {
       // It always passes, and that is correct — it exists to be VISIBLE. So the

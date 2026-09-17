@@ -146,6 +146,15 @@ const ENV_KIND = {
   AGENT_SIGNAL_FILE: 'path',
   AGENT_STATE_HOME: 'path',
   AGENT_FEED_LOG: 'path',
+  // BUG-140 — signal-set.sh validates --holder against a roster. `bp_roster_file`
+  // already accepts a literal file path as its "src" argument, so this override
+  // reuses that rather than adding a second resolver: unset, the check reads
+  // BP_STATE_ROOT/AGENT_ROSTER.md, which for a script run from its OWN physical
+  // location (BASH_SOURCE, never fixture-overridable — BUG-019) is the REAL
+  // checkout's live roster. Same shape and same reason as AGENT_SIGNAL_FILE: an
+  // ambient value would make a fixture validate against the operator's own
+  // per-engineer roster instead of the one the test wrote.
+  AGENT_ROSTER_FILE: 'path',
   // THE TWO TIMING KNOBS THE MIC SUITES SET, and 'opaque' is right for a
   // narrow reason worth stating: each is a DURATION IN SECONDS handed to
   // `sleep` or compared against `date +%s`, so it names nothing on disk,

@@ -22,7 +22,6 @@ belong where the decision happens.
 
 | # | Bug | Severity | Status | What to test | Detail |
 |---|---|---|---|---|---|
-| **BUG-134** | **`tests/lifecycle-docs` refuses a bug cancelled the way the DoD prescribes, so the cancellation cannot be pushed.** Observed 2026-09-16 while applying the founder-approved `doing/` triage (TASK-058): BUG-101 and BUG-108 were cancelled by deleting their rows and recording them in `docs/config/findings.md` F-005, and "THE REAL TREE" failed with "bugs with commits on HEAD and no row". It reads only `BUGS.md` rows, while `scripts/lib/dod-gate.sh` learned in BUG-130 that a findings pointer is a record. Same defect, second reader. | S3 | **FIXED — landed 3bf6351 (reproducer), cd0b827 (fix), pushed 2026-09-16, CI green on `cd0b827` (run 35151645886)** | Cancel a bug the DoD way (delete its row, name it in `docs/config/findings.md`) and push: `lifecycle-docs` and the DoD gate both accept it. A bug with commits and no record anywhere still fails. | Found 2026-09-16 by Eto. **Fix:** `rowedBugIds` also counts bug ids named in `docs/config/findings.md`, matching the DoD gate. **Regression test:** `lifecycle-docs` #6 BUG-134. **Re-open if** a findings-recorded cancellation fails either check. |
 
 
 The 2026-07-29 QA pass dispositioned the earlier bugs: BUG-001, BUG-002 and

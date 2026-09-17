@@ -1342,10 +1342,14 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
 
     expect(body, 'the subshell does not open with the INT and TERM ignore').toMatch(/^\(\s*trap '' INT TERM\s*\n/)
     expect(body.endsWith(')'), 'something follows the subshell — a redirect there opens the file unshielded').toBe(true)
+    // Atomic since the S1-S2 review (managed-references #5): the bytes go to a
+    // temp beside the destination, and a rename replaces it. Both are writes.
     const ignore = body.indexOf("trap '' INT TERM")
-    const redirect = body.search(/>\s*"\$2"/)
-    expect(redirect, 'no redirect to the destination inside the helper').toBeGreaterThan(ignore)
-    expect(body.lastIndexOf(')'), 'the destination is opened outside the shielded subshell').toBeGreaterThan(redirect)
+    const redirect = body.search(/>\s*"\$tmp"/)
+    const rename = body.search(/mv -f "\$tmp" "\$2"/)
+    expect(redirect, 'no redirect to the temp inside the helper').toBeGreaterThan(ignore)
+    expect(rename, 'the destination is not replaced by a rename of the temp').toBeGreaterThan(redirect)
+    expect(body.lastIndexOf(')'), 'the destination is written outside the shielded subshell').toBeGreaterThan(rename)
   })
 
   it('#23c group INT and TERM while the executable bit is set: the pulled file ends with the blueprint\'s mode', async () => {
@@ -1363,7 +1367,8 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
 
       for (const sig of SIGNALS) {
         const tag = sig.toLowerCase()
-        const blocker = await seam(s, `chmod-${tag}`, 'chmod', `[ "$1" = +x ] && [ "$2" = ${tool} ]`)
+        // The bit is set on the temp the atomic write renames into place.
+        const blocker = await seam(s, `chmod-${tag}`, 'chmod', `[ "$1" = +x ] && case "$2" in ${tool}.bp-new.*) true ;; *) false ;; esac`)
         const proj = await project(s, remote.dir, head, 'published', { tag })
         await s.fs.write(join(proj, tool), '#!/bin/sh\necho v1\n', { mode: 0o644 })
         const cli = await cliCopy(s, `cli-${tag}`)

@@ -331,4 +331,42 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
       ).toBe(false)
     })
   })
+
+  // Alexey, S1-S2 implementation review: the CLI wrote pulled files with
+  // `cat > DEST`, so a pull that replaced scripts/blueprint rewrote the script
+  // bash was still reading. After the dispatch returned, bash read the NEW bytes
+  // at its OLD offset and failed after reporting success (exit 127 and 2 in two
+  // real projects). The new CLI here is the old one plus a tail, so the bytes at
+  // the old end-of-file are exactly that tail: an in-place write runs it, a
+  // write that replaces the inode never does.
+  it('#5 a full pull that replaces the RUNNING CLI with a different CLI completes and exits 0', async () => {
+    await scenario('managed-references-5', async (s) => {
+      const tracked = (await s.run('git', ['-C', REPO_ROOT, 'ls-files', 'scripts'], { cwd: s.workspace.root })).stdout
+        .split('\n')
+        .filter(Boolean)
+      // Split words, so pull's own diff preview of the tail never matches the output.
+      const tail = '\necho "ran bytes" "the pull wrote" >&2\nexit 97\n'
+
+      const bp = await s.workspace.dir('bp')
+      for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(bp, f))
+      await s.fs.write(join(bp, 'scripts/blueprint'), tail, { append: true })
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await initRepo(s, bp)
+      const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+
+      const proj = await s.workspace.dir('proj')
+      for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(proj, f))
+      await s.fs.write(join(proj, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(
+        join(proj, '.blueprint-source'),
+        ['config_version   = 2', `blueprint_remote = ${bp}`, `bootstrap_sha    = ${sha}`, 'bootstrap_date   = 2026-01-01', ''].join('\n'),
+      )
+      await initRepo(s, proj)
+
+      const pulled = await s.run(join(proj, 'scripts/blueprint'), ['pull', '--yes'], { cwd: proj })
+      expect(await s.fs.read(join(proj, 'scripts/blueprint')), `the pull did not replace the CLI\n${pulled.output}`).toContain(tail)
+      expect(pulled.output, 'the running CLI executed bytes the pull wrote over it').not.toContain('ran bytes the pull wrote')
+      expect(pulled.code, pulled.output).toBe(0)
+    })
+  })
 })

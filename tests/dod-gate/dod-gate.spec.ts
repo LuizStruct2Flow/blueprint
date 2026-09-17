@@ -158,6 +158,11 @@ async function build(s: Scenario, tag: string, kind: 'blueprint' | 'derived' = '
   const dir = await s.workspace.dir(tag)
   await s.fs.copyIn(join(REPO_ROOT, LIB), join(dir, LIB))
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/state-dir.sh'), join(dir, 'scripts/lib/state-dir.sh'))
+  // BUG-140: dod_stage_signal's roster check. No AGENT_ROSTER.md is written here,
+  // so bp_roster_file finds nothing and the check degrades to a no-op — the same
+  // way it does on a fresh clone before `cp AGENT_ROSTER.example.md
+  // AGENT_ROSTER.md`. The #5* baton cases below rely on exactly that degrade.
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/roster.sh'), join(dir, 'scripts/lib/roster.sh'))
   await s.fs.copyIn(join(REPO_ROOT, SUBJECT_LIB), join(dir, SUBJECT_LIB))
   await s.fs.write(join(dir, kind === 'blueprint' ? '.blueprint-root' : '.blueprint-source'), `${kind}\n`)
   for (const state of LIFECYCLE) {
@@ -366,6 +371,71 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `a test naming the bug did not satisfy the stage:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#4-comment-only BUG-139: a spec mentioning the bug only in a comment fails the stage', async () => {
+    await scenario('dod-gate-4-comment-only', async (s) => {
+      // BUG-139: `grep -l` over the whole file is satisfied by a comment, so a
+      // fix can land with no test that actually names the bug in a checkable
+      // way. Only a test TITLE (an `it(...)`/`describe(...)` string) should count.
+      const f = await build(s, 'r4co')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-139** | comment only | S3 | open | d |\n')
+      await commit(s, f, 'c.txt', 'BUG#139: a fix whose only test mention is a comment')
+      await s.fs.write(
+        join(f.dir, 'tests/x/x.spec.ts'),
+        "// BUG-139 regression, see the fix above\nit('does the thing', () => {})\n",
+      )
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a comment-only mention of the bug PASSED the stage:\n${r.output}`).not.toBe(0)
+    })
+  })
+
+  it('#4-title BUG-139: a spec whose it() title carries the bug number passes', async () => {
+    await scenario('dod-gate-4-title', async (s) => {
+      const f = await build(s, 'r4t')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-139** | titled | S3 | open | d |\n')
+      await commit(s, f, 'c.txt', 'BUG#139: a fix with a title-named regression test')
+      await s.fs.write(join(f.dir, 'tests/x/x.spec.ts'), "it('BUG-139: regression', () => {})\n")
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a title naming the bug did not satisfy the stage:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#4-marker BUG-139: a row carrying **No regression test:** with a reason passes, no title needed', async () => {
+    await scenario('dod-gate-4-marker', async (s) => {
+      // BUG-017's real shape: a bug that genuinely has no test (does not
+      // reproduce, or similar) stays checkable on its own row instead of
+      // hiding the gap in a comment nobody greps.
+      const f = await build(s, 'r4m')
+      await appendRow(
+        s,
+        f,
+        'docs/doing/BUGS.md',
+        '| **BUG-201** | no fix reproduces | S3 | open | **No regression test:** does not reproduce at HEAD |\n',
+      )
+      await commit(s, f, 'c.txt', 'BUG#201: cannot be reproduced, no test possible')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a justified row was still required to carry a test:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#4-marker-empty BUG-139: the marker with no reason still fails', async () => {
+    await scenario('dod-gate-4-marker-empty', async (s) => {
+      const f = await build(s, 'r4me')
+      await appendRow(
+        s,
+        f,
+        'docs/doing/BUGS.md',
+        '| **BUG-202** | empty marker | S3 | open | **No regression test:** |\n',
+      )
+      await commit(s, f, 'c.txt', 'BUG#202: marker present but no reason given')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, 'an EMPTY "No regression test:" marker PASSED').not.toBe(0)
     })
   })
 

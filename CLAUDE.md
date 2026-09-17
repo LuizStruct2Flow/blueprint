@@ -119,69 +119,19 @@ up; it just participates).
 
 ## Running commands — one per call, chains only when dependent
 
-**Every command goes in its own call. Do not join independent commands with
-`;`, `&&`, or `||`.** Chain only when the commands are *fully dependent* — when
-the later one operates on what the earlier one produced and is meaningless
-without it (`mktemp` and then writing to that path; `fetch` and then reading the
-fetched ref). A pipeline passes that test by construction: a filter cannot run
-without its producer.
+**One command per tool call.** Do not join independent commands with `;`, `&&`
+or `||`: permission is granted per command pattern, and a compound string is
+matched as one unit, which also defeats the deny list. Chain only commands that
+genuinely depend on each other; a pipe qualifies. Never wrap a command until it
+stops matching its allowlist entry — run it plainly and let the prompt happen,
+or ask for it to be allowed.
 
-Commands that merely happen to run one after another are not a chain. Issue them
-as separate calls — in parallel when none depends on another, which is faster
-than sequencing them anyway.
-
-**This is a permission rule, not a style preference.** `.claude/settings.json`
-grants permission per command *pattern*. A compound string is matched as a single
-unit, so a permissive early pattern silently carries everything joined to it: a
-`cd` followed by four unrelated commands is reviewed as a `cd`. That collapses
-one decision per command into one decision per blob, and it defeats the `deny`
-list by the same mechanism. An allowlist is only worth the granularity it is
-actually consulted at.
-
-**The dependency test does not license wrapping.** A pipeline whose filter is
-genuinely dependent still must not be built around a command in a way that stops
-it matching its own allowlist entry — run the command, then filter its output.
-Wrapping a command until its permission pattern no longer applies is *routing
-around the prompt rather than asking*.
-
-If a command is not on the allowlist, ask for it to be added, or run it plainly
-and let the prompt happen. Both are correct; disguising it is not.
-
-**This is enforced, not merely written down.** `scripts/no-chain-guard.sh` is a
-`PreToolUse` hook on `Bash` that blocks `&&`, `||` and `;` and permits pipes.
-It exists because the rule above lived here for weeks while an agent broke it
-through an entire session believing it was complying, and the founder had to
-correct it three separate times. A rule that must be remembered at the moment
-the author is busy is the wrong shape of fix — the same conclusion BUG-004
-reached about "flip the mic last" and BUG-014 about fixture isolation. Ported
-from the peer stream rather than re-derived.
-
-Two consequences to work with rather than around:
-
-- **Agent scratch lives in the project, in `.scratch/`** (gitignored, and
-  `export-ignore`d so it cannot reach a derived project). Out-of-project scratch
-  needs a directory *grant* to be reachable; in-project scratch needs none — so
-  this **removes** a permission rather than adding one, which is the half worth
-  having. `/private/tmp` was dropped from `additionalDirectories` for exactly
-  that reason.
-- **The guard matches operators inside quoted text**, including heredoc bodies
-  and string literals — a commit message or a Python snippet containing `;`
-  trips it. So write the content to `.scratch/` with the Write tool and then run
-  or reference the file: `git commit -F .scratch/msg`, `python3 .scratch/x.py`.
-  The file is reviewable, which is better practice anyway. This repo has the same
-  class of false positive in its deny list already: `Bash(* --no-verify*)` blocks
-  a task string that merely *discusses* `--no-verify`.
-
-**The distinction that decides where temp files go** is not "is it temporary?"
-but **"would being inside a git tree break this?"**. Agent scratch — drafts,
-fixtures, snippets — goes in `.scratch/`. A *tooling workspace* that a tool will
-walk (a scratch clone, a worktree, a hermetic build root) must be outside any
-git tree, is created with `mktemp -d` by the code that needs it, and is that
-code's responsibility to remove on every exit path. `a2bp`'s scratch clone is
-the worked example of the second kind.
-
-The concrete instance of this rule for `blueprint drift` is in §"Wake-time drift
-check (mandatory on every fresh session)".
+`scripts/no-chain-guard.sh` blocks chains, including operators inside quoted
+text and heredocs. Write a commit message or a snippet to `.scratch/`
+(in-project and gitignored) and run or reference the file:
+`git commit -F .scratch/msg`. A tooling workspace that a tool will walk (a
+scratch clone, a worktree) goes outside any git tree instead, created with
+`mktemp -d` and removed by the code that created it.
 
 ## Before Every Push
 
@@ -392,194 +342,30 @@ project repo**. `.blueprint-source` bootstrap_sha is updated by
 
 ### Back-propagating (apply-to-blueprint)
 
-When you improve a generic rule in a blueprint-managed file (a tighter
-DoD wording, a new failure mode, a dispatcher bug fix), **offer to
-back-propagate** rather than silently committing only in the project:
-
-> "This change to `docs/DoD.md` §3.4 looks generic — back-propagate to
-> the blueprint so other projects inherit it?"
-
+When you improve a generic rule in a blueprint-managed file, **offer to
+back-propagate it** rather than committing it only here: *"This change to
+`docs/DoD.md` looks generic — back-propagate it so other projects inherit it?"*
 If yes:
 
 ```bash
-blueprint a2bp docs/DoD.md
+blueprint a2bp --dry-run docs/DoD.md   # show the request, push nothing
+blueprint a2bp docs/DoD.md             # file it
+blueprint prs                          # what is currently asked of the blueprint owner
 ```
 
-`a2bp` pushes a branch to the blueprint's remote and opens a pull request
-against it. It writes into no working tree — not yours, not the blueprint's —
-and it lands nothing.
+`a2bp` pushes a branch to the blueprint's remote and opens a pull request. It
+lands nothing: a human merges. **Exit 3 means filed, not landed**, and no script
+may read it as "the blueprint has this". It refuses what must not travel
+(secrets, project config, a project name or host path left in the file) and says
+why; a contamination finding is fixed, or its line marked with a justified
+`a2bp-allow: <why it is safe>`. It is a convention the command implements, not a
+wall: an agent with push access could bypass it
+(`project_config_paths.md` §"Back-propagation trust boundary").
 
-**It carries files outside the managed set too (TASK-037).** A path the blueprint
-does not ship (`templates/`, a blueprint-only doc) is proposed as a change to it,
-and a path the blueprint does not have is proposed as a new file. Both go through
-the same guard and the same PR, and each is marked **not shipped** in the output
-and in the PR body, so the reviewer judges it as a blueprint-only change. A new
-file has no base to align against, so nothing in it is restored: a literal
-project name blocks until you write `{{PROJECT_NAME}}` or justify an
-`a2bp-allow`. What `a2bp` refuses before contacting the remote: a path outside
-the project, a symlink or a path under a symlinked directory, anything inside a
-`.git` directory, a root `project_config_*.md` in any letter case (that is the
-blueprint's own config), a file named like a secret (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`,
-`id_ed25519*`, `*.p12`, `*.pfx`), and any file, managed or not, in which
-`gitleaks` finds a secret. A missing `gitleaks` **refuses the request**, unlike
-the pre-push gate, which skips it: the gate's skip keeps unscanned bytes on your
-machine, while `a2bp` pushes a branch to the blueprint's remote, and CI scanning
-the pull request afterwards can refuse the merge but cannot un-disclose it
-(BUG-127). Install it with `bash scripts/install-toolchain.sh`. A scanner that
-cannot run — one too old for `gitleaks dir`, for instance — is reported as an
-incomplete scan rather than as a found secret, and blocks either way. After
-fetching, and before pushing anything, it also refuses an unmanaged path the
-project gitignores (tracked or not), because the managed set is what the fetched
-base ships, and a new path that differs
-from a blueprint path only by letter case. A request that is not yet a file change goes in
-`docs/backlog/feature-requests.md` in the blueprint.
-
-It used to `cp` the file straight into the blueprint working tree, which made
-every derived project a writer to the generic blueprint. That is the mechanism
-by which **BUG-002** and **A-09** fanned out to every project on their next
-pull, and it is why the write path is gone rather than merely guarded.
-
-**Be precise about what that guarantees, because the obvious reading is wrong.**
-"Lands nothing" is a property of **this command's behaviour**, not a boundary the
-repository enforces. Two things are true at once:
-
-- `a2bp` pushes only to `a2bp/<project>/<hash>` and never to `main`, opens a PR,
-  and has no verb that merges. Nothing it does can land a change.
-- **A derived project is not otherwise prevented from writing to the blueprint.**
-  Filing a request needs push access to the blueprint remote, and in the
-  same-owner setup every agent authenticates as the owner — typically with admin
-  rights and `enforce_admins: false`, so branch protection's PR requirement does
-  not apply to it. An agent that runs plain `git push` instead of `a2bp` reaches
-  `main` directly.
-
-So the discipline is **a convention that `a2bp` implements**, not a wall. It
-cannot be fixed with repository settings while every agent shares one identity:
-no ruleset can distinguish a derived project's agent from the owner when they
-present the same credential. Enforcement needs a *separate, narrower credential*
-(or a fork), which is a deliberate future step and not today's model — see
-`project_config_paths.md` §"Back-propagation trust boundary".
-
-Do not write, or rely on, the claim that a derived project *cannot* write into
-the blueprint. It can. What is true is that `a2bp` does not, and that landing a
-change still requires a human to merge a PR.
-
-The command needs `config_version = 2` in `.blueprint-source`:
-
-```
-config_version           = 2
-blueprint_remote         = git@github.com:<owner>/<blueprint>.git
-blueprint_branch         = main
-blueprint_release_branch = released
-```
-
-`blueprint_branch` is where requests are filed; `a2bp` never reads
-`blueprint_release_branch`. That optional field is the branch `drift` and `pull`
-read — `released`, which the blueprint's CI fast-forwards to the newest `main`
-commit on which every job passed. Without it they read `blueprint_branch`.
-
-A version 1 config (no `config_version`) refuses and prints those lines. The
-remote is **never inferred** from the local checkout's `origin`: that would be
-right often enough to be trusted and silently wrong for anyone whose checkout
-tracks a fork, and pushing a request to the wrong repository is not a
-recoverable mistake.
-
-Useful shapes:
-
-```bash
-blueprint a2bp --dry-run docs/DoD.md   # resolve the base, show the diff, push nothing
-blueprint a2bp docs/DoD.md             # file the request
-blueprint prs                          # what is currently asked of the owner
-```
-
-**Exit statuses are distinct, and filing is deliberately non-zero** — filed is
-not landed, and no script may read "PR opened" as "the blueprint has this":
-`0` dry-run clean, `3` filed and awaiting a decision, `4` a guard refused
-(nothing filed), `5` operational failure, `6` nothing to request.
-
-**`3` means a PR actually exists.** A pushed branch with no PR opened — because
-`gh` is missing, unauthenticated, or the call failed — is `5`, not `3`
-(BUG-011). The distinction is the whole value of the code: `3` promises a
-reviewer now has something in front of them, and a run that returns it while
-nothing was filed has told every caller something false. `a2bp` says so
-explicitly in that case and names the branch to open a PR from by hand.
-
-**A back-propagation is a REQUEST, not a delivery.** What travels upstream is a
-proposal that an improvement proved itself downstream; the blueprint owner then
-**implements it in the blueprint** — merging it as-is, adapting it, or rewriting
-it. This is the same rule the repo already applies to spikes ("*re-implemented*
-… never `mv`'d wholesale from the spike folder", §"Documentation Structure").
-Nothing merges it automatically, and filing it is not integrating it: the
-blueprint's own rules for that decision live in the blueprint.
-
-**Propose what has held up.** The blueprint is derived, not designed: a
-capability is admitted after it proved itself in a real project. "We tightened
-the rule and it worked one time" usually isn't enough; "we tightened the rule
-and the next two bugs in this area didn't regress" usually is.
-
-**It is guarded (A-07), and the guard is now advisory.** Before a request is
-filed, `a2bp` restores `{{PROJECT_NAME}}` on the lines a positional diff against
-the **fetched base** proves unchanged, then scans **every** staged line for host
-home paths, literal per-project state dirs, and any project name that survived.
-Findings stop the request and exit non-zero.
-
-Advisory *with respect to the blueprint*, not toothless with respect to you: it
-no longer decides what reaches the blueprint, because a person does. That is why
-**there is no `--force`**. It existed to waive the guard and copy anyway, which
-was coherent while a2bp landed bytes; now the reviewer is the override. A finding
-has exactly two answers — fix it, or mark the line with a justified
-`a2bp-allow: <why it is safe>`. If the guard is wrong, that is a bug in
-`contamination.sh` and gets fixed as one. Passing `--force` is refused loudly
-rather than ignored.
-
-The promise is deliberately narrow: on the **default path** a recognized finding
-cannot be filed. It is *not* a claim that contamination is impossible — the scan
-is heuristic, and `a2bp-allow` plus the NOTICE class let things through by
-design. One property holds unconditionally: staging never changes the file's
-meaning under substitution, and that is asserted rather than assumed.
-
-**A known cost, stated because it is deliberate:** every staged line is scanned,
-including lines identical to the base. The alignment-derived exemption was
-removed (A-07 R4-F2) because it was the one path by which a misattributed line
-could wave contamination through. So a project named after a common word blocks
-on its own generic prose and needs an explicit `a2bp-allow`. That is the price
-of having no laundering path.
-
-The restore is **alignment-based, not a search-and-replace** — there is no
-general textual inverse of the substitution, and no content-based shortcut
-either. `pull` replaces an unambiguous token; reversing would replace a bare
-word that also occurs in prose (for a project named `blueprint`, every
-occurrence). Matching on line content fails the same way one level up. So
-lines you edited are left alone, and if one still carries the project name the
-guard blocks and you write the placeholder explicitly. Mark a known-benign
-line with an inline `a2bp-allow: <why it is safe>` comment — the justification
-is required. This guard exists because `a2bp` is how **BUG-002** and **A-09** got
-into the blueprint — an unguarded upstream door means one project's specifics
-fan out to every other project on their next pull.
-
-**One constraint the request flow adds.** The branch carries your project's name
-so a reviewer can see whose request it is, and the name is never slugged into
-something valid — a slug that differs from the real name destroys exactly the
-provenance the branch exists to carry. So a project whose directory basename
-cannot be a git ref component (`foo\bar`, `x*y`) can file no request at all, and
-is told so explicitly. Rename the directory, or make the change in the blueprint
-directly.
-
-**The ripples are the implementer's, not the requester's.** Deciding which
-blueprint documents travel with a change is part of implementing it in the
-blueprint, with the blueprint's whole tree in front of you. Filing a request does
-not put you on the hook for the blueprint's doc-sync.
-
-See what is currently asked of the blueprint owner with `blueprint prs`. It
-reports drafts and closed-but-branch-present distinctly, and on a `gh` API
-failure says the list is **incomplete** rather than printing an empty one that
-reads as "nothing pending".
-
-**A change is generic** if it would benefit every struct2flow project
-(tighter rule, better wording, missing capability). **A change is
-project-specific** if it names the project, an internal customer, an
-incident specific to this codebase, or a path/URL belonging to this
-project. Project-specific edits go in the `project_config_*.md` files,
-never back-propagated.
+**Propose what has held up**: "the next two bugs in this area didn't regress",
+not "it worked once". **A change is generic** if every struct2flow project would
+benefit. One that names this project, a customer, a local incident or a local
+path belongs in the `project_config_*.md` files, never upstream.
 
 ### What blueprint sync covers
 

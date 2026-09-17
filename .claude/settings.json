@@ -258,6 +258,18 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/session-start.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "hooks": [

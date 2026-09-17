@@ -41,7 +41,10 @@ because another machine only sees what is pushed.
 ### The founder's
 
 - **Acceptance.** Everything in `docs/waiting-acceptance/` (TASK-021, TASK-022,
-  TASK-050..059, BUG-083, BUG-133, BUG-134) carries what to test.
+  TASK-050..058, BUG-083, BUG-133, BUG-134) carries what to test.
+- **TASK-059 was rejected** (2026-09-17): the feed does not show a Claude subagent's
+  model. Its row in `doing/` names the fallback line. Matthias is fixing it, and the
+  proof is the real feed, not a fixture.
 - **BUG-133's re-open trigger fired** on 2026-09-17: #17 reported a leftover process
   twice on CI. The founder decides whether it stays in acceptance. The row carries the
   diagnosis (a test gap, not the product) and the fix `9a8a6fd`.
@@ -56,7 +59,7 @@ because another machine only sees what is pushed.
 
 ### Nobody's in flight
 
-`docs/doing/` is empty. No agent is running.
+`docs/doing/` holds TASK-059 (above).
 
 ### Derived projects
 

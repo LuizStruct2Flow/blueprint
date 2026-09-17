@@ -40,9 +40,10 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Acceptance.** Everything in `docs/waiting-acceptance/` (TASK-021, TASK-022,
-  TASK-050..058, BUG-083, BUG-133, BUG-134) carries what to
-  test. BUG-133 stays there by founder decision ("keep it").
+- **Acceptance.** Only **TASK-022** waits in `docs/waiting-acceptance/`. On
+  2026-09-17 the founder accepted every other waiting task and bug, and TASK-022
+  was the one exception. Its row names what is open (stages 2-4, and the rule
+  inventory as the next-step gate). Ask what is missing before acting on it.
 - **Reopen or new bug:** the same root cause reopens its row. A different cause is
   a new bug that links the old one.
 - **Dispatching personas (TASK-059..061, accepted):**

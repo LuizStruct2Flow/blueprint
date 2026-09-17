@@ -23,6 +23,7 @@ belong where the decision happens.
 | # | Bug | Severity | Status | What to test | Detail |
 |---|---|---|---|---|---|
 
+*(Empty.)*
 
 The 2026-07-29 QA pass dispositioned the earlier bugs: BUG-001, BUG-002 and
 BUG-003 are all ACCEPTED and live in [`../done/BUGS.md`](../done/BUGS.md) with

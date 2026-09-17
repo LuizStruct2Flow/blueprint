@@ -1,212 +1,88 @@
 # Definition of Done (DoD)
 
-Canonical quality bar + handoff contract for Claude Code + Codex. This
-document is the single source of truth for "is this work done?" — if any
-item below is unchecked, the work is **not done** and the mic does **not**
-flip to `OVER_TO_USER`.
+The quality bar and handoff contract for every agent on a struct2flow project.
+§1–§6 are the rules, and §7 is what you walk before flipping the mic. A rule
+marked *judgement* is checked by no mechanism, and nothing claims it is.
 
-CLAUDE.md is the longer reference manual; this file is the operational
-checklist you read before every handoff. Both agents are bound by it.
-
-> **Read order:** §1–§7 are the rules grouped by concern. §8 is the
-> step-by-step checklist you walk before every handoff — it points back
-> at the rule sections, so you can read them in any order but you walk
-> §8 last.
-
-> **Project-specific extensions live in `project_config_dod.md`** at the
-> repo root. Anything in this file is generic struct2flow agent protocol;
-> anything project-specific (sync list, visual / layout rules, localization,
-> head guards, deploy-target names) belongs in that file. Both files together
-> define DoD for this repo.
-
----
+Project-specific extensions live in `project_config_dod.md`. This file is the
+generic protocol, and a pull replaces it whole.
 
 ## §1 Lifecycle (parked + three founder-gated states)
 
 ```
 docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
-              (promote)        (PR merged to main)         (founder explicitly accepts)
+                               (landed on main, CI green)    (founder accepts)
 ```
 
 | State | What lives here | How items leave |
 |---|---|---|
-| `backlog/` | **Parked** work. Bugs, features, plans, decision records that exist but are not active. Every item carries a state: `KEEP` (will be pulled), `DEFER` (re-open trigger documented), or `OBSOLETE` (audit trail before deletion). | **Promotion** (move row / `PLAN-*.md` / folder into `doing/`) or **cancellation** (delete + one-line pointer in `docs/config/findings.md`). |
-| `doing/` | Active work being implemented. `BUGS.md` rows, `BACKLOG.md` rows for tasks and features in flight, `PLAN-*.md` files, `HANDOVER.md`. | **The PR merging to `main`** — not the branch push. An item whose PR is still open is waiting on review, not on the founder, and stays here. |
-| `waiting-acceptance/` | **Merged to `main`**, awaiting founder acceptance testing. Bug rows in `BUGS.md`, task and feature rows in `BACKLOG.md`. | Founder says "BUG-0XX is done" / "accept item Y" / "it worked". |
-| `done/` | Founder-accepted, fully delivered work. | Items don't leave; this is the source of truth for "what we have delivered". |
+| `backlog/` | **Parked** work. Every row carries `KEEP`, `DEFER` (with its re-open trigger) or `OBSOLETE`. | **Promotion** into `doing/`, or **cancellation**: delete the row and leave a one-line pointer in `docs/config/findings.md`. |
+| `doing/` | Active work: `BUGS.md` and `BACKLOG.md` rows, `PLAN-*.md`, multi-file item folders, `HANDOVER.md`. | Its work is on `main` and CI is green. A plan with open slices stays, with its shipped slices marked DONE. |
+| `waiting-acceptance/` | Landed work awaiting the founder's acceptance test. | The founder accepts it ("BUG-0XX is done", "accept item Y"). |
+| `done/` | Founder-accepted work: the record of what was delivered, not merely merged. | Items don't leave. |
 
-**Reopen path**: if the founder rejects acceptance, finds a regression, or
-asks for rework → move the row back from `waiting-acceptance/` to `doing/`
-in the same handoff turn.
-
-**Four folders, each with a non-optional rule**:
-- `backlog/` is **not** a graveyard — every parked row carries an explicit
-  re-open trigger or an OBSOLETE marker. Rows without one get groomed out
-  at the next grooming pass.
-- `doing/` is not a graveyard either — if its PR has **merged**, move it. Check
-  after every merge, not after every push: with the PR rule in force those are
-  different moments, and treating them as one leaves finished work looking
-  untouched.
-- `waiting-acceptance/` is the only path into `done/`. Never promote
-  straight from `doing/` to `done/` (and never from `backlog/`).
-- `done/` is founder-only — agents never auto-promote.
-
-**`backlog/` vs `doing/` — when to use which.** A thought of the shape
-"someday / maybe / depends on X" lives in `backlog/`. Work you're starting
-this session or the next lives in `doing/`. Movement between them happens
-in an explicit **grooming pass** — a founder-led session that triages
-parked items and pulls a handful into `doing/` (see storm2flow's <!-- a2bp-allow: the blueprint's own citation of a real precedent (CLAUDE.md cites the same plan); substituting the placeholder here would make every project claim it -->
-`PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent for the format).
+- **Reopen:** a rejected acceptance, a regression or a rework request moves the
+  row back to `doing/` in the same turn.
+- `backlog/` is not a graveyard: a row with neither a trigger nor `OBSOLETE` is
+  groomed out.
+- `waiting-acceptance/` is the only path into `done/`, and only the founder's
+  acceptance moves anything there.
+- **Someday / maybe** lives in `backlog/`; work starting this session or the next
+  lives in `doing/`. A founder-led grooming pass moves items between them.
+- **An item that needs more than one file gets a folder** named for it
+  (`BUG-XXX-<slug>`, `SPIKE-XX-<NAME>`), and the folder travels with the row.
+  Spike and prototype code never lives under production `src/`: a promoted arm is
+  re-implemented there, not moved.
 
 ## §1b Work intake — the path every change takes
 
-Eight rules. They are sequential: each step is the gate to the next.
+1. **All work refers to a backlog item** — a `TASK-`, `FEATURE-` or `BUG-` number
+   with a row, including a defect found mid-session. A cancelled item's pointer
+   in `docs/config/findings.md` is its record. *Checked by the gate.*
+2. **A new item's row lands in `doing/` with its first work commit.** There is no
+   separate filing or promotion commit (founder, 2026-09-16).
+3. **One item per commit.** The subject starts with the item (`BUG#20:`,
+   `FEATURE#3:`, `TASK#1:`), which `.githooks/commit-msg` enforces. A commit
+   serving two items is two commits; the hook reads only the subject, so that
+   part is yours. The body says *why*, since the diff already says what.
+4. **Cross-provider review for major bugs, core-path changes and new features**
+   (founder, 2026-09-17). An agent of the other provider reviews the named
+   commits (§7F). Other items need no review. *Judgement.*
 
-**1. All work refers to a backlog item.** A `TASK-`, `FEATURE-` or `BUG-`
-number, with a row in [`docs/backlog/`](../docs/backlog/). **No exceptions** —
-including a defect you trip over mid-session. "I was already in the file" is how
-work becomes untraceable, and it is exactly what happened the day this rule was
-written: two bugs found live were registered straight into `doing/`, which left
-no record that they had ever been triaged rather than merely noticed.
-
-A **cancelled** item satisfies this rule. §1 lets an item leave `backlog/` by
-cancellation — delete the row, leave a one-line pointer in
-`docs/config/findings.md` — so from then on the pointer *is* its record, and the
-gate reads the register alongside the row files (BUG-130: it read only the rows,
-and so refused the very push that performed a cancellation). What rule 1 refuses
-is work recorded **nowhere**.
-
-**2. Promote it to `doing/` BEFORE starting.** Not after, not at commit time.
-The folder answers "what is being worked on right now", and it can only answer
-that if the move precedes the work. If `doing/BACKLOG.md` does not exist yet,
-this promotion creates it.
-
-**3. Implement, and commit — ONE ITEM PER COMMIT.** The subject names the item
-(`BUG#20:`, `FEATURE#3:`, `TASK#1:`) and `.githooks/commit-msg` refuses anything
-else. Product and runtime bug fixes land as two commits — failing reproducer
-first, then the fix (§2) — and the body says *why*, since the diff already says
-what.
-
-**A commit that serves two items is two commits.** The hook cannot check this:
-it reads the subject, so a commit titled `TASK#2:` that also carries TASK-003's
-work passes. That happened the day this rule was written — TASK-003 landed
-inside a `TASK#2:` commit and was invisible in `git log`, spotted by the founder
-asking "you committed tasks 001, 002 and 003?".
-
-Splitting afterwards is cheap on a topic branch and the diff is unchanged; the
-cost of not splitting is permanent, because history is the only place that
-answers "what did this item actually change?".
-
-**4. A review by an agent of the OTHER provider.** Work implemented by one
-provider is reviewed by a different one — Claude Code's work reviewed by Codex,
-Codex's by Claude Code. **The item does not move on without it.**
-
-Why cross-provider and not merely "someone else": a reviewer sharing the
-implementer's blind spots confirms rather than checks. This is not theoretical
-for this repo — across two changes the cross-provider reviewer raised fifteen
-findings, every one real, including four the implementer had looked straight at.
-Two of them were guards that passed because they watched the wrong thing, which
-is precisely the error the author cannot see by definition.
-
-**A finding becomes work only if it is real and practical** — it has happened
-(observed in a real run, project or incident), or it sits on a core path with a
-trigger someone would realistically hit. Anything else is recorded as one "known
-limit" line on the item and costs nothing more: no reproducer, no mutant, no
-re-review. The implementer judges each finding against this before acting on it;
-a reviewer's "push after these fixes" is input, not an order. **Founder decision
-2026-09-16**, after BUG-126 spent 16 commits guarding a parse failure that
-`tsc` and ESLint already catch, and BUG-127's hypothetical guard turned CI red.
-A reviewer asked for findings always returns some, so this filter is the
-implementer's job, every time.
-
-**5. All gates green.** The pre-push gate must pass in full — no demotions, no
-`--no-verify`, no "CI will catch it" (§4).
-
-**6. Land it.** The landing step is the one thing that differs by repo type, and
-getting it wrong is a known failure mode in both directions:
-
-| Contributor | How it lands |
-|---|---|
-| **A maintainer of this repo** | Trunk-based: push to `main`. No branches. Same in a derived project and in the blueprint. |
-| **An external contribution** — a derived project asking the blueprint for a change | Pull request. `blueprint a2bp` files it, and a maintainer decides. |
-
-**The axis is the contributor, not the repo.** This table used to split by repo
-and say the blueprint always needs a pull request. TASK-019 removed that, for a
-reason worth keeping: a pull request is a request made *of* someone, so a
-maintainer opening one against their own trunk is reviewing themselves — and the
-hooks enforcing it had to be disabled to do ordinary work, which is a guard that
-protects nothing (`docs/done/BUGS.md` BUG-031 makes the same argument about a red
-CI everyone merges over).
-
-What a PR is actually for is unchanged, and it is why `a2bp` still opens one: the
-people who maintain a repo are not forced to accept a change from outside it. The
-reach of the blueprint's `main` is also unchanged — everything landing there fans
-out to every derived project on their next pull. What changed is only *who is
-asked for permission to use it*. See `CLAUDE.md` §"The blueprint's `main` is its
-trunk".
-
-**7. Landing moves it to `waiting-acceptance/`.** The trigger is landing on
-`main`, which for a maintainer's own work is the push itself. When a change does
-travel on a branch — an `a2bp` request, or one you chose to isolate — the trigger
-is the **merge**, not the branch push: an item whose PR is still open is waiting
-on review, not on the founder, and stays in `doing/`.
-
-**8. Artefacts always travel with their parent item.** Plans, review documents,
-mockups, spike code, outputs — the whole folder moves through
-`backlog/` → `doing/` → `waiting-acceptance/` → `done/` together, in the same
-commit as the row.
-
-This is the half that gets forgotten, because a row is one line and a folder is
-not: on 2026-08-03 fourteen rows were promoted to `done/` and every one of their
-folders was left behind, spotted only by a human reading a directory listing.
-[`tests/lifecycle-docs/`](../tests/lifecycle-docs/) #3 now fails the
-push instead.
+   **A finding becomes work only if it is real and practical:** it was observed
+   (in a real run, project or incident), or it sits on a core path with a trigger
+   someone would realistically hit. Anything else is one "known limit" line on
+   the item and costs nothing more: no reproducer, no mutant, no re-review. The
+   implementer applies this filter to every finding; a reviewer's "push after
+   these fixes" is input, not an order (founder, 2026-09-16).
+5. **All gates green** (§4). No `--no-verify`, no "CI will catch it".
+6. **Land it.** A maintainer pushes to `main`: trunk-based, no branches. An
+   external contribution, such as a derived project asking the blueprint for a
+   change, is a pull request, which `blueprint a2bp` files; there, landing is
+   the merge.
+7. **Landing moves the row to `waiting-acceptance/`**, once CI is green and never
+   before the push. Confirmed moves ride in the next ordinary work commit or
+   lifecycle pass; there is no separate commit per item.
+8. **Artefacts travel with their parent item** — plan, reviews, mockups, spike
+   code — in the same commit as the row. `tests/lifecycle-docs` #3 fails a push
+   that leaves a folder behind.
 
 ## §1c Lifecycle management pass (`lcm`)
 
-When the founder says `lcm` (or "lifecycle management"), reconcile every
-lifecycle folder against reality — a read-only audit plus the non-gated moves it
-implies. Walk this checklist:
+When the founder says `lcm`, reconcile the folders with reality:
 
-1. **Each item is in the right folder for its TRUE state.** A row/plan marked
-   "defer" or "someday" stranded in `doing/` belongs in `backlog/` (with a
-   re-open trigger). A landed deliverable belongs in `waiting-acceptance/`, and
-   **its plan/folder moves with it** (§1b rule 8).
-2. **The live baton matches the folders.** If the `Task` field claims artefacts
-   are waiting, `ls docs/waiting-acceptance/` must show them.
-3. **`backlog/` carries triggers.** Every parked item has a re-open trigger or
-   an `OBSOLETE` marker; flag any that don't.
-4. **`done/` is founder-accepted only.** Nothing auto-promoted there.
-5. **The lifecycle DOCUMENTS say something true** — not merely that membership
-   is right. This point exists because points 1–4 were the whole checklist on
-   2026-08-03 and three of that day's four findings fell outside them:
+1. Each item sits in the folder for its true state, with its plan or folder
+   beside it.
+2. The live baton's `Task` claims nothing that `ls docs/waiting-acceptance/`
+   does not show.
+3. Every `backlog/` row has a re-open trigger or `OBSOLETE`, and `done/` holds
+   only founder-accepted work.
+4. The lifecycle documents say something true. Do not narrate status the folders
+   already answer; where a second record is wanted, a test holds the two together
+   (`tests/lifecycle-docs`, `tests/doc-links`).
 
-   - `waiting-acceptance/INDEX.md` listed **5** items while `BUGS.md` held
-     **14** — nine fixes invisible to the only person who can accept them.
-   - `doing/BUGS.md` carried status prose that had gone false, including a line
-     telling the next session a decision was still pending on an item accepted
-     that morning.
-   - Tables carried empty placeholder rows, which render as real rows and so
-     claimed items that did not exist; and thirteen relative links pointed at
-     files that had moved, one wrong across two relocations.
-
-   Every one is the same defect: **two records of one fact, kept in step by
-   memory.** Folder membership is authoritative and cannot drift from itself;
-   prose describing it can only drift. So: do not narrate status where the
-   folders already answer it, and where a second record is genuinely wanted
-   (the per-item "what to test" prose an index carries, which a bug row cannot),
-   a test must hold the two together.
-
-   Enforced by [`tests/lifecycle-docs/`](../tests/lifecycle-docs/) and
-   [`tests/doc-links/`](../tests/doc-links/) rather than by remembering —
-   the same conclusion this repo reached for the pre-push gate, fixture
-   isolation and command chaining.
-
-The pass performs the **non-founder-gated** moves itself (`doing/`↔`backlog/`,
-`doing/`→`waiting-acceptance/` on landing) and only *surfaces* the gated ones
-(→`done/` on acceptance, reopen) for the founder to confirm. It is the
-between-grooming hygiene check; grooming is the heavier `backlog/`↔`doing/`
-re-prioritisation session.
+The pass makes the non-gated moves itself (`doing/`↔`backlog/`, landed work to
+`waiting-acceptance/`) and only surfaces the gated ones (acceptance, reopen).
 
 ## §2 Bug management
 
@@ -214,10 +90,9 @@ Every bug — minor or major — follows this:
 
 1. **Sequential numbering**: `BUG-001`, `BUG-002`, … Don't reuse numbers.
 2. **Row in `docs/{state}/BUGS.md`** matching the lifecycle (§1).
-   The bug exists in exactly **one** of the three BUGS.md files at any
-   time. Once the fix is ON `main` — which now means once its PR has
-   merged, not merely once a branch is pushed — move it; don't leave a
-   copy in `doing/`.
+   The bug exists in exactly **one** of the BUGS.md files at any time.
+   A defect-shaped change (something the founder would call broken) is a
+   `BUG-` row, never a backlog row: `BUGS.md` is what the founder tests.
 3. **Numbered regression test** with the bug number in the test name:
    ```js
    it('BUG-007: <one-line summary>', () => { … })
@@ -699,218 +574,49 @@ What you don't ship:
 The §7 handoff checklist §D pulls these boxes in for any push that
 modifies tracked code or docs.
 
----
+## §7 Handoff checklist (walk BEFORE flipping the mic)
 
-## §7 Handoff checklist (run BEFORE flipping the mic)
+Shipping is checked by the gate and CI, every item's row and every BUG's test by
+the gate's DoD stages, and the folders by `tests/lifecycle-docs`. What remains:
 
-Walk every box. If any is unchecked, finish it; do **not** flip
-`State` to `OVER_TO_USER` until they're all green.
+- **D. Docs in sync** — a user-facing change updated the doc-sync list in the
+  same commit (§5). *Judgement.*
+- **E. Project gates** — every gate `project_config_dod.md` declares for this
+  kind of change is met. *Judgement unless the project wired it.*
+- **F. Review of a commit, never the working tree** — when §1b rule 4 requires a
+  review, the handoff names the exact commits (`git log --oneline <base>..HEAD`)
+  and the reviewer reads that diff. `git status --short` goes in the handoff, and
+  an in-scope entry, untracked ones included, is committed or the claimed scope
+  is narrowed so it does not overlap; it is not declared away. *Judgement.*
+- **G. Baton and handover** — the baton is published with
+  `scripts/signal-set.sh`, never hand-edited; its `Task` says what the next actor
+  does; `docs/doing/HANDOVER.md` is current (§10). *The gate checks the baton is
+  well-formed.*
+- **H. Self-audit** — for `OVER_TO_USER`, what the founder should test is listed
+  concretely; each such item is in `waiting-acceptance/`, or the `Task` says CI
+  is still in flight; `git status` shows nothing half-staged. *Judgement.*
 
-### A. Code is shipped (→ §4)
-- [ ] All commits pushed to `main`
-      (`git log origin/main..HEAD` must be empty)
-- [ ] Pre-push hook ran clean (no `--no-verify` shortcut)
-- [ ] CI pipeline went green for the latest commit, OR is in flight and
-      will go green (state explicitly in the signal)
+## §8 When the DoD is not the gate
 
-### B. Tests cover the change (→ §3)
-- [ ] Every shipped bug has a `it('BUG-XXX: …')` regression test
-- [ ] If two-commit pattern applies: reproducer commit precedes fix
-      commit; reproducer was verified failing on the parent
-      (stash-test-restore loop)
-- [ ] No new tests call a live non-deterministic service in pre-push
-      (e.g. live-LLM tests belong in a nightly eval suite)
-- [ ] Coverage report run; no surprise regression in coverage
-- [ ] A suite moved to CI only is renamed `*.release.spec.ts` (§3.7), never
-      excluded any other way.
-- [ ] If snapshots changed: locally approved + committed; diff
-      reviewed; CI was NOT run with `-u`
+Read-only turns need no DoD. An infra-only operation needs no lifecycle artefact
+unless it serves an item, but the baton is still updated. Parallel work outside
+the mic holder's scope owns the DoD for its own changes.
 
-### C. Lifecycle artefacts moved (→ §1)
-- [ ] `doing/BUGS.md` row → moved to `waiting-acceptance/BUGS.md`
-      for every shipped bug, with commit SHA(s) named
-- [ ] `doing/BACKLOG.md` row → moved to `waiting-acceptance/BACKLOG.md`
-      for every shipped backlog item (tasks, features, behaviour
-      changes with no underlying defect)
-- [ ] **Defect-shaped change** (founder observed a broken behavior,
-      race, regression, UX break — anything that looks/feels like a
-      bug from the user's POV) → file as a `BUG-XXX` row in
-      `BUGS.md`, never as a backlog row. The founder's mental
-      model is "BUGS.md is what I test"; splitting defects across
-      two files hides them. If uncertain, default to `BUGS.md`.
-- [ ] `PLAN-*.md` for any completed plan → moved from `doing/` to
-      `waiting-acceptance/`. If the plan has open slices, it stays in
-      `doing/`; mark shipped slices DONE inline.
-- [ ] Anything rejected / regressed → moved back from
-      `waiting-acceptance/` to `doing/` (not silently left in flight)
+## §10 Resume continuity — `docs/doing/HANDOVER.md`
 
-### D. User-facing docs in sync (→ §5) — only if user-facing change
-- [ ] Every file in the project's doc-sync list (in
-      `project_config_dod.md`) updated in the same commit as the code
-- [ ] Project's user-surface rules (localization parity, no internal
-      customer references, head invariants, etc.) all green per
-      `project_config_dod.md`
+A woken prompt has none of the sleeping prompt's memory and none of its background
+tasks. `docs/doing/HANDOVER.md` is the bridge: one file, overwritten in place,
+kept current as work lands and committed with the work that changes what is open.
 
-### E. Project-specific quality gates — only if applicable
-- [ ] Any project-specific gates declared in `project_config_dod.md`
-      (visual / layout SVG proofs, accessibility checks, infra cost
-      ceilings, security posture reviews, etc.)
+It is a take-over brief (founder, 2026-08-05), and it holds only:
 
-### F. Codex review fixes (→ §5) — only if applicable
-- [ ] Findings register (`docs/config/findings.md` or equivalent)
-      finding block has "Status: Fixed"
+1. **WIP** — what someone picking up open work would otherwise get wrong;
+2. **Ephemeral state** — running monitors and how to re-arm them, a pipeline gate
+   awaiting approval: what died with the session and no command reconstructs;
+3. **Live hazards** — a trap still armed, with the command that checks it.
 
-#### F.1 The review object is a COMMIT, never the working tree
-- [ ] The handoff **names the exact commit(s)** under review
-      (`git log --oneline <base>..HEAD`), and the reviewer reviews that
-      diff — `git show` / `<base>..<sha>` — not whatever happens to be
-      in the tree.
-- [ ] `git status --short` is captured in the handoff. **Any entry inside the
-      claimed scope blocks the flip** — including `??` untracked ones. A new
-      test or doc that was never `git add`ed is omitted exactly as silently as
-      a modified file, and the reviewer cannot miss what was never mentioned.
-- [ ] An in-scope entry is resolved by **including it in the named review
-      commits**, or by **narrowing the claimed scope so it genuinely does not
-      overlap**. It may not be declared away: "out of scope" is a statement
-      about what the claim covers, not a waiver for work the claim depends on.
-      Unrelated entries stay allowed, listed explicitly — the rule prevents
-      overlap, it does not demand a globally clean tree.
-- [ ] The doc-sync list in the claim is checked **against that diff**,
-      file by file.
+Anything a command answers (folder counts, `git status`, what shipped) does not
+belong in it. Reasoning belongs in the commit, and lessons in the item's row.
 
-> **Why this is its own rule.** A cross-provider review that reads the
-> working tree can bless bytes that are not in the commit it approves.
-> That happened here: an R5 finding required narrowing an overclaimed
-> contract in four files; three were committed and `README.md` — at the
-> repo root, outside the path-scoped `git add -A scripts tests docs` used
-> for the rest — was not. The reviewer read the tree, saw the fix, and
-> recorded the finding closed. The pushed state did not contain it, and
-> the claim had already been reported to the founder as done. Neither
-> party was careless in a way the other could see; the review object was
-> simply the wrong artefact. A pre-push warning for tracked-but-unstaged
-> files is a useful backstop and not a substitute, because a repo often
-> holds legitimate unrelated edits and a generic warning gets normalised.
-
-### G. Signal + resume doc reflect reality (→ live baton + HANDOVER.md + §10)
-- [ ] Live baton `logs/state/signal.md` published with
-      `scripts/signal-set.sh` (`Holder` / `State` / `Task` / `Last update`
-      in one atomic write — never hand-edited; `AGENT_SIGNAL.md` documents
-      the protocol and holds no live state)
-- [ ] `Task` names **what the next actor needs to do**, not just what
-      I did
-- [ ] If state is `OVER_TO_USER`, the things the founder needs to test
-      are concretely listed (and findable in `waiting-acceptance/`)
-- [ ] **`docs/doing/HANDOVER.md` is current (§10)** — carrying **WIP,
-      EPHEMERAL state and live hazards ONLY**. The ephemeral half is the
-      part that matters: running monitors and pending pipeline gates do
-      NOT survive a prompt switch and no command can reconstruct them.
-- [ ] **Nothing was added to `HANDOVER.md` that a command already
-      answers.** Folder counts, `git status`, what just shipped — those
-      belong to `ls` and `git log`, and prose copies of them are what
-      made this file go stale three times in one day.
-
-### H. Self-audit (the cheap step that catches everything)
-- [ ] `ls docs/waiting-acceptance/` shows the artefacts the `Task`
-      field claims are waiting. If signal claims "BUG-XXX awaits test"
-      but the row is still in `doing/`, the handoff is a lie.
-- [ ] `git status` is clean (no half-staged changes, no
-      build / test artefacts accidentally staged)
-
----
-
-## §8 When the DoD is NOT the gate
-
-- **Infra-only operations** (deploy, pipeline approve, console fixes):
-  no lifecycle artefacts needed unless tied to a tracked bug. Signal
-  still must be updated.
-- **Investigative / read-only turns** (founder asks a question; you
-  answer with no code change): no DoD applies. Signal stays as-is.
-- **Mid-handoff parallel work** allowed by CLAUDE.md (edits outside the
-  active holder's declared scope): the parallel actor doesn't claim the
-  mic, but still owns the DoD for their own changes — they surface them
-  in their next signal flip.
-
-## §9 Failure modes this DoD prevents
-
-Add to this list whenever a new failure mode bites — the DoD only
-improves if real misses are folded back in.
-
-> This list starts empty per new project. Failures observed across all
-> struct2flow projects that motivated a generic rule can be added here in
-> abstract form (no project-specific names / IDs). Project-specific
-> failure modes go in `project_config_dod.md` §"Failure modes".
-
----
-
-## §10 Resume continuity — the handover doc + sleep/wake protocol
-
-The founder switches between prompts with **sleep / wake**: one prompt is
-put to sleep, another is woken (and back). The woken prompt has **none** of
-the sleeping prompt's in-conversation memory and **none** of its running
-background tasks. The bridge between prompts is a single canonical resume
-doc.
-
-**The canonical resume doc is `docs/doing/HANDOVER.md`** — one file, always
-overwritten to reflect the CURRENT state (not dated copies that accumulate
-and go stale). It is a first-class DoD artefact, gated by §G.
-
-### Keep it current continuously (not just at handoff)
-A prompt can degrade or be put to sleep **at any moment**, so `HANDOVER.md`
-must be updated whenever you finish a meaningful unit of work — after a
-push, after starting/stopping a monitor, after a pipeline gate, after a
-founder decision. Treat it like the signal: stale = lying.
-
-### What belongs in it — and what must NOT
-
-**Founder rule, 2026-08-05:** *"the file should only contain the data needed for
-the next agents that will take something over that is open / wip, all other
-things should be documented in the tasks/bugs || commits || md files."*
-
-It is a **take-over brief**, not a status report and not a history. Three things
-earn their place, and nothing else does:
-
-1. **WIP** — what is open, and the constraints on it that are easy to lose
-   between reading the plan and typing. Not *that* it is open (the folders say
-   so) — what a person picking it up would otherwise get wrong.
-2. **EPHEMERAL state that died with the session** — running `Monitor` tasks and
-   how to re-arm them, the activity feed, a pipeline gate awaiting approval.
-   This is the #1 thing a woken prompt misses, and it is the one category no
-   command can reconstruct.
-3. **Live hazards** — a trap that is still armed *right now*, with the command
-   to check it. Not a war story: a thing the next agent can still walk into.
-
-**Anything derivable from a command is FORBIDDEN.** Folder counts, `git status`,
-branch/ahead-behind, what just shipped, which items are where — `ls` and
-`git log` already answer those, and they cannot go stale the way prose does.
-This section previously *required* that content, and the file it produced went
-stale three times in a single day, twice within one working session, before
-being cut from 530 lines to under 80.
-
-**Reasoning belongs in the commit that made the change; lessons belong in the
-item's own row.** Both are permanent and both travel with what they describe. A
-copy here is a second record of one fact — the duplication TASK-005 deleted once
-already.
-
-### The wake side
-On "wake" (or any new prompt), **read `HANDOVER.md` first**, then
-the live baton `logs/state/signal.md`, `CLAUDE.md`, `MEMORY.md`. Re-establish the ephemeral
-state that §10 "What belongs in it" names (item 2) before continuing.
-
----
-
-## §11 Blueprint sync (struct2flow framework)
-
-This DoD is sourced from the struct2flow **blueprint** at
-`~/sources/struct2flow/blueprint/`. The blueprint is the canonical generic
-agent protocol; project-specific extensions live in
-`project_config_dod.md`. Two sync directions:
-
-- **Pull**: on wake, if the blueprint's `docs/DoD.md` has changed since
-  this file was last synced, surface the diff and offer to pull forward.
-- **Push (back-propagate)**: when you improve a generic rule in this file
-  (anything not project-specific), offer to back-propagate to the
-  blueprint so other projects inherit the improvement.
-
-Project-specific edits go in `project_config_dod.md`, not here. If you
-catch yourself adding a project-specific incident or path to this file,
-move it to `project_config_dod.md` before committing.
+**On wake**, read `HANDOVER.md` first, then the live baton, and re-establish the
+ephemeral state before continuing.

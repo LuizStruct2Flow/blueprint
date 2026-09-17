@@ -262,172 +262,40 @@ Details and the exact gate order live in [docs/DoD.md](docs/DoD.md) §4 + §7.
 
 ## Definition of Done — read before every handoff
 
-[**`docs/DoD.md`**](docs/DoD.md) is the canonical handoff checklist for
-Claude Code + Codex. Before flipping the baton to `OVER_TO_USER`
-(or to the other agent), walk the **Handoff checklist** in §A–§H. The
-sections of CLAUDE.md describe the rules in detail; the DoD is the
-operational gate that enforces them.
-
-If `waiting-acceptance/` doesn't contain the artefacts your signal claims
-are waiting, **the handoff is not done**.
+[`docs/DoD.md`](docs/DoD.md) holds the lifecycle, the work-intake rules, bug
+management and the handoff checklist. Walk its §7 before flipping the baton.
 
 ## Documentation Structure
 
-Project documentation lives under `docs/`:
-
 ```
 docs/
-├── DoD.md                ← Definition of Done — handoff checklist (READ FIRST)
-├── OBSERVABILITY.md      ← capture / retrieve / alert recipes per runtime
-├── config/               ← stable reference docs (FEATURES.md, ACCEPTANCE_TESTS.md, findings.md)
-├── backlog/              ← PARKED work (KEEP / DEFER / OBSOLETE — not active)
-├── doing/                ← active work being implemented (BUGS.md, PLAN-*.md, HANDOVER.md)
-├── waiting-acceptance/   ← pushed to main, awaiting user acceptance testing
-├── done/                 ← user-accepted completed work
-├── requirements/         ← cross-cutting normative specs referenced by multiple plans
-└── mocks/                ← design mockups + throwaway prototypes
+├── DoD.md                ← Definition of Done (read before every handoff)
+├── config/               ← stable reference (FEATURES.md, ACCEPTANCE_TESTS.md, findings.md)
+├── backlog/              ← parked work (KEEP / DEFER / OBSOLETE)
+├── doing/                ← active work (BUGS.md, BACKLOG.md, PLAN-*.md, HANDOVER.md)
+├── waiting-acceptance/   ← landed on main, awaiting founder acceptance
+├── done/                 ← founder-accepted work
+├── requirements/         ← cross-cutting specs referenced by several plans
+└── mocks/                ← design mockups and throwaway prototypes
 ```
 
-**Work-item folder rule:**
-A work item that needs more than one file to describe it lives in its
-own folder under `docs/<lifecycle-state>/`. Single-file items (just a
-row in `BUGS.md` / `BACKLOG.md`, or a single `PLAN-*.md`) stay flat;
-multi-file items get a folder containing the plan, code prototypes,
-visual mockups, outputs, decision docs, and any other artefacts.
-
-Folder-naming convention: `BUG-XXX-<short-slug>` / `SPIKE-XX-<NAME>` /
-`SLICE-XX-<NAME>` / `SPRINT-YYYY-MM-DD<-letter>` so the folder name
-self-identifies; inside the folder, file names can drop the
-identifier and stay short (`PLAN.md`, `DECISION.md`, `code/`,
-`outputs/`). Whole folder travels together through
-`doing/` → `waiting-acceptance/` → `done/`.
-
-This rule also forbids spike / prototype / mockup code under production
-`src/` directories. Production `src/` stays free of dead branches. If a
-spike outcome promotes one arm to production, that arm's code is
-*re-implemented* (or carefully copied) into `src/` as part of the
-implementation sprint — never `mv`'d wholesale from the spike folder.
-
-**Lifecycle — four-state flow (parked + three founder-gated):**
-
-```
-backlog/  →  doing/  →  waiting-acceptance/  →  done/
-         (promote)   (push to main)        (founder accepts)
-                ↑          ↑
-                └──────────┴─── reopen / regression
-```
-
-0. **`backlog/`** — **parked** items. Bugs, features, plans, decision records
-   that exist but are not actively being worked on. Each row carries a state:
-   `KEEP` (will be pulled when prioritised), `DEFER` (re-open trigger
-   documented), or `OBSOLETE` (audit trail, deleted at next grooming). Items
-   leave only by **promotion** (move the row / `PLAN-*.md` / multi-file folder
-   into `doing/`) or **cancellation** (delete + leave a one-line pointer in
-   `docs/config/findings.md`).
-1. **`doing/`** — active work being implemented. Bugs tracked in
-   `doing/BUGS.md`, major-bug / feature plans as `doing/PLAN-*.md`,
-   multi-file epics in their own folder, and the canonical
-   `doing/HANDOVER.md` resume doc.
-2. **Once the fix/feature is ON `main`** → move to **`waiting-acceptance/`**:
-   - Move the bug row from `doing/BUGS.md` to `waiting-acceptance/BUGS.md`.
-   - Move the `PLAN-*.md` file from `doing/` to `waiting-acceptance/`.
-   - Move the backlog row (tasks, features, behaviour changes with no
-     underlying defect) from `doing/BACKLOG.md` to
-     `waiting-acceptance/BACKLOG.md`.
-
-   **The trigger is landing on `main`.** For most work that is the push
-   itself, since trunk-based development (§"Team Workflow") means you push
-   straight to it. When a change does travel on a branch — a risky one you chose to
-   isolate, or an `a2bp` request from a derived project — the trigger is the
-   MERGE, not the push: an item whose PR is still open belongs in `doing/`,
-   because it is not waiting on the founder, it is waiting on review.
-
-   This is not pedantry about wording; it caused a real failure the day the PR
-   rule landed. Five fixed bugs sat in `doing/` across an afternoon of pushing
-   while `waiting-acceptance/` stayed empty, so the founder — correctly — read
-   the folders as "nothing has been finished". **When a workflow changes,
-   the lifecycle triggers that referenced the old workflow have to be re-read;
-   they do not fail loudly, they just quietly describe something that no longer
-   happens.**
-3. **User tests and confirms** (explicit signal like "BUG-0XX is done" /
-   "accept item Y") → move from `waiting-acceptance/` to `done/`. Claude
-   does NOT auto-promote to `done/`.
-4. **User reopens** (rejects acceptance, finds regression, asks for rework)
-   → move from `waiting-acceptance/` back to `doing/`.
-
-**Key rules:**
-- `backlog/` is **not** a graveyard: every parked item carries an explicit
-  re-open trigger or an OBSOLETE marker. Items without one get groomed out.
-- Never skip `waiting-acceptance/`. Pushing is the trigger to leave `doing/`;
-  user acceptance is the only trigger to enter `done/`.
-- If the user hasn't said "done" or "reopen", the item stays in
-  `waiting-acceptance/`.
-- `done/` is user-accepted work only — the source of truth for "what has
-  been delivered", not "what has been merged".
-
-**When to put something in `backlog/` vs `doing/`:** if a thought is
-"someday / maybe / depends on X" — it's `backlog/`. If you're starting work
-in the next session — it's `doing/`. The grooming pass (an explicit founder
-session — see storm2flow's `PLAN-BACKLOG-GROOMING-YYYY-MM-DD.md` precedent)
-is what moves items between them.
-
-**Work intake and the lifecycle management pass (`lcm`) are specified in
-[docs/DoD.md](docs/DoD.md) §1b and §1c** — the eight rules every change follows
-(backlog item first, promote before starting, cross-provider review, gates,
-land, artefacts travel with their parent) and the `lcm` checklist the founder
-triggers by saying `lcm`.
-
-They live there rather than here for the same reason the handoff checklist does:
-this file states the rules, the DoD is the operational gate that enforces them.
-The `lcm` checklist in particular belongs beside the lifecycle it audits (§1) —
-it was in this file while the invariants it checks were in that one, and it
-drifted to cover less than it needed to.
-
-## Bug Management
-
-- Every bug gets a sequential number: BUG-001, BUG-002, etc.
-- Track bugs across three files per the lifecycle above: `docs/doing/BUGS.md` (being implemented), `docs/waiting-acceptance/BUGS.md` (pushed, awaiting user acceptance), `docs/done/BUGS.md` (user-accepted)
-- Every bug fix MUST have a corresponding regression test (unit, integration, or E2E)
-- Reference the bug number in the test name: `it('BUG-007: <one-line summary>')`
-- No recurring bugs — if it's fixed, it stays fixed
-
-## Major Bug Process (Codex + Claude Code consensus)
-
-When a **major bug** is raised (affects a core USP path declared in
-`project_config_overview.md`, or has already had a failed fix attempt):
-
-1. **Plan first — do NOT jump to implementation.** Spawn agents to investigate
-   root cause and produce a concrete fix plan.
-2. **Document the plan in `docs/doing/PLAN-BUG-0XX.md`**. Must include:
-   root cause analysis, affected files, the fix approach, tests needed, and
-   rollback strategy. Thorough enough for an independent AI reviewer to
-   evaluate.
-3. **Wait for multi-AI consensus.** The founder will activate both Codex and
-   Claude Code to review the plan. **Implementation is NOT authorized until
-   both agree and commit to the approach.** If there's disagreement, revise
-   the plan until consensus.
-4. **Then implement** with the full team of agents, with tests at every gate.
-
-Plan files move with the work: `doing/` while implementing, `waiting-acceptance/` after push, `done/` once the user accepts. They stay as decision records at whichever state the work currently sits in.
-
-Minor bugs (cosmetic, clearly scoped, low-impact) can still be fixed directly
-per the normal team workflow below.
+How an item moves between those folders is [docs/DoD.md](docs/DoD.md) §1, and
+bug numbering, regression tests and the plan-first process for a major bug are
+§2.
 
 ## Team Workflow
 
 - Work as a team: spawn specialized agents (backend, frontend, infra, QA, design) via the `Agent` tool with the right `subagent_type`
 - Use agents for all non-trivial work — even small bug fixes should be
   delegated rather than quick-fixed inline
-- Every bug fix needs a numbered entry in `docs/doing/BUGS.md` + a regression test
-- **Commit-message convention — ENFORCED.** Every commit subject STARTS with the backlog item it serves: `BUG#20:`, `FEATURE#3:`, `TASK#1:`. `.githooks/commit-msg` rejects anything else, so this is a gate rather than a habit. **One item per commit** — a commit serving two items is two commits, which the hook cannot check and DoD §1b rule 3 states. The body explains *why*, not what: the "what" is in the diff, and the "why" is what a future reader (or `git blame`) actually needs. There is no such thing as a commit with no item — if work has no backlog row it is not ready to commit (DoD §1b rule 1). This REPLACES the Conventional Commits form (`fix(BUG-XXX):`) that this file used to prescribe; that form does not start with the item and is now refused.
+- **Commits:** the subject starts with the item it serves (`BUG#20:`,
+  `FEATURE#3:`, `TASK#1:`), one item per commit, and the body says why
+  ([docs/DoD.md](docs/DoD.md) §1b rules 1 and 3). `.githooks/commit-msg` refuses
+  any other subject.
 - **Minimal reproducer first, two-commit pattern**. Every product or runtime bug fix lands as two commits in this order: `BUG#XX: minimal reproducer (failing)` → `BUG#XX: <fix>`. The reproducer must fail on the parent commit (verified before pushing). "I added a regression test" is only credible when git log shows the test failing before the fix. Documented exceptions live in [docs/DoD.md](docs/DoD.md) §3.
-- Trunk-based development only — no branches, use feature toggles instead.
-  The axis that decides is the **contributor, not the repo**: a
-  maintainer of a repo pushes its trunk, and an **external** contribution
-  arrives as a pull request — which for the blueprint is what
-  `blueprint a2bp` files (§"Back-propagating"). A pull request exists so the
-  people who maintain a repo are not forced to accept a change from outside
-  it, not so an author can review themselves.
+- Trunk-based development: a maintainer pushes to `main` and uses feature
+  toggles, not branches. An external contribution is a pull request, which for
+  the blueprint is what `blueprint a2bp` files (§"Back-propagating").
 - Run and report test coverage before every commit/push
 - **Coverage thresholds** (enforced in the pre-push gate):
   - **Measure over the WHOLE source tree, not a curated subset.** A high

@@ -189,8 +189,7 @@ agent never delegates acceptance to another agent on its own authority.
 ## Failure modes seen on this project
 
 > Project-specific incidents that motivated a rule. Add a row when a
-> miss bites — agents read this to avoid repeats. Generic failure modes
-> live in `docs/DoD.md` §9.
+> miss bites — agents read this to avoid repeats.
 
 | Date | Failure | Rule it motivated |
 |---|---|---|

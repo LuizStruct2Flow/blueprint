@@ -224,6 +224,18 @@ jobs:
               echo "::warning::new branch push: checking the tip commit only (partial coverage)"
               ;;
           esac
+          if [ "$RANGE" = "$BEFORE..$AFTER" ]; then
+            # A force push: the old tip may be gone from a fresh clone, or the new
+            # tip may be an ancestor of it (a rollback pushes no new commits).
+            if git merge-base --is-ancestor "$AFTER" "$BEFORE" 2>/dev/null; then
+              echo "force push back to an earlier commit: nothing new to check"
+              exit 0
+            fi
+            if ! git merge-base --is-ancestor "$BEFORE" "$AFTER" 2>/dev/null; then
+              RANGE="$AFTER^!"
+              echo "::warning::force push rewrote history: checking the tip commit only (partial coverage)"
+            fi
+          fi
           bash scripts/check-commit-subjects.sh --range "$RANGE"
           export BP_CODE_ROOT=.
           . scripts/lib/pipeline.sh

@@ -442,7 +442,7 @@ Eight rules, each the gate to the next (`docs/DoD.md` §1b):
 
 1. **All work refers to a backlog item** — `TASK-`, `FEATURE-` or `BUG-`. No exceptions, including a defect found mid-session
 2. **The row lands in `doing/` with the first work commit** — no separate filing or promotion commit
-3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`)
+3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`), and CI re-checks every commit of a push, along with each item's row and each BUG's test
 4. **Major bugs, core-path changes and new features get a review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude, on named commits. A finding becomes work only if it is real and practical; a hypothetical is one "known limit" line
 5. **All gates green** — no bypass flags
 6. **Land it** — a maintainer pushes to `main`; an outside contribution is a pull request

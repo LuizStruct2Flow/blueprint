@@ -201,10 +201,41 @@ jobs:
       - name: What actually landed on main
         # Detection, not prevention — by here it is merged. It exists so a
         # violation that slips through some future path is VISIBLE rather than
-        # discovered months later by reading the log, which is how this one was
-        # found.
+        # discovered months later by reading the log.
+        #
+        # TASK-022: EVERY commit of the push, not HEAD~1..HEAD, which checked one
+        # subject of a 12-commit push. Then the gate's two DoD stages over the same
+        # range: every item has a row, every BUG has a test. They ran only in the
+        # local hook, which a clone without core.hooksPath never runs.
+        #
+        # The subject check goes FIRST: it refuses an unreadable or empty range,
+        # while dod_items_in_push swallows git errors and would pass over nothing.
         if: github.event_name == 'push'
-        run: bash scripts/check-commit-subjects.sh --range "HEAD~1..HEAD"
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          RANGE="$BEFORE..$AFTER"
+          case "$BEFORE" in
+            *[!0]*) ;;
+            *)
+              # A new branch has no `before`. The tip alone is all there is to read.
+              RANGE="$AFTER^!"
+              echo "::warning::new branch push: checking the tip commit only (partial coverage)"
+              ;;
+          esac
+          bash scripts/check-commit-subjects.sh --range "$RANGE"
+          export BP_CODE_ROOT=.
+          . scripts/lib/pipeline.sh
+          . scripts/lib/dod-gate.sh
+          # Called under `||`, so `bash -e` does not abort inside the library, and
+          # both stages report before the step fails.
+          rc=0
+          echo "every item has a row:"
+          dod_stage_rows "$RANGE" || rc=1
+          echo "every BUG has a test:"
+          dod_stage_bugtests "$RANGE" || rc=1
+          exit "$rc"
 
   ts-tests:
     name: TypeScript regression suites (vitest)

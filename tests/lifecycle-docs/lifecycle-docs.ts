@@ -37,11 +37,38 @@
  * was written.
  */
 
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 /** The three founder-gated lifecycle states an item's artefacts may sit in. */
 export const LIFECYCLE_STATES = ['doing', 'waiting-acceptance', 'done'] as const
+
+/**
+ * Every item prefix the lifecycle uses (BUG-138). `docs/DoD.md` §1b rule 8
+ * ("artefacts travel with their parent item") makes no exception by item
+ * type, so the scan must not either — BUG was the only prefix checked before
+ * this fix, which is exactly how TASK-022's plan and six audit files sat
+ * loose in `waiting-acceptance/` unnoticed (founder, 2026-09-17).
+ */
+export const ITEM_PREFIXES = ['BUG', 'TASK', 'FEATURE', 'SPIKE'] as const
+type ItemPrefix = (typeof ITEM_PREFIXES)[number]
+
+/** Which record file carries an item's row. A defect is a `BUG-XXX` row in
+ *  `BUGS.md`; everything else — task, feature, spike — is a `BACKLOG.md` row
+ *  (TASK-038, confirmed live: TASK-022/058/059 are `BACKLOG.md` rows today). */
+const RECORD_FILE_FOR_PREFIX: Record<ItemPrefix, string> = {
+  BUG: 'BUGS.md',
+  TASK: 'BACKLOG.md',
+  FEATURE: 'BACKLOG.md',
+  SPIKE: 'BACKLOG.md',
+}
+
+const ITEM_PREFIX_ALT = ITEM_PREFIXES.join('|')
+/** Anchored at the start — matches an artefact folder/file NAME, e.g. `BUG-104-stranded`. */
+const ITEM_ID_RE = new RegExp(`^(?:${ITEM_PREFIX_ALT})-[0-9]+`)
+/** Unanchored — pulls the id out of a `PLAN-<PREFIX>-NNN...md` name. */
+const PLAN_ID_RE = new RegExp(`(?:${ITEM_PREFIX_ALT})-[0-9]+`)
+const PLAN_NAME_RE = new RegExp(`^PLAN-(?:${ITEM_PREFIX_ALT})-[0-9]+.*\\.md$`)
 
 export interface LifecycleScan {
   /** How many per-item artefacts were examined. The non-vacuity number. */
@@ -57,6 +84,12 @@ export interface LifecycleScan {
   readonly phantomRows: readonly string[]
   /** Files whose "(Empty …)" line names where the items went. */
   readonly forwardingNotes: readonly string[]
+  /** `<state>/<id>: file1, file2` for an item whose artefacts are two or more
+   *  LOOSE files (not a folder) in one state folder. DoD §1a: "an item that
+   *  needs more than one file gets a folder" — one loose `PLAN-*.md` is the
+   *  allowed single-file case; a second loose file beside it means the item
+   *  needed a folder and didn't get one. */
+  readonly looseGroups: readonly string[]
 }
 
 const RECORD_FILES = ['BUGS.md', 'BACKLOG.md']
@@ -87,7 +120,9 @@ async function entries(dir: string): Promise<string[]> {
  * row or a weakened check, and both are worse than widening it to the truth.
  */
 async function recordedHere(docsDir: string, id: string, state: string): Promise<boolean> {
-  const rows = await readOrEmpty(join(docsDir, state, 'BUGS.md'))
+  const prefix = /^[A-Z]+/.exec(id)?.[0] as ItemPrefix | undefined
+  const recordFile = (prefix && RECORD_FILE_FOR_PREFIX[prefix]) || 'BUGS.md'
+  const rows = await readOrEmpty(join(docsDir, state, recordFile))
   if (new RegExp(`^\\| \\*\\*${id}\\*\\*`, 'm').test(rows)) return true
 
   for (const name of await entries(join(docsDir, state))) {
@@ -120,6 +155,7 @@ async function recordFiles(docsDir: string): Promise<string[]> {
 
 export async function scanLifecycleDocs(docsDir: string): Promise<LifecycleScan> {
   const orphans: string[] = []
+  const looseGroups: string[] = []
   let checked = 0
   let statesScanned = 0
 
@@ -129,17 +165,31 @@ export async function scanLifecycleDocs(docsDir: string): Promise<LifecycleScan>
     if ((await readOrEmpty(join(docsDir, state, 'BUGS.md'))) === '') continue
     statesScanned++
 
-    for (const name of await entries(join(docsDir, state))) {
-      const isArtefact = name.startsWith('BUG-') && name !== 'BUGS.md'
-      const isPlan = name.startsWith('PLAN-BUG-') && name.endsWith('.md')
+    const stateDir = join(docsDir, state)
+    const looseById = new Map<string, string[]>()
+
+    for (const name of await entries(stateDir)) {
+      if (RECORD_FILES.includes(name)) continue
+      const isPlan = PLAN_NAME_RE.test(name)
+      const isArtefact = !isPlan && ITEM_ID_RE.test(name)
       if (!isArtefact && !isPlan) continue
 
-      // A plan is named PLAN-BUG-0XX.md, an artefact folder BUG-0XX-<slug>.
-      const id = (isPlan ? /BUG-[0-9]+/.exec(name) : /^BUG-[0-9]+/.exec(name))?.[0]
+      // A plan is named PLAN-<PREFIX>-0XX.md, an artefact folder <PREFIX>-0XX-<slug>.
+      const id = (isPlan ? PLAN_ID_RE.exec(name) : ITEM_ID_RE.exec(name))?.[0]
       if (!id) continue
 
       checked++
       if (!(await recordedHere(docsDir, id, state))) orphans.push(`${state}/${name}`)
+
+      if (!(await stat(join(stateDir, name))).isDirectory()) {
+        const list = looseById.get(id) ?? []
+        list.push(name)
+        looseById.set(id, list)
+      }
+    }
+
+    for (const [id, files] of looseById) {
+      if (files.length >= 2) looseGroups.push(`${state}/${id}: ${files.sort().join(', ')}`)
     }
   }
 
@@ -169,7 +219,7 @@ export async function scanLifecycleDocs(docsDir: string): Promise<LifecycleScan>
     }
   }
 
-  return { checked, statesScanned, orphans, phantomRows, forwardingNotes }
+  return { checked, statesScanned, orphans, phantomRows, forwardingNotes, looseGroups }
 }
 
 /**

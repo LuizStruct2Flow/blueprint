@@ -543,26 +543,36 @@ _st_osv_scanner(){
     return 1
   fi
 
-  _osv_json="$(mktemp)"
+  _osv_json="$(mktemp)"; _osv_err="$(mktemp)"
   _osv_rc=0
   osv-scanner scan source \
     --recursive \
     --allow-no-lockfiles \
     --licenses=false \
     --format=json \
-    . >"$_osv_json" 2>/dev/null || _osv_rc=$?
+    . >"$_osv_json" 2>"$_osv_err" || _osv_rc=$?
 
   # A scan that did not run is NOT a clean scan. osv-scanner exits 0 with no
   # vulnerabilities and 1 with them; anything else is a tool failure. Require
   # BOTH a sane exit AND a well-formed `results` key (array, or null when there
   # were no package sources) before trusting a verdict — never coerce a missing
   # key to zero findings, which would fail open.
+  #
+  # BUG-136: a tool failure used to discard the scanner's own stderr
+  # (`2>/dev/null`), so "could not complete (exit N)" was all the log ever said —
+  # CI run 35220731328 hit exit 127 and nobody could tell a network failure from
+  # anything else. Capture it to a temp file and print it (bounded) on this
+  # branch only; a clean or findings run stays exactly as quiet as before.
   if [ "$_osv_rc" -gt 1 ] || \
      ! jq -e 'has("results") and ((.results | type) as $t | $t == "array" or $t == "null")' \
           "$_osv_json" >/dev/null 2>&1; then
-    rm -f "$_osv_json"
     echo "❌ osv-scanner could not complete (exit $_osv_rc) — the SCA gate did NOT run."
     echo "   This is a TOOL failure, not a clean scan, so the push is blocked."
+    if [ -s "$_osv_err" ]; then
+      echo "   osv-scanner's own error (last 20 lines):"
+      tail -20 "$_osv_err"
+    fi
+    rm -f "$_osv_json" "$_osv_err"
     return 1
   fi
 
@@ -575,14 +585,14 @@ _st_osv_scanner(){
   fi
 
   if [ "${_osv_blocking:-0}" -gt 0 ]; then
-    rm -f "$_osv_json"
+    rm -f "$_osv_json" "$_osv_err"
     echo "❌ osv-scanner found ${_osv_blocking} dependency vulnerabilit(ies) at MEDIUM+ (CVSS >= 4.0)."
     echo "   Upgrade or pin to a known-good version. MEDIUM+ blocks here AND in CI,"
     echo "   so there is nothing to be gained by pushing past it."
     return 1
   fi
 
-  rm -f "$_osv_json"
+  rm -f "$_osv_json" "$_osv_err"
   if [ "${_osv_all:-0}" -gt 0 ]; then
     echo "⚠  osv-scanner: $((_osv_all - _osv_blocking)) advisor(ies) below MEDIUM — reported, not blocking."
     echo "   Track them in docs/config/findings.md with a planned upgrade date."

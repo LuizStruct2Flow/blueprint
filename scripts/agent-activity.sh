@@ -238,7 +238,7 @@ start_token(){
 write_state(){
   # Atomic publish: temp + mv on the same filesystem.
   local tmp="$state_file.$$"
-  { echo "pid=$1"; echo "nonce=$2"; echo "token=$3"; } >"$tmp" && mv -f "$tmp" "$state_file"
+  { echo "pid=$1"; echo "nonce=$2"; echo "token=$3"; echo "codehash=$4"; } >"$tmp" && mv -f "$tmp" "$state_file"
 }
 
 read_state(){
@@ -253,6 +253,33 @@ read_state(){
   # makes a state file written before a reboot distinguishable from one written
   # after it.
   [ -n "${s_pid:-}" ] && [ -n "${s_nonce:-}" ] && [ -n "${s_token:-}" ]
+}
+
+# --- code identity (BUG-135) -------------------------------------------------
+# "The code this daemon runs" = this script's own resolved path plus every
+# scripts/lib/*.sh it sources. Found by grepping the script's own source for
+# scripts/lib/<name>.sh references, rather than a hand-maintained list — a new
+# `. "$repo_root/scripts/lib/foo.sh"` is then covered for free, instead of
+# silently sitting outside the check (the exact kind of drift BUG-135 is
+# about: code changes, nothing notices).
+code_files(){
+  printf '%s\n' "$_bp_self"
+  grep -oE 'scripts/lib/[A-Za-z0-9_.-]+\.sh' "$_bp_self" | sort -u | sed "s#^#$repo_root/#"
+}
+
+# A cheap content identity, not a security digest — cksum is enough to detect
+# "this file's bytes differ from what the running daemon last read."
+code_hash(){
+  local f
+  { while IFS= read -r f; do
+      [ -r "$f" ] && cat "$f"
+    done <<<"$(code_files)"
+  } | cksum | awk '{print $1}'
+}
+
+read_codehash(){
+  [ -f "$state_file" ] || return 1
+  sed -n 's/^codehash=//p' "$state_file" | head -1
 }
 
 # Fail-closed: signal ONLY a process whose recorded identity still matches.
@@ -301,8 +328,35 @@ cmd_stop(){
 
 cmd_daemon(){
   if feed_is_running; then
-    echo "[agent-activity] already running — leaving it."
-    return 0
+    # BUG-135: a running daemon sourced its code once, at start. Left alone
+    # forever, it keeps serving that snapshot after a fix or a `blueprint
+    # pull` changes it — invisibly, since nothing here restarts it. Compare
+    # what's actually running against what's on disk NOW; only a PROVEN
+    # difference restarts it, so an unchanged tree is still left alone.
+    #
+    # `[ -f "$state_file" ]` gates it deliberately, not `read_codehash`'s own
+    # emptiness: the lock (what `feed_is_running` tests) is taken a few
+    # instructions before `write_state` runs, so #1's 50-concurrent-`--daemon`
+    # race can observe "a supervisor holds the lock" before that supervisor
+    # has written its state file. Treating that ordinary startup window as
+    # "changed" turned it into a stop/restart storm among the 50 racers and
+    # left a late winner outliving the test's own `--stop`. A state file that
+    # exists but has no codehash line is unambiguous instead — only ever
+    # written by pre-BUG-135 code — so that case still restarts.
+    if [ -f "$state_file" ]; then
+      local live_hash cur_hash
+      live_hash="$(read_codehash)"
+      cur_hash="$(code_hash)"
+      if [ -n "$live_hash" ] && [ "$live_hash" = "$cur_hash" ]; then
+        echo "[agent-activity] already running — leaving it."
+        return 0
+      fi
+      echo "[agent-activity] running daemon's code has changed since it started (BUG-135) — restarting."
+      cmd_stop >/dev/null 2>&1
+    else
+      echo "[agent-activity] already running — leaving it."
+      return 0
+    fi
   fi
   # setsid ONLY here, so the foreground contract stays unambiguous.
   setsid "$0" --supervise >/dev/null 2>&1 &
@@ -550,7 +604,7 @@ supervise(){
 
 supervise_body(){
   local nonce; nonce="$$-$(od -An -tu4 -N4 /dev/urandom 2>/dev/null | tr -d ' ' || echo 0)"
-  write_state "$$" "$nonce" "$(start_token "$$")"
+  write_state "$$" "$nonce" "$(start_token "$$")" "$(code_hash)"
 
   local stop=0
   # Ordinary single-process teardown: no `kill 0` (it signals the shell running

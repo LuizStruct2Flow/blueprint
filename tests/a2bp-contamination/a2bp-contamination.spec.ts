@@ -58,12 +58,10 @@
  * the scan on that line — so the fail-closed check is the only thing left
  * standing. Observed: `C15` alone reds it.
  *
- * #29 AND #30 ARE NEW (BUG-105). Both close product behaviour that NOTHING
- * watched in either implementation: `bp_file_base_content` aligning at the root
- * coordinate instead of `bp_base_path`'s (`B15`), and `cmd_a2bp`'s required-libs
- * refusal degrading to a `continue` (`E7`). Neither is a port regression — the
- * shell runner was equally blind — so each needed a NEW case rather than a
- * stricter one.
+ * #30 IS NEW (BUG-105). It closes product behaviour that NOTHING watched in
+ * either implementation: `cmd_a2bp`'s required-libs refusal degrading to a
+ * `continue` (`E7`). #29 covered a `scaffolding/` base coordinate, removed
+ * with that resolver when TASK-021 dropped the move.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -1321,58 +1319,6 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       ).toHaveLength(4000)
       expect(produced, 'large-file substitution left unresolved tokens').not.toContain(
         '{{PROJECT_NAME}}',
-      )
-    })
-  })
-
-  it('#29 BUG-105: the guard aligns against the base COORDINATE, so a scaffolded base still restores', async () => {
-    await scenario('a2bp-contam-29', async (s) => {
-      // THE HOLE BUG-105 RECORDS, NOW WATCHED. `bp_file_base_content` could be
-      // changed to align at the ROOT path instead of `bp_base_path`'s answer and
-      // NOTHING in either implementation went red: no case drove a2bp end to end
-      // against a base whose copy of the file lives under `scaffolding/`, which
-      // is precisely the layout TASK-021 is moving the blueprint into. The
-      // function's own header states the consequence — an EMPTY base for a file
-      // that exists, so every line reads as new and A-07's placeholder restore
-      // degrades to nothing on exactly the lines it exists for.
-      //
-      // The fixture is the move itself: the base carries the carrier under
-      // `scaffolding/`, and a root file of the same name is left in place as
-      // well, because that is the state during the move and it is the wrong
-      // answer a root-coordinate alignment would pick up. Under the root
-      // coordinate the restore has nothing to align to, the literal project name
-      // survives into the staged bytes, and the residual-name scan blocks the
-      // request — so this case sees the defect as a REFUSAL of a request that
-      // must be filed. Observed: B15 reds it.
-      const f = await fixture(s)
-      const scaffolded = `scaffolding/${CARRIER}`
-      await f.writeBp(
-        scaffolded,
-        '# Mocks\nGeneric guidance for the {{PROJECT_NAME}} project.\none more line\n',
-      )
-      await f.writeIn(
-        f.proj,
-        CARRIER,
-        '# Mocks\nGeneric guidance for the acme-flow project.\none more line, edited\n',
-      )
-
-      const r = await f.a2bp(f.proj, [CARRIER])
-      expect(
-        r.rc,
-        `a request against a scaffolded base was refused — the guard aligned at the wrong coordinate\n${r.out}`,
-      ).toBe(0)
-
-      const filed = await f.readBp(scaffolded)
-      expect(
-        filed,
-        'the placeholder was not restored against the scaffolded base',
-      ).toContain('{{PROJECT_NAME}}')
-      expect(
-        filed,
-        'the literal project name reached the blueprint through a mis-resolved base',
-      ).not.toContain('acme-flow')
-      expect(filed, 'the request does not carry the edit it was filed for').toContain(
-        'one more line, edited',
       )
     })
   })

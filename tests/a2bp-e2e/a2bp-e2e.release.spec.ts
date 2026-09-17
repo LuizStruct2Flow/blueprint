@@ -735,10 +735,6 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     `exit 1`,
   ].join('\n')
 
-  // #19 RETIRED WITH TASK-021 STAGE 1: it filed a MANAGED creation against a
-  // scaffolding/ base. The managed set is now what the base ships, so a path the
-  // base lacks is never managed, and the scaffolding/ move itself was dropped.
-
   it('#17 TASK-037: a tracked ignored .env, an unignored private key and a managed file carrying a secret exit 4 before any remote contact', async () => {
     await scenario('a2bp-e2e-17', async (s) => {
       const e = await setup(s)

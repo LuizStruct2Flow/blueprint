@@ -364,6 +364,12 @@ describe('BUG-019 — a branch operation cannot destroy a live dispatch', () => 
         const baton = s.workspace.path('elsewhere', 'signal.md')
         await s.fs.mkdirp('elsewhere')
 
+        // BUG-140: this case runs the REAL repo's signal-set.sh (it is testing the
+        // journal derivation, not the fixture), so it resolves the REAL
+        // AGENT_ROSTER.md unless told otherwise. 'JTest' names nothing about a
+        // roster — point AGENT_ROSTER_FILE at a path that does not exist, the same
+        // degrade a fresh clone gets before its roster is copied in.
+        const noRoster = s.workspace.path('elsewhere', 'AGENT_ROSTER.md')
         const args = ['--holder', 'JTest', '--state', 'ACTIVE', '--task', 'journal follows the baton']
         const r = await s.run(
           'bash',
@@ -372,7 +378,10 @@ describe('BUG-019 — a branch operation cannot destroy a live dispatch', () => 
             : [join(REPO_ROOT, 'scripts/signal-set.sh'), '--file', baton, ...args],
           {
             cwd: s.workspace.root,
-            env: mode === 'env' ? { AGENT_SIGNAL_FILE: baton } : DERIVE_FROM_THE_FIXTURE,
+            env: {
+              ...(mode === 'env' ? { AGENT_SIGNAL_FILE: baton } : DERIVE_FROM_THE_FIXTURE),
+              AGENT_ROSTER_FILE: noRoster,
+            },
           },
         )
         expect(r.code, `publishing failed: ${r.output}`).toBe(0)
@@ -398,6 +407,9 @@ describe('BUG-019 — a branch operation cannot destroy a live dispatch', () => 
       const dir = await s.fs.mkdirp('first')
       const baton = join(dir, 'signal.md')
 
+      // BUG-140: same reason as #4 above — this runs the REAL repo's script, so
+      // AGENT_ROSTER_FILE is pointed at a path that does not exist to keep 'Atomic'
+      // from being validated against the real checkout's roster.
       const publisher = startWatcher(
         s,
         'bash',
@@ -407,7 +419,10 @@ describe('BUG-019 — a branch operation cannot destroy a live dispatch', () => 
           '--state', 'ACTIVE',
           '--task', 'first creation is atomic',
         ],
-        { cwd: s.workspace.root, env: { AGENT_SIGNAL_FILE: baton } },
+        {
+          cwd: s.workspace.root,
+          env: { AGENT_SIGNAL_FILE: baton, AGENT_ROSTER_FILE: s.workspace.path('first', 'AGENT_ROSTER.md') },
+        },
       )
 
       const samples: string[] = []

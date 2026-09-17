@@ -14,9 +14,11 @@
 #     Offline, a session start waits at most ~12 s; the hook's own `timeout` in
 #     settings.json is the backstop.
 #
-# Relative paths throughout: this ships to every derived project, which may
-# have no feed script or no .blueprint-source.
+# Relative paths throughout, from the project root: this ships to every derived
+# project, which may have no feed script or no .blueprint-source. A session can
+# start in a subdirectory, so the root is this script's parent, not the cwd.
 set -u
+cd "$(dirname "$0")/.." || exit 0
 
 echo "== session start =="
 

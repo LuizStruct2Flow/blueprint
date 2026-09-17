@@ -264,7 +264,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/session-start.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/session-start.sh\"",
             "timeout": 30
           }
         ]
@@ -275,7 +275,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/log-activity.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/log-activity.sh\"",
             "timeout": 5
           }
         ]
@@ -286,7 +286,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/log-activity.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/log-activity.sh\"",
             "timeout": 5
           }
         ]
@@ -298,7 +298,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/no-chain-guard.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/no-chain-guard.sh\"",
             "timeout": 5
           }
         ]

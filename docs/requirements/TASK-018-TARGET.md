@@ -65,43 +65,35 @@ evo-x2; 17.2 s vs 5.79 s on the Mac.
 
 ---
 
-## 2. The directory structure — agreed, not started
+## 2. The directory structure — the physical move was DROPPED
 
-```
-docs/  AGENT_ROSTER.md  logs/     ← this repo's OWN state, like any project
-scaffolding/                      ← everything a project RECEIVES
-forge/                            ← bootstrap, sync, a2bp, templates. NEVER ships
-```
+The target was two buckets: `scaffolding/` for everything a project receives,
+`forge/` for bootstrap, sync, a2bp and templates, with this repo's own state
+(`docs/`, `AGENT_ROSTER.md`, `logs/`) at the root like any project's. **The
+founder dropped the move on 2026-09-16 (TASK-021 Stage 3). Do not reimplement
+it.** The tree stays flat.
 
-**Two buckets, not three.** An earlier draft proposed a third for "this repo's
-own project state". The founder killed it: *"all derived projects will also have
-docs, agent_roster and logs"* — those are not blueprint-internal, they are what
-every project has. So the blueprint's own state sits **at the root, exactly where
-a derived project's does**, and `scaffolding/` holds the *template* of that
-shape. The distinction is **structure vs content**: the lifecycle folders and
-their READMEs ship; this repo's own `BUGS.md` rows do not (which is what
-`.gitattributes` already does).
+**What replaced it** — the same boundary, drawn without moving files:
 
-**`forge/` names a function.** It is where scaffolding is made and maintained —
-the one thing only a blueprint does. Chosen over `factory/` and `internal/`
-because it says what happens there rather than what it is not.
+- **The managed set is derived from the export archive.** `drift`, `pull` and
+  `a2bp` list what `git archive` of the fetched base ships, minus the
+  project-owned seeds. There is no hand-kept `MANAGED_FILES` array, and nothing
+  ships unmanaged.
+- **The audience split is `.gitattributes` directory rules.** `export-ignore`
+  conventions (`docs/requirements/**`, `docs/assets/**`, `docs/way-of-working.*`,
+  `docs/talk-*`) and a few named files decide what is blueprint-only. The
+  blueprint-only CLAUDE.md sections live in the export-ignored
+  `CLAUDE.blueprint.md`, which the shipped CLAUDE.md imports.
+- **Retirement.** A path that leaves the archive, by deletion or a new
+  `export-ignore`, is found from the fetched branch's history and offered for
+  deletion downstream only when its bytes equal the last shipped version.
 
-**Beware the terminology inversion.** Today `blueprint`-tier means *does not
-ship*. In the target, `scaffolding` is what ships and `forge` is what does not.
-Every existing comment, `.gitattributes` line and bug row uses the old sense, so
-**the rename must be total or it will be worse than either**.
-
-**The founder chose the symmetric shape** (both buckets move, nothing at root
-except this repo's own state), knowing the cost: bootstrap grows a path-mapping
-step, since `scaffolding/scripts/x` must land at `scripts/x` downstream. That
-changes `git archive`, every `MANAGED_FILES` entry, and the `a2bp`/`drift`/`pull`
-path handling **together**. `bootstrap-gate` is the suite that proves the strip
-is correct, which makes it the riskiest one — appropriately, since it is the only
-one speaking for downstream.
-
-**Where the harness lives:** `scaffolding/`. Derived projects run scaffolding
-tests, so they need it. `forge/` imports it from there — the factory using its
-own product. The dependency runs one way only.
+**Why.** The move was about 180 path moves and link rewrites, and it needed
+permanent source-to-project path translation in sync and a2bp, a prefix in
+test-root discovery, and root-versus-shipped copies of the workflow, the
+`settings.json` hook commands and the Sonar sources: GitHub Actions and Claude
+Code only read those at the root. Once the archive decides what ships, the move
+adds legibility, not consistency. Plan: `docs/doing/PLAN-TASK-021-RESTRUCTURE.md`.
 
 ---
 
@@ -206,7 +198,7 @@ file stops existing.
 | Rule | State on `8b7dc46` |
 |---|---|
 | R1 BDD specs in TS, self-documenting | **partial** — 8 specs exist; `tests/SUITES.md` still load-bearing |
-| R2 `scaffolding/`+`forge/`, co-located | **NOT STARTED** — §1.1, §2 |
+| R2 co-located (`scaffolding/`+`forge/` dropped, §2) | **NOT STARTED** — §1.1 |
 | R3 mock by default, sandbox otherwise | **done** — `tests/harness/`, with its own escape tests |
 | R4 no fixed waits | **partial** — harness polls; remaining shell suites sleep |
 | R5 parallel, no serial category | **DONE** — `fileParallelism: true` (TASK-055), §1.2 |

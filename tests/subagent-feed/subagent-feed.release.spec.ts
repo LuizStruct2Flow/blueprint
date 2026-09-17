@@ -133,6 +133,32 @@ const rec = (text: string, isSidechain: boolean): string =>
     message: { content: [{ type: 'text', text }] },
   })}\n`
 
+/** Same, but with a `message.model` — what makes a real record ran-model-bearing. */
+const recWithModel = (text: string, isSidechain: boolean, model: string): string =>
+  `${JSON.stringify({
+    type: 'assistant',
+    isSidechain,
+    message: { model, content: [{ type: 'text', text }] },
+  })}\n`
+
+/**
+ * A roster with a Model cell for Nadia (TASK-059 reopened). Kept separate from
+ * the shared ROSTER above — which has no Model column on purpose, so every
+ * other case in this file keeps asserting the plain "<Name> - <Backing>" shape
+ * unaffected by this one persona's tier.
+ */
+const MODEL_ROSTER = `# Roster
+
+## Members
+
+| Role | Name | Backing agent | Model |
+|---|---|---|---|
+| Orchestrator | Wren | Claude Code | session-based |
+| Back-End-1 | Nadia | Claude Code | frontier:high |
+
+Claude models, best first: fable, opus, sonnet, haiku
+`
+
 interface Transcripts {
   /** The session transcript — carries the orchestrator's own records AND sidechain copies. */
   readonly mainRel: string
@@ -375,6 +401,44 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
         await f.expectLine('LABELLED-LINE')
 
         expect(await f.read()).toContain('[Nadia - Claude Code] LABELLED-LINE')
+      })
+    })
+  })
+
+  it('#2b TASK-059 reopened: a streamed subagent line upgrades from the alias to the ran model, and stays there', async () => {
+    await scenario('sf-2b', async (s) => {
+      // The transcript is discovered (and its offset seeded) BEFORE it has any
+      // assistant record, exactly like a real dispatch: the meta file lands
+      // first, the model only shows up once the first assistant turn is
+      // written. Before the fix, the label resolved at discovery — with no ran
+      // model yet — and was cached for the stream's whole life, so every later
+      // line kept reading the roster alias ("fable") even after the transcript
+      // started recording the real model.
+      const f = await feedFixture(s, 'repo', { source: SUBJECT, roster: MODEL_ROSTER, holder: 'Wren' })
+      const t = await transcripts(s, f, 'abc123def456')
+
+      await f.withFeed(async () => {
+        await f.readerReady(t.subRel, { wrap: (tag) => rec(tag, true) })
+
+        // No model yet: the roster alias wins.
+        await s.fs.write(t.subRel, rec('BEFORE-MODEL-LINE', true), { append: true })
+        await f.expectLine('BEFORE-MODEL-LINE')
+        expect(await f.read()).toContain('[Nadia - fable - high] BEFORE-MODEL-LINE')
+
+        // First assistant record carrying a model — the transcript now KNOWS.
+        await s.fs.write(t.subRel, recWithModel('MODEL-LANDS-LINE', true, 'claude-ran-7'), { append: true })
+        await f.expectLine('MODEL-LANDS-LINE')
+        expect(await f.read()).toContain('[Nadia - claude-ran-7 - high] MODEL-LANDS-LINE')
+
+        // Every line after that keeps naming the ran model — one resolution to
+        // pick it up, then cached for good, not a jq per tick forever.
+        await s.fs.write(t.subRel, rec('AFTER-MODEL-LINE', true), { append: true })
+        await f.expectLine('AFTER-MODEL-LINE')
+        expect(await f.read()).toContain('[Nadia - claude-ran-7 - high] AFTER-MODEL-LINE')
+        expect(
+          await f.count('[Nadia - fable - high] MODEL-LANDS-LINE'),
+          'the alias must never re-appear once the ran model is known',
+        ).toBe(0)
       })
     })
   })

@@ -212,4 +212,34 @@ Claude models, best first: fable, opus, sonnet, haiku
       expect(persona.stderr).toMatch(/Nadia:.*session-based.*Orchestrator/)
     })
   })
+
+  it('#6 TASK-059 reopened: a nested subagent (rc-2 "who") labels with the model it ran on, no invented effort', async () => {
+    await scenario('rm-6', async (s) => {
+      const { dir, env } = await project(s)
+      // Nadia dispatches a plain general-purpose helper — parentAgentId ties the
+      // helper back to her, but the helper itself is never a roster name, so
+      // there is no Model cell and no effort to show for it (bp_roster_subagent_label
+      // rc-2 branch). Before the fix this always read "... - Claude Code", even
+      // once the helper's own transcript recorded the model it ran on.
+      await s.fs.write(
+        'proj/sess/subagents/agent-parent1.meta.json',
+        JSON.stringify({ agentType: 'general-purpose', description: 'Nadia coordinates the audit' }),
+      )
+      await s.fs.write(
+        'proj/sess/subagents/agent-child1.meta.json',
+        JSON.stringify({ agentType: 'general-purpose', description: 'check one file', parentAgentId: 'parent1' }),
+      )
+      await s.fs.write(
+        'proj/sess/subagents/agent-child1.jsonl',
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-ran-7' } }) + '\n',
+      )
+      const r = await s.run(
+        'bash',
+        ['-c', `. "${LIB}"; bp_roster_subagent_label "$1" "$1/sess/subagents/agent-child1.meta.json"`, 'x', dir],
+        { cwd: s.workspace.root, env },
+      )
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toBe('Nadia › general-purpose - claude-ran-7')
+    })
+  })
 })

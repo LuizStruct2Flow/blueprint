@@ -33,6 +33,7 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
+| **BUG-136** | **The pre-push SCA stage throws away osv-scanner's stderr, so a failed scan cannot say why.** CI run 35220731328 on `9ba218f`: bootstrap-gate failed on `osv-scanner could not complete (exit 127)`, and a re-run passed unchanged. `.githooks/pre-push` redirects the scanner's stderr to `/dev/null`, so the log could not tell a network failure from anything else. That breaks the observability rule that every captured error is diagnosable. | S3 | **OPEN**, founder asked for the fix 2026-09-17 | **Fix:** a tool failure prints the scanner's own stderr, while a clean or findings run stays quiet. **Regression test:** named BUG-136. **Re-open if** a failed scan's gate output omits the scanner's error. |
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

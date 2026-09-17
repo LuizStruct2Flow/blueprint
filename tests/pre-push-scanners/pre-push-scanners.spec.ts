@@ -512,6 +512,48 @@ describe('BUG-126 — a scan semgrep could not finish is not a clean scan', () =
   })
 })
 
+describe('BUG-136 — a failed osv-scanner run surfaces its own diagnostic', () => {
+  // .githooks/pre-push used to redirect osv-scanner's stderr to /dev/null, so a
+  // tool failure only ever said "could not complete (exit N)" — CI run
+  // 35220731328 hit exit 127 and the log could not say why (osv.dev
+  // unreachable, most likely, but unprovable from the gate's own output).
+  it('#1 exit 127 blocks as a TOOL FAILURE and surfaces the scanner\'s own stderr', async () => {
+    await scenario('scanners-bug136-1', async (s) => {
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['clean'])
+      await f.shims.add(
+        'osv-scanner',
+        `echo "OSV-SCANNER-DIAG (simulated: osv.dev unreachable)" >&2\nexit 127`,
+      )
+
+      const r = await f.runHook()
+
+      expect(r.code, `an osv-scanner tool error must block\n${r.output}`).not.toBe(0)
+      expect(r.output).toContain('could not complete')
+      expect(
+        r.output,
+        "the tool-failure path hid osv-scanner's own diagnostic — the BUG-136 defect",
+      ).toContain('OSV-SCANNER-DIAG')
+    })
+  })
+
+  it('#2 a clean osv-scanner run stays quiet, same as before the fix', async () => {
+    await scenario('scanners-bug136-2', async (s) => {
+      const f = await fixture(s)
+      await f.gitleaks([0])
+      await f.semgrep(['clean'])
+      // fixture()'s default osv-scanner shim already emits a clean `{"results":[]}`.
+
+      const r = await f.runHook()
+
+      expect(r.code, r.output).toBe(0)
+      expect(r.output, 'a clean scan printed diagnostic noise').not.toContain('OSV-SCANNER-DIAG')
+      expect(r.output, 'a clean scan printed a tool-failure message').not.toContain('could not complete')
+    })
+  })
+})
+
 describe('TASK-053 — a push that changes only .md files skips the code stages', () => {
   /**
    * Commit `files` on top of a base commit and run the hook with the real ref

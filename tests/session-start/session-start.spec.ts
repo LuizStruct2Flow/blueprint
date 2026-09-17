@@ -42,8 +42,14 @@ describe('the SessionStart hook', () => {
           'exit 5\n',
       )
 
+      // Started from a SUBDIRECTORY, as a session opened in tests/ or src/ is.
+      const sub = await s.workspace.dir('proj', 'sub')
       const started = Date.now()
-      const r = await s.run('sh', ['-c', command], { cwd: proj, timeoutMs: 60_000 })
+      const r = await s.run('sh', ['-c', command], {
+        cwd: sub,
+        env: { CLAUDE_PROJECT_DIR: proj },
+        timeoutMs: 60_000,
+      })
       const elapsed = Date.now() - started
 
       expect(r.code, r.output).toBe(0)
@@ -52,5 +58,19 @@ describe('the SessionStart hook', () => {
       expect(r.stdout).toContain('NOT a clean drift report')
       expect(elapsed, `the hook held the session start for ${elapsed} ms`).toBeLessThan(BOUND_MS)
     })
+  })
+
+  it('every hook runs from the project root, so a session in a subdirectory keeps its guards', async () => {
+    const settings = JSON.parse(await readFile(join(REPO_ROOT, '.claude/settings.json'), 'utf8')) as {
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
+    }
+    const commands = Object.values(settings.hooks ?? {}).flatMap((es) =>
+      es.flatMap((e) => (e.hooks ?? []).map((h) => h.command ?? '')),
+    )
+    expect(commands.length, 'no hooks configured').toBeGreaterThan(0)
+    // A relative `scripts/...` exits 127 from a subdirectory, and a PreToolUse hook
+    // that exits 127 does not block: the no-chain guard would silently stop.
+    const relative = commands.filter((c) => !c.includes('$CLAUDE_PROJECT_DIR/'))
+    expect(relative, 'hook commands resolved against the cwd').toEqual([])
   })
 })

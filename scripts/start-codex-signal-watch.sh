@@ -131,6 +131,23 @@ else
   feed_append(){ :; }
 fi
 
+# WHO TO HAND BACK TO (TASK-061). The preamble used to tell Codex to flip back
+# to a hardcoded `Holder=Claude Code`, but Holder is a PERSONA NAME, and the
+# Orchestrator name varies by roster (project to project, engineer to
+# engineer). Resolved here, at dispatch time, from the same roster lookup
+# `agent-activity.sh --whoami` uses — never a second resolver (BUG-010 class).
+# A roster with no Orchestrator row falls back visibly: logged to RUN_LOG, not
+# silently hardcoded, because a silent fallback here is exactly the defect this
+# fixes.
+ORCHESTRATOR_NAME=""
+if command -v bp_roster_name_for_role >/dev/null 2>&1; then
+  ORCHESTRATOR_NAME="$(bp_roster_name_for_role "$BP_STATE_ROOT" Orchestrator 2>/dev/null)"
+fi
+if [ -z "$ORCHESTRATOR_NAME" ]; then
+  ORCHESTRATOR_NAME="Orchestrator"
+  printf "[roster] no Orchestrator row resolved — hand-back preamble falls back to the literal 'Orchestrator'\n" | tee -a "$RUN_LOG" >&2
+fi
+
 # THE MODEL AND EFFORT, from the Model cell of the holder persona (TASK-059).
 # A Codex persona passes `-m <slug> -c model_reasoning_effort=<effort>`. A cell
 # that does not resolve REFUSES the dispatch, visibly: running the wrong model
@@ -164,7 +181,7 @@ feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
   --sandbox workspace-write \
   --skip-git-repo-check \
   --output-last-message "$OUTPUT_LAST" \
-  "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. Commit your changes if appropriate." \
+  "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. Commit your changes if appropriate." \
   2>>"$RUN_LOG" \
   | bash "$ROOT/scripts/codex-feed-filter.sh" \
   | while IFS= read -r __line; do

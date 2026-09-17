@@ -273,7 +273,10 @@ CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
 3. **Where output lands.** `logs/state/codex-runs.log` (full run log),
    `logs/state/codex-last-message.md` (final message), `logs/state/signal.log`
    (trigger log). Codex flips the signal back to
-   `Holder=Claude Code / State=OVER_TO_CLAUDE` itself. Keep a signal-change
+   `Holder=<the Orchestrator's roster name> / State=OVER_TO_CLAUDE` itself,
+   resolved at dispatch time from the roster's `Orchestrator` row — never a
+   hardcoded name, since it varies project to project and engineer to
+   engineer. Keep a signal-change
    `Monitor` (mechanism 1) armed so Claude Code wakes on the flip-back.
 
 **Claude personas (TASK-059).** Claude Code has no signal dispatcher: the

@@ -40,10 +40,10 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Acceptance: `docs/waiting-acceptance/` is EMPTY.** On 2026-09-17 the founder
-  accepted everything that was waiting, TASK-022 included. **BUG-138, BUG-139 and
-  BUG-140 land there next**, once CI on `892d4ca` (run 35259708409) is green — check
-  it before anything else, and move the rows with what to test.
+- **Acceptance: BUG-138, BUG-139 and BUG-140** are in
+  [`../waiting-acceptance/BUGS.md`](../waiting-acceptance/BUGS.md) with what to
+  test (CI green on `892d4ca`, 2026-09-18). BUG-140's "never runs in CI" half was
+  not done; its row asks the founder to accept it as moot or reopen.
 - **TASK-062 (backlog) is the live epic:** enforcement in code, not in agent
   context. Its input is the refreshed audit in
   [`../done/TASK-022-anchor-rules/`](../done/TASK-022-anchor-rules/): of 309 rules
@@ -62,12 +62,6 @@ because another machine only sees what is pushed.
 
 ### In flight
 
-- **Vitali is folding TASK-018's artefacts into one folder** (founder decision
-  2026-09-17), `docs/done/TASK-018-ts-suites/`: four loose files plus three
-  sub-folders, with ~30 files mentioning those names. Most mentions are name-only
-  comments in specs and must NOT be rewritten; only path-bearing references move.
-  If his work is lost, the loose files are still listed by BUG-138's `looseGroups`,
-  which reports without failing.
 - **Three gate rules tightened today, and two of them bit** (BUG-139, BUG-140):
   `baton-durability`, `wait-mic` and `commit-subjects` all broke on the first push
   and were fixed without loosening the rules. If a suite of yours starts failing on

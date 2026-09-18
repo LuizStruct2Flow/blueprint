@@ -345,8 +345,9 @@ describe('lifecycle-docs — a record that states something untrue costs more th
       const files = healthyTree()
       files['done/BACKLOG.md'] = TABLE_HEAD + '| **TASK-203** | a real row | fixed |\n'
       // Two loose files for the same item, neither wrapped in a folder — the
-      // real-world shape is done/TASK-018-CONVENTIONS.md plus
-      // PLAN-TASK-018.md, both loose in the same state folder.
+      // real-world shape this caught was done/TASK-018-CONVENTIONS.md plus
+      // PLAN-TASK-018.md sitting loose in the same state folder, since folded
+      // into done/TASK-018-ts-suites/ (BUG-138 §looseGroups).
       files['done/PLAN-TASK-203.md'] = '# plan\n'
       files['done/TASK-203-notes.md'] = '# notes\n'
 

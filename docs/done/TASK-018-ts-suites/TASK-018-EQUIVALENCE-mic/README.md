@@ -168,7 +168,7 @@ amount of side-by-side reading was going to surface it.
 
 Both are cases that were **green over the defect they exist to catch**, and
 neither was reachable by reading. Both have bug rows in
-[`../BUGS.md`](../BUGS.md).
+[`../../BUGS.md`](../../BUGS.md).
 
 ### BUG-079 — Codex R8's fix never worked, and `#13` could not see that
 

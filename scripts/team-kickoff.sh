@@ -59,8 +59,7 @@ intro_for_role(){
     orchestrator)      echo "Orchestrator. I coordinate the team: dispatch, handoffs, integration. Opening the floor, passing the mic round the table." ;;
     po)                echo "PO. I own the backlog, the priorities, and what 'done' means for the customer." ;;
     ba)                echo "BA. I turn fuzzy impulses into clear requirements and acceptance criteria." ;;
-    "senior architect") echo "Senior Architect. I own the system shape and the big technical calls." ;;
-    architect)         echo "Architect. I detail the designs and keep them consistent across the system." ;;
+    architect)         echo "Architect. I own the system shape, detail the designs, and keep them consistent." ;;
     ux)                echo "UX. I own the flows, the editorial style, and that the output delights." ;;
     front-end)         echo "Front-End. I build the user-facing surfaces: components, state, and polish." ;;
     back-end)          echo "Back-End. I own the domain logic, the data, and the APIs." ;;

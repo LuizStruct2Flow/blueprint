@@ -44,11 +44,12 @@ one's backing agent to whatever you actually run.
 |---|---|---|---|
 | Orchestrator | Sylvia | Claude Code | session-based |
 | PO | Klaus | Claude Code | frontier-2:medium |
-| BA-1 | Kathrin | Codex | frontier-2:medium |
-| BA-2 | Joan | Kimi | frontier-2:high |
-| Senior Architect | Christian | Claude Code | frontier-1:high |
-| Architect-1 | Slava | Kimi | frontier-1:high |
+| BA-1 | Annika | Claude Code | frontier-2:medium |
+| BA-2 | Kathrin | Codex | frontier-2:medium |
+| BA-3 | Joan | Kimi | frontier-2:high |
+| Architect-1 | Christian | Claude Code | frontier-1:high |
 | Architect-2 | Alexey | Codex | frontier-1:high |
+| Architect-3 | Slava | Kimi | frontier-1:high |
 | UX | Nicole | Claude Code | frontier-2:medium |
 | Front-End-1 | Yannik | Claude Code | frontier-2:medium |
 | Front-End-2 | Alex | Codex | frontier-2:medium |
@@ -60,7 +61,8 @@ one's backing agent to whatever you actually run.
 | QA-2 | Jesko | Codex | frontier-2:medium |
 | QA-3 | Vijay | Kimi | frontier-2:high |
 | Security-1 | Markus | Claude Code | frontier:high |
-| Security-2 | Florian | Kimi | frontier:high |
+| Security-2 | Stefan | Codex | frontier:high |
+| Security-3 | Florian | Kimi | frontier:high |
 | Infrastructure-1 | Philipp | Claude Code | frontier-2:medium |
 | Infrastructure-2 | Elias | Codex | frontier-2:medium |
 | Infrastructure-3 | Thomas | Kimi | frontier-2:high |
@@ -81,7 +83,20 @@ peers read `medium`. Resolution reads each provider's own list and refuses a cel
 that names an effort the model does not support, so a wrong cell fails loudly
 rather than running at some silently-substituted setting.
 
-Default backing-agent totals: **9 Claude Code, 6 Codex, 7 Kimi.** **Gemini and
+**Every delivery role carries one persona per provider**, because the rotation
+that spreads work is scoped to a ROLE — a back-end task goes to a back-end
+engineer, and only then does the rotation pick which one ([AGENTS.md](AGENTS.md)
+§"Who does the work"). A role missing a provider simply rotates across fewer,
+and never borrows from another role. The trailing digit is which representative,
+not which job; the ordering below (Claude, Codex, Kimi) is a convention for
+readability and **nothing reads it** — resolution is by role name, so a fleet
+with different providers just numbers them differently.
+
+**`PO`, `UX` and `Orchestrator` are deliberately single-provider.** They are
+judgement and coordination roles rather than delivery ones, and the Orchestrator
+is by rule the founder-facing session.
+
+Default backing-agent totals: **10 Claude Code, 7 Codex, 7 Kimi.** **Gemini and
 GitHub Copilot are also supported** (see [AGENTS.md](AGENTS.md)) but aren't in
 the default roster, because on many setups those are free-tier accounts with
 limited credits (Gemini throttles on quota; GitHub Copilot may have no headless

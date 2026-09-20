@@ -44,12 +44,6 @@ because another machine only sees what is pushed.
   [`../waiting-acceptance/BUGS.md`](../waiting-acceptance/BUGS.md) with what to
   test (CI green on `892d4ca`, 2026-09-18). BUG-140's "never runs in CI" half was
   not done; its row asks the founder to accept it as moot or reopen.
-- **Acceptance: TASK-063 (Kimi as a third provider) and TASK-064 (scratch
-  workspaces)** are in
-  [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md) with
-  what to test. Landed `729a972..a37339d`, **CI green on `a37339d`**, and the
-  four-eyes cross-provider review is done — Alexey (Codex) returned four
-  findings, all real, all fixed before the push.
 - **TASK-062 (backlog) is the live epic:** enforcement in code, not in agent
   context. Its input is the refreshed audit in
   [`../done/TASK-022-anchor-rules/`](../done/TASK-022-anchor-rules/): of 309 rules
@@ -77,10 +71,10 @@ because another machine only sees what is pushed.
   stages skip, but the four-eyes rule still applies and has NOT been run on them.
   **The first real test of the rule is the next code item** — it must go to the
   next provider in that role's rotation, not to whichever agent is convenient.
-- **TASK-063 (Kimi) and TASK-064 (scratch) have LANDED** and moved to
-  `waiting-acceptance/`. Kept here only for what they cost, because every item
-  below was a plausible wrong answer that shipped-looking evidence would have
-  hidden.
+- **TASK-063 (Kimi) and TASK-064 (scratch) are ACCEPTED** (founder, 2026-09-20)
+  and live in [`../done/BACKLOG.md`](../done/BACKLOG.md). Kept here only for what
+  they cost, because every item below was a plausible wrong answer that
+  shipped-looking evidence would have hidden.
   **Four things, each of which looked right and was not:**
   Kimi has no `medium` effort (only `low`/`high`/`max`), so a cell naming one is
   refused rather than substituted — that is why the Kimi rows read `high`.

@@ -63,15 +63,30 @@ because another machine only sees what is pushed.
 ### In flight
 
 - **TASK-063 — Kimi as a third watcher-backed provider** ([`BACKLOG.md`](BACKLOG.md),
-  promoted 2026-09-20). Model resolution is done and proven against the shipped
-  template (all 22 rows resolve); the dispatcher and the `[KIMI]` feed arm are in
-  progress. **The thing to know before touching a roster cell: Kimi has no
-  `medium` effort** — only `low`, `high`, `max` — and resolution refuses a cell
-  naming one rather than substituting, which is why the Kimi rows read `high`.
-  `kimi-for-coding-highspeed` carries no `support_efforts` at all, so tier
-  `frontier-3` refuses by design. Nothing is committed yet, and the dispatcher
-  half is not done until a REAL dispatch is shown — a green suite is not
-  acceptance for a watcher here.
+  promoted 2026-09-20). **Built and proven live: all seven Kimi personas were
+  dispatched and answered on-air, each on the model its roster cell resolves to.**
+  **Five commits sit UNPUSHED on `main`** — `f712f56`, `4e79d08` (TASK-064),
+  `32b4832`, `08d26ed`, `4e977da`. The four-eyes cross-provider review AGENTS.md
+  requires is DONE: Alexey (Codex, Architect-2) returned four findings, all real,
+  all fixed in `4e977da`. **The suites were green through every one of them** —
+  a masked exit status, a dropped final line, a label asserting an unapplied
+  effort, and this handover being stale in its own committed copy. That is the
+  argument for the review step, in one paragraph.
+  **What remains before push:** nothing but the push and CI.
+  **Four things this cost, each of which looked right and was not:**
+  Kimi has no `medium` effort (only `low`/`high`/`max`), so a cell naming one is
+  refused rather than substituted — that is why the Kimi rows read `high`.
+  `kimi -m k3` is rejected outright and `-m kimi-code/k3` works, so the roster's
+  ranking line carries provider-qualified aliases. `KIMI_HOME` is not a variable
+  Kimi has — the CLI reads `KIMI_CODE_HOME`. And `kimi -p` REFUSES `--auto` and
+  `--yolo`, so never "harden" the dispatcher by adding one.
+  **Effort is logged, never applied:** kimi 2.0.2 has no per-invocation effort
+  flag, so a persona's model is per-dispatch while its effort is global to the
+  machine. Do not fake it.
+  **A long-lived feed daemon runs the code it started with.** Both Kimi feed
+  symptoms the founder reported were one stale daemon from before the change.
+  After touching `agent-activity.sh` or `roster.sh`, restart the feed
+  (`--stop` then `--daemon`) or you are reading yesterday's binary.
 - **TASK-064 — agent scratch workspaces belong in `.scratch/`, not `/tmp`**
   ([`BACKLOG.md`](BACKLOG.md), 2026-09-20). `CLAUDE.md` used to send "a tooling
   workspace that a tool will walk" outside the git tree; it is now `.scratch/`

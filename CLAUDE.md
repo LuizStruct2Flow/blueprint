@@ -161,6 +161,13 @@ bug numbering, regression tests and the plan-first process for a major bug are
 - Work as a team: spawn specialized agents (backend, frontend, infra, QA, design) via the `Agent` tool with the right `subagent_type`
 - Use agents for all non-trivial work — even small bug fixes should be
   delegated rather than quick-fixed inline
+- **Spread the work across providers — [AGENTS.md](AGENTS.md) §"Who does the
+  work".** Plan review goes to all three seeking consensus, code-writing
+  round-robins across providers with quota, and a provider at zero quota leaves
+  the rotation until it returns. **Orchestration and `git commit` / `git push`
+  are the Claude session's alone**; every other kind of work is load-balanced.
+  Reaching for the provider you are already running on is the thing this rule
+  forbids, because that is always the cheapest move and always the same answer.
 - **Commits:** the subject starts with the item it serves (`BUG#20:`,
   `FEATURE#3:`, `TASK#1:`), one item per commit, and the body says why
   ([docs/DoD.md](docs/DoD.md) §1b rules 1 and 3). `.githooks/commit-msg` refuses

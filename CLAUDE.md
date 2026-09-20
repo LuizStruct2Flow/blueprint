@@ -101,9 +101,31 @@ or ask for it to be allowed.
 `scripts/no-chain-guard.sh` blocks chains, including operators inside quoted
 text and heredocs. Write a commit message or a snippet to `.scratch/`
 (in-project and gitignored) and run or reference the file:
-`git commit -F .scratch/msg`. A tooling workspace that a tool will walk (a
-scratch clone, a worktree) goes outside any git tree instead, created with
-`mktemp -d` and removed by the code that created it.
+`git commit -F .scratch/msg`.
+
+**Everything temporary goes in `.scratch/`, including a tooling workspace** — a
+scratch clone, a worktree, a dispatch fixture. Create it with
+`mktemp -d -p .scratch` and remove it when done. This used to carve out
+workspaces "a tool will walk" and send them to a system temp dir, which was
+wrong on both halves (TASK-064):
+
+- **Nothing walks it.** `.scratch/` is gitignored, and the gate's scanners honour
+  that — measured, not assumed: the pre-push semgrep step scans 198 files here
+  and enters `.scratch/` for none of them. `gitleaks protect --staged` sees only
+  the index, and `blueprint files` is `git archive`, so an untracked workspace is
+  invisible to it by construction.
+- **`/tmp` is where cleanup fails.** `rm -rf .scratch/*` is an allowed command
+  and `rm -rf /tmp/...` is not, so an agent that follows the old advice cannot
+  remove what it made and leaves litter the founder deletes by hand. That is what
+  happened when a dispatcher fixture went to `mktemp -d` (2026-09-20).
+
+`.gitignore` already said so — *"Kept INSIDE the repo so the work is visible next
+to the code that prompted it, rather than hidden in a system temp dir"* — and
+this file contradicted it for long enough to send an agent the wrong way.
+
+**This governs what an AGENT creates, not the test suites.** A suite's fixture
+roots are governed by its own isolation contract and stay where that contract
+puts them; do not migrate them here on the strength of this rule.
 
 ## Before Every Push
 

@@ -72,6 +72,15 @@ because another machine only sees what is pushed.
   `frontier-3` refuses by design. Nothing is committed yet, and the dispatcher
   half is not done until a REAL dispatch is shown — a green suite is not
   acceptance for a watcher here.
+- **TASK-064 — agent scratch workspaces belong in `.scratch/`, not `/tmp`**
+  ([`BACKLOG.md`](BACKLOG.md), 2026-09-20). `CLAUDE.md` used to send "a tooling
+  workspace that a tool will walk" outside the git tree; it is now `.scratch/`
+  for everything, `mktemp -d -p .scratch`. The reason is a permission
+  asymmetry worth remembering: `rm -rf .scratch/*` is allowed and
+  `rm -rf /tmp/...` is not, so the old rule produced workspaces no agent could
+  clean up. Scoped to what an agent creates — the suites' fixture roots are
+  TASK-018's isolation contract and must not be migrated on this rule's
+  strength.
 - **Three gate rules tightened today, and two of them bit** (BUG-139, BUG-140):
   `baton-durability`, `wait-mic` and `commit-subjects` all broke on the first push
   and were fixed without loosening the rules. If a suite of yours starts failing on

@@ -129,7 +129,13 @@ the Orchestrator or by the founder as needed.
   `start-kimi-signal-watch.sh`). All three drive the same provider-agnostic
   polling engine, so a fourth provider is a launcher, not an engine. The dispatch
   task names the persona/role for the run; a persona in `Holder` runs on the
-  model and effort its `Model` cell resolves to.
+  model its `Model` cell resolves to, and — for Codex and Gemini — the effort
+  too. **Kimi is the exception: the effort is REQUESTED, not applied.** Kimi
+  2.0.2 has no per-invocation effort flag, so the cell's effort is only what was
+  asked for; what actually governs the run is the `[thinking]` effort (or
+  `default_effort`) already configured in Kimi own `config.toml`, and the feed
+  label reflects that applied value, not the roster cell, or omits effort
+  entirely when the config cannot be read (TASK-063 cross-provider review).
 - **GitHub Copilot** personas: notify-only unless a headless Copilot CLI is
   installed — a human operator drives Copilot in the IDE (see AGENTS.md).
 

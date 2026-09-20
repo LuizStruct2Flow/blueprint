@@ -128,6 +128,40 @@ if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
   . "$ROOT/scripts/lib/roster.sh"
 fi
 
+# THE APPLIED EFFORT (cross-provider review finding 3, TASK-063). The roster
+# Model cell carries a REQUESTED effort, but kimi 2.0.2 never applies one
+# per-invocation (see the block above) — the effort that actually governs this
+# run is the `effort` key of the `[thinking]` section in the kimi config.toml.
+# VERIFIED ON THE WIRE, not inferred: a dispatched session records
+# `"thinkingEffort":"high"` in its own
+# `~/.kimi-code/sessions/<wd>/<session>/agents/main/wire.jsonl`, matching
+# `[thinking] effort` in that file. Do not add a `default_effort` fallback here:
+# that key exists, but it is a PER-MODEL key inside `[models."<alias>"]`, not a
+# `[thinking]` one, and whether it overrides `[thinking]` for a `-p` run has not
+# been established. Guessing the precedence would re-create the very defect this
+# block fixes, one level up. Read failure is likewise NOT papered over with the
+# roster requested effort (F-002: a value standing in for something it does not
+# imply) — the effort is left empty and the reason goes to the run log.
+KIMI_CFG="${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml"
+APPLIED_EFFORT=""
+APPLIED_EFFORT_REASON=""
+if [ -r "$KIMI_CFG" ]; then
+  APPLIED_EFFORT="$(awk "
+/^\[thinking\]/ { insec = 1; next }
+/^\[/ { insec = 0; next }
+insec && /^effort[[:space:]]*=/ {
+  line = \$0
+  sub(/^[^=]*=[[:space:]]*/, \"\", line)
+  gsub(/[\" \t]/, \"\", line)
+  print line
+  exit
+}
+" "$KIMI_CFG" 2>/dev/null)"
+  [ -n "$APPLIED_EFFORT" ] || APPLIED_EFFORT_REASON="no [thinking] effort key in $KIMI_CFG"
+else
+  APPLIED_EFFORT_REASON="$KIMI_CFG is not readable"
+fi
+
 # THE FEED LABEL, built here and nowhere else (BUG-021) — same rule as the
 # Codex launcher, same function, so the two cannot drift into different
 # formats. There is deliberately NO kimi-runs.log pump in agent-activity.sh any
@@ -136,15 +170,31 @@ fi
 # growing partial line as kimi streamed without a trailing newline, so removing
 # it fixes the duplicate-line defect at the same time as the missing label —
 # one cause, one fix, verified with a real dispatch (TASK-063).
+#
+# The 4th argument overrides the effort shown to the APPLIED one above, not
+# the roster requested one — a plain 2-arg call would print the roster cell
+# effort as if kimi had honoured it, which is exactly F-002. The sentinel "-"
+# tells bp_roster_label to print no effort at all (added for this case, see
+# scripts/lib/roster.sh) rather than fall back to the roster value, for when
+# the applied effort could not be read.
 FEED_LABEL="Kimi"
 if command -v bp_roster_label >/dev/null 2>&1; then
-  __label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Kimi}" 2>/dev/null)"
+  if [ -n "$APPLIED_EFFORT" ]; then
+    __label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Kimi}" "" "$APPLIED_EFFORT" 2>/dev/null)"
+  else
+    __label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Kimi}" "" "-" 2>/dev/null)"
+  fi
   [ -n "$__label" ] && FEED_LABEL="$__label"
 fi
 if [ -r "$ROOT/scripts/lib/feed.sh" ]; then
   . "$ROOT/scripts/lib/feed.sh"
 else
   feed_append(){ :; }
+fi
+if [ -n "$APPLIED_EFFORT" ]; then
+  printf "[roster] applied effort=%s (from %s)\n" "$APPLIED_EFFORT" "$KIMI_CFG" | tee -a "$RUN_LOG"
+else
+  printf "[roster] applied effort: unknown (%s) — feed label omits effort rather than showing the roster request\n" "$APPLIED_EFFORT_REASON" | tee -a "$RUN_LOG" >&2
 fi
 
 # WHO TO HAND BACK TO (TASK-061, re-broken and re-fixed under TASK-063). This
@@ -203,16 +253,46 @@ cd "$ROOT"
 # newline, so a still-growing unterminated line is never re-emitted mid-write —
 # which a raw log pump elsewhere could not tell apart from three genuinely new
 # lines (TASK-063 finding). Each complete line gets exactly one feed_append.
-"$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
-  2>&1 \
+# `|| [ -n "$__line" ]` on the loop condition flushes the FINAL fragment too:
+# `read` returns non-zero at EOF even when it captured a trailing partial line
+# (kimi exiting without a final newline), and without this the last line was
+# silently dropped from both the run log and the feed (cross-provider review
+# finding 2). It flushes at most once per run, at real EOF, so it cannot
+# reintroduce the duplicate-line defect the line-by-line read was written to
+# fix in the first place.
+#
+# THE EXIT STATUS (cross-provider review finding 1). This whole pipeline runs
+# under dash (`sh -c`, no PIPESTATUS, no `set -o pipefail`), so `$?` after the
+# pipe is the status of the last stage — the `while read` loop, which always
+# exits 0. Capturing the real status needs the classic pipefail-free trick: the
+# command group below writes the KIMI BIN exit status to KIMI_STATUS_FILE right
+# after it finishes, which happens before its stdout (feeding tee) closes, so
+# the file is always fully written by the time the downstream stages see EOF
+# and this script reads it back. A failed dispatch (proven live with a probe
+# exiting non-zero, TASK-063 cross-provider review) must never read as one
+# that finished cleanly — that is what the run log and the feed line below
+# now say.
+KIMI_STATUS_FILE="$(mktemp "$STATE_DIR/.kimi-exit-status.XXXXXX" 2>/dev/null)" || KIMI_STATUS_FILE="$STATE_DIR/.kimi-exit-status.$$"
+{
+  "$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
+    2>&1
+  printf "%s" "$?" >"$KIMI_STATUS_FILE"
+} \
   | tee "$OUTPUT_LAST" \
-  | while IFS= read -r __line; do
+  | while IFS= read -r __line || [ -n "$__line" ]; do
       printf "%s\n" "$__line" >>"$RUN_LOG"
       [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
     done
+KIMI_STATUS="$(cat "$KIMI_STATUS_FILE" 2>/dev/null)"
+rm -f "$KIMI_STATUS_FILE"
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
-echo "[$end] kimi finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
-feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
+if [ "${KIMI_STATUS:-1}" = "0" ]; then
+  echo "[$end] kimi finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+  feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
+else
+  echo "[$end] kimi FAILED (exit ${KIMI_STATUS:-unknown}) — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+  feed_append "[$FEED_LABEL] FAILED (exit ${KIMI_STATUS:-unknown}) — see $OUTPUT_LAST"
+fi
 '
 
 exec "${ROOT}/scripts/signal-watch.sh" --state OVER_TO_KIMI "$@"

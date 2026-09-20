@@ -62,6 +62,16 @@ because another machine only sees what is pushed.
 
 ### In flight
 
+- **TASK-063 — Kimi as a third watcher-backed provider** ([`BACKLOG.md`](BACKLOG.md),
+  promoted 2026-09-20). Model resolution is done and proven against the shipped
+  template (all 22 rows resolve); the dispatcher and the `[KIMI]` feed arm are in
+  progress. **The thing to know before touching a roster cell: Kimi has no
+  `medium` effort** — only `low`, `high`, `max` — and resolution refuses a cell
+  naming one rather than substituting, which is why the Kimi rows read `high`.
+  `kimi-for-coding-highspeed` carries no `support_efforts` at all, so tier
+  `frontier-3` refuses by design. Nothing is committed yet, and the dispatcher
+  half is not done until a REAL dispatch is shown — a green suite is not
+  acceptance for a watcher here.
 - **Three gate rules tightened today, and two of them bit** (BUG-139, BUG-140):
   `baton-durability`, `wait-mic` and `commit-subjects` all broke on the first push
   and were fixed without loosening the rules. If a suite of yours starts failing on

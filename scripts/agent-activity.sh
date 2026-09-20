@@ -5,6 +5,7 @@
 #   - AGENT_SIGNAL.md mic changes           → [<Holder>] <State> — <Task>
 #   - $AGENT_STATE_HOME/codex-runs.log      → [CODEX]  <line>
 #   - $AGENT_STATE_HOME/gemini-runs.log     → [GEMINI] <line>
+#   - $AGENT_STATE_HOME/kimi-runs.log       → [KIMI]   <line>
 #   - this repo's newest Claude transcript  → [<persona> - <model> - <effort>] <line>
 #   - each Agent-tool subagent's transcript → [<persona> - <model it ran on> - <effort>] <line>
 #
@@ -674,6 +675,7 @@ supervise_body(){
   # log this loop never reads would leave a dead offset that later reads as
   # "already caught up" if the pump were ever restored.
   seed_offset "$state_dir/gemini-runs.log"
+  seed_offset "$state_dir/kimi-runs.log"
 
   # BUG-137 — true only for the loop's first pass. A subagent transcript that
   # the glob below matches on THIS pass existed (or was already fully written)
@@ -714,10 +716,11 @@ supervise_body(){
     # know, because a label chosen here is bound once at daemon start while the
     # mic changes hands many times under it (BUG-021).
     #
-    # Gemini still routes through its run log: it has no launcher doing
-    # per-dispatch labelling, so dropping this pump would lose its lines rather
-    # than improve them.
+    # Gemini and Kimi still route through their run logs: neither has a
+    # launcher doing per-dispatch labelling, so dropping these pumps would lose
+    # their lines rather than improve them.
     pump "$state_dir/gemini-runs.log" raw   "GEMINI"
+    pump "$state_dir/kimi-runs.log"   raw   "KIMI"
 
     if command -v jq >/dev/null 2>&1; then
       # "newest" always EOF-seeds, deliberately, even past first_scan: the

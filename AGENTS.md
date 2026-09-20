@@ -1,6 +1,6 @@
 # Agent Coordination Protocol
 
-Canonical rules for how the team agents — **Codex, Claude Code, Gemini, and
+Canonical rules for how the team agents — **Codex, Claude Code, Gemini, Kimi and
 GitHub Copilot** — coordinate in this repo. The live state is the slim baton in
 [AGENT_SIGNAL.md](AGENT_SIGNAL.md) (the protocol) and the LIVE baton at
 `logs/state/signal.md` (untracked, written only by `scripts/signal-set.sh` —
@@ -100,8 +100,8 @@ Per-slice decisions live in the relevant
   - **Blocked**: edits to files that overlap with the active holder's declared
     `Task` scope, unless the founder explicitly interrupts or the signal is
     clearly stale.
-- If the state is `OVER_TO_CODEX`, `OVER_TO_CLAUDE`, `OVER_TO_GEMINI`, or
-  `OVER_TO_COPILOT`, that agent may proceed directly with its review/fix without
+- If the state is `OVER_TO_CODEX`, `OVER_TO_CLAUDE`, `OVER_TO_GEMINI`,
+  `OVER_TO_KIMI`, or `OVER_TO_COPILOT`, that agent may proceed directly with its review/fix without
   waiting for the founder to ask again.
 - When handing off, update the state to the target actor and include `OVER` in
   the state value, e.g. `OVER_TO_CODEX`.
@@ -120,8 +120,8 @@ Per-slice decisions live in the relevant
   folder) and say in one sentence what it does. Look the line up; never guess it.
 
 **Agents stay active after a handoff** — after flipping the state to
-`OVER_TO_CODEX`, `OVER_TO_GEMINI`, `OVER_TO_COPILOT`, or `OVER_TO_USER`, an agent
-does NOT go silent waiting for a prompt. It keeps re-reading the live baton
+`OVER_TO_CODEX`, `OVER_TO_GEMINI`, `OVER_TO_KIMI`, `OVER_TO_COPILOT`, or
+`OVER_TO_USER`, an agent does NOT go silent waiting for a prompt. It keeps re-reading the live baton
 until the state advances (e.g. `OVER_TO_CLAUDE`), then claims the mic and
 continues. Stop only when there's genuinely nothing to do (signal `IDLE`, no open
 plans, all bugs in `done/`).
@@ -129,8 +129,8 @@ plans, all bugs in `done/`).
 ## Four-eyes cross-provider review (mandatory before push)
 
 **Every change is reviewed by a DIFFERENT backing provider than the one that wrote
-it, before it is pushed.** Claude Code and Codex (and Gemini / Copilot) cross-check
-each other — no provider both writes and blesses-for-push the same code. The loop:
+it, before it is pushed.** Claude Code, Codex and Kimi (and Gemini / Copilot)
+cross-check each other — no provider both writes and blesses-for-push the same code. The loop:
 
 1. **Provider A implements and commits** its slice (`Holder` = an A persona).
 2. A **flips the mic to a Provider-B persona** (`OVER_TO_<B>`), naming the
@@ -303,13 +303,39 @@ and `logs/state/gemini-last-message.md`. **Caveat:** instruct Gemini to edit
 ONLY the `Holder`/`State`/`Task` fields on hand-back — it has flattened the whole
 signal table before; keep a git copy to restore.
 
+## Dispatching Kimi (signal-driven)
+
+The same mirror again, for Kimi. `scripts/start-kimi-signal-watch.sh` (via the
+shared `codex-signal-watch.sh` poller with `--state OVER_TO_KIMI`) runs the
+headless Kimi CLI on each flip to `OVER_TO_KIMI`. Output lands in
+`logs/state/kimi-runs.log` and `logs/state/kimi-last-message.md`.
+
+**What is Kimi-specific and worth knowing before you dispatch one:**
+
+- The binary is `kimi` (`KIMI_BIN` overrides) and its home is `~/.kimi-code/`.
+  **`-p` / `--prompt` is the whole story, and it takes no autonomy flag.** The
+  interactive `--auto` and `-y/--yolo` modes exist, but kimi 2.0.2 refuses to
+  start when either is combined with `--prompt` (*"Cannot combine --prompt with
+  --auto"*) — prompt mode has nobody to ask, so it already never interrupts, and
+  it writes files with no approval step. Do not "harden" the dispatcher by adding
+  `--auto`: it turns every dispatch into an immediate CLI error. This is measured
+  on the binary, not read off `--help`, which does not say so.
+- **Kimi's efforts are `low`, `high`, `max` — there is no `medium`.** A roster
+  cell that names one is refused rather than silently substituted, which is why
+  the example roster's Kimi rows read `high` where their peers read `medium`
+  ([AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)).
+- The model ranking behind `frontier-N` comes from the roster's
+  `Kimi models, best first:` line, not from a provider cache. Kimi's own
+  `config.toml` lists the models it has but does not rank them, so the ordering
+  is a fleet decision and lives where fleet decisions live.
+
 ## GitHub Copilot (notify-only)
 
 `GitHub Copilot` is a recognized team agent handed the mic via the live baton
 like the others. To hand off, set `Holder = GitHub Copilot` + `State =
 OVER_TO_COPILOT` with a one-line `Task`.
 
-Unlike Codex/Gemini there is **no autonomous Copilot dispatcher**:
+Unlike Codex/Gemini/Kimi there is **no autonomous Copilot dispatcher**:
 `scripts/start-copilot-signal-watch.sh` is **notify-only** — it echoes signal
 changes and, on `OVER_TO_COPILOT`, prints the `Task` so a human operator (driving
 Copilot in the IDE) picks it up. It does not invoke any Copilot CLI. Copilot then
@@ -335,11 +361,11 @@ On start it:
    output**, so you don't switch prompts:
    - `[Claude Code]` — text + tool calls from the live session transcript
      (`~/.claude/projects/.../<session>.jsonl`, via jq; private thinking excluded),
-   - `[CODEX]` / `[GEMINI]` — full run output from their dispatch logs
-     (`logs/state/{codex,gemini}-runs.log`),
+   - `[CODEX]` / `[GEMINI]` / `[KIMI]` — full run output from their dispatch logs
+     (`logs/state/{codex,gemini,kimi}-runs.log`),
    - mic/state changes from the live baton.
    Copilot is notify-only (it runs in the IDE; no log to tail).
 
 - `scripts/start-all-watchers.sh` — starts the autonomous dispatchers (Codex,
-  Gemini) **and** the notify-only watcher (Copilot) in the background. Start
+  Gemini, Kimi) **and** the notify-only watcher (Copilot) in the background. Start
   individual watchers by name when you don't want a specific dispatcher up.

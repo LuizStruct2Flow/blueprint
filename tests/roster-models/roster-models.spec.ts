@@ -213,6 +213,51 @@ Claude models, best first: fable, opus, sonnet, haiku
     })
   })
 
+  it('#7 TASK-063: a Kimi tier resolves order from the roster and efforts from config.toml', async () => {
+    await scenario('rm-7', async (s) => {
+      const roster = `# Roster
+
+## Members
+
+| Role | Name | Backing agent | Model |
+|---|---|---|---|
+| Back-End-1 | Mira | Kimi | frontier:high |
+| Back-End-2 | Nils | Kimi | frontier-3:high |
+
+Kimi models, best first: k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed
+`
+      const dir = await s.fs.mkdirp('proj')
+      await s.fs.write('proj/AGENT_ROSTER.md', roster)
+      await s.fs.write('proj/.blueprint-source', '')
+      const kimiHome = await s.fs.mkdirp('kimi')
+      await s.fs.write(
+        'kimi/config.toml',
+        [
+          '[models."kimi-code/k3"]',
+          'model = "k3"',
+          'support_efforts = [ "low", "high", "max" ]',
+          '',
+          '[models."kimi-code/kimi-for-coding-highspeed"]',
+          'model = "kimi-for-coding-highspeed"',
+          'max_context_size = 262144',
+        ].join('\n') + '\n',
+      )
+      const env = { KIMI_HOME: kimiHome }
+      const run = (snippet: string) =>
+        s.run('bash', ['-c', `. "${LIB}"; ${snippet.replace(/@/g, dir)}`], { cwd: s.workspace.root, env })
+
+      const ok = await run('bp_roster_model_for_name "@" Mira')
+      expect(ok.stdout, ok.output).toBe('Kimi\tk3\thigh\n')
+
+      // frontier-3 lands on kimi-for-coding-highspeed, which has no
+      // support_efforts key in config.toml — refused, not silently allowed.
+      const noEfforts = await run('bp_roster_model_for_name "@" Nils')
+      expect(noEfforts.code).not.toBe(0)
+      expect(noEfforts.stdout).toBe('')
+      expect(noEfforts.stderr).toMatch(/Nils: no support_efforts for kimi-code\/kimi-for-coding-highspeed/)
+    })
+  })
+
   it('#6 TASK-059 reopened: a nested subagent (rc-2 "who") labels with the model it ran on, no invented effort', async () => {
     await scenario('rm-6', async (s) => {
       const { dir, env } = await project(s)

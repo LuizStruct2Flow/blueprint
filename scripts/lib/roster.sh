@@ -383,6 +383,15 @@ EOF
 #                   Claude models, best first: fable, opus, sonnet, haiku
 #                 and Claude Code resolves each family alias to its newest
 #                 version. Efforts are the ones a subagent definition accepts.
+#   Kimi — the roster carries one line, best first, naming the model aliases:
+#                   Kimi models, best first: k3, k3-256k, kimi-for-coding
+#                 (order comes from the roster, not the file — Kimi's config
+#                 has no priority field). The tier resolves an alias from that
+#                 line; its supported efforts come from that alias's
+#                 `support_efforts` in `${KIMI_HOME:-$HOME/.kimi-code}/config.toml`,
+#                 under `[models."kimi-code/<alias>"]`. An alias with no
+#                 `support_efforts` key in that file (e.g. a non-thinking
+#                 model) has nothing to resolve against and is refused.
 #
 # Prints `backing<TAB>model<TAB>effort`. Every failure prints an error naming the
 # persona on stderr — never a silent default. rc 2 means there is nothing to
@@ -393,10 +402,13 @@ EOF
 # POSIX on purpose: the Codex wake command sources this lib under `sh`.
 BP_CLAUDE_EFFORTS="low medium high xhigh max"
 
-bp_roster_claude_order(){
-  local file
+# Space-separated, best first, from the roster's "<Provider> models, best
+# first:" line (e.g. provider "Claude" or "Kimi").
+bp_roster_model_order(){
+  local file provider
   file="$(bp_roster_file "${1:-.}" 2>/dev/null)" || return 1
-  sed -n 's/^[[:space:]]*Claude models, best first:[[:space:]]*//p' "$file" | head -1 | tr ',' ' '
+  provider="$2"
+  sed -n "s/^[[:space:]]*${provider} models, best first:[[:space:]]*//p" "$file" | head -1 | tr ',' ' '
 }
 
 # One `slug<TAB>level level …` per listed Codex model, best first.
@@ -406,6 +418,26 @@ bp_roster_codex_models(){
   jq -r '[.models[] | select(.visibility == "list")] | sort_by(.priority)[]
          | .slug + "\t" + ([.supported_reasoning_levels[]? | (.effort // .)] | join(" "))' \
     "$cache" 2>/dev/null
+}
+
+# Space-separated supported efforts for one Kimi model alias (e.g. "k3"),
+# read from `[models."kimi-code/<alias>"]` -> `support_efforts` in
+# config.toml. Empty/failure if the file is unreadable or the alias has no
+# support_efforts key (kimi-for-coding-highspeed has none on this host).
+bp_roster_kimi_levels(){
+  local alias="$1" cfg="${KIMI_HOME:-$HOME/.kimi-code}/config.toml"
+  [ -r "$cfg" ] || return 1
+  awk -v want="[models.\"kimi-code/${alias}\"]" '
+    /^\[/ { insec = ($0 == want); next }
+    insec && /^support_efforts[[:space:]]*=/ {
+      line = $0
+      sub(/^[^=]*=[[:space:]]*/, "", line)
+      gsub(/[][",]/, " ", line)
+      print line
+      found = 1
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$cfg"
 }
 
 bp_roster_model_for_name(){
@@ -435,7 +467,7 @@ EOF
   esac
   case "$backing" in
     "Claude Code")
-      line="$(bp_roster_claude_order "$src")"
+      line="$(bp_roster_model_order "$src" "Claude")"
       [ -n "$line" ] || { printf "[roster] %s: the roster has no 'Claude models, best first:' line\n" "$name" >&2; return 1; }
       # shellcheck disable=SC2086
       set -- $line
@@ -447,6 +479,16 @@ EOF
       line="$(printf '%s\n' "$line" | sed -n "$((n + 1))p")"
       model="$(printf '%s' "$line" | cut -f1)"
       levels="$(printf '%s' "$line" | cut -f2)" ;;
+    Kimi)
+      line="$(bp_roster_model_order "$src" "Kimi")"
+      [ -n "$line" ] || { printf "[roster] %s: the roster has no 'Kimi models, best first:' line\n" "$name" >&2; return 1; }
+      # shellcheck disable=SC2086
+      set -- $line
+      if [ "$n" -lt "$#" ]; then shift "$n"; model="$1"; fi
+      if [ -n "$model" ]; then
+        levels="$(bp_roster_kimi_levels "$model")"
+        [ -n "$levels" ] || { printf "[roster] %s: no support_efforts for kimi-code/%s in %s\n" "$name" "$model" "${KIMI_HOME:-$HOME/.kimi-code}/config.toml" >&2; return 1; }
+      fi ;;
     *) printf "[roster] %s: no model list for backing agent '%s'\n" "$name" "$backing" >&2; return 1 ;;
   esac
   [ -n "$model" ] || { printf "[roster] %s: tier '%s' is past the end of the %s model list\n" "$name" "$tier" "$backing" >&2; return 1; }

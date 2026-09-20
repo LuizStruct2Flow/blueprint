@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Start all signal watchers (codex, copilot, gemini) in the background and log to ./logs/
-# WARNING: This helper may start autonomous dispatchers (Codex, Gemini) which
-# invoke CLIs. Use intentionally; prefer starting notify-only watchers by name.
+# Start all signal watchers (codex, copilot, gemini, kimi) in the background and log to ./logs/
+# WARNING: This helper may start autonomous dispatchers (Codex, Gemini, Kimi)
+# which invoke CLIs. Use intentionally; prefer starting notify-only watchers by name.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 logs_dir="$repo_root/logs"
@@ -18,7 +18,7 @@ start_watch(){
   fi
 }
 
-dispatchers=(start-codex-signal-watch.sh start-gemini-signal-watch.sh)
+dispatchers=(start-codex-signal-watch.sh start-gemini-signal-watch.sh start-kimi-signal-watch.sh)
 notifiers=(start-copilot-signal-watch.sh)
 
 echo "Starting dispatchers: ${dispatchers[*]}"

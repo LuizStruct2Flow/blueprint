@@ -53,11 +53,11 @@ roster, not a bare agent type.
   (`cp AGENT_ROSTER.example.md AGENT_ROSTER.md`) and edit your copy. Each engineer
   runs a different fleet — different agents, subscriptions and quotas — so the live
   roster is neither shared nor overwritten by a blueprint sync. The `Backing agent`
-  column is free text (Claude Code, Codex, Gemini, Copilot, Qwen, …); only
+  column is free text (Claude Code, Codex, Kimi, Gemini, Copilot, Qwen, …); only
   autonomous dispatch needs a matching signal watcher.
 - **[AGENTS.md](AGENTS.md)** — the coordination protocol: mic states, the ACTIVE-on-claim rule
   (claiming the mic means setting `State = ACTIVE` first), reactivity / Monitor
-  setup, and how each backing agent (Codex, Gemini, Copilot) is dispatched/watched.
+  setup, and how each backing agent (Codex, Gemini, Kimi, Copilot) is dispatched/watched.
   Read it before any coordinated work.
 
 Watch the whole team live in one terminal: `bash scripts/agent-activity.sh --daemon`
@@ -85,7 +85,7 @@ change: the mic (`logs/state/signal.md`, every `Holder`/`State` change, not just
 `OVER_TO_<you>`), and whatever `project_config_paths.md` §"Wake-time Monitors"
 declares. Then orchestrate the roster.
 
-**Agents without Claude hooks (Codex, Gemini) wake by hand:** run
+**Agents without Claude hooks (Codex, Gemini, Kimi) wake by hand:** run
 `bash scripts/blueprint drift` and report a non-zero exit as unknown, then
 `bash scripts/agent-activity.sh --daemon` regardless of the drift result.
 

@@ -14,8 +14,8 @@
 > be overwritten on every blueprint sync. So the *example* is blueprint-managed
 > and the *live roster* is yours.
 >
-> **Backing agents are open-ended.** The rows below use Claude Code and Codex
-> because that is the combination the dispatchers in
+> **Backing agents are open-ended.** The rows below use Claude Code, Codex and
+> Kimi because those are the ones the dispatchers in
 > [AGENTS.md](AGENTS.md) ship with, but the `Backing agent` column is free text
 > — put `Gemini`, `GitHub Copilot`, `Qwen`, or anything else you actually run.
 > Only two things depend on the value: the live feed prints it as the label
@@ -43,39 +43,54 @@ one's backing agent to whatever you actually run.
 | Role | Name | Backing agent | Model |
 |---|---|---|---|
 | Orchestrator | Sylvia | Claude Code | session-based |
-| PO | Klaus | Claude Code | frontier-1:medium |
-| BA | Kathrin | Codex | frontier-1:medium |
-| Senior Architect | Christian | Claude Code | frontier:high |
-| Architect | Slava | Codex | frontier:high |
-| UX | Nicole | Claude Code | frontier-1:medium |
-| Front-End-1 | Yannik | Claude Code | frontier-1:medium |
-| Front-End-2 | Alex | Codex | frontier-1:medium |
-| Back-End-1 | Matthias | Claude Code | frontier-1:medium |
-| Back-End-2 | Andreas | Codex | frontier-1:medium |
-| QA-1 | Vitali | Claude Code | frontier-1:medium |
-| QA-2 | Jesko | Codex | frontier-1:medium |
-| Security-1 | Markus | Claude Code | frontier-1:medium |
-| Infrastructure-1 | Philipp | Claude Code | frontier-1:medium |
-| Infrastructure-2 | Elias | Codex | frontier-1:medium |
+| PO | Klaus | Claude Code | frontier-2:medium |
+| BA-1 | Kathrin | Codex | frontier-2:medium |
+| BA-2 | Joan | Kimi | frontier-2:high |
+| Senior Architect | Christian | Claude Code | frontier-1:high |
+| Architect-1 | Slava | Kimi | frontier-1:high |
+| Architect-2 | Alexey | Codex | frontier-1:high |
+| UX | Nicole | Claude Code | frontier-2:medium |
+| Front-End-1 | Yannik | Claude Code | frontier-2:medium |
+| Front-End-2 | Alex | Codex | frontier-2:medium |
+| Front-End-3 | Adam | Kimi | frontier-2:high |
+| Back-End-1 | Matthias | Claude Code | frontier-2:medium |
+| Back-End-2 | Andreas | Codex | frontier-2:medium |
+| Back-End-3 | Jonathan | Kimi | frontier-2:high |
+| QA-1 | Vitali | Claude Code | frontier-2:medium |
+| QA-2 | Jesko | Codex | frontier-2:medium |
+| QA-3 | Vijay | Kimi | frontier-2:high |
+| Security-1 | Markus | Claude Code | frontier:high |
+| Security-2 | Florian | Kimi | frontier:high |
+| Infrastructure-1 | Philipp | Claude Code | frontier-2:medium |
+| Infrastructure-2 | Elias | Codex | frontier-2:medium |
+| Infrastructure-3 | Thomas | Kimi | frontier-2:high |
 
 Claude models, best first: fable, opus, sonnet, haiku
+Kimi models, best first: k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed
 
 **Model** is `<tier>:<effort>`: `frontier` is the provider's best model and
 `frontier-N` is N places down its ranked list, so no cell names a model version.
 The Orchestrator row is the one exception: its cell is `session-based`, because
 the founder picks that session's model at start, not the roster.
 
-Default backing-agent totals: **9 Claude Code, 6 Codex.** This default uses only
-Claude Code + Codex. **Gemini and GitHub Copilot are fully supported** (see
-[AGENTS.md](AGENTS.md)) but aren't in the default roster, because on many setups
-those are free-tier accounts with limited credits (Gemini throttles on quota;
-GitHub Copilot may have no headless CLI to dispatch). If you have paid Gemini /
-Copilot, give them personas.
+**The effort half is the provider's own vocabulary, not a shared scale.** Claude
+Code takes `low` … `max`; Codex takes whatever its model's
+`supported_reasoning_levels` allow; **Kimi takes `low`, `high`, `max` — it has no
+`medium`**, which is why the Kimi rows read `high` where their Claude and Codex
+peers read `medium`. Resolution reads each provider's own list and refuses a cell
+that names an effort the model does not support, so a wrong cell fails loudly
+rather than running at some silently-substituted setting.
+
+Default backing-agent totals: **9 Claude Code, 6 Codex, 7 Kimi.** **Gemini and
+GitHub Copilot are also supported** (see [AGENTS.md](AGENTS.md)) but aren't in
+the default roster, because on many setups those are free-tier accounts with
+limited credits (Gemini throttles on quota; GitHub Copilot may have no headless
+CLI to dispatch). If you have paid Gemini / Copilot, give them personas.
 
 **The Orchestrator is the operator's primary, human-facing session** — the Claude
 Code prompt the founder talks to and wakes. Whoever holds that row dispatches the
-Codex (and Gemini) personas, hands off to / spawns the other Claude personas,
-integrates their work, and owns coordination. The other personas are launched by
+watcher-backed personas (Codex, Gemini, Kimi), hands off to / spawns the other
+Claude personas, integrates their work, and owns coordination. The other personas are launched by
 the Orchestrator or by the founder as needed.
 
 > **Renaming a persona means editing ONE cell — the Name column above.**
@@ -109,24 +124,26 @@ the Orchestrator or by the founder as needed.
   `.claude/agents/<name>.md` (model and effort from the `Model` cell) on every
   session start; the Orchestrator row gets none, since the founder picks that
   session's model.
-- **Codex / Gemini** personas: launched by their dispatcher
-  (`start-codex-signal-watch.sh` / `start-gemini-signal-watch.sh`). The dispatch
-  task names the persona/role for the run; a Codex persona in `Holder` runs on
-  the model and effort its `Model` cell resolves to.
+- **Codex / Gemini / Kimi** personas: launched by their dispatcher
+  (`start-codex-signal-watch.sh` / `start-gemini-signal-watch.sh` /
+  `start-kimi-signal-watch.sh`). All three drive the same provider-agnostic
+  polling engine, so a fourth provider is a launcher, not an engine. The dispatch
+  task names the persona/role for the run; a persona in `Holder` runs on the
+  model and effort its `Model` cell resolves to.
 - **GitHub Copilot** personas: notify-only unless a headless Copilot CLI is
   installed — a human operator drives Copilot in the IDE (see AGENTS.md).
 
 **Optional enhancement (not wired by default):** make the dispatchers roster-aware
 — fire on `OVER_TO_<persona>` (resolved to the backing agent via this table) and
-inject the persona + role into the run preamble, so `OVER_TO_SLAVA` launches Codex
-acting as the Architect. Until then, route Codex/Gemini personas via
-`OVER_TO_CODEX` / `OVER_TO_GEMINI` with the target persona named in `Holder`/`Task`.
+inject the persona + role into the run preamble, so `OVER_TO_SLAVA` launches Kimi
+acting as Architect-1. Until then, route those personas via `OVER_TO_CODEX` /
+`OVER_TO_GEMINI` / `OVER_TO_KIMI` with the target persona named in `Holder`/`Task`.
 
 ## Live team feed
 
 `scripts/agent-activity.sh` streams one tail-able `[Persona - model - effort]` feed
-(every agent's mic moves + Codex/Gemini run output + the orchestrator's session
-output). The first agent to wake starts it; it cleans its log and opens a tail
+(every agent's mic moves + the watcher-backed providers' run output + the
+orchestrator's session output). The first agent to wake starts it; it cleans its log and opens a tail
 terminal. `scripts/team-kickoff.sh` runs a round-robin kick-off where each persona
 presents itself and hands the mic to the next — a quick way to confirm the roster
 and the coordination loop after editing this file.

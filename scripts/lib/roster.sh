@@ -338,6 +338,14 @@ _bp_roster_subagent_who(){
 # The optional fourth argument likewise overrides the EFFORT actually run
 # with — usually unnecessary (a dispatch typically gets the effort it asked
 # for), but the session is the source of truth when it differs, same as model.
+# A literal "-" for this argument means "no effort applies, and do not fall
+# back to the roster requested one" — a caller cannot express that with an
+# empty string, since `${4:-}` treats "not passed" and "passed empty" alike,
+# and the roster fallback is the default precisely because most callers want
+# it. Kimi's launcher is the first caller that must say "unknown" without
+# lying: kimi has no per-invocation effort flag, so showing the roster cell
+# here would assert an effort that was never applied (TASK-063 cross-provider
+# review finding 3 / F-002).
 # A roster with no Model cell keeps the old "<Name> - <Backing>"; an INVALID
 # cell also does, and warns naming the persona.
 bp_roster_label(){
@@ -346,6 +354,10 @@ bp_roster_label(){
   r="$(bp_roster_model_for_name "$src" "$name" 2>&1)"; rc=$?
   if [ "$rc" -eq 0 ]; then
     [ -n "$ran" ] || ran="$(printf '%s' "$r" | cut -f2)"
+    if [ "$ran_effort" = "-" ]; then
+      printf '%s - %s' "$name" "$ran"
+      return 0
+    fi
     effort="${ran_effort:-$(printf '%s' "$r" | cut -f3)}"
     printf '%s - %s - %s' "$name" "$ran" "$effort"
     return 0

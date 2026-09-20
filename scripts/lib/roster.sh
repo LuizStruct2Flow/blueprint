@@ -384,13 +384,17 @@ EOF
 #                 and Claude Code resolves each family alias to its newest
 #                 version. Efforts are the ones a subagent definition accepts.
 #   Kimi — the roster carries one line, best first, naming the model aliases:
-#                   Kimi models, best first: k3, k3-256k, kimi-for-coding
+#                   Kimi models, best first: kimi-code/k3, kimi-code/k3-256k
 #                 (order comes from the roster, not the file — Kimi's config
-#                 has no priority field). The tier resolves an alias from that
-#                 line; its supported efforts come from that alias's
-#                 `support_efforts` in `${KIMI_HOME:-$HOME/.kimi-code}/config.toml`,
-#                 under `[models."kimi-code/<alias>"]`. An alias with no
-#                 `support_efforts` key in that file (e.g. a non-thinking
+#                 has no priority field). **The alias is PROVIDER-QUALIFIED,
+#                 because that is what `kimi -m` accepts**: `-m k3` is refused
+#                 with "Model "k3" is not configured in config.toml", and
+#                 `-m kimi-code/k3` runs. Measured on kimi 2.0.2 — a bare alias
+#                 would have broken every dispatch while looking correct in the
+#                 roster. The same string is the config key, so efforts come
+#                 from `[models."<alias>"]` -> `support_efforts` in
+#                 `${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml`. An alias
+#                 with no `support_efforts` key there (e.g. a non-thinking
 #                 model) has nothing to resolve against and is refused.
 #
 # Prints `backing<TAB>model<TAB>effort`. Every failure prints an error naming the
@@ -420,14 +424,15 @@ bp_roster_codex_models(){
     "$cache" 2>/dev/null
 }
 
-# Space-separated supported efforts for one Kimi model alias (e.g. "k3"),
-# read from `[models."kimi-code/<alias>"]` -> `support_efforts` in
-# config.toml. Empty/failure if the file is unreadable or the alias has no
-# support_efforts key (kimi-for-coding-highspeed has none on this host).
+# Space-separated supported efforts for one PROVIDER-QUALIFIED Kimi alias
+# (e.g. "kimi-code/k3"), read from `[models."<alias>"]` -> `support_efforts` in
+# config.toml. The alias is the config key verbatim, and the same string `kimi
+# -m` takes. Empty/failure if the file is unreadable or the alias has no
+# support_efforts key (kimi-code/kimi-for-coding-highspeed has none on this host).
 bp_roster_kimi_levels(){
-  local alias="$1" cfg="${KIMI_HOME:-$HOME/.kimi-code}/config.toml"
+  local alias="$1" cfg="${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml"
   [ -r "$cfg" ] || return 1
-  awk -v want="[models.\"kimi-code/${alias}\"]" '
+  awk -v want="[models.\"${alias}\"]" '
     /^\[/ { insec = ($0 == want); next }
     insec && /^support_efforts[[:space:]]*=/ {
       line = $0
@@ -487,7 +492,7 @@ EOF
       if [ "$n" -lt "$#" ]; then shift "$n"; model="$1"; fi
       if [ -n "$model" ]; then
         levels="$(bp_roster_kimi_levels "$model")"
-        [ -n "$levels" ] || { printf "[roster] %s: no support_efforts for kimi-code/%s in %s\n" "$name" "$model" "${KIMI_HOME:-$HOME/.kimi-code}/config.toml" >&2; return 1; }
+        [ -n "$levels" ] || { printf "[roster] %s: no support_efforts for %s in %s\n" "$name" "$model" "${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml" >&2; return 1; }
       fi ;;
     *) printf "[roster] %s: no model list for backing agent '%s'\n" "$name" "$backing" >&2; return 1 ;;
   esac

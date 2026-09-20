@@ -97,7 +97,51 @@ STATE_DIR="$(agent_state_dir)"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/kimi-runs.log"
 OUTPUT_LAST="$STATE_DIR/kimi-last-message.md"
+# THE MODEL, from the Model cell of the holder persona (TASK-059/TASK-063).
+# A Kimi persona passes `-m <slug>`. A cell that does not resolve REFUSES the
+# dispatch, visibly: running the wrong model quietly is the failure this exists
+# to stop. A holder that is not a Kimi persona with a Model cell dispatches on
+# the default_model kimi has configured, and says so.
+#
+# NOTE FOR EDITORS: this whole block is inside a single-quoted string, so an
+# apostrophe here ends it and breaks the script (`bash -n` catches it). The
+# wording below avoids possessives on purpose — keep it that way rather than
+# re-introducing `'"'"'` escapes.
+#
+# EFFORT IS LOGGED, NOT APPLIED. Unlike the Codex `-c model_reasoning_effort=`
+# flag, kimi 2.0.2 has no per-invocation effort flag — effort lives only in the
+# `[thinking] effort` / `default_effort` keys of config.toml, a shared, global
+# setting. Applying it per dispatch would mean staging a private
+# `KIMI_CODE_HOME` with its own config.toml per persona, which means copying
+# credentials into a generated config — not done casually (founder call,
+# TASK-063). So the resolved effort is REQUESTED and LOGGED, and left
+# unapplied on purpose — never silently dropped as if it had taken effect.
+set --
+REQUESTED_MODEL="" REQUESTED_EFFORT=""
+if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
+  . "$ROOT/scripts/lib/roster.sh"
+fi
+if command -v bp_roster_model_for_name >/dev/null 2>&1; then
+  __m="$(bp_roster_model_for_name "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-}" 2>&1)"
+  case $? in
+    0) case "$__m" in
+         Kimi*) REQUESTED_MODEL="$(printf "%s" "$__m" | cut -f2)"
+                REQUESTED_EFFORT="$(printf "%s" "$__m" | cut -f3)"
+                set -- -m "$REQUESTED_MODEL" ;;
+         *) __m="[roster] ${AGENT_SIGNAL_HOLDER:-}: not a Kimi persona" ;;
+       esac ;;
+    1) printf "%s — dispatch refused\n" "$__m" | tee -a "$RUN_LOG" >&2
+       exit 8 ;;
+  esac
+  [ "$#" -eq 0 ] && printf "%s — kimi runs its configured default_model\n" "$__m" | tee -a "$RUN_LOG"
+fi
+
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
+if [ -n "$REQUESTED_MODEL" ]; then
+  printf "[roster] requested model=%s effort=%s — effort not applicable per-invocation on kimi 2.0.2, see config.toml [thinking]\n" "$REQUESTED_MODEL" "$REQUESTED_EFFORT" | tee -a "$RUN_LOG"
+else
+  printf "[roster] requested model=<kimi default>\n" | tee -a "$RUN_LOG"
+fi
 echo "[$now] dispatching kimi -p ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
 cd "$ROOT"
@@ -106,7 +150,7 @@ cd "$ROOT"
 # ("Cannot combine --prompt with --auto/--yolo", kimi 2.0.2), and `-p` alone
 # writes files with no approval step. Passing --auto/--yolo here would not
 # soften that, it would make the dispatch fail outright.
-"$KIMI_BIN" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
+"$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
   2>&1 | tee "$OUTPUT_LAST" >> "$RUN_LOG"
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] kimi finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"

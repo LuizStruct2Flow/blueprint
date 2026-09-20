@@ -23,11 +23,16 @@ struct2flow agent protocol; this file holds what's specific to
 
 ## Agents in use
 
-> Which dispatchers are wired up for this project. The blueprint assumes
-> Codex + Claude Code; list specialists / subagents the project uses
-> beyond that.
+> Which dispatchers are wired up for this project. The blueprint ships
+> signal-driven dispatchers for Codex, Gemini and Kimi alongside Claude Code;
+> delete the ones you do not run and list any specialists / subagents the
+> project uses beyond them.
 
-- **Codex** (CLI dispatcher, signal-driven — see CLAUDE.md "Dispatching Codex")
+- **Codex** (CLI dispatcher, signal-driven — see AGENTS.md "Dispatching Codex")
+- **Kimi** (CLI dispatcher, signal-driven — see AGENTS.md "Dispatching Kimi").
+  Its efforts are `low` / `high` / `max` — **there is no `medium`** — so a roster
+  cell copied from a Claude or Codex row will be refused rather than substituted.
+- **Gemini** (CLI dispatcher, signal-driven — see AGENTS.md "Dispatching Gemini")
 - **Claude Code** (this assistant)
 - Optional: list any specialist subagent_types you rely on
   (`Explore`, `Plan`, `claude-code-guide`, …)

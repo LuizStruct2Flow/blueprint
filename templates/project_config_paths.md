@@ -74,13 +74,19 @@ Declare neither if your docs link no served pages.
 
 ## Local agent state
 
-> Where the agent dispatchers write logs and artefacts on the founder's
-> machine. The blueprint defaults to `~/.{{PROJECT_NAME}}/`. Override here
-> only if you want a different location.
+> Where the agent dispatchers write logs and artefacts. State lives **inside
+> the project**, under gitignored `logs/state/`, derived by
+> `scripts/lib/state-dir.sh` — so deleting the project deletes its state
+> (BUG-020: it used to live in `~/.<repo>`, and a project bootstrapped later
+> at the same path inherited the previous one's records). Override here only
+> if you want a different location.
 
-- Codex run log: `~/.{{PROJECT_NAME}}/codex-runs.log`
-- Codex last message: `~/.{{PROJECT_NAME}}/codex-last-message.md`
-- Signal trigger log: `~/.{{PROJECT_NAME}}/signal.log`
+- Codex run log / last message: `logs/state/codex-runs.log`, `logs/state/codex-last-message.md`
+- Gemini run log / last message: `logs/state/gemini-runs.log`, `logs/state/gemini-last-message.md`
+- Kimi run log / last message: `logs/state/kimi-runs.log`, `logs/state/kimi-last-message.md`
+- Signal trigger log: `logs/state/signal.log`
+
+Delete the rows for dispatchers you do not run.
 
 ## Cloud / infra accounts
 

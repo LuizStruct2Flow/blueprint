@@ -29,6 +29,7 @@ export const DISPATCHERS = [
   'scripts/start-codex-signal-watch.sh',
   'scripts/codex-signal-watch.sh',
   'scripts/start-gemini-signal-watch.sh',
+  'scripts/start-kimi-signal-watch.sh',
 ] as const
 
 /** Every consumer of the shared derivation — the feed plus the dispatchers. */

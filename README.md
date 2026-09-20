@@ -15,7 +15,7 @@ upstream so every other project inherits it.
   (a gitignored, per-engineer `AGENT_ROSTER.md`, copied from
   [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md) the way you'd copy
   `.env.example`) — each backed by whichever agent you run: Codex, Claude Code,
-  Gemini, Copilot, Qwen — coordinates through a single live baton at
+  Kimi, Gemini, Copilot, Qwen — coordinates through a single live baton at
   `logs/state/signal.md` (untracked per-checkout state, written only by
   `scripts/signal-set.sh`; `AGENT_SIGNAL.md` documents the protocol):
   radio-over handoff, one mic at a time, no overwrites or duplicate work.

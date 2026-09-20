@@ -36,7 +36,7 @@ import { join } from 'node:path'
  * a name beginning with a generic prefix is generic.
  */
 const ALLOWED_PREFIX =
-  /^(AGENT_|BP_|BLUEPRINT_|GIT_|SIGNAL_|CODEX_|GEMINI_|CLAUDE_|SONAR_|GITHUB_|GH_|OSV_|SEMGREP_|GITLEAKS_|HOME|PATH|TMPDIR|XDG_|PWD|SHELL|USER|LANG|LC_|EDITOR|NO_COLOR|TERM|CI)/
+  /^(AGENT_|BP_|BLUEPRINT_|GIT_|SIGNAL_|CODEX_|GEMINI_|KIMI_|CLAUDE_|SONAR_|GITHUB_|GH_|OSV_|SEMGREP_|GITLEAKS_|HOME|PATH|TMPDIR|XDG_|PWD|SHELL|USER|LANG|LC_|EDITOR|NO_COLOR|TERM|CI)/
 
 export interface EnvNamespaceScan {
   /** How many managed scripts were scanned. The non-vacuity number. */

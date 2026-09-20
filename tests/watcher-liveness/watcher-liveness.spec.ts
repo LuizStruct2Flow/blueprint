@@ -86,7 +86,7 @@ import { feedFixture } from '../helpers/feed-fixture.js'
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 const LIB = join(SUBJECT, 'scripts', 'lib', 'watcher-lock.sh')
-const WATCH = join(SUBJECT, 'scripts', 'codex-signal-watch.sh')
+const WATCH = join(SUBJECT, 'scripts', 'signal-watch.sh')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 
 /**
@@ -186,7 +186,7 @@ async function holdLock(
 async function liveRepo(s: Scenario, name = 'live') {
   const root = await s.fs.mkdirp(name)
   await s.fs.write(`${name}/.blueprint-source`, '')
-  const watch = await s.fs.copyIn(WATCH, `${name}/scripts/codex-signal-watch.sh`)
+  const watch = await s.fs.copyIn(WATCH, `${name}/scripts/signal-watch.sh`)
   // The WHOLE lib dir, never named files — feed-fixture.ts records why.
   const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
     cwd: s.workspace.root,

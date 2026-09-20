@@ -126,7 +126,7 @@ blueprint/
 │   └── settings.json               ← generic AWS / git / shell permission allow-list
 ├── scripts/
 │   ├── install-toolchain.sh        ← installs the gate's tools per-OS (brew on macOS, pinned binaries on Linux)
-│   ├── codex-signal-watch.sh       ← signal poller (whole-file generic)
+│   ├── signal-watch.sh             ← signal poller (whole-file generic; provider-agnostic, TASK-063)
 │   ├── start-codex-signal-watch.sh ← Codex CLI launcher (uses {{PROJECT_NAME}})
 │   ├── new-project.sh              ← bootstrap a new project
 │   └── blueprint                   ← sync CLI: drift / pull / a2bp (add to PATH)
@@ -236,7 +236,7 @@ tightening a DoD rule, fixing a bug in the dispatcher script), copy the
 change back to the blueprint:
 
 ```bash
-blueprint a2bp docs/DoD.md scripts/codex-signal-watch.sh
+blueprint a2bp docs/DoD.md scripts/signal-watch.sh
 ```
 
 `a2bp` (apply-to-blueprint) **files a request**: it pushes a branch to the
@@ -335,7 +335,7 @@ decides what ships. Run `blueprint files` to print it. Current contents include:
 - **Top-level:** `CLAUDE.md`, `AGENTS.md`, `STACK_DEFAULTS.md`
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`
-- **`scripts/`:** `install-toolchain.sh`, `codex-signal-watch.sh`,
+- **`scripts/`:** `install-toolchain.sh`, `signal-watch.sh`,
   `start-codex-signal-watch.sh`, `blueprint` itself
 - **`tests/`** — every suite the archive ships (BUG-029). The regression suites guard blueprint-managed machinery your
   project runs, so they have to move forward with it. The blueprint's own

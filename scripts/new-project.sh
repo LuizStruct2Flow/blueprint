@@ -328,8 +328,9 @@ EOF
 # only baton this line may ever write is the NEW PROJECT'S.
 #
 # `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.sh:87) and
-# $AGENT_STATE_HOME (:56), and `codex-signal-watch.sh` EXPORTS
-# AGENT_SIGNAL_FILE into every dispatched wake command. So bootstrapping from a
+# $AGENT_STATE_HOME (:56), and `signal-watch.sh` (TASK-063, formerly
+# codex-signal-watch.sh) EXPORTS AGENT_SIGNAL_FILE into every dispatched wake
+# command. So bootstrapping from a
 # dispatched agent — or from any suite that drives this script without scrubbing
 # its own environment — resolved the seed to the CALLER's live mic and published
 # `Holder=Nobody / State=IDLE / Task="Bootstrapped from the blueprint…"` over a

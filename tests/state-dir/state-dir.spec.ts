@@ -107,7 +107,7 @@ import {
 } from './state-dir.js'
 
 const HELPER = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
-const WATCHER = join(REPO_ROOT, 'scripts/codex-signal-watch.sh')
+const WATCHER = join(REPO_ROOT, 'scripts/signal-watch.sh')
 
 /**
  * Ask the SHIPPED helper, through the named seam, with an explicit root.
@@ -306,7 +306,7 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
 
       for (const rel of [
         'scripts/start-codex-signal-watch.sh',
-        'scripts/codex-signal-watch.sh',
+        'scripts/signal-watch.sh',
         'scripts/codex-feed-filter.sh',
       ]) {
         await s.fs.copyIn(join(REPO_ROOT, rel), join('work', rel))

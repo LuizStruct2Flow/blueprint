@@ -40,7 +40,7 @@ import { startWatcher, until } from '../harness/watcher.js'
  * calls a guard watching the wrong thing.
  *
  * Unsetting them is what the shell suite did too, for a harder reason:
- * `codex-signal-watch.sh` exports `AGENT_SIGNAL_FILE` into every dispatched
+ * `signal-watch.sh` exports `AGENT_SIGNAL_FILE` into every dispatched
  * wake, so a suite run from inside a dispatch inherited a pointer to the REAL
  * baton and wrote live state whatever its cwd said (BUG-046).
  */

@@ -4,7 +4,7 @@ set -euo pipefail
 # Launcher for the AGENT_SIGNAL.md ↔ Gemini CLI orchestrator.
 #
 # Mirror of start-codex-signal-watch.sh, but for Gemini. Watches
-# AGENT_SIGNAL.md (via the shared scripts/codex-signal-watch.sh polling
+# AGENT_SIGNAL.md (via the shared scripts/signal-watch.sh polling
 # engine) and, every time the mic flips to `OVER_TO_GEMINI`, invokes the
 # real Gemini CLI in non-interactive (-p) YOLO mode with the current `Task`
 # field as the prompt. Gemini's file edits + signal flip land directly in
@@ -19,16 +19,17 @@ set -euo pipefail
 # `GEMINI_BIN` points at. Auth reuses ~/.gemini/oauth_creds.json (the
 # Gemini Code Assist extension login).
 #
-# NOTE: the shared poller (codex-signal-watch.sh) executes the wake script
-# via its CODEX_WAKE_COMMAND env hook — we reuse that hook here (the name is
-# incidental; the poller is provider-agnostic). The trigger STATE is passed
-# as --state OVER_TO_GEMINI so this never collides with the Codex watcher.
+# NOTE: the shared poller (signal-watch.sh) executes the wake script via its
+# AGENT_WAKE_COMMAND env hook (TASK-063; the poller is provider-agnostic, was
+# renamed from codex-signal-watch.sh/CODEX_WAKE_COMMAND). The trigger STATE is
+# passed as --state OVER_TO_GEMINI so this never collides with the Codex/Kimi
+# watchers.
 
-# Anchored to this script's own location — see scripts/codex-signal-watch.sh
+# Anchored to this script's own location — see scripts/signal-watch.sh
 # repo_root() for why `git rev-parse` and `pwd` are both wrong here (exported
 # GIT_DIR, and a different checkout's lib/state-dir.sh silently winning).
 # --- physical script root (A-09 / BUG-020) -----------------------------------
-# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# Resolved from THIS FILE, through symlinks. See scripts/signal-watch.sh
 # for why $0, cwd and `git rev-parse` are each wrong here. The block below is
 # byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
 # cannot be shared as a lib, because finding the lib is the very problem it
@@ -86,7 +87,7 @@ export ROOT
 # Runs every time State = OVER_TO_GEMINI fires. AGENT_SIGNAL_TASK is the
 # current Task field, exported by the poller. We hand Gemini the radio-over
 # preamble + Task and let it edit files / flip the signal in YOLO mode.
-export CODEX_WAKE_COMMAND='
+export AGENT_WAKE_COMMAND='
 set -u
 # Resolved HERE, on every dispatch — not baked in when the watcher started.
 # A watcher lives for days; the derivation can change under it, and a frozen
@@ -111,4 +112,4 @@ end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] gemini finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
 '
 
-exec "${ROOT}/scripts/codex-signal-watch.sh" --state OVER_TO_GEMINI "$@"
+exec "${ROOT}/scripts/signal-watch.sh" --state OVER_TO_GEMINI "$@"

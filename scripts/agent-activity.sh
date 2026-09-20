@@ -5,7 +5,7 @@
 #   - AGENT_SIGNAL.md mic changes           → [<Holder>] <State> — <Task>
 #   - $AGENT_STATE_HOME/codex-runs.log      → [CODEX]  <line>
 #   - $AGENT_STATE_HOME/gemini-runs.log     → [GEMINI] <line>
-#   - $AGENT_STATE_HOME/kimi-runs.log       → [KIMI]   <line>
+#   - Kimi's launcher labels its own lines per-persona (BUG-021 shape, TASK-063)
 #   - this repo's newest Claude transcript  → [<persona> - <model> - <effort>] <line>
 #   - each Agent-tool subagent's transcript → [<persona> - <model it ran on> - <effort>] <line>
 #
@@ -49,7 +49,7 @@
 set -uo pipefail
 
 # --- physical script root (A-09 / BUG-020) -----------------------------------
-# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# Resolved from THIS FILE, through symlinks. See scripts/signal-watch.sh
 # for why $0, cwd and `git rev-parse` are each wrong here. The block below is
 # byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
 # cannot be shared as a lib, because finding the lib is the very problem it
@@ -105,8 +105,9 @@ state_dir="$(agent_state_dir)"; mkdir -p "$state_dir"
 # project (same class as BUG-002).
 . "$repo_root/scripts/lib/roster.sh"
 
-# The watcher-liveness oracle, shared with scripts/codex-signal-watch.sh which
-# takes the lock this tests (BUG-022). Guarded rather than sourced outright: a
+# The watcher-liveness oracle, shared with scripts/signal-watch.sh (TASK-063,
+# formerly scripts/codex-signal-watch.sh) which takes the lock this tests
+# (BUG-022). Guarded rather than sourced outright: a
 # project that has pulled the feed but not this lib must keep its feed, and lose
 # only the dead-watcher warning. watcher_liveness_line no-ops without it.
 [ -r "$repo_root/scripts/lib/watcher-lock.sh" ] && . "$repo_root/scripts/lib/watcher-lock.sh"
@@ -671,11 +672,14 @@ supervise_body(){
   sig_last="$(signal_token)"
   ros_last="$(roster_token)"
 
-  # No seed for codex-runs.log — nothing pumps it any more (BUG-021). Seeding a
-  # log this loop never reads would leave a dead offset that later reads as
-  # "already caught up" if the pump were ever restored.
+  # No seed for codex-runs.log or kimi-runs.log — nothing pumps either any more
+  # (BUG-021, and TASK-063 for Kimi: its launcher now does its own per-dispatch
+  # labelling exactly like Codex's, so the raw pump that used to stamp every
+  # line `[KIMI]` — and re-emit a still-growing unterminated line as if it were
+  # new — is gone). Seeding a log this loop never reads would leave a dead
+  # offset that later reads as "already caught up" if a pump were ever
+  # restored.
   seed_offset "$state_dir/gemini-runs.log"
-  seed_offset "$state_dir/kimi-runs.log"
 
   # BUG-137 — true only for the loop's first pass. A subagent transcript that
   # the glob below matches on THIS pass existed (or was already fully written)
@@ -716,11 +720,11 @@ supervise_body(){
     # know, because a label chosen here is bound once at daemon start while the
     # mic changes hands many times under it (BUG-021).
     #
-    # Gemini and Kimi still route through their run logs: neither has a
-    # launcher doing per-dispatch labelling, so dropping these pumps would lose
-    # their lines rather than improve them.
+    # Gemini still routes through its run log: it has no launcher doing
+    # per-dispatch labelling, so dropping this pump would lose its lines rather
+    # than improve them. Kimi's launcher now labels its own lines (TASK-063,
+    # same shape as Codex) and is deliberately NOT pumped here any more.
     pump "$state_dir/gemini-runs.log" raw   "GEMINI"
-    pump "$state_dir/kimi-runs.log"   raw   "KIMI"
 
     if command -v jq >/dev/null 2>&1; then
       # "newest" always EOF-seeds, deliberately, even past first_scan: the

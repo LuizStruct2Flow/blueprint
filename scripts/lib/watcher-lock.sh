@@ -2,7 +2,8 @@
 # scripts/lib/watcher-lock.sh — is a dispatcher listening on this mic state?
 #
 # Sourced, not executed. Two callers, deliberately:
-#   scripts/codex-signal-watch.sh   TAKES the lock for its lifetime
+#   scripts/signal-watch.sh         TAKES the lock for its lifetime (TASK-063,
+#                                    formerly scripts/codex-signal-watch.sh)
 #   scripts/agent-activity.sh       TESTS it against the baton, every poll
 #
 # WHY THIS EXISTS (BUG-022)

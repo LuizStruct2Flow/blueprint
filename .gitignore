@@ -108,7 +108,7 @@ docs/**/CODEX_REVIEW.md
 # struct2flow agent-protocol scripts (Codex dispatcher etc.).
 # Project-specific scripts that ship publicly go in scripts/ with
 # names that don't match these.
-scripts/codex-signal-watch.sh
+scripts/signal-watch.sh
 scripts/start-codex-signal-watch.sh
 scripts/new-project.sh
 

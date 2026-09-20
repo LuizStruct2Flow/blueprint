@@ -390,7 +390,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
   it.each([
     'scripts/start-codex-signal-watch.sh',
     'scripts/start-gemini-signal-watch.sh',
-    'scripts/codex-signal-watch.sh',
+    'scripts/signal-watch.sh',
   ])('#6 A-09: %s has its placeholder substituted at bootstrap', async (rel) => {
     await scenario(`bootstrap-contents-6-${rel.replace(/[^a-z0-9]+/gi, '-')}`, async (s) => {
       const { derived } = await build(s)

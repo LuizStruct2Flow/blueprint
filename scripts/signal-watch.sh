@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Watch AGENT_SIGNAL.md and run a wake command when the mic flips to Codex.
+# Watch AGENT_SIGNAL.md and run a wake command when the mic flips to a given
+# state. Provider-agnostic (TASK-063): Codex, Gemini and Kimi each `exec` this
+# same engine with their own `--state OVER_TO_<NAME>`, so it is named for what
+# it does — signal-watch.sh — rather than for the first consumer it had.
 #
 # Example:
-#   scripts/codex-signal-watch.sh --once -- printf 'wake\n'
+#   scripts/signal-watch.sh --once -- printf 'wake\n'
 #
-# Or configure a real Codex client command:
-#   CODEX_WAKE_COMMAND='codex --cwd /path/to/repo wake' \
-#     scripts/codex-signal-watch.sh
+# Or configure a real client command:
+#   AGENT_WAKE_COMMAND='codex --cwd /path/to/repo wake' \
+#     scripts/signal-watch.sh
 #
 # The command receives AGENT_SIGNAL_HOLDER, AGENT_SIGNAL_STATE, and
 # AGENT_SIGNAL_TASK in its environment. Every trigger is also appended to
@@ -16,7 +19,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/codex-signal-watch.sh [options] [-- command ...]
+Usage: scripts/signal-watch.sh [options] [-- command ...]
 
 Options:
   --file PATH       Signal file to watch (default: ./AGENT_SIGNAL.md)
@@ -26,7 +29,8 @@ Options:
   --once            Exit after the first trigger
   -h, --help        Show this help
 
-If no command is passed after --, CODEX_WAKE_COMMAND is executed with sh -c.
+If no command is passed after --, AGENT_WAKE_COMMAND is executed with sh -c
+(CODEX_WAKE_COMMAND is still honoured as a back-compat alias — see below).
 If neither is provided, the watcher only writes the trigger log line.
 USAGE
 }
@@ -249,10 +253,15 @@ trigger_if_needed() {
   export AGENT_SIGNAL_TASK="$task"
   export AGENT_SIGNAL_FILE="$SIGNAL_FILE"
 
+  # TASK-063: renamed from CODEX_WAKE_COMMAND (Codex was the first consumer;
+  # Gemini and Kimi now exec this same engine). The generic name is read
+  # FIRST, per tests/env-namespace #2 — a back-compat fallback must never let
+  # the old name win over the new one.
+  __wake_command="${AGENT_WAKE_COMMAND:-${CODEX_WAKE_COMMAND:-}}"
   if [[ ${#COMMAND[@]} -gt 0 ]]; then
     "${COMMAND[@]}"
-  elif [[ -n "${CODEX_WAKE_COMMAND:-}" ]]; then
-    sh -c "$CODEX_WAKE_COMMAND"
+  elif [[ -n "$__wake_command" ]]; then
+    sh -c "$__wake_command"
   fi
 
   return 0

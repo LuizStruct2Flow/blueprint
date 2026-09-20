@@ -126,6 +126,64 @@ until the state advances (e.g. `OVER_TO_CLAUDE`), then claims the mic and
 continues. Stop only when there's genuinely nothing to do (signal `IDLE`, no open
 plans, all bugs in `done/`).
 
+## Who does the work — load balancing across providers
+
+**Founder rule, 2026-09-20.** Work is spread across every provider that has
+quota. Not "may be" — is. A provider sitting idle while another burns its
+allowance is the failure this rule exists to stop.
+
+| Kind of work | Who does it |
+|---|---|
+| **Plan review** | **All three providers, seeking consensus.** Not one reviewer — Claude, Codex and Kimi each review, and the plan advances on what they agree. |
+| **Writing code** | **Round-robin across providers with quota.** The next dispatch goes to the next provider in rotation, not to whoever is convenient. |
+| **Anything else** | Load-balanced the same way. There is no category exempt from this. |
+| **Orchestration** | **Claude only.** The Orchestrator is the founder-facing session. |
+| **`git commit` and `git push`** | **Claude only.** No other provider commits or pushes, and every dispatch preamble says so. |
+
+**A provider with zero quota leaves the rotation** for as long as its quota is
+unavailable, and rejoins when it returns. It is not skipped once and then
+retried on the next dispatch — it is out, and coming back is a state change.
+
+**Why this is a rule and not a preference:** the cheapest provider to reach for
+is whichever one the Orchestrator is already running on, and that is Claude.
+Left to convenience, every dispatch lands on Claude, the other two subscriptions
+pay for nothing, and the cross-provider review that catches what one model's
+blind spot hides (see §"Four-eyes" below) never has a second opinion available.
+
+### Two things this collides with, and how they resolve
+
+**Round-robin picks the AUTHOR. Four-eyes constrains the REVIEWER.** They
+compose: the rotation chooses who writes, and the review must then come from a
+provider that did not. No conflict unless the rotation has shrunk to one.
+
+**When only one provider has quota, four-eyes cannot be satisfied.** That is a
+real state, not a hypothetical, and it must not be resolved by quietly letting a
+provider review itself — the rule's entire value is that the reviewer has a
+different blind spot. Hold the push and tell the founder, who decides whether to
+wait for quota or waive the review for that change. **A waiver is the founder's,
+never an agent's.**
+
+### Defaults the Orchestrator applies until told otherwise
+
+These fill gaps the rule above does not decide. They are defaults, not founder
+decisions — correct them and they change.
+
+- **Rotation granularity is per dispatch**, not per work item. A task split
+  across three agents uses three rotation slots.
+- **Consensus means the reviewers agree on what must change.** Where they
+  genuinely disagree, the Orchestrator does not cast a tie-breaking vote: it
+  reports the disagreement and what each provider argued, and the founder
+  decides. A reviewer's finding is input, not an order (DoD §1b rule 4), so
+  "two out of three" is not a verdict.
+- **Quota exhaustion is detected from the provider's own refusal**, not
+  predicted. Until the mechanism in TASK-065 lands, this is the Orchestrator
+  noticing a dispatch fail and saying so.
+
+**This is prose, and prose is the weak form.** TASK-065 mechanises the rotation
+and the quota state so that the selection is made by code rather than by an
+agent remembering this section — the direction TASK-062 sets for every rule in
+this repo.
+
 ## Four-eyes cross-provider review (mandatory before push)
 
 **Every change is reviewed by a DIFFERENT backing provider than the one that wrote

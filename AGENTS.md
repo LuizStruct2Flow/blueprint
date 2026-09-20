@@ -135,8 +135,8 @@ allowance is the failure this rule exists to stop.
 | Kind of work | Who does it |
 |---|---|
 | **Plan review** | **All three providers, seeking consensus.** Not one reviewer — Claude, Codex and Kimi each review, and the plan advances on what they agree. |
-| **Writing code** | **Round-robin across providers with quota.** The next dispatch goes to the next provider in rotation, not to whoever is convenient. |
-| **Anything else** | Load-balanced the same way. There is no category exempt from this. |
+| **Writing code** | **The ROLE is chosen by the work. The PROVIDER is chosen by rotation within that role.** A back-end task goes to a back-end engineer — the next one in rotation among the back-end personas with quota. |
+| **Anything else** | Load-balanced the same way, inside the role the work belongs to. There is no category exempt from this. |
 | **Orchestration** | **Claude only.** The Orchestrator is the founder-facing session. |
 | **`git commit` and `git push`** | **Claude only.** No other provider commits or pushes, and every dispatch preamble says so. |
 
@@ -149,6 +149,32 @@ is whichever one the Orchestrator is already running on, and that is Claude.
 Left to convenience, every dispatch lands on Claude, the other two subscriptions
 pay for nothing, and the cross-provider review that catches what one model's
 blind spot hides (see §"Four-eyes" below) never has a second opinion available.
+
+### Role first, provider second
+
+**Founder rule, 2026-09-20.** Load balancing never overrides competence. The
+work decides the **role** — a back-end change goes to a back-end engineer, an
+infra change to infra, a test to QA. Only then does the rotation choose **which**
+of that role's personas takes it, among those whose provider has quota.
+
+So the rotation is **per role family**, not one global queue. Back-End turning
+to Codex says nothing about whose turn it is in QA.
+
+**Roles are matched by family, ignoring the numeric suffix.** `Back-End-1`,
+`Back-End-2` and `Back-End-3` are one role with three representatives; the digit
+is which representative, not which job. That is already how
+`scripts/team-kickoff.sh` reads roles for its introductions, so the convention
+is not new here.
+
+**Check the coverage before relying on it.** The rule assumes each role has a
+representative per provider, and on a real roster that is often untrue — a role
+covered by two providers rotates between two, and a role covered by one does not
+rotate at all. **That is a roster gap, not a licence to cross roles**: a back-end
+task does not go to a front-end persona because the back-end rotation is
+exhausted. It waits, or the founder is told the role is short.
+
+`bp_roster_rows` plus a strip of the `-N` suffix answers "who covers this role"
+in one pass — TASK-065 makes it a command rather than a thing to remember.
 
 ### The rotation turns per WORK ITEM, and the agent ends with it
 

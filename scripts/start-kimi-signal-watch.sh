@@ -4,7 +4,7 @@ set -euo pipefail
 # Launcher for the AGENT_SIGNAL.md ↔ Kimi CLI orchestrator.
 #
 # Mirror of start-gemini-signal-watch.sh, but for Kimi. Watches AGENT_SIGNAL.md
-# (via the shared scripts/codex-signal-watch.sh polling engine) and, every time
+# (via the shared scripts/signal-watch.sh polling engine) and, every time
 # the mic flips to `OVER_TO_KIMI`, invokes the real Kimi CLI in non-interactive
 # (-p) mode with the current `Task` field as the prompt — `-p` alone runs
 # unattended (kimi 2.0.2 refuses to combine `-p` with `--auto`/`--yolo`, and
@@ -20,16 +20,17 @@ set -euo pipefail
 # The Kimi CLI is `~/.kimi-code/bin/kimi` or whatever `KIMI_BIN` points at.
 # Auth reuses ~/.kimi-code/ (device-code login).
 #
-# NOTE: the shared poller (codex-signal-watch.sh) executes the wake script via
-# its CODEX_WAKE_COMMAND env hook — we reuse that hook here (the name is
-# incidental; the poller is provider-agnostic). The trigger STATE is passed as
-# --state OVER_TO_KIMI so this never collides with the Codex/Gemini watchers.
+# NOTE: the shared poller (signal-watch.sh) executes the wake script via its
+# AGENT_WAKE_COMMAND env hook (TASK-063; renamed from codex-signal-watch.sh /
+# CODEX_WAKE_COMMAND — the poller is provider-agnostic). The trigger STATE is
+# passed as --state OVER_TO_KIMI so this never collides with the Codex/Gemini
+# watchers.
 
-# Anchored to this script's own location — see scripts/codex-signal-watch.sh
+# Anchored to this script's own location — see scripts/signal-watch.sh
 # repo_root() for why `git rev-parse` and `pwd` are both wrong here (exported
 # GIT_DIR, and a different checkout's lib/state-dir.sh silently winning).
 # --- physical script root (A-09 / BUG-020) -----------------------------------
-# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# Resolved from THIS FILE, through symlinks. See scripts/signal-watch.sh
 # for why $0, cwd and `git rev-parse` are each wrong here. The block below is
 # byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
 # cannot be shared as a lib, because finding the lib is the very problem it
@@ -85,7 +86,7 @@ export ROOT
 # Runs every time State = OVER_TO_KIMI fires. AGENT_SIGNAL_TASK is the current
 # Task field, exported by the poller. We hand Kimi the radio-over preamble +
 # Task and let it edit files / flip the signal in never-ask mode.
-export CODEX_WAKE_COMMAND='
+export AGENT_WAKE_COMMAND='
 set -u
 # Resolved HERE, on every dispatch — not baked in when the watcher started.
 # A watcher lives for days; the derivation can change under it, and a frozen
@@ -116,11 +117,55 @@ OUTPUT_LAST="$STATE_DIR/kimi-last-message.md"
 # credentials into a generated config — not done casually (founder call,
 # TASK-063). So the resolved effort is REQUESTED and LOGGED, and left
 # unapplied on purpose — never silently dropped as if it had taken effect.
-set --
-REQUESTED_MODEL="" REQUESTED_EFFORT=""
+# The roster lib is sourced ONCE, here, before anything asks it a question.
+# Both blocks below call into it, and an earlier revision resolved the
+# Orchestrator ABOVE this line: `command -v` was false, so it fell back to the
+# literal Orchestrator and the preamble named a holder signal-set.sh refuses.
+# The run log said so plainly and the dispatch still completed, because the
+# model reasoned its way to the right name — which is exactly how this stays
+# invisible. Keep the source first.
 if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
   . "$ROOT/scripts/lib/roster.sh"
 fi
+
+# THE FEED LABEL, built here and nowhere else (BUG-021) — same rule as the
+# Codex launcher, same function, so the two cannot drift into different
+# formats. There is deliberately NO kimi-runs.log pump in agent-activity.sh any
+# more: a persona-resolved label at the point of dispatch is the only labeller,
+# exactly as BUG-021 established for Codex. A raw pump also re-emitted every
+# growing partial line as kimi streamed without a trailing newline, so removing
+# it fixes the duplicate-line defect at the same time as the missing label —
+# one cause, one fix, verified with a real dispatch (TASK-063).
+FEED_LABEL="Kimi"
+if command -v bp_roster_label >/dev/null 2>&1; then
+  __label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Kimi}" 2>/dev/null)"
+  [ -n "$__label" ] && FEED_LABEL="$__label"
+fi
+if [ -r "$ROOT/scripts/lib/feed.sh" ]; then
+  . "$ROOT/scripts/lib/feed.sh"
+else
+  feed_append(){ :; }
+fi
+
+# WHO TO HAND BACK TO (TASK-061, re-broken and re-fixed under TASK-063). This
+# preamble used to name a hardcoded `Holder=Claude Code`, but Holder is a
+# PERSONA NAME and the Orchestrator name varies by roster. Worse, signal-set.sh
+# now REFUSES a non-roster Holder (BUG-140), so the hardcoded form does not
+# merely read oddly — it fails, and the dispatch only completes if the model is
+# sharp enough to work out the right name unaided. Observed on the first live
+# roll call: Kimi hit the refusal, reasoned its way to the Orchestrator row and
+# recovered. That recovery is not something to depend on.
+ORCHESTRATOR_NAME=""
+if command -v bp_roster_name_for_role >/dev/null 2>&1; then
+  ORCHESTRATOR_NAME="$(bp_roster_name_for_role "$BP_STATE_ROOT" Orchestrator 2>/dev/null)"
+fi
+if [ -z "$ORCHESTRATOR_NAME" ]; then
+  ORCHESTRATOR_NAME="Orchestrator"
+  printf "[roster] no Orchestrator row resolved — hand-back preamble falls back to the literal Orchestrator\n" | tee -a "$RUN_LOG" >&2
+fi
+
+set --
+REQUESTED_MODEL="" REQUESTED_EFFORT=""
 if command -v bp_roster_model_for_name >/dev/null 2>&1; then
   __m="$(bp_roster_model_for_name "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-}" 2>&1)"
   case $? in
@@ -131,6 +176,7 @@ if command -v bp_roster_model_for_name >/dev/null 2>&1; then
          *) __m="[roster] ${AGENT_SIGNAL_HOLDER:-}: not a Kimi persona" ;;
        esac ;;
     1) printf "%s — dispatch refused\n" "$__m" | tee -a "$RUN_LOG" >&2
+       feed_append "[$FEED_LABEL] dispatch refused: $__m"
        exit 8 ;;
   esac
   [ "$#" -eq 0 ] && printf "%s — kimi runs its configured default_model\n" "$__m" | tee -a "$RUN_LOG"
@@ -144,16 +190,29 @@ else
 fi
 echo "[$now] dispatching kimi -p ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 cd "$ROOT"
 # --prompt mode has nobody to ask, so it already never interrupts — measured:
 # `kimi --auto --prompt ...` and `kimi --yolo --prompt ...` both refuse to start
 # ("Cannot combine --prompt with --auto/--yolo", kimi 2.0.2), and `-p` alone
 # writes files with no approval step. Passing --auto/--yolo here would not
 # soften that, it would make the dispatch fail outright.
-"$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
-  2>&1 | tee "$OUTPUT_LAST" >> "$RUN_LOG"
+#
+# Read LINE BY LINE rather than piped straight into `tee ... >> RUN_LOG` (the
+# previous shape): `read` only returns a line once it sees the trailing
+# newline, so a still-growing unterminated line is never re-emitted mid-write —
+# which a raw log pump elsewhere could not tell apart from three genuinely new
+# lines (TASK-063 finding). Each complete line gets exactly one feed_append.
+"$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
+  2>&1 \
+  | tee "$OUTPUT_LAST" \
+  | while IFS= read -r __line; do
+      printf "%s\n" "$__line" >>"$RUN_LOG"
+      [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
+    done
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$end] kimi finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
 '
 
-exec "${ROOT}/scripts/codex-signal-watch.sh" --state OVER_TO_KIMI "$@"
+exec "${ROOT}/scripts/signal-watch.sh" --state OVER_TO_KIMI "$@"

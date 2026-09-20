@@ -50,7 +50,7 @@ git status --ignored
 ```
 
 `Ignored files:` should include `docs/**/CODEX_REVIEW.md`,
-`project_config_*.md`, `scripts/codex-signal-watch.sh`,
+`project_config_*.md`, `scripts/signal-watch.sh`,
 `scripts/start-codex-signal-watch.sh`, `scripts/new-project.sh`,
 `.claude/`, `.blueprint-source`, plus any project-specific privacy paths
 you've added in the project's `.gitignore` extension block. The rest of
@@ -67,7 +67,7 @@ your `.gitignore` predates 2026-09-16 — CLAUDE.md §"Your project's
 # 1b. Index state — what would actually publish if you `git push`?
 # .gitignore does NOT untrack already-tracked files. This is the
 # critical check: a tracked file ignores nothing.
-git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "PRIVATE FILES STILL TRACKED — DO NOT PUSH" || echo "index clean"
+git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "PRIVATE FILES STILL TRACKED — DO NOT PUSH" || echo "index clean"
 ```
 
 Expected output: `index clean`.
@@ -105,7 +105,7 @@ grep if needed.)
 
 The current local repo's git history includes the struct2flow bootstrap
 commit (`chore(bootstrap)`). That commit **tracks** the still-private
-files (`project_config_*.md`, `scripts/codex-signal-watch.sh`,
+files (`project_config_*.md`, `scripts/signal-watch.sh`,
 `scripts/start-codex-signal-watch.sh`, `scripts/new-project.sh`,
 `.claude/settings.json`). `.gitignore` does NOT untrack them — it only
 prevents NEW additions. They will publish on a normal `git push` unless
@@ -149,7 +149,7 @@ PUBLIC_PATHS=(
   # tests/
   # — scripts: copy each PUBLIC script EXPLICITLY. Do NOT copy the
   # whole scripts/ folder; it contains struct2flow methodology files
-  # (codex-signal-watch.sh, start-codex-signal-watch.sh, new-project.sh)
+  # (signal-watch.sh, start-codex-signal-watch.sh, new-project.sh)
   # that .gitignore correctly prevents from being committed but that
   # would end up on disk in the public-repo dir as untracked-gitignored
   # files — a latent leak risk if someone later force-adds.
@@ -197,7 +197,7 @@ find docs -name 'CODEX_REVIEW.md' -delete 2>/dev/null
 # on the filesystem rather than the git index, plus the handover.
 find . -type f \( -name 'HANDOVER.md' -o -name 'CODEX_REVIEW.md' \
   -o -name 'project_config_*.md' \
-  -o -name 'codex-signal-watch.sh' -o -name 'start-codex-signal-watch.sh' \
+  -o -name 'signal-watch.sh' -o -name 'start-codex-signal-watch.sh' \
   -o -name 'new-project.sh' -o -path './.claude/*' \
   -o -name '.blueprint-source' \) | head -20
 
@@ -254,12 +254,12 @@ git rm --cached \
   $(git ls-files 'docs/**/CODEX_REVIEW.md') \
   project_config_overview.md project_config_paths.md project_config_dod.md \
   project_config_security.md project_config_infra.md \
-  scripts/codex-signal-watch.sh scripts/start-codex-signal-watch.sh scripts/new-project.sh \
+  scripts/signal-watch.sh scripts/start-codex-signal-watch.sh scripts/new-project.sh \
   $(git ls-files '.claude/**' 2>/dev/null) \
   .blueprint-source
 
 # Confirm index is now clean — the pattern MUST stay identical to §1b's:
-git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(codex-signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
+git ls-files | grep -E '^(docs/.+/CODEX_REVIEW\.md|project_config_.*\.md|scripts/(signal-watch|start-codex-signal-watch|new-project)\.sh|\.claude/.*|\.blueprint-source)$' && echo "STILL TRACKED" || echo "index clean"
 
 # Redact the live handover IN THIS REPO — §3b publishes this repo's own
 # index, so whatever the file holds is what strangers read. Restore

@@ -80,7 +80,7 @@ export interface Scenario {
    *
    * For the one thing `run()` structurally cannot express: a subject whose
    * behaviour IS whether and when it exits. `scripts/wait-mic.sh` exists to
-   * turn "the mic moved" into an exit; `codex-signal-watch.sh` runs until it
+   * turn "the mic moved" into an exit; `signal-watch.sh` runs until it
    * dispatches. A spec that could only await completion would have to wrap
    * them in `timeout` and then throw the status away — which is precisely the
    * 125.4 s scaffolding tests/signal-dispatch's header describes removing.

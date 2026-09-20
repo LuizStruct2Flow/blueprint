@@ -192,7 +192,7 @@ describe('A-14 — bootstrap inherits the git identity and fails safely without 
       // the ceremony without a manual first step (BUG-019). It called
       // signal-set.sh without naming a file, and signal-set.sh honours
       // $AGENT_SIGNAL_FILE and $AGENT_STATE_HOME. Those are not exotic:
-      // codex-signal-watch.sh EXPORTS AGENT_SIGNAL_FILE into every dispatched
+      // signal-watch.sh EXPORTS AGENT_SIGNAL_FILE into every dispatched
       // wake, so bootstrapping from a dispatched agent published
       // "Holder=Nobody / State=IDLE" over a live hand-off, appended to that
       // project's journal, and reported success. That is BUG-030,

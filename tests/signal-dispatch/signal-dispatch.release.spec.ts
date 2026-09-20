@@ -56,7 +56,7 @@
  * wrong-order cases slept a fraction of settle between the two edits.
  *
  * All three are now counted in the WATCHER'S OWN POLL ITERATIONS, made visible by
- * a `sleep` shim ahead of the real one on PATH — `codex-signal-watch.sh` calls
+ * a `sleep` shim ahead of the real one on PATH — `signal-watch.sh` calls
  * `sleep` exactly once per loop iteration (:343) and nothing else in these
  * fixtures calls it at all. The shim execs the real `sleep`, so the subject is
  * observed rather than altered.
@@ -86,7 +86,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until, type Watcher } from '../harness/watcher.js'
 
-const WATCHER = join(REPO_ROOT, 'scripts/codex-signal-watch.sh')
+const WATCHER = join(REPO_ROOT, 'scripts/signal-watch.sh')
 const SETTER = join(REPO_ROOT, 'scripts/signal-set.sh')
 const LOCK_LIB = join(REPO_ROOT, 'scripts/lib/watcher-lock.sh')
 

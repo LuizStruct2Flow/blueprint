@@ -27,7 +27,7 @@ import { join } from 'node:path'
 /** The three dispatchers that must rendezvous with the feed on one directory. */
 export const DISPATCHERS = [
   'scripts/start-codex-signal-watch.sh',
-  'scripts/codex-signal-watch.sh',
+  'scripts/signal-watch.sh',
   'scripts/start-gemini-signal-watch.sh',
   'scripts/start-kimi-signal-watch.sh',
 ] as const

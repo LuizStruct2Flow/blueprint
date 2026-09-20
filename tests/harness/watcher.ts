@@ -3,7 +3,7 @@
  *
  * WHAT THIS IS FOR. Three of the mic suites test scripts whose behaviour IS
  * whether and when they exit: `scripts/wait-mic.sh` exists to turn "the mic
- * moved" into an exit event (FEATURE-005), and `codex-signal-watch.sh` runs
+ * moved" into an exit event (FEATURE-005), and `signal-watch.sh` runs
  * until it dispatches. `s.run()` cannot express either — it awaits completion,
  * so the only way to bound a subject that may never finish is to wrap it in
  * `timeout` and discard the status.

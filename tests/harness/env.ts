@@ -31,7 +31,7 @@ import { dirname, resolve, sep } from 'node:path'
  *    creates no .git in the fixture, and every later commit lands in the
  *    directory GIT_DIR names — i.e. the real repository (BUG-014, BUG-047).
  *  - the blueprint's own coordination state. signal-set.sh honours
- *    AGENT_SIGNAL_FILE and AGENT_STATE_HOME, and codex-signal-watch.sh exports
+ *    AGENT_SIGNAL_FILE and AGENT_STATE_HOME, and signal-watch.sh exports
  *    AGENT_SIGNAL_FILE into every dispatched wake — which is why BUG-046 struck
  *    during a Codex review and not during ordinary local runs.
  *
@@ -162,7 +162,7 @@ const ENV_KIND = {
   // the GIT_CONFIG_COUNT paragraph above says 'opaque' must actually pass, not
   // merely "it looks like a number".
   //
-  //   AGENT_SIGNAL_SETTLE   scripts/codex-signal-watch.sh's settle window.
+  //   AGENT_SIGNAL_SETTLE   scripts/signal-watch.sh's settle window.
   //                         Whole seconds only, because the watcher compares
   //                         `date +%s`; tests/signal-dispatch's header records
   //                         that a sub-second value straddles a second boundary

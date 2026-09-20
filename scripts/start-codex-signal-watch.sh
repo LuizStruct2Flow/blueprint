@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Launcher for the AGENT_SIGNAL.md ↔ Codex CLI orchestrator.
 #
-# Watches AGENT_SIGNAL.md (via scripts/codex-signal-watch.sh) and, every
+# Watches AGENT_SIGNAL.md (via scripts/signal-watch.sh) and, every
 # time the mic flips to `OVER_TO_CODEX`, invokes the real Codex CLI in
 # non-interactive `exec` mode with the current `Task` field as the
 # prompt. Codex's response (file edits, signal flip) lands directly in
@@ -26,10 +26,10 @@ set -euo pipefail
 # about the caller's exported GIT_DIR, per BUG-014) and NOT to `pwd`. Either can
 # name a different checkout, and this script then sources THAT tree's
 # lib/state-dir.sh, so a stale copy of the derivation wins and the feed and the
-# dispatcher stop sharing a state dir. See scripts/codex-signal-watch.sh
+# dispatcher stop sharing a state dir. See scripts/signal-watch.sh
 # repo_root() for the full reasoning and the reproduction.
 # --- physical script root (A-09 / BUG-020) -----------------------------------
-# Resolved from THIS FILE, through symlinks. See scripts/codex-signal-watch.sh
+# Resolved from THIS FILE, through symlinks. See scripts/signal-watch.sh
 # for why $0, cwd and `git rev-parse` are each wrong here. The block below is
 # byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
 # cannot be shared as a lib, because finding the lib is the very problem it
@@ -82,12 +82,16 @@ fi
 
 # The wake command runs every time `State = OVER_TO_CODEX` fires.
 # `AGENT_SIGNAL_TASK` is the current `Task` field, exported by
-# codex-signal-watch.sh. We pass it to `codex exec` along with explicit
+# signal-watch.sh. We pass it to `codex exec` along with explicit
 # coordination instructions so Codex knows it's in the radio-over
 # protocol.
 export CODEX_BIN
 export ROOT
-export CODEX_WAKE_COMMAND='
+# TASK-063: the poller's hook is AGENT_WAKE_COMMAND now (the poller is
+# provider-agnostic — Gemini and Kimi export it too). Kept the name
+# CODEX_WAKE_COMMAND only as read-side back-compat in signal-watch.sh; every
+# producer, including this one, exports the generic name.
+export AGENT_WAKE_COMMAND='
 set -u
 # Resolved HERE, on every dispatch — not baked in when the watcher started.
 # A watcher lives for days; the derivation can change under it, and a frozen
@@ -257,4 +261,4 @@ echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | te
 feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
 '
 
-exec "${ROOT}/scripts/codex-signal-watch.sh" "$@"
+exec "${ROOT}/scripts/signal-watch.sh" "$@"

@@ -167,8 +167,10 @@ bug numbering, regression tests and the plan-first process for a major bug are
   back-end task goes to the next back-end engineer in rotation, never to another
   role because that role's turn is inconvenient. **The rotation turns per WORK
   ITEM**, so one item runs entirely on one persona, and a provider at zero quota
-  leaves the rotation until it returns. **Orchestration and `git commit` /
-  `git push` are the Claude session's alone.** Reaching for the provider you are
+  leaves the rotation until it returns. **Orchestration and `git push` are the
+  Claude session's alone — every provider commits its own work** (founder,
+  2026-09-20), because `.githooks/commit-msg` already enforces the subject
+  convention and withholding the verb enforces nothing extra. Reaching for the provider you are
   already running on is the thing this rule forbids, because that is always the
   cheapest move and always the same answer.
 - **An agent ends with its work item.** Do not resume one across an item

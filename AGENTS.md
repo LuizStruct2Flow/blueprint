@@ -138,7 +138,8 @@ allowance is the failure this rule exists to stop.
 | **Writing code** | **The ROLE is chosen by the work. The PROVIDER is chosen by rotation within that role.** A back-end task goes to a back-end engineer — the next one in rotation among the back-end personas with quota. |
 | **Anything else** | Load-balanced the same way, inside the role the work belongs to. There is no category exempt from this. |
 | **Orchestration** | **Claude only.** The Orchestrator is the founder-facing session. |
-| **`git commit` and `git push`** | **Claude only.** No other provider commits or pushes, and every dispatch preamble says so. |
+| **`git push`** | **Claude only.** Pushing is the one outward-facing act, and it stays with the founder-facing session. Every dispatch preamble says so. |
+| **`git add` / `git commit`** | **Every provider.** A dispatched agent commits its own work (founder, 2026-09-20). `.githooks/commit-msg` already refuses a subject that names no item, so the convention is enforced by the hook rather than by withholding the verb. |
 
 **A provider with zero quota leaves the rotation** for as long as its quota is
 unavailable, and rejoins when it returns. It is not skipped once and then

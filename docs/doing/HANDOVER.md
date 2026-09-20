@@ -44,6 +44,12 @@ because another machine only sees what is pushed.
   [`../waiting-acceptance/BUGS.md`](../waiting-acceptance/BUGS.md) with what to
   test (CI green on `892d4ca`, 2026-09-18). BUG-140's "never runs in CI" half was
   not done; its row asks the founder to accept it as moot or reopen.
+- **Acceptance: TASK-063 (Kimi as a third provider) and TASK-064 (scratch
+  workspaces)** are in
+  [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md) with
+  what to test. Landed `729a972..a37339d`, **CI green on `a37339d`**, and the
+  four-eyes cross-provider review is done — Alexey (Codex) returned four
+  findings, all real, all fixed before the push.
 - **TASK-062 (backlog) is the live epic:** enforcement in code, not in agent
   context. Its input is the refreshed audit in
   [`../done/TASK-022-anchor-rules/`](../done/TASK-022-anchor-rules/): of 309 rules
@@ -62,18 +68,20 @@ because another machine only sees what is pushed.
 
 ### In flight
 
-- **TASK-063 — Kimi as a third watcher-backed provider** ([`BACKLOG.md`](BACKLOG.md),
-  promoted 2026-09-20). **Built and proven live: all seven Kimi personas were
-  dispatched and answered on-air, each on the model its roster cell resolves to.**
-  **Five commits sit UNPUSHED on `main`** — `f712f56`, `4e79d08` (TASK-064),
-  `32b4832`, `08d26ed`, `4e977da`. The four-eyes cross-provider review AGENTS.md
-  requires is DONE: Alexey (Codex, Architect-2) returned four findings, all real,
-  all fixed in `4e977da`. **The suites were green through every one of them** —
-  a masked exit status, a dropped final line, a label asserting an unapplied
-  effort, and this handover being stale in its own committed copy. That is the
-  argument for the review step, in one paragraph.
-  **What remains before push:** nothing but the push and CI.
-  **Four things this cost, each of which looked right and was not:**
+- **TASK-065 — provider load balancing** ([`BACKLOG.md`](BACKLOG.md)). The RULE
+  is written (`AGENTS.md` §"Who does the work") and the roster now backs it:
+  every delivery role carries one persona per provider. **The MECHANISM is not
+  built**, so routing is still an agent remembering a section — which is the
+  exact shape TASK-062 exists to delete. **Four commits UNPUSHED:** `00e0242`,
+  `cdfc38b`, `e38a5bd`, `309191e`. They are doc-and-roster only, so the code
+  stages skip, but the four-eyes rule still applies and has NOT been run on them.
+  **The first real test of the rule is the next code item** — it must go to the
+  next provider in that role's rotation, not to whichever agent is convenient.
+- **TASK-063 (Kimi) and TASK-064 (scratch) have LANDED** and moved to
+  `waiting-acceptance/`. Kept here only for what they cost, because every item
+  below was a plausible wrong answer that shipped-looking evidence would have
+  hidden.
+  **Four things, each of which looked right and was not:**
   Kimi has no `medium` effort (only `low`/`high`/`max`), so a cell naming one is
   refused rather than substituted — that is why the Kimi rows read `high`.
   `kimi -m k3` is rejected outright and `-m kimi-code/k3` works, so the roster's

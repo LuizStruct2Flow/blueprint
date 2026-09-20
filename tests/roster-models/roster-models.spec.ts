@@ -224,7 +224,7 @@ Claude models, best first: fable, opus, sonnet, haiku
 | Back-End-1 | Mira | Kimi | frontier:high |
 | Back-End-2 | Nils | Kimi | frontier-3:high |
 
-Kimi models, best first: k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed
+Kimi models, best first: kimi-code/k3, kimi-code/k3-256k, kimi-code/kimi-for-coding, kimi-code/kimi-for-coding-highspeed
 `
       const dir = await s.fs.mkdirp('proj')
       await s.fs.write('proj/AGENT_ROSTER.md', roster)
@@ -242,12 +242,15 @@ Kimi models, best first: k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed
           'max_context_size = 262144',
         ].join('\n') + '\n',
       )
-      const env = { KIMI_HOME: kimiHome }
+      const env = { KIMI_CODE_HOME: kimiHome }
       const run = (snippet: string) =>
         s.run('bash', ['-c', `. "${LIB}"; ${snippet.replace(/@/g, dir)}`], { cwd: s.workspace.root, env })
 
       const ok = await run('bp_roster_model_for_name "@" Mira')
-      expect(ok.stdout, ok.output).toBe('Kimi\tk3\thigh\n')
+      // The alias is provider-qualified because that is what `kimi -m` accepts:
+      // `-m k3` is refused ("Model "k3" is not configured in config.toml"),
+      // `-m kimi-code/k3` runs. Measured on kimi 2.0.2.
+      expect(ok.stdout, ok.output).toBe('Kimi\tkimi-code/k3\thigh\n')
 
       // frontier-3 lands on kimi-for-coding-highspeed, which has no
       // support_efforts key in config.toml — refused, not silently allowed.

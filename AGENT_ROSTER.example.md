@@ -66,7 +66,7 @@ one's backing agent to whatever you actually run.
 | Infrastructure-3 | Thomas | Kimi | frontier-2:high |
 
 Claude models, best first: fable, opus, sonnet, haiku
-Kimi models, best first: k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed
+Kimi models, best first: kimi-code/k3, kimi-code/k3-256k, kimi-code/kimi-for-coding, kimi-code/kimi-for-coding-highspeed
 
 **Model** is `<tier>:<effort>`: `frontier` is the provider's best model and
 `frontier-N` is N places down its ranked list, so no cell names a model version.

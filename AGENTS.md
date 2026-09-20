@@ -150,6 +150,34 @@ Left to convenience, every dispatch lands on Claude, the other two subscriptions
 pay for nothing, and the cross-provider review that catches what one model's
 blind spot hides (see §"Four-eyes" below) never has a second opinion available.
 
+### The rotation turns per WORK ITEM, and the agent ends with it
+
+**Founder rule, 2026-09-20.** The rotation advances per **work item** — one
+`BUG-`/`TASK-`/`FEATURE-` number — not per dispatch. The item is assigned to the
+next provider with quota, and every slice of that item runs on it.
+
+**When the item is done, the agent shuts down.** It is not kept alive for the
+next item, and it is not resumed across an item boundary. The next item gets a
+fresh agent with a fresh context.
+
+**Both halves are about the same cost.** A resumed agent carries its whole
+transcript into work that has nothing to do with it, so it gets steadily more
+expensive while getting no better informed about the new task — and two such
+agents alive at once is the expensive case squared. Measured on TASK-063, where
+one agent was resumed three times across slices of the same item: 133k tokens,
+then 167k, then 328k for the same quality of answer. Ending it and briefing a
+fresh one costs a paragraph and resets the meter.
+
+**What this changes in practice, and it is not free.** Two specialists working
+different slices of one item in parallel now share a provider, because the
+provider is the item's. Cross-provider parallelism moves from *within* an item
+to *between* items. That is the trade the rule makes deliberately: predictable
+rotation and bounded context, against concurrency inside a single item.
+
+**A watcher is not an agent.** `start-<provider>-signal-watch.sh` is a stateless
+poller holding a lock — leave it running. What shuts down is the session or
+subagent that did the work and accumulated the context.
+
 ### Two things this collides with, and how they resolve
 
 **Round-robin picks the AUTHOR. Four-eyes constrains the REVIEWER.** They
@@ -168,8 +196,6 @@ never an agent's.**
 These fill gaps the rule above does not decide. They are defaults, not founder
 decisions — correct them and they change.
 
-- **Rotation granularity is per dispatch**, not per work item. A task split
-  across three agents uses three rotation slots.
 - **Consensus means the reviewers agree on what must change.** Where they
   genuinely disagree, the Orchestrator does not cast a tie-breaking vote: it
   reports the disagreement and what each provider argued, and the founder

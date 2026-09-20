@@ -162,12 +162,18 @@ bug numbering, regression tests and the plan-first process for a major bug are
 - Use agents for all non-trivial work — even small bug fixes should be
   delegated rather than quick-fixed inline
 - **Spread the work across providers — [AGENTS.md](AGENTS.md) §"Who does the
-  work".** Plan review goes to all three seeking consensus, code-writing
-  round-robins across providers with quota, and a provider at zero quota leaves
-  the rotation until it returns. **Orchestration and `git commit` / `git push`
-  are the Claude session's alone**; every other kind of work is load-balanced.
-  Reaching for the provider you are already running on is the thing this rule
-  forbids, because that is always the cheapest move and always the same answer.
+  work".** Plan review goes to all three seeking consensus, and every other kind
+  of work round-robins across providers with quota. **The rotation turns per
+  WORK ITEM**, so one item runs entirely on one provider, and a provider at zero
+  quota leaves the rotation until it returns. **Orchestration and `git commit` /
+  `git push` are the Claude session's alone.** Reaching for the provider you are
+  already running on is the thing this rule forbids, because that is always the
+  cheapest move and always the same answer.
+- **An agent ends with its work item.** Do not resume one across an item
+  boundary — brief a fresh agent instead. A resumed agent drags its whole
+  transcript into work it has nothing to do with, so it costs more each time
+  while knowing no more about the new task, and two such agents at once is that
+  cost squared.
 - **Commits:** the subject starts with the item it serves (`BUG#20:`,
   `FEATURE#3:`, `TASK#1:`), one item per commit, and the body says why
   ([docs/DoD.md](docs/DoD.md) §1b rules 1 and 3). `.githooks/commit-msg` refuses

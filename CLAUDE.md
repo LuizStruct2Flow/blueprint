@@ -162,10 +162,12 @@ bug numbering, regression tests and the plan-first process for a major bug are
 - Use agents for all non-trivial work — even small bug fixes should be
   delegated rather than quick-fixed inline
 - **Spread the work across providers — [AGENTS.md](AGENTS.md) §"Who does the
-  work".** Plan review goes to all three seeking consensus, and every other kind
-  of work round-robins across providers with quota. **The rotation turns per
-  WORK ITEM**, so one item runs entirely on one provider, and a provider at zero
-  quota leaves the rotation until it returns. **Orchestration and `git commit` /
+  work".** Plan review goes to all three seeking consensus. For everything else
+  **the work picks the ROLE and the rotation picks the PROVIDER within it** — a
+  back-end task goes to the next back-end engineer in rotation, never to another
+  role because that role's turn is inconvenient. **The rotation turns per WORK
+  ITEM**, so one item runs entirely on one persona, and a provider at zero quota
+  leaves the rotation until it returns. **Orchestration and `git commit` /
   `git push` are the Claude session's alone.** Reaching for the provider you are
   already running on is the thing this rule forbids, because that is always the
   cheapest move and always the same answer.

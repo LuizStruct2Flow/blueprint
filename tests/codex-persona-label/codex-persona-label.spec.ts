@@ -94,6 +94,7 @@ import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 const LAUNCHER = join(SUBJECT, 'scripts', 'start-codex-signal-watch.sh')
+const GEMINI_LAUNCHER = join(SUBJECT, 'scripts', 'start-gemini-signal-watch.sh')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
@@ -322,13 +323,31 @@ describe('BUG-021 — Codex output carries the persona that produced it', () => 
     )
   })
 
-  it('#5 the Gemini run log is still merged — its lines are not dropped', async () => {
-    // SCOPE DISCIPLINE: fix the one that has a fix. Gemini routes through its own
-    // run log and has no launcher doing per-dispatch labelling, so removing ITS
-    // pump would silently drop the lines entirely rather than relabel them.
-    expect(
-      await code(FEED),
-      'the Gemini pump was removed too, silently losing its output',
-    ).toMatch(/gemini-runs\.log/)
+  it('BUG-141 #5 a Gemini dispatch writes persona-labelled feed lines, never [GEMINI]', async () => {
+    // The prior test held the retired pump in place. This runs the launcher's own
+    // dispatch body with a CLI stub: a real Gemini output line must arrive in the
+    // feed under the holder's roster label, and a static [GEMINI] line is forbidden.
+    await scenario('gemini-label-5', async (s) => {
+      const state = await s.fs.mkdirp('gemini-state')
+      const feed = join(s.workspace.root, 'gemini-feed.log')
+      await s.fs.write('gemini-state/AGENT_ROSTER.md', FIXTURE_ROSTER)
+      const gemini = await s.fs.write('fake-gemini.sh', '#!/bin/sh\nprintf "gemini says hello\\n"\n', { mode: 0o755 })
+      const source = await readFile(GEMINI_LAUNCHER, 'utf8')
+      const wake = source.match(/export AGENT_WAKE_COMMAND='\n([\s\S]*?)\n'\n\nexec /)?.[1]
+      expect(wake, 'could not extract Gemini dispatch body from its launcher').toBeDefined()
+
+      const r = await s.run('bash', ['-c', 'export AGENT_SIGNAL_HOLDER=Slava AGENT_SIGNAL_TASK="label this Gemini dispatch" AGENT_FEED_LOG="$2"; exec bash -c "$1"', 'x', wake!, feed], {
+        cwd: s.workspace.root,
+        env: {
+          ROOT: SUBJECT,
+          GEMINI_BIN: gemini,
+          AGENT_STATE_HOME: state,
+        },
+      })
+      expect(r.code, `Gemini dispatch body failed: ${r.output}`).toBe(0)
+      const lines = await readFile(feed, 'utf8')
+      expect(lines, 'Gemini output was dropped instead of entering the feed').toMatch(/\[Slava(?: - [^\]]+)?\] gemini says hello/)
+      expect(lines, 'Gemini output kept the retired static label').not.toContain('[GEMINI]')
+    })
   })
 })

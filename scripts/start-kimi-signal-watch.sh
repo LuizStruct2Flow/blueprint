@@ -274,7 +274,7 @@ cd "$ROOT"
 # now say.
 KIMI_STATUS_FILE="$(mktemp "$STATE_DIR/.kimi-exit-status.XXXXXX" 2>/dev/null)" || KIMI_STATUS_FILE="$STATE_DIR/.kimi-exit-status.$$"
 {
-  "$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
+  "$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \
     2>&1
   printf "%s" "$?" >"$KIMI_STATUS_FILE"
 } \

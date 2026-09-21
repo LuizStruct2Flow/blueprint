@@ -3,9 +3,10 @@
 # prefix per line (TASK-059; [Persona - Backing] for a persona with no Model cell),
 # merging:
 #   - AGENT_SIGNAL.md mic changes           → [<Holder>] <State> — <Task>
-#   - $AGENT_STATE_HOME/codex-runs.log      → [CODEX]  <line>
-#   - $AGENT_STATE_HOME/gemini-runs.log     → [GEMINI] <line>
-#   - Kimi's launcher labels its own lines per-persona (BUG-021 shape, TASK-063)
+#   - Codex, Gemini and Kimi dispatches     → labelled by their OWN launcher,
+#     per persona, at the point of dispatch (BUG-021, TASK-063, BUG-141). This
+#     feed pumps no provider run log: a pump chosen here is bound once at daemon
+#     start, while the mic changes hands many times under it.
 #   - this repo's newest Claude transcript  → [<persona> - <model> - <effort>] <line>
 #   - each Agent-tool subagent's transcript → [<persona> - <model it ran on> - <effort>] <line>
 #
@@ -435,7 +436,7 @@ emit_delta(){
   case "$kind" in
     jsonl)     while IFS= read -r line; do [ -n "$line" ] && project_jsonl "$line" "$who" 0; done <"$2" ;;
     jsonl-sub) while IFS= read -r line; do [ -n "$line" ] && project_jsonl "$line" "$who" 1; done <"$2" ;;
-    *)         while IFS= read -r line; do [ -n "$line" ] && emit "$(ts) [$who] $line"; done <"$2" ;;
+    *)         return 1 ;;
   esac
 }
 
@@ -672,14 +673,9 @@ supervise_body(){
   sig_last="$(signal_token)"
   ros_last="$(roster_token)"
 
-  # No seed for codex-runs.log or kimi-runs.log — nothing pumps either any more
-  # (BUG-021, and TASK-063 for Kimi: its launcher now does its own per-dispatch
-  # labelling exactly like Codex's, so the raw pump that used to stamp every
-  # line `[KIMI]` — and re-emit a still-growing unterminated line as if it were
-  # new — is gone). Seeding a log this loop never reads would leave a dead
-  # offset that later reads as "already caught up" if a pump were ever
-  # restored.
-  seed_offset "$state_dir/gemini-runs.log"
+  # No provider run log is seeded or pumped here. Each launcher labels output
+  # while it knows the dispatch holder; a raw pump would lose that identity and
+  # repeatedly emit a still-growing unterminated CLI line.
 
   # BUG-137 — true only for the loop's first pass. A subagent transcript that
   # the glob below matches on THIS pass existed (or was already fully written)
@@ -720,12 +716,6 @@ supervise_body(){
     # know, because a label chosen here is bound once at daemon start while the
     # mic changes hands many times under it (BUG-021).
     #
-    # Gemini still routes through its run log: it has no launcher doing
-    # per-dispatch labelling, so dropping this pump would lose its lines rather
-    # than improve them. Kimi's launcher now labels its own lines (TASK-063,
-    # same shape as Codex) and is deliberately NOT pumped here any more.
-    pump "$state_dir/gemini-runs.log" raw   "GEMINI"
-
     if command -v jq >/dev/null 2>&1; then
       # "newest" always EOF-seeds, deliberately, even past first_scan: the
       # newest-session pointer can SWITCH to a file that already existed (a

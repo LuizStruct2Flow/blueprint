@@ -40,7 +40,7 @@
  *
  *   4. NO CASE WAITS A FIXED DURATION (R4). Where the shell slept to let ticks pass
  *      and then asserted an ABSENCE, this round-trips sentinels through the pumped
- *      run log: each sentinel that comes back out of the feed is one tick PROVEN to
+ *      JSONL transcript: each sentinel that comes back out of the feed is one tick PROVEN to
  *      have completed. That is strictly stronger than a sleep — it does not get
  *      weaker on a loaded box, and it does not get slower on an idle one. The one
  *      unavoidable bound is `withFeed`'s outer process ceiling, which is a safety
@@ -123,6 +123,11 @@ const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 
+/** One production-shaped Claude subagent record. */
+function jsonlRecord(text: string): string {
+  return `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text }] } })}\n`
+}
+
 /** A script's source with comments stripped — this file's header names the idioms. */
 async function code(path: string): Promise<string> {
   const raw = await readFile(path, 'utf8').catch(() => '')
@@ -132,18 +137,21 @@ async function code(path: string): Promise<string> {
 /**
  * The instrumented fixture every behavioural case uses.
  *
- * The pumped source is the GEMINI run log, not the Codex one: BUG-021 stopped the
- * feed pumping `codex-runs.log`, because Codex's launcher now labels its own lines
- * with the persona holding the mic — a fact the feed cannot know. Nothing here is
- * about Codex; these assertions are about byte-exact delta reads, so any pumped log
- * serves.
+ * The pumped source is a Claude subagent JSONL transcript: that is the production
+ * `pump` path. Provider launchers label their own output because the supervisor
+ * cannot recover a dispatch holder after the fact. These assertions are about the
+ * shared byte-exact delta reader before its JSONL projection, so this real caller
+ * exercises bounded reads, truncation, rotation and split records without retaining
+ * a dead `raw` branch solely for tests.
  */
 interface Bound {
   readonly f: FeedFixture
-  /** Workspace-relative path of the pumped run log. */
+  /** Workspace-relative path of the pumped production JSONL source. */
   readonly runLogRel: string
-  /** Append to the pumped run log. */
+  /** Append already-encoded bytes to the pumped JSONL source. */
   append(text: string): Promise<void>
+  /** Wait until the JSONL reader has registered the pumped source. */
+  ready(): Promise<void>
   /** Truncate the pumped run log. */
   truncate(): Promise<void>
   /**
@@ -170,13 +178,13 @@ async function bound(s: Scenario, name = 'repo'): Promise<Bound> {
     holder: 'Fixture',
     state: 'ACTIVE',
   })
-  const runLogRel = `${name}/state/gemini-runs.log`
+  const runLogRel = `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess/subagents/agent-pump-subject.jsonl`
   await s.fs.write(runLogRel, '')
 
   // A pumped file the cases never touch, so proving a tick cannot alter what the
   // tick is being counted for. A subagent transcript is the other thing the feed
   // pumps, and its records are self-delimiting JSON — so an appended sentinel can
-  // never accidentally terminate a fragment the way a raw line can.
+  // never accidentally terminate a fragment the subject is holding.
   const tickRel = `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess/subagents/agent-tickproof.jsonl`
   await s.fs.write(tickRel, '')
 
@@ -185,6 +193,7 @@ async function bound(s: Scenario, name = 'repo'): Promise<Bound> {
     f,
     runLogRel,
     append: async (text) => void (await s.fs.write(runLogRel, text, { append: true })),
+    ready: async () => void (await f.readerReady(runLogRel, { wrap: jsonlRecord })),
     truncate: async () => void (await s.fs.write(runLogRel, '')),
     proveTicks: async (n) => {
       if (n === 0) return
@@ -229,7 +238,7 @@ async function utf8Locale(s: Scenario): Promise<string> {
   return (found ?? '').trim()
 }
 
-describe('BUG-001 — one instance, a bounded process set, byte-correct reads', () => {
+describe('BUG-001 / BUG-141 — one instance, a bounded process set, byte-correct reads', () => {
   // =========================================================================
   // RC-1 — the instance guard.
   // =========================================================================
@@ -319,13 +328,13 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     await scenario('aab-16', async (s) => {
       const b = await bound(s)
       // Written BEFORE the feed ever starts.
-      await b.append('PRE-EXISTING-must-not-replay\n')
+      await b.append(jsonlRecord('PRE-EXISTING-must-not-replay'))
 
       await b.f.withDaemon(async () => {
         // The absence is bounded by a PROVEN tick rather than by a sleep: once the
         // supervisor has completed a full cycle over this file, "not replayed" is a
         // fact instead of a guess about latency.
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         await b.proveTicks(1)
 
         expect(await b.f.count('PRE-EXISTING-must-not-replay')).toBe(0)
@@ -342,8 +351,8 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       // than it measures.
       const b = await bound(s)
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
-        await b.append('SOLO-RECORD\n')
+        await b.ready()
+        await b.append(jsonlRecord('SOLO-RECORD'))
         await b.f.expectLine('SOLO-RECORD')
         await b.proveTicks(1)
 
@@ -356,11 +365,11 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     await scenario('aab-17b', async (s) => {
       const b = await bound(s)
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
-        await b.append('SOLO-RECORD\n')
+        await b.ready()
+        await b.append(jsonlRecord('SOLO-RECORD'))
         await b.f.expectLine('SOLO-RECORD')
         // A stalled offset would either re-emit the first record or swallow this one.
-        await b.append('SOLO-NEXT\n')
+        await b.append(jsonlRecord('SOLO-NEXT'))
         await b.f.expectLine('SOLO-NEXT')
 
         expect(await b.f.count('SOLO-RECORD')).toBe(1)
@@ -379,8 +388,9 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const b = await bound(s)
       await b.f.withDaemon(
         async () => {
-          await b.f.readerReady(b.runLogRel)
-          await b.append('SPLIT-héllo-→')
+          await b.ready()
+          const record = jsonlRecord('SPLIT-héllo-→-TAIL')
+          await b.append(record.slice(0, record.indexOf('-TAIL')))
 
           await b.proveTicks(1)
           expect(
@@ -399,10 +409,12 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const b = await bound(s)
       await b.f.withDaemon(
         async () => {
-          await b.f.readerReady(b.runLogRel)
-          await b.append('SPLIT-héllo-→')
+          await b.ready()
+          const record = jsonlRecord('SPLIT-héllo-→-TAIL')
+          const cut = record.indexOf('-TAIL')
+          await b.append(record.slice(0, cut))
           await b.proveTicks(1)
-          await b.append('-TAIL\n')
+          await b.append(record.slice(cut))
 
           await b.f.expectLine('SPLIT-héllo-→-TAIL')
           await b.proveTicks(1)
@@ -420,12 +432,12 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       // to this file is exactly what "went quiet" means, and it is checkable.
       const b = await bound(s)
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
-        const other = `${b.runLogRel.replace('gemini-runs.log', 'quiet-probe.log')}`
+        await b.ready()
+        const other = `${b.runLogRel.replace('agent-pump-subject.jsonl', 'agent-quiet-probe.jsonl')}`
         await s.fs.write(other, '')
         await b.proveTicks(3)
 
-        await b.append('AFTER-IDLE\n')
+        await b.append(jsonlRecord('AFTER-IDLE'))
         await b.f.expectLine('AFTER-IDLE')
       })
     })
@@ -439,7 +451,7 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const b = await bound(s)
       await b.f.withDaemon(
         async () => {
-          await b.f.readerReady(b.runLogRel)
+          await b.ready()
           await b.append('X'.repeat(200))
 
           await b.f.expectLine('force-flushed')
@@ -459,11 +471,11 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const b = await bound(s)
       await b.f.withDaemon(
         async () => {
-          await b.f.readerReady(b.runLogRel)
+          await b.ready()
           await b.append('X'.repeat(200))
           await b.f.expectLine('force-flushed')
 
-          await b.append('\nAFTER-FLUSH\n')
+          await b.append(jsonlRecord('AFTER-FLUSH'))
           await b.f.expectLine('AFTER-FLUSH')
         },
         { AGENT_FEED_MAX_FRAGMENT: '64' },
@@ -487,7 +499,7 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
         // "re-emitted every tick" about a supervisor that emitted exactly once. The
         // handshake proves the seed happened, which is strictly after the baton
         // line, so the baseline is sampled on a settled log.
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         const base = await b.f.count('ACTIVE —')
 
         await b.proveTicks(3)
@@ -510,7 +522,7 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
         `| State | ACTIVE |\n| Task | ${task} |\n| Last update | 2026-09-11 |\n`
 
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         await s.fs.write('repo/state/signal.md', baton('AAAA'))
         await b.f.expectLine('AAAA')
 
@@ -580,9 +592,9 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     await scenario('aab-8', async (s) => {
       const b = await bound(s)
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         await b.truncate()
-        await b.append('AFTER-TRUNCATE\n')
+        await b.append(jsonlRecord('AFTER-TRUNCATE'))
 
         await b.f.expectLine('AFTER-TRUNCATE')
       })
@@ -593,12 +605,12 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     await scenario('aab-8b', async (s) => {
       const b = await bound(s)
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         // A NEW INODE at the same path, which is what a rotator produces.
         await s.run('mv', [join(s.workspace.root, b.runLogRel), join(s.workspace.root, `${b.runLogRel}.old`)], {
           cwd: s.workspace.root,
         })
-        await s.fs.write(b.runLogRel, 'AFTER-ROTATE\n')
+        await s.fs.write(b.runLogRel, jsonlRecord('AFTER-ROTATE'))
 
         await b.f.expectLine('AFTER-ROTATE')
       })
@@ -785,7 +797,8 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     await scenario('aab-7', async (s) => {
       const b = await bound(s)
       const spacey = await s.fs.mkdirp('repo/state dir with spaces')
-      await s.fs.write('repo/state dir with spaces/gemini-runs.log', '')
+      const spaceySubject = `home/.claude/projects/${b.f.repo.replace(/\//g, '-')}/sess/subagents/agent-spacey.jsonl`
+      await s.fs.write(spaceySubject, '')
       await s.fs.write(
         'repo/state dir with spaces/signal.md',
         '| Field | Value |\n|---|---|\n| Holder | Fixture |\n| State | ACTIVE |\n| Task | t |\n',
@@ -801,10 +814,12 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       })
       try {
         await b.f.expectSupervisors(1)
-        // The handshake on the spacey path itself is also the first proof the reader
-        // opened a path containing spaces at all.
-        await b.f.readerReady('repo/state dir with spaces/gemini-runs.log')
-        await s.fs.write('repo/state dir with spaces/gemini-runs.log', 'SPACED-PATH-OK\n', {
+        await b.f.expectLine('ACTIVE — t')
+        // The supervisor is using the spacey state directory for its signal and
+        // own state; this production JSONL subject then proves that it remained
+        // alive and pumping rather than merely starting successfully.
+        await b.f.readerReady(spaceySubject, { wrap: jsonlRecord })
+        await s.fs.write(spaceySubject, jsonlRecord('SPACED-PATH-OK'), {
           append: true,
         })
 
@@ -836,7 +851,7 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       await makeTranscripts(0, 40)
 
       await b.f.withDaemon(async () => {
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         await b.proveTicks(1)
         const at40 = await b.f.ownedProcesses()
 
@@ -879,12 +894,12 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const b = await bound(s)
       await b.f.withDaemon(
         async () => {
-          await b.f.readerReady(b.runLogRel)
-          await b.append('RACE-A\n') // present when the snapshot is taken
+          await b.ready()
+          await b.append(jsonlRecord('RACE-A')) // present when the snapshot is taken
           await intoSeam(1 / 3)
-          await b.append('RACE-B\n') // lands DURING the slowed read
+          await b.append(jsonlRecord('RACE-B')) // lands DURING the slowed read
           await intoSeam(1 / 3)
-          await b.append('RACE-C\n')
+          await b.append(jsonlRecord('RACE-C'))
 
           // The shell gave this one call 30 s against its own default of 8
           // (`wait_for RACE-C 30`, test.sh:578), because the case DELIBERATELY
@@ -918,9 +933,9 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
           // The handshake must complete while the sink is HEALTHY — the seam's whole
           // purpose is to suppress emission, so arming it first would make the
           // handshake unsatisfiable.
-          await b.f.readerReady(b.runLogRel)
+          await b.ready()
           await s.fs.write('short-sink-active', '')
-          await b.append('SHORTSINK-PAYLOAD\n')
+          await b.append(jsonlRecord('SHORTSINK-PAYLOAD'))
 
           await b.proveTicks(0)
           // Nothing can be round-tripped while the sink is short, so the absence is
@@ -943,9 +958,9 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
       const sentinel = join(s.workspace.root, 'short-sink-active')
       await b.f.withDaemon(
         async () => {
-          await b.f.readerReady(b.runLogRel)
+          await b.ready()
           await s.fs.write('short-sink-active', '')
-          await b.append('SHORTSINK-PAYLOAD\n')
+          await b.append(jsonlRecord('SHORTSINK-PAYLOAD'))
           await s.fs.rm('short-sink-active') // sink healthy again
 
           await b.f.expectLine('SHORTSINK-PAYLOAD')
@@ -967,7 +982,7 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
         // It blocks if it is still resident once it has demonstrably started
         // pumping — which is a condition, where "it did not return yet" measured
         // against a sleep is a guess.
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         expect((await b.f.ownedProcesses()).supervisors).toBe(1)
       })
     })
@@ -977,7 +992,7 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
     await scenario('aab-15f', async (s) => {
       const b = await bound(s)
       await b.f.withFeed(async () => {
-        await b.f.readerReady(b.runLogRel)
+        await b.ready()
         // THE PARENT PID HAS TO BE THE SUPERVISOR'S OWN. The first version passed
         // the supervisor COUNT to awk as if it were a pid, so the filter matched
         // nothing and the case passed without looking at anything — a green earned
@@ -1016,8 +1031,8 @@ describe('BUG-001 — one instance, a bounded process set, byte-correct reads', 
         })
         .catch(() => undefined)
       try {
-        await b.f.readerReady(b.runLogRel)
-        await b.append('FOREGROUND-LINE\n')
+        await b.ready()
+        await b.append(jsonlRecord('FOREGROUND-LINE'))
         await b.f.expectLine('FOREGROUND-LINE')
 
         await vi.waitFor(

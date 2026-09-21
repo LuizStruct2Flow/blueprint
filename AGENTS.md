@@ -472,8 +472,11 @@ On start it:
    output**, so you don't switch prompts:
    - `[Claude Code]` — text + tool calls from the live session transcript
      (`~/.claude/projects/.../<session>.jsonl`, via jq; private thinking excluded),
-   - `[CODEX]` / `[GEMINI]` / `[KIMI]` — full run output from their dispatch logs
-     (`logs/state/{codex,gemini,kimi}-runs.log`),
+   - `[<Persona> - <model> - <effort>]` for every Codex, Gemini and Kimi
+     dispatch — written by the provider's own **launcher**, which knows who holds
+     the mic, rather than pumped from a run log by the feed, which cannot
+     (BUG-021, TASK-063, BUG-141). The run logs still exist in `logs/state/` as
+     the full record; the feed simply does not read them,
    - mic/state changes from the live baton.
    Copilot is notify-only (it runs in the IDE; no log to tail).
 

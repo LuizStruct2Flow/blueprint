@@ -353,16 +353,24 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         state: 'OVER_TO_CODEX',
       })
       await s.fs.write('once/state/.watch-over_to_codex.lock', '')
-      // The pumped run log is how further ticks are PROVEN to have elapsed. The
-      // shell version slept 3.5s and inferred it; a sentinel that comes back out
-      // of the feed is evidence, and it does not get slower on a loaded box.
-      await s.fs.write('once/state/gemini-runs.log', '')
+      // A pumped Claude subagent JSONL is how further ticks are PROVEN to have
+      // elapsed. Provider run logs are labelled at dispatch and deliberately are
+      // not supervisor subjects; a sentinel that comes back out of this real
+      // supervisor source is evidence, and it does not get slower on a loaded box.
+      const subject = `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess/subagents/agent-liveness-once.jsonl`
+      await s.fs.write(subject, '')
 
       await f.withFeed(async () => {
         await f.expectLine('NO watcher is listening')
-        await f.readerReady('once/state/gemini-runs.log')
+        await f.readerReady(subject, {
+          wrap: (tag) => `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: tag }] } })}\n`,
+        })
         for (const tick of ['TICK-A', 'TICK-B', 'TICK-C']) {
-          await s.fs.write('once/state/gemini-runs.log', `${tick}\n`, { append: true })
+          await s.fs.write(
+            subject,
+            `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: tick }] } })}\n`,
+            { append: true },
+          )
           await f.expectLine(tick)
         }
 
@@ -385,7 +393,8 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         state: 'OVER_TO_CODEX',
       })
       await s.fs.write('alive/state/.watch-over_to_codex.lock', '')
-      await s.fs.write('alive/state/gemini-runs.log', '')
+      const subject = `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess/subagents/agent-liveness-alive.jsonl`
+      await s.fs.write(subject, '')
       const lock = join(f.stateDir, '.watch-over_to_codex.lock')
       const holder = await holdLock(s, lock, join(s.workspace.root, 'holder.pid'))
 
@@ -397,8 +406,14 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         // the run log, and a single append is then lost permanently — which is
         // how this case failed on its first run, reading exactly like the feed
         // having gone silent.
-        await f.readerReady('alive/state/gemini-runs.log')
-        await s.fs.write('alive/state/gemini-runs.log', 'AWAKE\n', { append: true })
+        await f.readerReady(subject, {
+          wrap: (tag) => `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: tag }] } })}\n`,
+        })
+        await s.fs.write(
+          subject,
+          `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'AWAKE' }] } })}\n`,
+          { append: true },
+        )
         await f.expectLine('AWAKE')
 
         expect(

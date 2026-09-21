@@ -311,12 +311,15 @@ describe('BUG-010 — the roster is the single source of persona identity', () =
       // a different hat: the displayed name and the roster disagree, and nothing
       // says so. Reported by the founder as "you are still logging as <old name>".
       const f = await feedFixture(s, 'p4', { source: SUBJECT, roster: ROSTER })
-      await s.fs.write('p4/state/gemini-runs.log', '')
+      const subject = `home/.claude/projects/${f.repo.replace(/\//g, '-')}/sess/subagents/agent-roster-rename.jsonl`
+      await s.fs.write(subject, '')
 
       await f.withFeed(async () => {
         // The supervisor must be READING before the rename, or the evidence that it
         // followed the change cannot be told from it never having looked (BUG-038).
-        await f.readerReady('p4/state/gemini-runs.log')
+        await f.readerReady(subject, {
+          wrap: (tag) => `${JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: tag }] } })}\n`,
+        })
 
         // The rename, exactly as a founder would make it: one cell in the roster.
         //

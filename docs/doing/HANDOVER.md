@@ -60,6 +60,34 @@ because another machine only sees what is pushed.
 - **TASK-049 (backlog):** managed vs project placement for a guard that refuses to
   publish a live handover.
 
+### The rotation, as of 2026-09-20
+
+**There is no rotation state file yet** (TASK-065 builds it), so it lives here
+until there is one. Anyone picking up work reads this and advances it.
+
+| Role | Last completed by | In flight | Next |
+|---|---|---|---|
+| Infrastructure | Elias (Codex) — BUG-141 | — | Thomas (Kimi) — BUG-142 |
+| Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
+
+TASK-063 ran entirely on Claude, which is what prompted the rule. BUG-141 and
+BUG-142 are the first work it routed: Codex then Kimi, with Philipp (Claude)
+reviewing both — cross-provider for each author, as §"Four-eyes" requires.
+
+**Codex cannot commit.** Its launcher runs `--sandbox workspace-write`, which
+mounts `.git` read-only, so the founder's "every provider commits its own work"
+(2026-09-20) is impossible for Codex today. Elias said so rather than failing
+silently. Loosening the sandbox is a security-boundary decision and is the
+founder's, so until then the Orchestrator commits Codex work with Codex named in
+the body. **Nor can a dispatched agent run the suite as written:** the harness
+refuses the `AGENT_*` variables every dispatch exports, correctly, so an agent
+must scrub them first — Elias hit this and worked around it.
+
+**The mic is one at a time, so watcher-backed providers run in sequence.** Codex
+and Kimi cannot both hold it, which bounds how much of an item can be
+parallelised across providers. Claude subagents are not on the baton and do run
+in parallel.
+
 ### In flight
 
 - **TASK-065 — provider load balancing** ([`BACKLOG.md`](BACKLOG.md)). The RULE

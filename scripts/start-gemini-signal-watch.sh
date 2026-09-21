@@ -99,17 +99,67 @@ STATE_DIR="$(agent_state_dir)"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/gemini-runs.log"
 OUTPUT_LAST="$STATE_DIR/gemini-last-message.md"
+# The roster has to be available before either the feed label or hand-back
+# target is resolved. A Holder is a persona, never the backing-agent name.
+if [ -r "$ROOT/scripts/lib/roster.sh" ]; then
+  . "$ROOT/scripts/lib/roster.sh"
+fi
+
+# Label Gemini output at the point of dispatch. The activity supervisor cannot
+# recover this attribution later: it outlives several mic holders. Keeping the
+# raw run log out of its pump also prevents a growing unterminated CLI line from
+# being emitted again on every polling tick.
+FEED_LABEL="Gemini"
+if command -v bp_roster_label >/dev/null 2>&1; then
+  __label="$(bp_roster_label "$BP_STATE_ROOT" "${AGENT_SIGNAL_HOLDER:-Gemini}" 2>/dev/null)"
+  [ -n "$__label" ] && FEED_LABEL="$__label"
+fi
+if [ -r "$ROOT/scripts/lib/feed.sh" ]; then
+  . "$ROOT/scripts/lib/feed.sh"
+else
+  feed_append(){ :; }
+fi
+
+# Resolve the receiving persona from the roster. `signal-set.sh` rejects the
+# former literal backing-agent value (Claude Code) because it is not a Holder.
+ORCHESTRATOR_NAME=""
+if command -v bp_roster_name_for_role >/dev/null 2>&1; then
+  ORCHESTRATOR_NAME="$(bp_roster_name_for_role "$BP_STATE_ROOT" Orchestrator 2>/dev/null)"
+fi
+if [ -z "$ORCHESTRATOR_NAME" ]; then
+  ORCHESTRATOR_NAME="Orchestrator"
+  printf "[roster] no Orchestrator row resolved — hand-back preamble falls back to the literal Orchestrator\\n" | tee -a "$RUN_LOG" >&2
+fi
+
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching gemini -p (yolo) ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
+feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 cd "$ROOT"
 # GOOGLE_GENAI_USE_GCA=true selects the Gemini Code Assist OAuth creds
 # (~/.gemini/oauth_creds.json from the extension login); --skip-trust trusts
 # this workspace for the run so --yolo can auto-approve file writes.
-GOOGLE_GENAI_USE_GCA=true "$GEMINI_BIN" --skip-trust --yolo --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to Claude Code, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. Do NOT run git commit or git add." \
-  2>&1 | tee "$OUTPUT_LAST" >> "$RUN_LOG"
+GEMINI_STATUS_FILE="$(mktemp "$STATE_DIR/.gemini-exit-status.XXXXXX" 2>/dev/null)" || GEMINI_STATUS_FILE="$STATE_DIR/.gemini-exit-status.$$"
+{
+  GOOGLE_GENAI_USE_GCA=true "$GEMINI_BIN" --skip-trust --yolo --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \
+    2>&1
+  printf "%s" "$?" >"$GEMINI_STATUS_FILE"
+} \
+  | tee "$OUTPUT_LAST" \
+  | while IFS= read -r __line || [ -n "$__line" ]; do
+      printf "%s\\n" "$__line" >>"$RUN_LOG"
+      [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
+    done
+GEMINI_STATUS="$(cat "$GEMINI_STATUS_FILE" 2>/dev/null)"
+rm -f "$GEMINI_STATUS_FILE"
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
-echo "[$end] gemini finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+if [ "${GEMINI_STATUS:-1}" = "0" ]; then
+  echo "[$end] gemini finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+  feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
+else
+  echo "[$end] gemini FAILED (exit ${GEMINI_STATUS:-unknown}) — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+  feed_append "[$FEED_LABEL] FAILED (exit ${GEMINI_STATUS:-unknown}) — see $OUTPUT_LAST"
+fi
 '
 
 exec "${ROOT}/scripts/signal-watch.sh" --state OVER_TO_GEMINI "$@"

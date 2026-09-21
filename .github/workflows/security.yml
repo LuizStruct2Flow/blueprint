@@ -260,11 +260,12 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0 # tests/managed-references #3 reads a pre-TASK-025 project from history
-      # Pinned to the floor engines.node declares. That floor is a SECURITY
-      # requirement, not a preference: vitest 4.1.11 is the first release clear
-      # of GHSA-82fw-gwwq-j7x9 (CVSS 5.9, which osv-scanner blocks), and it
-      # needs ^20.19 || >=22.12 — enforced at runtime, not merely warned, since
-      # on 20.11 it dies importing styleText from node:util.
+      # Pinned to the floor engines.node declares. TASK-067 raised it to
+      # 22.18.0, the first official release with type stripping on by
+      # default — scripts/**/*.mts needs that to run with no flag. The
+      # ^20.19 arm this comment used to describe (vitest 4.1.11 /
+      # GHSA-82fw-gwwq-j7x9, CVSS 5.9) is gone: 22.18.0 already clears the
+      # vitest floor, so there is nothing left for a 20.x arm to cover.
       # TASK-018 PHASE 2 HAS LANDED, AND THIS JOB NOW RUNS EVERYWHERE.
       # `tests/package.json`, `tests/package-lock.json`, `tests/tsconfig.json`,
       # `tests/vitest.config.ts`, `tests/harness/` and the shipping suites'
@@ -297,7 +298,11 @@ jobs:
         if: hashFiles('tests/package.json') != ''
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
-          node-version: '22.12.0'
+          # TASK-067: raised from 22.12.0 to the floor engines.node now
+          # declares — the first official release with type stripping ON by
+          # default, so scripts/**/*.mts runs here with no flag, matching
+          # what require_node's capability probe demands on a developer machine.
+          node-version: '22.18.0'
           cache: 'npm'
           cache-dependency-path: tests/package-lock.json
       # `npm ci` and not `npm install`: the lockfile is the pinned tree
@@ -340,6 +345,16 @@ jobs:
         run: |
           . scripts/run-ts-suites.sh
           sh_lint .
+      # TASK-067 — THE SHELL INVENTORY GATE, blueprint-only (guarded on
+      # .blueprint-root, which is export-ignore'd, so this condition is false
+      # in every derived project's checkout, exactly as ts_shell_inventory_stage
+      # skips there). Through the raw command, like its sh_lint / ts_typecheck
+      # neighbours, since pipeline.sh's pipe_stage is not sourced in this job.
+      - name: Blueprint shell inventory
+        if: hashFiles('.blueprint-root') != ''
+        run: |
+          . scripts/run-ts-suites.sh
+          ts_shell_inventory . "$(command -v node)"
       # TASK-031 — THE TYPECHECK, through the function the pre-push gate's
       # typecheck stage calls, so the two modes run one command. vitest strips
       # types without checking them, so without this step CI passes a type error.

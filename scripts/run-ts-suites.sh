@@ -203,6 +203,53 @@ sh_lint_stage(){
     return 1
   fi
   pipe_stage "shellcheck · TASK-033" sh_lint "$_sl_root"
+  ts_shell_inventory_stage "$_sl_root"
+}
+
+# --- TASK-067: the shell inventory gate --------------------------------------
+#
+# "A shell file" = what sh_lint_files lists, reused rather than redefined.
+# Hooked in HERE — sh_lint_stage is already called by every project's gate
+# through this exempt file — rather than by adding a call to
+# .githooks/pre-push-project, which is itself a legacy shell file this rule
+# would then force a migration of just to wire in its own enforcement. CI gets
+# its own step calling ts_shell_inventory (the raw command, matching how its
+# neighbouring "Blueprint shell lint" and "Blueprint TypeScript typecheck"
+# steps call sh_lint / ts_typecheck rather than the *_stage wrappers, since
+# pipeline.sh's pipe_stage/pipe_skip are not sourced there) — see
+# .github/workflows/security.yml's "Blueprint shell inventory" step.
+#
+# BLUEPRINT-ONLY BY THE CHECK ITSELF, not by the call site: downstream,
+# managed scripts are placeholder-substituted, so every legacy blob sha would
+# differ from what this repo recorded, and scripts/shell-inventory.json /
+# scripts/shell-inventory-check.mts are export-ignore'd besides. A project
+# with no .blueprint-root just SKIPS, which is a real answer here (its own
+# shell is its own decision), not a gap this repo needs to cover.
+ts_shell_inventory_stage(){
+  _si_root="${1:-$(pwd)}"
+  if [ ! -f "$_si_root/.blueprint-root" ]; then
+    pipe_skip "shell-inventory · TASK-067" "blueprint-only: no .blueprint-root here"
+    return 0
+  fi
+  if [ ! -f "$_si_root/scripts/shell-inventory-check.mts" ] || [ ! -f "$_si_root/scripts/shell-inventory.json" ]; then
+    pipe_skip "shell-inventory · TASK-067" "scripts/shell-inventory-check.mts or scripts/shell-inventory.json absent"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "❌ The shell inventory check needs node (>=22.18, native type stripping) on PATH."
+    pipe_stage "shell-inventory · TASK-067" false
+    return 1
+  fi
+  pipe_stage "shell-inventory · TASK-067" ts_shell_inventory "$_si_root" "$(command -v node)"
+}
+
+# ts_shell_inventory ROOT NODE — the command itself. NODE is resolved by the
+# caller, before ts_scrubbed's environment scrub, matching ts_typecheck's own
+# reasoning for resolving tsc's path early.
+ts_shell_inventory(){
+  _sinv_root="${1:-.}"
+  _sinv_node="$2"
+  sh_lint_files "$_sinv_root" | ts_scrubbed "$_sinv_node" "$_sinv_root/scripts/shell-inventory-check.mts" "$_sinv_root"
 }
 
 # ts_typecheck [ROOT] — TASK-031. `tsc --noEmit -p ROOT/tests` with the PINNED
@@ -221,8 +268,55 @@ sh_lint_stage(){
 # fetching one, which is an unpinned package installed mid-push (see the vitest
 # stage's tests/node_modules guard). The path is resolved BEFORE the scrub, so
 # the scrub cannot remove anything the path depends on.
+#
+# TASK-067 — A SECOND PROJECT, `-p scripts`, runs after `tests` with the SAME
+# pinned compiler, when scripts/tsconfig.json exists. No new toolchain: the
+# review synthesis borrows @types/node from tests/node_modules rather than
+# giving scripts/ its own package.json (see scripts/tsconfig.json's own
+# comment for why). A project with no scripts/tsconfig.json yet (every project
+# before this commit lands) runs the first project only, unchanged.
 ts_typecheck(){
-  ts_scrubbed "${1:-.}/tests/node_modules/.bin/tsc" --noEmit -p "${1:-.}/tests"
+  _tt_root="${1:-.}"
+  ts_scrubbed "$_tt_root/tests/node_modules/.bin/tsc" --noEmit -p "$_tt_root/tests" || return 1
+  if [ -f "$_tt_root/scripts/tsconfig.json" ]; then
+    ts_scripts_no_bare_imports "$_tt_root" || return 1
+    ts_scrubbed "$_tt_root/tests/node_modules/.bin/tsc" --noEmit -p "$_tt_root/scripts" || return 1
+  fi
+  return 0
+}
+
+# ts_scripts_no_bare_imports [ROOT] — TASK-067's runtime-floor rule, checked
+# ahead of tsc rather than by it: `.mts` under scripts/ runs on plain node
+# before `npm ci`, so it may import only `node:` builtins or a relative file,
+# never a package from node_modules — that dependency does not exist yet at
+# the point these scripts run (install-toolchain.sh, no-chain-guard.sh).
+# tsc has no built-in rule for "no bare specifiers"; this is a grep because the
+# alternative is a package (an eslint plugin) that scripts/ is exactly the
+# tree forbidden from depending on.
+ts_scripts_no_bare_imports(){
+  _bi_root="${1:-.}"
+  # A command SUBSTITUTION, not a bare pipe into `while`: the loop still runs
+  # in a subshell, but only its stdout is read back, so nothing depends on a
+  # variable surviving the subshell boundary (the SC2044 fix below would
+  # otherwise be silently undone by exactly that mistake).
+  _bi_bad="$(
+    find "$_bi_root/scripts" -name '*.mts' -print 2>/dev/null | while IFS= read -r _bi_f; do
+      grep -ohE "from[[:space:]]+['\"][^'\"]+['\"]|^import[[:space:]]+['\"][^'\"]+['\"]" "$_bi_f" \
+        | sed -E "s/^(from|import)[[:space:]]+['\"]//; s/['\"]\$//" \
+        | while IFS= read -r _bi_s; do
+            case "$_bi_s" in
+              node:*|./*|../*) ;;
+              *) printf '%s: "%s"\n' "$_bi_f" "$_bi_s" ;;
+            esac
+          done
+    done
+  )"
+  if [ -n "$_bi_bad" ]; then
+    echo "❌ scripts/**/*.mts may import only node: builtins or a relative file:"
+    printf '%s\n' "$_bi_bad" | sed 's/^/   /'
+    return 1
+  fi
+  return 0
 }
 
 # ts_typecheck_stage [ROOT] — the gate's typecheck stage. It runs BEFORE the

@@ -64,6 +64,12 @@ belong to the project, not to a session.
   supports_reasoning_summaries`. Root cause was two installs, with `~/.local/bin`
   shadowing `/usr/local/bin`.
 - **`blueprint` is not on PATH in this checkout** — use `bash scripts/blueprint …`.
+- **Node is the official v22.23.2 build**, unpacked in
+  `~/.local/opt/node-v22.23.2-linux-x64` and linked into `~/.local/bin`, which
+  shadows the distro `/usr/bin/node` (2026-09-21, TASK-067). The distro build was
+  compiled without TypeScript support, so it cannot run `.ts`/`.mts` even with
+  `--experimental-strip-types`. There is no version manager: to upgrade, unpack
+  a newer tarball there, verify it against `SHASUMS256.txt`, and relink.
 
 ## Standing founder decisions
 

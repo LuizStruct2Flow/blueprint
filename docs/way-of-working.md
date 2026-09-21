@@ -547,6 +547,22 @@ CI only *reports*.
 
 ---
 
+# 3 · Quality — shell to TypeScript, organically
+
+No big-bang rewrite. Instead:
+
+- **New code is TypeScript** (`.mts`, Node's own type stripping — no `tsx`,
+  no runtime dependency, so it still runs before `npm ci`).
+- **A shell file you must change migrates first**, whole file, its own
+  commit, proven behaviour-identical — then the change the item wanted.
+- A **committed inventory** (path → git blob sha) is the enforcement: a gate
+  stage refuses a new shell file, a changed legacy one, or an orphaned row.
+  Not a diff heuristic — it reads the tree, so CI and the local gate agree.
+
+The blueprint's own `scripts/` is the first tree this runs against.
+
+---
+
 # 4 · Observability — MALT
 
 **M**onitoring · **A**lerting · **L**ogging · **T**racing —

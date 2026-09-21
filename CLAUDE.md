@@ -282,14 +282,22 @@ Stale documentation fails silently, so keeping it in sync is a rule:
 `scripts/` is `.mts` (see `scripts/tsconfig.json`), not `.sh` — no big bang
 migration, but nobody adds a new shell script either.
 
-**A shell file you must change is migrated first, whole file.** The migration
-is its own commit, behaviour-identical, proven by the existing suites and by a
-mutant caught in the port. The change the item actually wanted comes after, so
-a reviewer can tell a port from a fix. The only exception is a rewrite so small
-it fits a fixed two-line shim (`#!/usr/bin/env bash` /
-`exec node "$(dirname "$0")/<basename>.mts" "$@"`) — there is no
-shrink-a-shell-file-into-a-dispatcher middle ground; the founder overruled it
-on cost (docs/doing/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis").
+**A shell file you must change is migrated first, whole file — never a
+subcommand or a function.** The founder overruled the 2-to-1 majority that
+wanted a shrink-into-a-dispatcher middle ground, on cost, in front of him
+(docs/doing/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis"): a
+one-line fix to `scripts/blueprint` means porting all 2,257 lines first, not
+extracting the one function that changed. The migration is its own commit,
+behaviour-identical, proven by the existing suites and by a mutant caught in
+the port; the change the item actually wanted comes after, so a reviewer can
+tell a port from a fix. **The shim is not an exception to whole-file
+migration — it is what whole-file migration LEAVES BEHIND.** A script's path
+is a public interface (hooks, allowlists, docs and CI all name it), so the
+migration moves the file's entire logic into a new `.mts` at the same stem
+and turns the OLD path into a fixed two-line shim
+(`#!/usr/bin/env bash` / `exec node "$(dirname "$0")/<basename>.mts" "$@"`)
+that keeps every caller working. Every whole-file migration ends this way;
+there is no smaller unit that also counts.
 
 **Runtime: Node's own type stripping, no flag, no dependency.** `.mts` scripts
 run on an official Node build (`engines.node` in `tests/package.json`) with no
@@ -303,20 +311,29 @@ grow:** `scripts/install-toolchain.sh` (and the libs it sources, while it
 sources them), `scripts/no-chain-guard.sh`, `scripts/run-ts-suites.sh` — each
 keeps the gate's toolchain-bootstrap or fail-closed-without-Node property that
 a `.mts` port cannot have (TASK-018 §3.3). `.githooks/pre-push` and
-`.githooks/pre-push-project` are a THIRD case: they stay shell too, but their
-logic migrates piece by piece behind a shim once a change actually touches
-them, rather than either staying whole or migrating all at once. Everything
-else is either unmigrated shell or a `.mts` port.
+`.githooks/pre-push-project` are NOT in this exception list: they are legacy
+shell files like any other, and the first change that actually touches either
+one migrates that WHOLE file behind a shim, same as `scripts/blueprint` or
+anything else — TASK-018 §3.3 only means the gate's ENTRY stays a shim that
+fails closed without Node, not that the file's logic may migrate gradually.
+Everything else is either unmigrated shell or a `.mts` port.
 
-**Enforcement is a committed inventory, not a diff heuristic** — currently
-**in this blueprint only** (a derived project's own shell is its own decision;
-its changes to managed scripts reach the blueprint through `a2bp`, where the
-gate applies). `scripts/shell-inventory.json` lists every shell file with its
-git blob sha; `scripts/shell-inventory-check.mts` refuses a new one, a legacy
-one whose blob changed to anything but the exact shim, or a row whose file is
-gone. Wired through `scripts/run-ts-suites.sh` (exempt), never by editing a
-legacy shell file to call it — that would force the migration the rule exists
-to phase in gradually.
+**Enforcement is a committed inventory, judged against a BASE it cannot
+edit — not a diff heuristic, and not self-referential.** Currently **in this
+blueprint only** (a derived project's own shell is its own decision; its
+changes to managed scripts reach the blueprint through `a2bp`, where the gate
+applies). `scripts/shell-inventory.json` lists every shell file with its git
+blob sha; `scripts/shell-inventory-check.mts` reads that file at a BASE ref
+the pushed range cannot have edited (locally `@{u}`/`origin/main`, in CI
+`github.event.before`), never at the tip of the push itself — reading it from
+the pushed tree would let one commit patch a legacy file and update its own
+recorded sha in the same breath. Against that base it refuses: a shell file
+neither list covers, a legacy row HEAD adds or changes, an exempt entry HEAD
+grows, a legacy file whose blob changed to anything but the exact shim WITH A
+TRACKED `.mts` TARGET, and a row removed without its file becoming that valid
+shim or disappearing. Wired through `scripts/run-ts-suites.sh` (exempt), never
+by editing a legacy shell file to call it — that would force the migration the
+rule exists to phase in gradually.
 
 ## Architecture Principles
 

@@ -350,8 +350,17 @@ jobs:
       # in every derived project's checkout, exactly as ts_shell_inventory_stage
       # skips there). Through the raw command, like its sh_lint / ts_typecheck
       # neighbours, since pipeline.sh's pipe_stage is not sourced in this job.
+      #
+      # BP_SHELL_INVENTORY_BASE = github.event.before — the tip BEFORE this
+      # push, which the push itself cannot have edited. Empty on a
+      # pull_request run (GitHub sets no top-level `before` there) or on a
+      # brand-new branch (all-zero sha): ts_shell_inventory_base treats both
+      # as unset and falls back to origin/main, which `fetch-depth: 0` above
+      # made resolvable.
       - name: Blueprint shell inventory
         if: hashFiles('.blueprint-root') != ''
+        env:
+          BP_SHELL_INVENTORY_BASE: ${{ github.event.before }}
         run: |
           . scripts/run-ts-suites.sh
           ts_shell_inventory . "$(command -v node)"

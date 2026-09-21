@@ -243,13 +243,67 @@ ts_shell_inventory_stage(){
   pipe_stage "shell-inventory · TASK-067" ts_shell_inventory "$_si_root" "$(command -v node)"
 }
 
+# ts_shell_inventory_base [ROOT] — the BASE ref the checker compares
+# scripts/shell-inventory.json against, so the pushed range itself can never
+# author the ground truth it is judged by (Elias, Codex, four-eyes review of
+# 7a060d1/8b5a68b).
+#
+# Resolved HERE, in shell, BEFORE ts_scrubbed's environment scrub — same
+# reasoning as ts_typecheck resolving tsc's path early: the scrub removes
+# every BP_*/GIT_*/AGENT_* name, and BP_SHELL_INVENTORY_BASE (CI's hook for
+# `github.event.before`) is exactly such a name.
+#
+#   1. BP_SHELL_INVENTORY_BASE, if set and not the all-zero "new ref" sha —
+#      CI sets this from `github.event.before` (see security.yml's
+#      "Blueprint shell inventory" step). The all-zero case (a brand-new
+#      branch on a push event, or an empty value on a pull_request event,
+#      where GitHub sets no `before` at all) is handled explicitly by falling
+#      through rather than trusting it.
+#   2. `@{u}` — the current branch's upstream. In the ordinary case (push to
+#      the branch you track) this IS the push's remote sha.
+#   3. `origin/main` — a local branch with no upstream yet.
+#
+# Prints the resolved ref on stdout; prints nothing and returns 1 if none of
+# the three resolves, which the caller must treat as FAIL CLOSED (refuse to
+# run the check at all, never fall back to judging the tree against itself).
+ts_shell_inventory_base(){
+  _sib_root="${1:-.}"
+  _sib_zero="0000000000000000000000000000000000000000"
+  if [ -n "${BP_SHELL_INVENTORY_BASE:-}" ] && [ "$BP_SHELL_INVENTORY_BASE" != "$_sib_zero" ]; then
+    if git -C "$_sib_root" rev-parse --verify --quiet "${BP_SHELL_INVENTORY_BASE}^{commit}" >/dev/null 2>&1; then
+      printf '%s\n' "$BP_SHELL_INVENTORY_BASE"
+      return 0
+    fi
+    echo "shell-inventory: BP_SHELL_INVENTORY_BASE=$BP_SHELL_INVENTORY_BASE does not resolve to a commit here — falling back" >&2
+  elif [ -n "${BP_SHELL_INVENTORY_BASE:-}" ]; then
+    echo "shell-inventory: BP_SHELL_INVENTORY_BASE is the all-zero ref (a brand-new ref) — falling back" >&2
+  fi
+  _sib_up="$(git -C "$_sib_root" rev-parse --verify --quiet '@{u}' 2>/dev/null)"
+  if [ -n "$_sib_up" ]; then
+    printf '%s\n' "$_sib_up"
+    return 0
+  fi
+  _sib_om="$(git -C "$_sib_root" rev-parse --verify --quiet origin/main 2>/dev/null)"
+  if [ -n "$_sib_om" ]; then
+    echo "shell-inventory: no upstream and no explicit base — using origin/main" >&2
+    printf '%s\n' "$_sib_om"
+    return 0
+  fi
+  echo "shell-inventory: cannot resolve a base ref (no BP_SHELL_INVENTORY_BASE, no @{u}, no origin/main)" >&2
+  return 1
+}
+
 # ts_shell_inventory ROOT NODE — the command itself. NODE is resolved by the
 # caller, before ts_scrubbed's environment scrub, matching ts_typecheck's own
 # reasoning for resolving tsc's path early.
 ts_shell_inventory(){
   _sinv_root="${1:-.}"
   _sinv_node="$2"
-  sh_lint_files "$_sinv_root" | ts_scrubbed "$_sinv_node" "$_sinv_root/scripts/shell-inventory-check.mts" "$_sinv_root"
+  _sinv_base="$(ts_shell_inventory_base "$_sinv_root")" || {
+    echo "❌ shell inventory: no base ref — refusing to judge scripts/shell-inventory.json against itself (see above)"
+    return 1
+  }
+  sh_lint_files "$_sinv_root" | ts_scrubbed "$_sinv_node" "$_sinv_root/scripts/shell-inventory-check.mts" "$_sinv_root" "$_sinv_base"
 }
 
 # ts_typecheck [ROOT] — TASK-031. `tsc --noEmit -p ROOT/tests` with the PINNED
@@ -278,7 +332,14 @@ ts_shell_inventory(){
 ts_typecheck(){
   _tt_root="${1:-.}"
   ts_scrubbed "$_tt_root/tests/node_modules/.bin/tsc" --noEmit -p "$_tt_root/tests" || return 1
-  if [ -f "$_tt_root/scripts/tsconfig.json" ]; then
+  # `-p scripts` needs at least one *.mts for `tsc`'s "include" glob to match —
+  # an empty match is TS18003, a hard error, not a clean pass over nothing.
+  # scripts/tsconfig.json SHIPS to every project (it is not export-ignore'd),
+  # so a fresh bootstrap has the config with zero .mts files until its first
+  # migration — tests/bootstrap-gate #2/#3 caught this exact gap the first
+  # time scripts/shell-inventory-check.mts (blueprint-only, export-ignore'd)
+  # was the only .mts in the tree and made the blueprint's own run look fine.
+  if [ -f "$_tt_root/scripts/tsconfig.json" ] && [ -n "$(find "$_tt_root/scripts" -name '*.mts' -print -quit 2>/dev/null)" ]; then
     ts_scripts_no_bare_imports "$_tt_root" || return 1
     ts_scrubbed "$_tt_root/tests/node_modules/.bin/tsc" --noEmit -p "$_tt_root/scripts" || return 1
   fi

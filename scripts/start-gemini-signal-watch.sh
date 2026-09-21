@@ -99,6 +99,18 @@ STATE_DIR="$(agent_state_dir)"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/gemini-runs.log"
 OUTPUT_LAST="$STATE_DIR/gemini-last-message.md"
+
+# BUG-142: THE DISPATCHED CLI IS THE HOLDER PERSONA, not the Orchestrator.
+# agent-activity.sh --whoami resolves the Orchestrator row unless AGENT_PERSONA
+# overrides it, and nothing set that override here — so a dispatched agent
+# asking who it is got the Orchestrator name (seen live twice: baton
+# Holder=Florian, a dispatched Kimi --whoami answered Eto). The poller exports
+# the dispatch persona as AGENT_SIGNAL_HOLDER; bridge it to the override
+# resolve_identity already honours, at the only point where both are in scope.
+# Deliberately NOT a second identity path inside --whoami — that is the
+# BUG-010/BUG-021 two-copies-of-one-rule shape. Guarded so a wake run with no
+# holder in scope leaves any ambient AGENT_PERSONA untouched.
+[ -n "${AGENT_SIGNAL_HOLDER:-}" ] && export AGENT_PERSONA="$AGENT_SIGNAL_HOLDER"
 # The roster has to be available before either the feed label or hand-back
 # target is resolved. A Holder is a persona, never the backing-agent name.
 if [ -r "$ROOT/scripts/lib/roster.sh" ]; then

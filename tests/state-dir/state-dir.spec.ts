@@ -95,6 +95,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import {
@@ -105,9 +106,33 @@ import {
   structuralViolations,
   type StateDirScan,
 } from './state-dir.js'
+import { resolveConsumer, shimContent, shimTargetPath } from '../helpers/shim.js'
 
 const HELPER = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
-const WATCHER = join(REPO_ROOT, 'scripts/signal-watch.sh')
+
+/**
+ * #10b/#10d extract the shared shell walk and re-run it in a synthetic
+ * fixture to prove IT follows a relative chain and refuses a cycle. That walk
+ * is duplicated across every consumer that still carries it (#7's own
+ * reasoning), so any one of them is as good a source as another — this reads
+ * from whichever CONSUMER is still 'shell' today, rather than hardcoding
+ * WATCHER (BUG-144 commit 0). A migrated consumer's `.mts` target has no such
+ * block to extract (tsPhysicalRootBlock's docblock in state-dir.ts explains
+ * why one is not needed there), so pinning these two cases to a name that
+ * survives the NEXT port, not just this one, is what keeps them meaningful
+ * instead of vacuous.
+ */
+function firstShellBlockSource(): string {
+  for (const rel of CONSUMERS) {
+    const resolved = resolveConsumer(REPO_ROOT, rel)
+    if (resolved?.kind === 'shell') return join(REPO_ROOT, rel)
+  }
+  throw new Error(
+    'no CONSUMER is still shell — #10b/#10d have nothing left to extract the walk from; ' +
+      'if every consumer has migrated, the shell symlink walk itself is gone and these ' +
+      'two cases should be retired rather than left vacuous',
+  )
+}
 
 /**
  * Ask the SHIPPED helper, through the named seam, with an explicit root.
@@ -312,6 +337,14 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       ]) {
         await s.fs.copyIn(join(REPO_ROOT, rel), join('work', rel))
         await s.fs.chmod(join('work', rel), 0o755)
+        // BUG-144 commit 0 — a migrated `rel`'s shim execs a sibling `.mts`
+        // (TASK-067); copy it too WHEN ONE EXISTS, so this out-of-tree fixture
+        // can still run it. None does yet, so this is a no-op today and the
+        // fixture is byte-for-byte what it always was.
+        const mts = shimTargetPath(rel)
+        if (existsSync(join(REPO_ROOT, mts))) {
+          await s.fs.copyIn(join(REPO_ROOT, mts), join('work', mts))
+        }
       }
       await s.fs.copyIn(HELPER, join('work', 'scripts/lib/state-dir.sh'))
       await s.gitRepo('work')
@@ -416,7 +449,7 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       await s.fs.mkdirp(join('probe', 'real/scripts'))
       await s.fs.mkdirp(join('probe', 'links/nested'))
 
-      const block = physicalRootBlock(await readFile(WATCHER, 'utf8'))
+      const block = physicalRootBlock(await readFile(firstShellBlockSource(), 'utf8'))
       expect(block, 'the physical-root block has moved — #10b is extracting nothing').not.toBeNull()
       await s.fs.write(
         join('probe', 'real/scripts/probe.sh'),
@@ -474,7 +507,7 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // not about the code — and a test controls its environment.
       await s.fs.mkdirp(join('hop', 'real/scripts'))
 
-      const block = physicalRootBlock(await readFile(WATCHER, 'utf8'))
+      const block = physicalRootBlock(await readFile(firstShellBlockSource(), 'utf8'))
       await s.fs.write(
         join('hop', 'real/scripts/probe.sh'),
         `${block}\nprintf '%s\\n' "$_bp_root"\n`,
@@ -549,7 +582,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
 
   it('#7 a drifted physical-root block is named', async () => {
     await scenario('sd-r6-7', async (s) => {
-      const real = await readFile(WATCHER, 'utf8')
+      const real = await readFile(firstShellBlockSource(), 'utf8')
       const block = physicalRootBlock(real)
       expect(block).not.toBeNull()
 
@@ -569,7 +602,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
 
   it('#7 a consumer with NO physical-root block anchors some other way', async () => {
     await scenario('sd-r6-7-missing', async (s) => {
-      const real = await readFile(WATCHER, 'utf8')
+      const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
       for (const rel of CONSUMERS) files[rel] = real
       files[CONSUMERS[2]] = '#!/bin/sh\n. lib/state-dir.sh\nexceeds 40 hops\n'
@@ -583,7 +616,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
 
   it('#4+#10+#10e each go red on the defect they name', async () => {
     await scenario('sd-r6-rest', async (s) => {
-      const real = await readFile(WATCHER, 'utf8')
+      const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
       for (const rel of CONSUMERS) files[rel] = real
 
@@ -608,7 +641,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
 
   it('#3 a dispatcher building a log path from the literal placeholder is caught', async () => {
     await scenario('sd-r6-3', async (s) => {
-      const real = await readFile(WATCHER, 'utf8')
+      const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
       for (const rel of CONSUMERS) files[rel] = real
       // THE ORIGINAL DEFECT, verbatim in shape: this repo is the template AND a
@@ -643,7 +676,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
 
   it('a MISSING consumer is reported rather than silently skipped', async () => {
     await scenario('sd-r6-missing', async (s) => {
-      const real = await readFile(WATCHER, 'utf8')
+      const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
       for (const rel of CONSUMERS) files[rel] = real
       delete files[CONSUMERS[3]]
@@ -656,6 +689,78 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       // folded that into `missing` alone, which made the two disagree on exactly
       // this tree. Found by the verdict comparison, not by reading.
       expect(scan.missingDispatchers).toEqual([CONSUMERS[3]])
+    })
+  })
+
+  /**
+   * BUG-144 commit 0 — the shim-awareness `resolveConsumer` adds. `writeAndScan`
+   * cannot prove this pair: `isValidShim` requires the target be TRACKED, and
+   * the workspace `writeAndScan` writes into is never a git repository. So
+   * these two build their own git-backed fixture instead — a valid shim only
+   * counts once git agrees the target is really there, same as the gate.
+   */
+  it('#7 R6 a valid, tracked shim redirects the static checks to its .mts target', async () => {
+    await scenario('sd-r6-shim-valid', async (s) => {
+      const shellTemplate = await readFile(firstShellBlockSource(), 'utf8')
+      const migrated = CONSUMERS[1]
+      const mtsRel = shimTargetPath(migrated)
+
+      const files: Record<string, string> = {}
+      for (const rel of CONSUMERS) files[rel] = shellTemplate
+      files[migrated] = shimContent(migrated)
+      files[mtsRel] = [
+        '// --- physical script root (A-09 / BUG-020, ported) ---',
+        "const _bpRoot = 'dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))'",
+        '// --- end physical script root ---',
+        "// reaches scripts/lib/state-dir.sh across a process boundary",
+        "const LOG_FILE = 'signal.log'",
+      ].join('\n')
+
+      const root = await s.workspace.dir('bp')
+      for (const [rel, content] of Object.entries(files)) {
+        await s.fs.write(join('bp', rel), content)
+      }
+      const repo = await s.gitRepo('bp')
+      await repo.commitAll('fixture: a valid shim')
+
+      const scan = await scanStateDir(root)
+
+      // The shim itself carries none of these properties — the point is that
+      // the scan followed it to the target and found them there instead.
+      expect(scan.rootBlockMissing).not.toContain(migrated)
+      expect(scan.notSourcingHelper).not.toContain(migrated)
+      expect(scan.rootBlockCount).toBe(CONSUMERS.length)
+      expect(scan.rootBlockDrifted).toEqual([])
+    })
+  })
+
+  it('#7 R6 a shim whose target is UNTRACKED is not treated as migrated', async () => {
+    await scenario('sd-r6-shim-untracked', async (s) => {
+      const shellTemplate = await readFile(firstShellBlockSource(), 'utf8')
+      const migrated = CONSUMERS[1]
+      const mtsRel = shimTargetPath(migrated)
+
+      const files: Record<string, string> = {}
+      for (const rel of CONSUMERS) files[rel] = shellTemplate
+      files[migrated] = shimContent(migrated)
+      // The .mts exists ON DISK but is never committed — same shape
+      // `scripts/shell-inventory-check.mts`'s own isValidShim refuses
+      // (a scratch file is not a migration). No fallback should treat the shim
+      // text as though it were still full shell, either: it has neither the
+      // physical-root block nor the `lib/state-dir.sh` string, so this is
+      // exactly the proof that an INCOMPLETE migration is still caught.
+      files[mtsRel] = '// not committed\n'
+
+      const root = await s.workspace.dir('bp')
+      for (const [rel, content] of Object.entries(files)) {
+        await s.fs.write(join('bp', rel), content)
+      }
+      await s.gitRepo('bp') // git repo exists, but nothing is staged or committed
+
+      const scan = await scanStateDir(root)
+
+      expect(scan.rootBlockMissing).toContain(migrated)
+      expect(scan.notSourcingHelper).toContain(migrated)
     })
   })
 })

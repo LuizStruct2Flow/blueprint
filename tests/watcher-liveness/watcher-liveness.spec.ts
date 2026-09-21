@@ -74,9 +74,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until } from '../harness/watcher.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
+import { shimTargetPath } from '../helpers/shim.js'
 
 /**
  * The tree under test. `BP_SPEC_ROOT` repoints it at a perturbed copy, which is
@@ -187,6 +189,13 @@ async function liveRepo(s: Scenario, name = 'live') {
   const root = await s.fs.mkdirp(name)
   await s.fs.write(`${name}/.blueprint-source`, '')
   const watch = await s.fs.copyIn(WATCH, `${name}/scripts/signal-watch.sh`)
+  // BUG-144 commit 0 — a migrated WATCH's shim execs a sibling `.mts`
+  // (TASK-067); copy it too WHEN ONE EXISTS, so this out-of-tree fixture can
+  // still run it. None does yet, so this is a no-op today.
+  const watchMts = shimTargetPath('scripts/signal-watch.sh')
+  if (existsSync(join(SUBJECT, watchMts))) {
+    await s.fs.copyIn(join(SUBJECT, watchMts), `${name}/${watchMts}`)
+  }
   // The WHOLE lib dir, never named files — feed-fixture.ts records why.
   const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
     cwd: s.workspace.root,
@@ -305,14 +314,85 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
       .not.toMatch(/pgrep|pidof|ps -ef|ps -eo/)
   })
 
-  it('#4 the watcher sources the shared lock lib', async () => {
-    // Without this the feed's check is decorative: every state would read 'none'
-    // forever and the warning could never fire.
-    expect(await code(WATCH)).toMatch(/watcher-lock\.sh/)
+  /**
+   * #4 — BEHAVIOURAL, not a source grep (BUG-144 commit 0). The two cases this
+   * replaces read `code(WATCH)` for `watcher-lock.sh` and `bp_watch_hold` —
+   * properties of WATCH's own source text. That stops meaning anything once a
+   * migrated consumer is a two-line shim (TASK-067): the shim contains
+   * neither string, and the guarantee moves to its `.mts` target, which holds
+   * the lock by an entirely different mechanism (a lifeline pipe, not a
+   * sourced shell function). The GUARANTEE — the watcher holds a real lock
+   * for its whole life, so a second watcher on the same state is refused —
+   * is observable from OUTSIDE regardless of implementation, which is the
+   * F-002 lesson (a source grep is a proxy; prefer the thing itself). Proven
+   * here against WATCH as shipped today (still shell) and unchanged, with no
+   * further edit, once WATCH is the shim: `startWatcher`/`s.background` just
+   * run the file at that path, whatever it execs.
+   */
+  it('#4 the watcher holds the lock for its lifetime — a second watcher on the same state is refused', async () => {
+    await scenario('wl-4-refuse', async (s) => {
+      const dir = await batonDir(s, 'proj/logs/state', 'ACTIVE')
+      const args = [
+        WATCH,
+        '--file', join(dir, 'signal.md'),
+        '--state', 'OVER_TO_CODEX',
+        '--poll', '0.2',
+        '--log', join(dir, 'signal.log'),
+      ]
+      const first = startWatcher(s, 'bash', args)
+      try {
+        await until(
+          'the first watcher holds the lock',
+          async () => (await lib(s, `bp_watch_liveness "${dir}" OVER_TO_CODEX`)) === 'alive',
+        )
+
+        const second = await s.run('bash', args, { cwd: s.workspace.root, timeoutMs: 15_000 })
+
+        expect(
+          second.code,
+          `a second watcher on the same state was not refused:\n${second.output}`,
+        ).toBe(1)
+        expect(second.output).toMatch(/already holds/)
+        first.assertStillRunning(
+          'refusing the second watcher must not disturb the first',
+        )
+      } finally {
+        await first.stop()
+      }
+    })
   })
 
-  it('#4 the watcher holds the lock for its lifetime', async () => {
-    expect(await code(WATCH)).toMatch(/bp_watch_hold/)
+  it('#4 SIGKILL of the watcher frees the lock — no cleanup needed (TASK-006)', async () => {
+    await scenario('wl-4-sigkill', async (s) => {
+      const dir = await batonDir(s, 'proj/logs/state', 'ACTIVE')
+      const child = s.background(
+        'bash',
+        [
+          WATCH,
+          '--file', join(dir, 'signal.md'),
+          '--state', 'OVER_TO_CODEX',
+          '--poll', '0.2',
+          '--log', join(dir, 'signal.log'),
+        ],
+        { cwd: s.workspace.root },
+      )
+      const pid = child.pid
+      expect(pid, 'the watcher never started').toBeDefined()
+
+      await until(
+        'the watcher holds the lock',
+        async () => (await lib(s, `bp_watch_liveness "${dir}" OVER_TO_CODEX`)) === 'alive',
+      )
+
+      process.kill(pid as number, 'SIGKILL')
+
+      // 'dead', not 'none': TASK-006 — the lock FILE is never removed, only
+      // released. Its persistence is the record that a watcher was expected.
+      await until(
+        'SIGKILL released the lock (it reads dead, not alive)',
+        async () => (await lib(s, `bp_watch_liveness "${dir}" OVER_TO_CODEX`)) === 'dead',
+      )
+    })
   })
 
   it("#5 the feed compares the mic against the dispatcher's liveness", async () => {

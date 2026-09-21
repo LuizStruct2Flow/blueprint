@@ -21,8 +21,7 @@
  * that fails fast and names the file, and #8/#9 are the actual boundary.
  */
 
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { resolveConsumer, type ConsumerKind } from '../helpers/shim.js'
 
 /** The three dispatchers that must rendezvous with the feed on one directory. */
 export const DISPATCHERS = [
@@ -133,6 +132,34 @@ export function physicalRootBlock(source: string): string | null {
 }
 
 /**
+ * The TypeScript equivalent of #7's physical-root block — BUG-144 commit 0.
+ *
+ * A ported `.mts` has no `_bp_self=`/`_bp_root=` walk to extract: it does not
+ * need one. `fs.realpathSync` follows an arbitrary symlink chain and refuses
+ * a cycle natively, which is the exact pair of properties the shell block's
+ * 40-hop loop exists to hand-roll (#7/#10/#10e below). So the property this
+ * pins for a 'ts' consumer is narrower and different in kind, not absent: the
+ * consumer anchors itself to ITS OWN PHYSICAL FILE — `import.meta.url`
+ * resolved through `realpathSync` — rather than to `cwd` or an argv guess,
+ * marked with the same two sentinel comments in every ported consumer so this
+ * extractor (and its byte-identity check, once a second one exists) has
+ * something stable to find regardless of how the surrounding code is
+ * refactored.
+ */
+export function tsPhysicalRootBlock(source: string): string | null {
+  const lines = source.split('\n')
+  const start = lines.findIndex(
+    (l) => l.trim() === '// --- physical script root (A-09 / BUG-020, ported) ---',
+  )
+  if (start === -1) return null
+  const end = lines.findIndex(
+    (l, i) => i > start && l.trim() === '// --- end physical script root ---',
+  )
+  if (end === -1) return null
+  return lines.slice(start, end + 1).join('\n')
+}
+
+/**
  * #5b — the STRUCTURAL guard, and it is not a `$HOME` blocklist.
  *
  * The first version grepped for `$HOME` shapes. Codex broke it in one pass with
@@ -212,22 +239,38 @@ function scanDispatcherPaths(sources: ReadonlyMap<string, string>): {
   }
 }
 
-/** #7 — the physical-root block, byte-compared across every consumer that has one. */
-function scanRootBlocks(sources: ReadonlyMap<string, string>): {
+/**
+ * #7 — the physical-root block, byte-compared across every consumer that has
+ * one — WITHIN ITS OWN KIND (BUG-144 commit 0). A 'shell' consumer is judged
+ * against other 'shell' consumers' `physicalRootBlock`; a 'ts' consumer
+ * (a migrated file's shim target) is judged against other 'ts' consumers'
+ * `tsPhysicalRootBlock`. Comparing the two kinds to each other would be
+ * comparing a bash symlink walk to a `realpathSync` call and calling the
+ * difference drift — they anchor to the same fact by different, equally
+ * legitimate means (see tsPhysicalRootBlock's docblock). `rootBlockCount` and
+ * `rootBlockMissing` still range over EVERY consumer regardless of kind, so
+ * the floor this pins — every consumer anchors to its own physical file,
+ * somehow — is unchanged.
+ */
+function scanRootBlocks(
+  sources: ReadonlyMap<string, string>,
+  kinds: ReadonlyMap<string, ConsumerKind>,
+): {
   rootBlockCount: number
   rootBlockDrifted: string[]
   rootBlockMissing: string[]
 } {
   const rootBlockDrifted: string[] = []
   const rootBlockMissing: string[] = []
-  let signature: string | null = null
+  const signatures: Record<ConsumerKind, string | null> = { shell: null, ts: null }
   let rootBlockCount = 0
 
   for (const rel of CONSUMERS) {
     const source = sources.get(rel)
     if (source === undefined) continue
+    const kind = kinds.get(rel) ?? 'shell'
 
-    const block = physicalRootBlock(source)
+    const block = kind === 'ts' ? tsPhysicalRootBlock(source) : physicalRootBlock(source)
     if (block === null) {
       rootBlockMissing.push(rel)
       continue
@@ -237,8 +280,8 @@ function scanRootBlocks(sources: ReadonlyMap<string, string>): {
     // cannot itself live in scripts/lib/. Duplication that cannot be removed is
     // pinned instead, or the four copies drift and A-09 comes back through
     // whichever one was forgotten.
-    if (signature === null) signature = block
-    else if (block !== signature) rootBlockDrifted.push(rel)
+    if (signatures[kind] === null) signatures[kind] = block
+    else if (block !== signatures[kind]) rootBlockDrifted.push(rel)
   }
 
   return { rootBlockCount, rootBlockDrifted, rootBlockMissing }
@@ -246,14 +289,22 @@ function scanRootBlocks(sources: ReadonlyMap<string, string>): {
 
 export async function scanStateDir(root: string): Promise<StateDirScan> {
   const sources = new Map<string, string>()
+  const kinds = new Map<string, ConsumerKind>()
   const missing: string[] = []
 
   for (const rel of CONSUMERS) {
-    try {
-      sources.set(rel, await readFile(join(root, rel), 'utf8'))
-    } catch {
+    // BUG-144 commit 0 — a migrated consumer is a two-line shim; the
+    // properties below are properties of its `.mts` TARGET, not of the shim
+    // text itself. resolveConsumer reads the right file and says which kind
+    // it is; every real consumer today is still 'shell', so this is a no-op
+    // until the first port lands.
+    const resolved = resolveConsumer(root, rel)
+    if (resolved === undefined) {
       missing.push(rel)
+      continue
     }
+    sources.set(rel, resolved.source)
+    kinds.set(rel, resolved.kind)
   }
 
   const notSourcingHelper: string[] = []
@@ -262,7 +313,22 @@ export async function scanStateDir(root: string): Promise<StateDirScan> {
   const noHopGuard: string[] = []
 
   for (const [rel, source] of sources) {
+    const kind = kinds.get(rel) ?? 'shell'
+    // Sourcing the shared helper is still a plain substring check either way:
+    // a 'ts' consumer reaches scripts/lib/state-dir.sh across a process
+    // boundary rather than duplicating its derivation (TASK-067's stated
+    // consequence for sourced libraries), and doing that means naming the
+    // path in its own source too.
     if (!source.includes('lib/state-dir.sh')) notSourcingHelper.push(rel)
+    // #5b, #10, #10e are shell-syntax / shell-portability heuristics with no
+    // TypeScript analogue to mis-fire on: a 'ts' consumer cannot spell a
+    // reconstruction the way STATE_ASSIGN matches, cannot depend on GNU
+    // `readlink -f` (it never shells out to `readlink` at all), and needs no
+    // hand-rolled hop guard (`fs.realpathSync` refuses a cycle on its own —
+    // see tsPhysicalRootBlock). Applying shell regexes to TypeScript source
+    // would not catch a real defect; it would just report false positives
+    // that make a correct port look violating.
+    if (kind === 'ts') continue
     structural.push(...structuralViolations(rel, source))
     if (/readlink -f/.test(stripComments(source))) gnuReadlink.push(rel)
     if (!source.includes('exceeds 40 hops')) noHopGuard.push(rel)
@@ -270,7 +336,7 @@ export async function scanStateDir(root: string): Promise<StateDirScan> {
 
   return {
     ...scanDispatcherPaths(sources),
-    ...scanRootBlocks(sources),
+    ...scanRootBlocks(sources, kinds),
     missingDispatchers: DISPATCHERS.filter((rel) => !sources.has(rel)),
     notSourcingHelper,
     structural,

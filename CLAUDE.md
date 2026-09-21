@@ -276,6 +276,48 @@ Stale documentation fails silently, so keeping it in sync is a rule:
   triage workflow is in the header of `scripts/sonar.sh`; a Quality Gate `ERROR`
   blocks the handoff to the founder.
 
+## Shell to TypeScript, organically (TASK-067)
+
+**New code is TypeScript.** A new script, library or gate stage under
+`scripts/` is `.mts` (see `scripts/tsconfig.json`), not `.sh` — no big bang
+migration, but nobody adds a new shell script either.
+
+**A shell file you must change is migrated first, whole file.** The migration
+is its own commit, behaviour-identical, proven by the existing suites and by a
+mutant caught in the port. The change the item actually wanted comes after, so
+a reviewer can tell a port from a fix. The only exception is a rewrite so small
+it fits a fixed two-line shim (`#!/usr/bin/env bash` /
+`exec node "$(dirname "$0")/<basename>.mts" "$@"`) — there is no
+shrink-a-shell-file-into-a-dispatcher middle ground; the founder overruled it
+on cost (docs/doing/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis").
+
+**Runtime: Node's own type stripping, no flag, no dependency.** `.mts` scripts
+run on an official Node build (`engines.node` in `tests/package.json`) with no
+`tsx`, `ts-node`, Bun or Deno — they must run before `npm ci` installs
+anything. `scripts/install-toolchain.sh` probes this as a CAPABILITY, not a
+version number: a Node whose version satisfies the range can still be a
+distro/vendored build with type stripping compiled out.
+
+**Closed exceptions that stay whole shell, stated so the list cannot silently
+grow:** `scripts/install-toolchain.sh` (and the libs it sources, while it
+sources them), `scripts/no-chain-guard.sh`, `scripts/run-ts-suites.sh` — each
+keeps the gate's toolchain-bootstrap or fail-closed-without-Node property that
+a `.mts` port cannot have (TASK-018 §3.3). `.githooks/pre-push` and
+`.githooks/pre-push-project` are a THIRD case: they stay shell too, but their
+logic migrates piece by piece behind a shim once a change actually touches
+them, rather than either staying whole or migrating all at once. Everything
+else is either unmigrated shell or a `.mts` port.
+
+**Enforcement is a committed inventory, not a diff heuristic** — currently
+**in this blueprint only** (a derived project's own shell is its own decision;
+its changes to managed scripts reach the blueprint through `a2bp`, where the
+gate applies). `scripts/shell-inventory.json` lists every shell file with its
+git blob sha; `scripts/shell-inventory-check.mts` refuses a new one, a legacy
+one whose blob changed to anything but the exact shim, or a row whose file is
+gone. Wired through `scripts/run-ts-suites.sh` (exempt), never by editing a
+legacy shell file to call it — that would force the migration the rule exists
+to phase in gradually.
+
 ## Architecture Principles
 
 - No hardcoded configuration — everything configurable via admin UI and stored in the project's config store

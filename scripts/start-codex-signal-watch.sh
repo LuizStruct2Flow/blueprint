@@ -216,23 +216,49 @@ now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
 feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
+
+# BUG-143, causes 2 and 3: `--output-last-message` is written by codex ONLY
+# when the process exits, so (2) a run that dies never touches it and a
+# PREVIOUS run'\''s report survives looking current, and (3) an agent that
+# hands the mic back mid-run (before codex exits) leaves the Orchestrator
+# reading that same stale file seconds before the real report lands — seen
+# live twice in a row. Stamping an honest in-progress marker HERE, before
+# codex runs, makes both readings true instead of misleading: if codex dies,
+# the marker is what survives; if the mic flips early, the marker is what a
+# premature read sees, and it says plainly that this run has not reported
+# yet. A successful run overwrites the marker with its real last message via
+# --output-last-message, same as before.
+printf "[in-progress] codex exec dispatched %s — no report written yet\n" "$now" >"$OUTPUT_LAST"
+
+# BUG-143, cause 1: `codex exec` sits in a pipeline under dash (`sh -c`, no
+# PIPESTATUS, no `set -o pipefail`), so its exit status was lost — a run that
+# died still logged "codex exec finished". Same fix as the Kimi launcher
+# (TASK-063 cross-provider review): the command group writes `$?` to a status
+# file right after codex exits, before its stdout (feeding tee) reaches EOF,
+# so the file is always complete by the time the downstream stages finish.
+CODEX_STATUS_FILE="$(mktemp "$STATE_DIR/.codex-exit-status.XXXXXX" 2>/dev/null)" || CODEX_STATUS_FILE="$STATE_DIR/.codex-exit-status.$$"
 # --json + codex-feed-filter.sh keeps the activity feed at one concise line per
 # action (codex prose, commands, file changes) instead of echoing every file
 # codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
 # --output-last-message still captures the final message for verdict reading.
-"$CODEX_BIN" exec --json "$@" \
-  --cd "$ROOT" \
-  --sandbox workspace-write \
-  --skip-git-repo-check \
-  --output-last-message "$OUTPUT_LAST" \
-  "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \
-  2>>"$RUN_LOG" \
+{
+  "$CODEX_BIN" exec --json "$@" \
+    --cd "$ROOT" \
+    --sandbox workspace-write \
+    --skip-git-repo-check \
+    --output-last-message "$OUTPUT_LAST" \
+    "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \
+    2>>"$RUN_LOG"
+  printf "%s" "$?" >"$CODEX_STATUS_FILE"
+} \
   | tee -a "$RAW_JSON" \
   | bash "$ROOT/scripts/codex-feed-filter.sh" \
-  | while IFS= read -r __line; do
+  | while IFS= read -r __line || [ -n "$__line" ]; do
       printf "%s\n" "$__line" >>"$RUN_LOG"
       [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
     done
+CODEX_STATUS="$(cat "$CODEX_STATUS_FILE" 2>/dev/null)"
+rm -f "$CODEX_STATUS_FILE"
 
 # RESOLVE THE ACTUAL MODEL/EFFORT (TASK-060), from the thread id codex itself
 # announced on its own --json stream (RAW_JSON, captured above via tee) — an IDENTITY
@@ -269,8 +295,15 @@ else
 fi
 
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
-echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
-feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
+if [ "${CODEX_STATUS:-1}" = "0" ]; then
+  echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
+  feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
+else
+  # BUG-143: report distinctly rather than "finished" — and point at RUN_LOG,
+  # not OUTPUT_LAST, because a dead run left only the in-progress marker there.
+  echo "[$end] codex exec FAILED (exit ${CODEX_STATUS:-unknown}) — see $RUN_LOG" | tee -a "$RUN_LOG"
+  feed_append "[$FEED_LABEL] FAILED (exit ${CODEX_STATUS:-unknown}) — see $RUN_LOG"
+fi
 '
 
 exec "${ROOT}/scripts/signal-watch.sh" "$@"

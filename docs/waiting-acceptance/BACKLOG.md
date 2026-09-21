@@ -8,6 +8,7 @@ have, not that it is missing.
 
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
+| **TASK-066** | **A Codex dispatch can commit its own work.** `scripts/start-codex-signal-watch.sh` passes `codex exec --add-dir <git common dir>`, so `.git` is writable while the sandbox stays `workspace-write`; a linked worktree grants its common dir, not its `.git` pointer file. Authored by Elias (Codex), reviewed APPROVE by Thomas (Kimi). **LANDED**, CI green on `6196bdd` (2026-09-21). | S3 | **What to test:** dispatch any Codex persona on a small item and check `git log`: the commit is its own, not the Orchestrator's. That first real commit is the one proof still outstanding. | **Re-open if** a Codex dispatch cannot commit, or the sandbox is widened beyond the git dir. |
 
 **Each row's "what to test" travels WITH it** — into `done/` on acceptance, back
 into `doing/` on a rejection. It is not dropped at the boundary: a rejected item

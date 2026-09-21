@@ -67,7 +67,7 @@ until there is one. Anyone picking up work reads this and advances it.
 
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
-| Infrastructure | Philipp (Claude) — BUG-143 | — | Elias (Codex) |
+| Infrastructure | Elias (Codex) — TASK-066 | — | Thomas (Kimi) |
 | Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
 
 BUG-141, 142 and 143 were the first work the rule routed — Elias (Codex), Thomas

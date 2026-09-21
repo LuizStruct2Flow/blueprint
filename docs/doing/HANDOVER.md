@@ -67,8 +67,19 @@ until there is one. Anyone picking up work reads this and advances it.
 
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
-| Infrastructure | Elias (Codex) — TASK-066 | — | Thomas (Kimi) |
+| Infrastructure | Philipp (Claude) — TASK-067 | — | Elias (Codex) |
 | Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
+
+**Kimi hit its 5-hour quota at 13:05Z on 2026-09-21** and left the rotation, so
+TASK-067 skipped Thomas and went to Philipp. That is the rule working. What did
+not work is BUG-144: the failed dispatch stranded the mic at `OVER_TO_KIMI`, and
+nothing noticed. Until BUG-144 is fixed, **after every watcher dispatch, read the
+provider's run log for `FAILED`; do not wait on the mic alone.**
+
+**Shell to TypeScript is now a rule (TASK-067, `CLAUDE.md`).** Before editing any
+shell file, check `scripts/shell-inventory.json`. A legacy file must be migrated
+whole to `.mts` behind the two-line shim first, and the gate refuses anything
+else.
 
 BUG-141, 142 and 143 were the first work the rule routed — Elias (Codex), Thomas
 (Kimi), Philipp (Claude), one full turn of Infrastructure — each reviewed by

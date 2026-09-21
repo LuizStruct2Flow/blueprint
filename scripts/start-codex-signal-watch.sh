@@ -104,6 +104,18 @@ mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/codex-runs.log"
 OUTPUT_LAST="$STATE_DIR/codex-last-message.md"
 
+# BUG-142: THE DISPATCHED CLI IS THE HOLDER PERSONA, not the Orchestrator.
+# agent-activity.sh --whoami resolves the Orchestrator row unless AGENT_PERSONA
+# overrides it, and nothing set that override here — so a dispatched agent
+# asking who it is got the Orchestrator name (seen live twice: baton
+# Holder=Florian, a dispatched Kimi --whoami answered Eto). The poller exports
+# the dispatch persona as AGENT_SIGNAL_HOLDER; bridge it to the override
+# resolve_identity already honours, at the only point where both are in scope.
+# Deliberately NOT a second identity path inside --whoami — that is the
+# BUG-010/BUG-021 two-copies-of-one-rule shape. Guarded so a wake run with no
+# holder in scope leaves any ambient AGENT_PERSONA untouched.
+[ -n "${AGENT_SIGNAL_HOLDER:-}" ] && export AGENT_PERSONA="$AGENT_SIGNAL_HOLDER"
+
 # THE FEED LABEL, built here and nowhere else (BUG-021).
 #
 # The persona is a per-dispatch fact: AGENT_SIGNAL_HOLDER is exported fresh for

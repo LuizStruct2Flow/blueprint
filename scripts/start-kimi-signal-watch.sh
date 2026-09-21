@@ -98,6 +98,18 @@ STATE_DIR="$(agent_state_dir)"
 mkdir -p "$STATE_DIR"
 RUN_LOG="$STATE_DIR/kimi-runs.log"
 OUTPUT_LAST="$STATE_DIR/kimi-last-message.md"
+
+# BUG-142: THE DISPATCHED CLI IS THE HOLDER PERSONA, not the Orchestrator.
+# agent-activity.sh --whoami resolves the Orchestrator row unless AGENT_PERSONA
+# overrides it, and nothing set that override here — so a dispatched agent
+# asking who it is got the Orchestrator name (seen live twice: baton
+# Holder=Florian, a dispatched Kimi --whoami answered Eto). The poller exports
+# the dispatch persona as AGENT_SIGNAL_HOLDER; bridge it to the override
+# resolve_identity already honours, at the only point where both are in scope.
+# Deliberately NOT a second identity path inside --whoami — that is the
+# BUG-010/BUG-021 two-copies-of-one-rule shape. Guarded so a wake run with no
+# holder in scope leaves any ambient AGENT_PERSONA untouched.
+[ -n "${AGENT_SIGNAL_HOLDER:-}" ] && export AGENT_PERSONA="$AGENT_SIGNAL_HOLDER"
 # THE MODEL, from the Model cell of the holder persona (TASK-059/TASK-063).
 # A Kimi persona passes `-m <slug>`. A cell that does not resolve REFUSES the
 # dispatch, visibly: running the wrong model quietly is the failure this exists

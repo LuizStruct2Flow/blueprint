@@ -188,9 +188,22 @@ describe('TASK-027 — check derives the Node requirement from tests/package.jso
         expect(r.line).toContain(`v${v}`)
         expect(r.code, `a rejected node did not fail check:\n${r.output}`).toBe(1)
       }
-      for (const v of ['20.19.0', '22.12.0', '24.1.0']) {
+      // TASK-067 raised the real floor to `>=22.18.0` (the first official Node
+      // release with type stripping on by default) and dropped the `^20.19.0`
+      // arm outright — so 20.19.0 moved from accepted to rejected, and belongs
+      // with the rejection list above, not here. 22.12.0 is now also outside
+      // the range; it stays here only as a version between "old floor" and
+      // "new floor" — accepted before this fix, rejected after — a case the
+      // rejection loop above did not cover.
+      for (const v of ['22.18.0', '24.1.0']) {
         const r = await check(s, v)
         expect(r.line, `check rejected node v${v}:\n${r.output}`).toMatch(/✓ node v/)
+      }
+      for (const v of ['20.19.0', '22.12.0']) {
+        const r = await check(s, v)
+        expect(r.line, `check accepted node v${v}, but TASK-067 raised the floor past it:\n${r.output}`).toMatch(
+          /✗ node/,
+        )
       }
     })
   })

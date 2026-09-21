@@ -75,6 +75,12 @@ SHELLCHECK_VERSION="0.10.0"
 # install (TASK-027, a2bp request PR #67). npm 8+ is the floor for a
 # lockfileVersion 2/3 `npm ci`, and nothing else declares it, so it stays a
 # constant.
+#
+# TASK-067 raised the manifest's floor to `>=22.18.0`, the first official Node
+# release with type stripping ON BY DEFAULT — scripts/**/*.mts needs that to
+# run at all, with no flag and no runtime dependency. The numeric range alone
+# cannot tell a distro/vendored build (type stripping compiled out) from an
+# official one at the SAME version: see require_node's capability probe below.
 HARNESS_MANIFEST="$ROOT/tests/package.json"
 NPM_MIN_MAJOR="8"
 
@@ -308,6 +314,32 @@ require_node() {
   else
     fail_tool npm "missing or older than ${NPM_MIN_MAJOR} — 'npm ci' cannot materialise the test harness"
   fi
+
+  # TASK-067 — a CAPABILITY probe, run only once the version check above has
+  # already passed. Only then, because "the version is in range but it cannot
+  # strip types" is a DIFFERENT failure than "the version is out of range",
+  # and node_check's NODE_RC already means this Node satisfies engines.node.
+  if [ "$NODE_RC" = 0 ] && node_strips_types; then
+    note "✓ node strips types by default (scripts/**/*.mts will run)"
+  elif [ "$NODE_RC" = 0 ]; then
+    fail_tool node "$(node --version 2>/dev/null) satisfies engines.node but does not strip TypeScript types by default — this is almost always a DISTRO or vendored build with that support compiled out (observed on this host's own /usr/bin/node), not a version problem. $NODE_INSTALL_HINT — an OFFICIAL build from nodejs.org or your version manager, not the OS package."
+  fi
+}
+
+# node_strips_types — TASK-067's capability probe. Runs a one-line TYPED file
+# through the resolved `node` with NO flag, and reads whether it ran: the
+# version-range check above cannot tell an official build from a distro one at
+# the SAME reported version — this repo's own dev machine had `/usr/bin/node`
+# report a version inside range while `--experimental-strip-types` failed with
+# ERR_NO_TYPESCRIPT ("not compiled with TypeScript support"). NEVER installs
+# anything — same posture as require_node's own comment above.
+node_strips_types() {
+  _nst_dir="$(mktemp -d)" || return 1
+  printf 'const _nst: number = 1\nif (_nst !== 1) throw new Error("unreachable")\n' >"$_nst_dir/probe.mts"
+  node "$_nst_dir/probe.mts" >/dev/null 2>&1
+  _nst_rc=$?
+  rm -rf "$_nst_dir"
+  return "$_nst_rc"
 }
 
 # --- TASK-025: the per-machine `blueprint` command ----------------------------
@@ -523,7 +555,14 @@ if [ "$MODE" = "check" ]; then
   node_check
   case "$NODE_RC" in
     0)
-      note "✓ node $(node --version 2>/dev/null)  ($(command -v node))"
+      if node_strips_types; then
+        note "✓ node $(node --version 2>/dev/null)  ($(command -v node)) — strips types by default"
+      else
+        note "✗ node $(node --version 2>/dev/null)  ($(command -v node)) satisfies engines.node but does NOT strip"
+        note "        types by default — almost always a distro/vendored build with that support"
+        note "        compiled out, not a version problem. $NODE_INSTALL_HINT — an official build."
+        missing=$((missing + 1))
+      fi
       ;;
     3)
       note "✗ node  UNSUPPORTED — $(node --version 2>&1 | head -1) does not satisfy engines.node \"$NODE_WHY\""

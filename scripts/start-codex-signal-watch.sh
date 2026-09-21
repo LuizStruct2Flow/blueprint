@@ -230,6 +230,28 @@ feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 # --output-last-message, same as before.
 printf "[in-progress] codex exec dispatched %s — no report written yet\n" "$now" >"$OUTPUT_LAST"
 
+# TASK-066: workspace-write deliberately excludes repository metadata, but a
+# dispatched agent must be able to create its own commit. Grant only the git
+# common directory, never the whole filesystem. `--git-common-dir` is vital
+# for linked worktrees: their `$ROOT/.git` is a file, while objects and refs
+# live in the common directory. Clear inherited git-location overrides first;
+# BUG-014 prohibits letting the watcher operate on an exported GIT_DIR.
+CODEX_GIT_DIR="$(
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+  git -C "$ROOT" rev-parse --git-common-dir
+)" || {
+  printf "[git] could not resolve the repository common directory — dispatch refused\n" | tee -a "$RUN_LOG" >&2
+  exit 7
+}
+case "$CODEX_GIT_DIR" in
+  /*) ;;
+  *) CODEX_GIT_DIR="$ROOT/$CODEX_GIT_DIR" ;;
+esac
+CODEX_GIT_DIR="$(cd -P "$CODEX_GIT_DIR" && pwd)" || {
+  printf "[git] repository common directory is not accessible — dispatch refused\n" | tee -a "$RUN_LOG" >&2
+  exit 7
+}
+
 # BUG-143, cause 1: `codex exec` sits in a pipeline under dash (`sh -c`, no
 # PIPESTATUS, no `set -o pipefail`), so its exit status was lost — a run that
 # died still logged "codex exec finished". Same fix as the Kimi launcher
@@ -245,6 +267,7 @@ CODEX_STATUS_FILE="$(mktemp "$STATE_DIR/.codex-exit-status.XXXXXX" 2>/dev/null)"
   "$CODEX_BIN" exec --json "$@" \
     --cd "$ROOT" \
     --sandbox workspace-write \
+    --add-dir "$CODEX_GIT_DIR" \
     --skip-git-repo-check \
     --output-last-message "$OUTPUT_LAST" \
     "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \

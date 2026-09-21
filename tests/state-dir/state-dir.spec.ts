@@ -299,9 +299,10 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // different repository.
       await s.fs.mkdirp(join('work', 'scripts/lib'))
 
-      // TASK-021 — a project-shaped fixture root marker. This tree never runs
-      // `git init`, so without a terminator the three-terminator walk resolves
-      // NOTHING and the dispatch fails for a reason unrelated to A-09.
+      // TASK-021 — a project-shaped fixture root marker. The launcher also
+      // resolves the Git common directory now (TASK-066), so this is a real Git
+      // work tree as well as a project-shaped root. The marker keeps this case
+      // focused on state-dir derivation rather than Git discovery.
       await s.fs.write(join('work', '.blueprint-source'), '')
 
       for (const rel of [
@@ -313,6 +314,7 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
         await s.fs.chmod(join('work', rel), 0o755)
       }
       await s.fs.copyIn(HELPER, join('work', 'scripts/lib/state-dir.sh'))
+      await s.gitRepo('work')
 
       // BUG-019 — the watcher reads the LIVE baton (untracked, under the state
       // dir), not the tracked AGENT_SIGNAL.md, which is the protocol document.

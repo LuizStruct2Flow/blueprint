@@ -43,7 +43,7 @@
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { REPO_ROOT, scenario } from '../harness/index.js'
+import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
 
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
@@ -64,6 +64,19 @@ async function extractWake(): Promise<string> {
   const wake = src.match(/export AGENT_WAKE_COMMAND='\n([\s\S]*?)\n'\n\nexec /)?.[1]
   expect(wake, `could not extract the dispatch body from ${LAUNCHER}`).toBeDefined()
   return wake!
+}
+
+async function initializeGit(s: Scenario, repo: string, withInitialCommit = false): Promise<void> {
+  const commands = [
+    ['init', '-q', '--initial-branch', 'main'],
+    ['config', 'user.name', 'Fixture Operator'],
+    ['config', 'user.email', 'fixture@example.test'],
+  ]
+  if (withInitialCommit) commands.push(['add', '-A'], ['commit', '-qm', 'fixture: initial'])
+  for (const args of commands) {
+    const git = await s.run('git', args, { cwd: repo })
+    expect(git.code, `fixture git ${args.join(' ')} failed:\n${git.output}`).toBe(0)
+  }
 }
 
 /** Same invented fixture roster shape as the other codex-launcher suites. */
@@ -89,6 +102,9 @@ const FIXTURE_ROSTER = `# Roster
  */
 const FAKE_CODEX = `#!/bin/sh
 out=""
+if [ -n "\${FAKE_CODEX_ARGS:-}" ]; then
+  printf '%s\\n' "$@" >"$FAKE_CODEX_ARGS"
+fi
 while [ $# -gt 0 ]; do
   case "$1" in
     --output-last-message) out="$2"; shift 2 ;;
@@ -104,11 +120,54 @@ exit 0
 `
 
 describe('BUG-143 — a Codex dispatch never reports finished for a run it did not verify', () => {
+  it('TASK-066: grants a linked worktree only its git common directory', async () => {
+    await scenario('codex-commit-git-dir', async (s) => {
+      const f = await feedFixture(s, 'proj', { roster: FIXTURE_ROSTER, extraScripts: ['codex-feed-filter.sh'] })
+      const wake = await extractWake()
+      const fakeCodex = await s.fs.write('fake-codex.sh', FAKE_CODEX, { mode: 0o755 })
+      const argsFile = join(s.workspace.root, 'fake-codex.args')
+      const linked = join(s.workspace.root, 'linked-worktree')
+
+      await initializeGit(s, f.repo, true)
+      for (const args of [['worktree', 'add', '-q', '-b', 'linked', linked]]) {
+        const git = await s.run('git', args, { cwd: f.repo })
+        expect(git.code, `fixture git ${args.join(' ')} failed:\n${git.output}`).toBe(0)
+      }
+
+      const r = await s.run(
+        'bash',
+        [
+          '-c',
+          'export AGENT_SIGNAL_HOLDER=Slava AGENT_SIGNAL_TASK="TASK-066 git directory probe"; exec sh -c "$1"',
+          'x',
+          wake,
+        ],
+        {
+          cwd: s.workspace.root,
+          env: {
+            ROOT: linked,
+            CODEX_BIN: fakeCodex,
+            AGENT_STATE_HOME: f.stateDir,
+            FAKE_CODEX_ARGS: argsFile,
+          },
+        },
+      )
+      expect(r.code, `the dispatch body itself failed:\n${r.output}`).toBe(0)
+
+      const args = (await readFile(argsFile, 'utf8')).split('\n')
+      const addDir = args.indexOf('--add-dir')
+      expect(addDir, `codex did not receive --add-dir:\n${args.join('\n')}`).toBeGreaterThan(-1)
+      expect(args[addDir + 1]).toBe(join(f.repo, '.git'))
+      expect(args[addDir + 1]).not.toBe(join(linked, '.git'))
+    })
+  })
+
   it('a dying dispatch reports FAILED distinctly, never "finished"', async () => {
     await scenario('codex-status-1', async (s) => {
       const f = await feedFixture(s, 'proj', { roster: FIXTURE_ROSTER, extraScripts: ['codex-feed-filter.sh'] })
       const wake = await extractWake()
       const fakeCodex = await s.fs.write('fake-codex.sh', FAKE_CODEX, { mode: 0o755 })
+      await initializeGit(s, f.repo)
 
       const r = await s.run(
         'bash',
@@ -138,6 +197,7 @@ describe('BUG-143 — a Codex dispatch never reports finished for a run it did n
       const f = await feedFixture(s, 'proj', { roster: FIXTURE_ROSTER, extraScripts: ['codex-feed-filter.sh'] })
       const wake = await extractWake()
       const fakeCodex = await s.fs.write('fake-codex.sh', FAKE_CODEX, { mode: 0o755 })
+      await initializeGit(s, f.repo)
 
       // A stale artefact, exactly as the bug report describes: the file left
       // behind by a PREVIOUS, unrelated run.
@@ -176,6 +236,7 @@ describe('BUG-143 — a Codex dispatch never reports finished for a run it did n
       const f = await feedFixture(s, 'proj', { roster: FIXTURE_ROSTER, extraScripts: ['codex-feed-filter.sh'] })
       const wake = await extractWake()
       const fakeCodex = await s.fs.write('fake-codex.sh', FAKE_CODEX, { mode: 0o755 })
+      await initializeGit(s, f.repo)
 
       const r = await s.run(
         'bash',

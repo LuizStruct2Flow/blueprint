@@ -77,14 +77,11 @@ another provider. All three landed together, CI green on `3c4d133`, and wait in
 §3.1's two-commit reproducer convention at push (2026-09-21); do not read that
 as a standing waiver.
 
-**Codex cannot commit.** Its launcher runs `--sandbox workspace-write`, which
-mounts `.git` read-only, so the founder's "every provider commits its own work"
-(2026-09-20) is impossible for Codex today. Elias said so rather than failing
-silently. Loosening the sandbox is a security-boundary decision and is the
-founder's, so until then the Orchestrator commits Codex work with Codex named in
-the body. **Nor can a dispatched agent run the suite as written:** the harness
-refuses the `AGENT_*` variables every dispatch exports, correctly, so an agent
-must scrub them first — Elias hit this and worked around it.
+**Codex can commit.** TASK-066 keeps `--sandbox workspace-write` and adds only
+Git's common directory with `--add-dir`, so a linked worktree grants its actual
+objects and refs rather than its `.git` pointer file. `git push` remains
+Claude-only by protocol. **A dispatched agent still must scrub `AGENT_*` before
+running the suite:** the harness rejects those exported variables correctly.
 
 **The mic is one at a time, so watcher-backed providers run in sequence.** Codex
 and Kimi cannot both hold it, which bounds how much of an item can be

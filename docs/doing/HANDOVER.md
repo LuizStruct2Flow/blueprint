@@ -60,19 +60,22 @@ because another machine only sees what is pushed.
 - **TASK-049 (backlog):** managed vs project placement for a guard that refuses to
   publish a live handover.
 
-### The rotation, as of 2026-09-20
+### The rotation, as of 2026-09-21
 
 **There is no rotation state file yet** (TASK-065 builds it), so it lives here
 until there is one. Anyone picking up work reads this and advances it.
 
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
-| Infrastructure | Elias (Codex) — BUG-141 | — | Thomas (Kimi) — BUG-142 |
+| Infrastructure | Philipp (Claude) — BUG-143 | — | Elias (Codex) |
 | Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
 
-TASK-063 ran entirely on Claude, which is what prompted the rule. BUG-141 and
-BUG-142 are the first work it routed: Codex then Kimi, with Philipp (Claude)
-reviewing both — cross-provider for each author, as §"Four-eyes" requires.
+BUG-141, 142 and 143 were the first work the rule routed — Elias (Codex), Thomas
+(Kimi), Philipp (Claude), one full turn of Infrastructure — each reviewed by
+another provider. All three landed together, CI green on `3c4d133`, and wait in
+`waiting-acceptance/`. The founder accepted their single-commit form over DoD
+§3.1's two-commit reproducer convention at push (2026-09-21); do not read that
+as a standing waiver.
 
 **Codex cannot commit.** Its launcher runs `--sandbox workspace-write`, which
 mounts `.git` read-only, so the founder's "every provider commits its own work"

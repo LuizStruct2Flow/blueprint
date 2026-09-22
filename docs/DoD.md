@@ -16,7 +16,7 @@ docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
 
 | State | What lives here | How items leave |
 |---|---|---|
-| `backlog/` | **Parked** work. Category is `KEEP`, `DEFER` (with its re-open trigger), or `OBSOLETE`. **Enforced by: `tests/lifecycle-docs` "TASK-070: every parked BACKLOG row has a KEEP, DEFER, or OBSOLETE Category marker".** | **Promotion** into `doing/`, or **cancellation**: delete the row and leave a one-line pointer in `docs/config/findings.md`. |
+| `backlog/` | **Parked** work. Category is `KEEP`, `DEFER`, or `OBSOLETE`; every non-`OBSOLETE` row carries a re-open trigger. **Enforced by: `tests/lifecycle-docs` "TASK-070: every parked BACKLOG row has a valid Category marker and non-OBSOLETE rows have a re-open trigger".** | **Promotion** into `doing/`, or **cancellation**: delete the row and leave a one-line pointer in `docs/config/findings.md`. |
 | `doing/` | Active work: `BUGS.md` and `BACKLOG.md` rows, `PLAN-*.md`, multi-file item folders, `HANDOVER.md`. | Its work is on `main` and CI is green. A plan with open slices stays, with its shipped slices marked DONE. |
 | `waiting-acceptance/` | Landed work awaiting the founder's acceptance test. | The founder accepts it ("BUG-0XX is done", "accept item Y"). |
 | `done/` | Founder-accepted work: the record of what was delivered, not merely merged. | Items don't leave. |

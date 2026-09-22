@@ -357,9 +357,9 @@ function refreshSignalFile(): void {
 //
 // THE FILE IS NEVER REMOVED (TASK-006, carried over unchanged): its
 // persistence is the record that a watcher was EXPECTED on this state, which
-// is what lets scripts/agent-activity.sh tell "nobody is listening" apart
-// from "an agent is thinking". See scripts/lib/watcher-lock.sh's own
-// docblock for the full reasoning; this file does not re-derive it.
+// is what lets scripts/agent-activity.sh tell "nobody is listening" and "an
+// agent is thinking" apart. See scripts/lib/watcher-lock.sh's own docblock
+// for the full reasoning; this file does not re-derive it.
 //
 // --once is exempt, same as the shell version: a one-shot probe is not a
 // listener.

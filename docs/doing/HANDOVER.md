@@ -72,7 +72,7 @@ until there is one. Anyone picking up work reads this and advances it.
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
 | Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
-| Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
+| Back-End | Matthias (Claude) — TASK-063 | Andreas (Codex) — TASK-070 | Jonathan (Kimi) |
 | QA | Vijay (Kimi) — TASK-068 | — | Vitali (Claude), then Jesko (Codex) for an item Codex can verify |
 
 **TASK-062 runs task by task** from

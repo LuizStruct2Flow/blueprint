@@ -33,6 +33,7 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
+| **BUG-145** | **After a port lands, every later push is refused: the shell inventory calls the port's own shim `NEW`.** | S1 | OPEN | **Observed in CI on `3cfa5e1`, 2026-09-22**, the first push after BUG-144's port: `❌ NEW: scripts/signal-watch.sh is a shell file … but BASE's scripts/shell-inventory.json covers it in neither list`. `scripts/shell-inventory-check.mts` accepts a valid shim only while the push REMOVES its legacy row. Once that push is the base, the shim is still a shell file (`sh_lint_files` lists it), in neither list, so it reads as new shell. The port push itself passed because its base still carried the row. The local gate skipped `3cfa5e1` as text-only, so CI caught it. The next code push fails locally too, and `released` cannot move while `main` is red. `tests/shell-inventory` covers "row removed with a valid shim" but never "the push after that". **Fix:** a file that is a valid shim with a TRACKED `.mts` target is accepted whether or not any list names it, because a shim is by definition migrated, not new shell. **Re-open if** any push after a port is refused for the port's own shim. |
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

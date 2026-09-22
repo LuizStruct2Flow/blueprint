@@ -118,6 +118,7 @@ import { readFile, readdir, symlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { skipVisibly } from '../helpers/project-config.js'
 
 const LIB = 'scripts/lib/dod-gate.sh'
 const SUBJECT_LIB = 'scripts/lib/commit-subject.sh'
@@ -1288,7 +1289,11 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
     // Only meaningful in the blueprint: in a derived project a runner at the
     // tests/ root is precisely what the founder's rule blesses as project-owned,
     // so asserting there would fail every project that follows CLAUDE.md:466.
-    if (!existsSync(join(REPO_ROOT, '.blueprint-root'))) ctx.skip()
+    // TASK-068: a bare ctx.skip( can never land (DoD §3 rule 7) — the skip must
+    // say why, so the gate prints the reason instead of reading green in silence.
+    if (!existsSync(join(REPO_ROOT, '.blueprint-root'))) {
+      skipVisibly(ctx, 'blueprint-only guard: a derived project blesses a runner at the tests/ root as project-owned (CLAUDE.md:466)')
+    }
 
     // TASK-047 collapsed this to the one extension the gate accepts and vitest
     // runs. A shipped `.sh` or `.test.ts` at this root is no longer a hazard for

@@ -48,8 +48,10 @@
  */
 
 import { describe, it, expect, vi, type TestContext } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { inspect, type CheckResult } from './manifest.js'
+import { inspect, bareSkips, type CheckResult } from './manifest.js'
 import { notGithubActions, skipNote, skipVisibly } from '../helpers/project-config.js'
 import { baselineTree, materialize, BP_ONLY_SUITE, SUITES, TS_SUITE } from './fixture.js'
 
@@ -648,6 +650,59 @@ describe('TASK-047 — one runner convention, no exceptions', () => {
       expect(
         paths.filter((p) => !p.endsWith('.spec.ts') && !p.endsWith('.spec.tsx')),
         'these runners are neither *.spec.ts nor *.spec.tsx, so the gate counts what vitest cannot run',
+      ).toEqual([])
+    })
+  })
+})
+
+describe('TASK-068 / N025 — a bare ctx.skip can never land', () => {
+  it('bareSkips flags a zero-argument .skip and ignores reasons, comments and strings', () => {
+    // Alexey's review, as a unit: the match is on the PARSED call. A bare
+    // `ctx.skip(` in a comment or a string is prose about the rule, not a
+    // call, and must not trip it; every accepted form carries an argument.
+    const source = [
+      '// a bare ctx.skip( in a comment is prose, not a call',
+      "const mention = 'ctx.skip( in a string is data, not a call'",
+      'export const cases = {',
+      '  bare: async (ctx) => {',
+      '    if (x) ctx.skip()',
+      "    if (y) await ctx.skip('') !== undefined && ctx.skip( /* empty */ )",
+      '  },',
+      "  reasoned: async (ctx) => ctx.skip('the declared CI is x'),",
+      "  visible: async (ctx) => skipVisibly(ctx, 'the declared CI is x'),",
+      '}',
+    ].join('\n')
+
+    expect(bareSkips(source, 'tests/x.spec.ts')).toEqual(['tests/x.spec.ts:5', 'tests/x.spec.ts:6'])
+  })
+
+  it('#live no runner under tests/ calls a bare skip — every skip states why', async () => {
+    await scenario('manifest-bare-skip', async (s) => {
+      // TASK-068 (audit row N025). DoD §3 rule 7: a check that cannot judge
+      // this project skips OUT LOUD via skipVisibly/skipNote, and a bare
+      // ctx.skip( reads as a pass while a behaviour goes unchecked in
+      // silence. This case refuses that shape landing again.
+      //
+      // Runners are derived through scripts/lib/suites.sh — the same library
+      // the gate uses — rather than by walking the tree here: a second
+      // derivation would assert something about its own glob instead of about
+      // what runs. Non-vacuity is the derivation count itself.
+      const script = ['set -u', '. "$1/scripts/lib/suites.sh" || exit 1', 'bp_suite_runners "$1"'].join('\n')
+      const r = await s.run('sh', ['-c', script, 'sh', REPO_ROOT], { cwd: REPO_ROOT })
+      expect(r.code, r.output).toBe(0)
+
+      const paths = r.stdout
+        .split('\n')
+        .filter((l) => l !== '')
+        .map((l) => l.split('\t')[1] ?? '')
+      expect(paths.length, 'the derivation found no runners, so this proves nothing').toBeGreaterThan(20)
+
+      const offenders: string[] = []
+      for (const p of paths) offenders.push(...bareSkips(await readFile(join(REPO_ROOT, p), 'utf8'), p))
+
+      expect(
+        offenders,
+        'a bare ctx.skip( hides a case with no stated reason — use skipVisibly(ctx, reason) so the gate prints why (DoD §3 rule 7)',
       ).toEqual([])
     })
   })

@@ -179,6 +179,49 @@ follows the majority, and the losing argument is recorded.
 - **Local semgrep adds `p/typescript` and `p/javascript` (Alexey)**, which CI
   already runs, so TypeScript gets the same SAST in both places.
 
+## The port method, established by the first port (BUG-144, 2026-09-22)
+
+`scripts/signal-watch.sh` was the first whole-file port. What it taught is the
+method for every port after it:
+
+1. **A test-preparation commit comes first.** Some suites read a script's SOURCE
+   TEXT, or copy a hand-picked list of files into a fixture. A two-line shim
+   can never satisfy either, however good the port is. So before the port, a
+   separate commit makes those checks shim-aware:
+   - fixtures copy a shim's `.mts` target when one exists;
+   - static checks follow a valid shim to its target and check the same
+     property there;
+   - a source grep that can become a behavioural test does (the F-002 lesson).
+
+   The commit must pass the full suite against the UNPORTED shell, which proves
+   it weakened nothing. This keeps the port commit free of test edits. BUG-144
+   needed two such commits, because running the suite found a third fixture.
+2. **Externally observable events are behaviour.** The shell's `sleep` is a
+   child process on every poll, and `tests/signal-dispatch` counts those
+   through a PATH shim, so the port spawns the real `sleep`. A `setTimeout`
+   would have silently broken every case built on it.
+3. **A library the port still needs is reached across a process boundary,
+   never copied.** `sh -c '. lib.sh; fn'`, reading stdout. Two copies of the
+   state-dir rule is how A-09 broke the feed.
+4. **Isolation follows the resource.** When the port calls another script, it
+   passes that script's inputs explicitly (for example `AGENT_ROSTER_FILE`) so
+   a fixture never falls through to the real checkout's state.
+5. **The port is proven three ways**, as §"Review synthesis" requires: the
+   FULL suite, including release-tier suites run directly (bootstrap-gate
+   materialises from committed HEAD, so it sees only committed work); an
+   old-versus-new differential corpus; and a mutant that turns a named suite
+   red.
+6. **Only a provider that can run those suites owns a port** (AGENTS.md
+   §"Who does the work"). The Codex sandbox cannot build fixture git repos, and
+   its first attempt at this port failed 25 tests it could not see.
+
+**Known debt from the first port:** `tests/helpers/shim.ts` duplicates the shim
+definition in `scripts/shell-inventory-check.mts`, because that module runs
+`process.exit(main())` on import. Drift would surface as one suite red and one
+green, not silently. The fix is to export the helpers from the checker (or guard
+its `main()` behind an entry-point check) the next time a port touches
+`scripts/`.
+
 ## Not in scope
 
 Migrating anything. The first port happens inside the first item that needs to

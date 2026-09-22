@@ -60,26 +60,37 @@ because another machine only sees what is pushed.
 - **TASK-049 (backlog):** managed vs project placement for a guard that refuses to
   publish a live handover.
 
-### The rotation, as of 2026-09-21
+### The rotation, as of 2026-09-22
 
 **There is no rotation state file yet** (TASK-065 builds it), so it lives here
 until there is one. Anyone picking up work reads this and advances it.
 
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
-| Infrastructure | Philipp (Claude) — TASK-067 | — | Elias (Codex) |
+| Infrastructure | Philipp (Claude) — BUG-144 | — | Elias (Codex), for an item Codex can verify |
 | Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
 
-**Kimi hit its 5-hour quota at 13:05Z on 2026-09-21** and left the rotation, so
-TASK-067 skipped Thomas and went to Philipp. That is the rule working. What did
-not work is BUG-144: the failed dispatch stranded the mic at `OVER_TO_KIMI`, and
-nothing noticed. Until BUG-144 is fixed, **after every watcher dispatch, read the
-provider's run log for `FAILED`; do not wait on the mic alone.**
+**Two skips, both with reasons, both the rules working:**
+- **TASK-067 skipped Thomas (Kimi):** the provider was out of its 5-hour quota
+  at 13:05Z on 2026-09-21.
+- **BUG-144 skipped Elias (Codex) after his attempt:** the item's proof is the
+  fixture-git suites, which the Codex sandbox cannot run (AGENTS.md §"Who does
+  the work", founder 2026-09-21). His blind attempt is kept, unpushed, on local
+  branch `rejected/bug144-port-8a863bd`. Delete that branch once BUG-144 is
+  accepted.
+
+**A failed dispatch now hands the mic back (BUG-144).** The watchers run
+`scripts/signal-watch.mts`, restarted onto it on 2026-09-22. A watcher started
+before that runs the old shell poller and does not recover the mic, so restart
+any you find with `pgrep -af '[s]ignal-watch.sh'`.
 
 **Shell to TypeScript is now a rule (TASK-067, `CLAUDE.md`).** Before editing any
-shell file, check `scripts/shell-inventory.json`. A legacy file must be migrated
+shell file, check `scripts/shell-inventory.json`. A legacy file is migrated
 whole to `.mts` behind the two-line shim first, and the gate refuses anything
-else.
+else. **Follow the port method** in
+[`../waiting-acceptance/PLAN-TASK-067-shell-to-typescript.md`](../waiting-acceptance/PLAN-TASK-067-shell-to-typescript.md)
+§"The port method": a test-preparation commit first, then the port proven three
+ways.
 
 BUG-141, 142 and 143 were the first work the rule routed — Elias (Codex), Thomas
 (Kimi), Philipp (Claude), one full turn of Infrastructure — each reviewed by

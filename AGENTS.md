@@ -145,6 +145,17 @@ allowance is the failure this rule exists to stop.
 unavailable, and rejoins when it returns. It is not skipped once and then
 retried on the next dispatch — it is out, and coming back is a state change.
 
+**A provider is routed only work it can VERIFY** (founder, 2026-09-21). Quota is
+not the only way a provider can be unable to do an item. Codex's
+`workspace-write` sandbox keeps every `.git` directory read-only, so it cannot
+run a suite that builds a fixture git repository. An item whose proof is such a
+suite, like a whole-file port of a script those suites drive, skips Codex and
+goes to the next persona in that role. That is a fact about the provider, not a
+preference: BUG-144's first attempt was written blind for exactly this reason,
+and 25 tests it could not run failed. Record a skip like this where the rotation
+is recorded, with its reason, so the capability gap is visible rather than a
+habit of avoiding one provider.
+
 **Why this is a rule and not a preference:** the cheapest provider to reach for
 is whichever one the Orchestrator is already running on, and that is Claude.
 Left to convenience, every dispatch lands on Claude, the other two subscriptions

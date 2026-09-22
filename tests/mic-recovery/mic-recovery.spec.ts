@@ -119,6 +119,65 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     })
   })
 
+  it('BUG-144: a stub wake command that claims ACTIVE and then dies is recovered: the mic returns to the Orchestrator', async () => {
+    await scenario('mic-recovery-3', async (s) => {
+      await s.fs.mkdirp('mic-recovery-3/state')
+      const signalRel = 'mic-recovery-3/state/AGENT_SIGNAL.md'
+      const signalPath = s.workspace.path(signalRel)
+
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
+          '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      await s.fs.write('mic-recovery-3/state/AGENT_ROSTER.md', ROSTER)
+
+      // The common failure path (observed live 2026-09-22): the dispatched
+      // agent claims the mic first (Holder stays the same, State flips to
+      // ACTIVE — every well-behaved agent does this), then its CLI dies
+      // before it ever hands the mic back. The wake command exits having
+      // left the baton at Holder=Kimi State=ACTIVE, not at the dispatched
+      // OVER_TO_KIMI pair.
+      const stub = await s.fs.write(
+        'mic-recovery-3/stub-wake',
+        '#!/bin/sh\n' +
+          `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Kimi |\\n| State | ACTIVE |\\n| Task | do the thing |\\n' > "${signalPath}"\n` +
+          'exit 1\n',
+        { mode: 0o755 },
+      )
+
+      const w = startWatcher(
+        s,
+        'bash',
+        [
+          WATCHER,
+          '--file', signalPath,
+          '--state', 'OVER_TO_KIMI',
+          '--poll', '0.2',
+          '--',
+          stub,
+        ],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the mic is handed back to the Orchestrator', async () => {
+        w.assertStillRunning('the watcher must keep polling after recovering the mic')
+        const holder = await readField(s, signalRel, 'Holder')
+        const state = await readField(s, signalRel, 'State')
+        return holder === 'Orchy' && state === 'OVER_TO_CLAUDE'
+      })
+
+      const task = await readField(s, signalRel, 'Task')
+      expect(task, 'the handback Task should name who stranded the mic').toContain('Kimi')
+      expect(
+        task,
+        'the handback Task should point at the provider run log',
+      ).toContain('run log')
+
+      await w.stop()
+    })
+  })
+
   it('a dispatch that DID hand back the mic is left alone — the poller does nothing', async () => {
     await scenario('mic-recovery-2', async (s) => {
       await s.fs.mkdirp('mic-recovery-2/state')
@@ -137,6 +196,69 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       const stub = await s.fs.write(
         'mic-recovery-2/stub-wake',
         '#!/bin/sh\n' +
+          `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Orchy |\\n| State | ACTIVE |\\n| Task | done |\\n' > "${signalPath}"\n`,
+        { mode: 0o755 },
+      )
+
+      const w = startWatcher(
+        s,
+        'bash',
+        [
+          WATCHER,
+          '--file', signalPath,
+          '--state', 'OVER_TO_KIMI',
+          '--poll', '0.2',
+          '--',
+          stub,
+        ],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the dispatch has landed', async () => {
+        const holder = await readField(s, signalRel, 'Holder')
+        const state = await readField(s, signalRel, 'State')
+        return holder === 'Orchy' && state === 'ACTIVE'
+      })
+
+      // Give the poller several more iterations to prove it does NOT also
+      // fire a recovery on top of a baton that already moved.
+      w.assertStillRunning('the watcher must still be polling')
+      await until(
+        'a few more polls pass with the baton unchanged',
+        async () => {
+          const holder = await readField(s, signalRel, 'Holder')
+          const state = await readField(s, signalRel, 'State')
+          const task = await readField(s, signalRel, 'Task')
+          return holder === 'Orchy' && state === 'ACTIVE' && task === 'done'
+        },
+        2000,
+      )
+
+      await w.stop()
+    })
+  })
+
+  it('BUG-144 control: a dispatch that claims ACTIVE then hands off to someone else is left alone', async () => {
+    await scenario('mic-recovery-4', async (s) => {
+      await s.fs.mkdirp('mic-recovery-4/state')
+      const signalRel = 'mic-recovery-4/state/AGENT_SIGNAL.md'
+      const signalPath = s.workspace.path(signalRel)
+
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
+          '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      await s.fs.write('mic-recovery-4/state/AGENT_ROSTER.md', ROSTER)
+
+      // Claims ACTIVE (same as the stranded case) but, unlike it, goes on to
+      // hand the mic to someone else before the wake command returns — the
+      // baton no longer names Kimi/ACTIVE once the poller checks, so this
+      // must NOT be recovered.
+      const stub = await s.fs.write(
+        'mic-recovery-4/stub-wake',
+        '#!/bin/sh\n' +
+          `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Kimi |\\n| State | ACTIVE |\\n| Task | working |\\n' > "${signalPath}"\n` +
           `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Orchy |\\n| State | ACTIVE |\\n| Task | done |\\n' > "${signalPath}"\n`,
         { mode: 0o755 },
       )

@@ -79,6 +79,16 @@ until there is one. Anyone picking up work reads this and advances it.
   branch `rejected/bug144-port-8a863bd`. Delete that branch once BUG-144 is
   accepted.
 
+**Gemini is now on the roster as QA-4 Gemma (2026-09-22), and two facts about
+it cost a review:**
+- **The Gemini CLI cannot read gitignored files, so it cannot see `.scratch/`.**
+  A brief there is invisible to it: put a Gemini brief inline in the Task
+  field, or in a tracked file.
+- **Its free tier allows 20 requests a day** (`gemini-3.5-flash`), which is not
+  enough for a real review. Gemma's first review ran out, and her hand-back
+  said `ACCEPT-READY` with nothing behind it. **Never relay a verdict without
+  reading the run log that produced it.**
+
 **A failed dispatch now hands the mic back (BUG-144).** The watchers run
 `scripts/signal-watch.mts`, restarted onto it on 2026-09-22. A watcher started
 before that runs the old shell poller and does not recover the mic, so restart

@@ -40,10 +40,10 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Acceptance: BUG-138, BUG-139 and BUG-140** are in
-  [`../waiting-acceptance/BUGS.md`](../waiting-acceptance/BUGS.md) with what to
-  test (CI green on `892d4ca`, 2026-09-18). BUG-140's "never runs in CI" half was
-  not done; its row asks the founder to accept it as moot or reopen.
+- **Acceptance: TASK-066 and TASK-067** are in
+  [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md) with
+  what to test. No bug is waiting: all of them were accepted on 2026-09-22,
+  BUG-140's unbuilt "never runs in CI" half included, as moot.
 - **TASK-062 (backlog) is the live epic:** enforcement in code, not in agent
   context. Its input is the refreshed audit in
   [`../done/TASK-022-anchor-rules/`](../done/TASK-022-anchor-rules/): of 309 rules
@@ -75,9 +75,8 @@ until there is one. Anyone picking up work reads this and advances it.
   at 13:05Z on 2026-09-21.
 - **BUG-144 skipped Elias (Codex) after his attempt:** the item's proof is the
   fixture-git suites, which the Codex sandbox cannot run (AGENTS.md §"Who does
-  the work", founder 2026-09-21). His blind attempt is kept, unpushed, on local
-  branch `rejected/bug144-port-8a863bd`. Delete that branch once BUG-144 is
-  accepted.
+  the work", founder 2026-09-21). His blind attempt was never pushed, and its
+  local branch was deleted when BUG-144 was accepted.
 
 **Gemini is now on the roster as QA-4 Gemma (2026-09-22), and two facts about
 it cost a review:**

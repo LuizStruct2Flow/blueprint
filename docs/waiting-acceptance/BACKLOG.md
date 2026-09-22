@@ -8,6 +8,7 @@ have, not that it is missing.
 
 | # | Item | Sev | Category | Re-open trigger / next-step gate |
 |---|---|---|---|---|
+| **TASK-068** | **TASK-062-01: a bare `ctx.skip(` in a test can never land.** Audit row N025, the first TASK-062 sub-task. `tests/manifest` gains `bareSkips`, which walks the parsed TypeScript tree (a mention in a comment or a string does not trip it), and a `#live` case that derives every runner through `scripts/lib/suites.sh`, as the gate does, and refuses any zero-argument `.skip(`. The one live violation (`dod-gate.spec.ts:1291`) now skips with a stated reason via `skipVisibly`. DoD §3 rule 7 carries its `enforced by` pointer, and audit row N025 moved MECHANISE to ALREADY-OK in the same commit. Authored and committed by Vijay (Kimi). Reviewed by the Orchestrator (Claude), who put the bare skip back and saw the check fail on exactly that line. Two notes not taken (no practical trigger): an empty reason `ctx.skip('')` passes, and helper files are not scanned. **LANDED**, CI green on `abf6d9c` (2026-09-22). | S3 | **What to test:** put `ctx.skip()` (no argument) in any `tests/**/*.spec.ts` and run `tests/node_modules/.bin/vitest run --root tests manifest -t 'bare skip'`. It fails, naming the file and line. `ctx.skip('why')` and `skipVisibly(ctx, 'why')` pass. | **Re-open if** a bare `ctx.skip(` lands. |
 
 **Each row's "what to test" travels WITH it** — into `done/` on acceptance, back
 into `doing/` on a rejection. It is not dropped at the boundary: a rejected item

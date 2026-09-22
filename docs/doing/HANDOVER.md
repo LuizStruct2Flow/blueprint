@@ -73,6 +73,13 @@ until there is one. Anyone picking up work reads this and advances it.
 |---|---|---|---|
 | Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
 | Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
+| QA | Vijay (Kimi) — TASK-068 | — | Vitali (Claude), then Jesko (Codex) for an item Codex can verify |
+
+**TASK-062 runs task by task** from
+[`PLAN-TASK-062.md`](PLAN-TASK-062.md) §4, each sub-task promoted to its own
+`TASK-NNN` row when picked up. TASK-068 (TASK-062-01) skipped Jesko (Codex):
+fixing its live violation meant running `tests/dod-gate`, whose fixture git
+repos the Codex sandbox cannot build.
 
 **Two skips, both with reasons, both the rules working:**
 - **TASK-067 skipped Thomas (Kimi):** the provider was out of its 5-hour quota

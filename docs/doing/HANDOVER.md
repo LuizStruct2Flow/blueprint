@@ -67,7 +67,7 @@ until there is one. Anyone picking up work reads this and advances it.
 
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
-| Infrastructure | Philipp (Claude) — BUG-144 | — | Elias (Codex), for an item Codex can verify |
+| Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
 | Back-End | Matthias (Claude) — TASK-063 | — | Andreas (Codex) |
 
 **Two skips, both with reasons, both the rules working:**

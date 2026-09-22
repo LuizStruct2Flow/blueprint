@@ -40,7 +40,6 @@
     "scripts/session-resume.sh": "ffd9cfe30246ae04e0dcb63b3d535c0e4ecd8852",
     "scripts/session-start.sh": "fe5d5cd714152528014cfe394c027bd67682fc9a",
     "scripts/signal-set.sh": "45a2afbeffd2b1efeba0b4f3846eea2ee668080a",
-    "scripts/signal-watch.sh": "2990a773382c4635905a5eeb3fe0f6beb45cb1dd",
     "scripts/sonar-api.sh": "5e14426f113b5ce2f192fe0ad58d5a25ff1f8687",
     "scripts/sonar.sh": "00f8777fbcd814a21ebd3804d22e5a34dca83708",
     "scripts/start-all-watchers.sh": "fdf0e3cee4ba8be033da6fe0e2aa802972560495",

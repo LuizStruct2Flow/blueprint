@@ -56,10 +56,12 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until, type Watcher } from '../harness/watcher.js'
 import type { FixtureRepo } from '../harness/fixture-repo.js'
+import { shimTargetPath } from '../helpers/shim.js'
 
 /**
  * The dispatcher's own pointers must NOT be inherited, and that is BUG-046's
@@ -152,6 +154,15 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
     // The launcher EXECS signal-watch.sh rather than running `bash` on it,
     // so the bit is load-bearing rather than cosmetic.
     await s.fs.chmod(rel(script), 0o755)
+  }
+  // BUG-144 — a migrated script's shim execs a sibling `.mts` (TASK-067).
+  // Copy it too WHEN ONE EXISTS, so this out-of-tree fixture can still run
+  // it; same pattern as tests/watcher-liveness's liveRepo().
+  for (const script of ['scripts/signal-watch.sh']) {
+    const target = shimTargetPath(script)
+    if (existsSync(join(REPO_ROOT, target))) {
+      await s.fs.copyIn(join(REPO_ROOT, target), rel(target))
+    }
   }
 
   await s.fs.write(rel('AGENT_SIGNAL.md'), COMMITTED_BASELINE)

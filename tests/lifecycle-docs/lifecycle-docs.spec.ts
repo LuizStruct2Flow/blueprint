@@ -59,6 +59,7 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import {
+  backlogMarkerViolations,
   bugsWithoutRows,
   rowedBugIds,
   scanLifecycleDocs,
@@ -103,6 +104,36 @@ function healthyTree(): Record<string, string> {
 }
 
 describe('lifecycle-docs — a record that states something untrue costs more than an absent one', () => {
+  it('TASK-070: every parked BACKLOG row has a KEEP, DEFER, or OBSOLETE Category marker', async () => {
+    await scenario('lifecycle-070-backlog-markers', async (s) => {
+      const docs = await s.workspace.dir('bp', 'docs')
+      await s.fs.write(
+        'bp/docs/backlog/BACKLOG.md',
+        [
+          '| # | Item | Sev | Category | Re-open trigger |',
+          '|---|---|---|---|---|',
+          '| **TASK-701** | parked | S3 | DEFER | revisit after the next release |',
+          '| **TASK-702** | planted unmarked row | S3 |  | decide later |',
+          '| **TASK-703** | planted invalid row | S3 | PARKED | decide later |',
+          '| **TASK-704** | deferred without a trigger | S3 | DEFER |  |',
+          '',
+        ].join('\n'),
+      )
+      // `doing/BACKLOG.md` is active work, not the parked backlog described by
+      // docs/backlog/README.md; an active row has no marker obligation here.
+      await s.fs.write(
+        'bp/docs/doing/BACKLOG.md',
+        '| # | Item | Sev | Category | Next step |\n|---|---|---|---|---|\n| **TASK-703** | active | S2 |  | implement now |\n',
+      )
+
+      expect(await backlogMarkerViolations(docs)).toEqual([
+        { line: 4, marker: '', reason: 'invalid marker' },
+        { line: 5, marker: 'PARKED', reason: 'invalid marker' },
+        { line: 6, marker: 'DEFER', reason: 'missing DEFER re-open trigger' },
+      ])
+    })
+  })
+
   it('#3+#4+#5 the healthy fixture is green, and #3 is seen examining a real population', async () => {
     await scenario('lifecycle-baseline', async (s) => {
       const scan = await scanTree(s, 'bp', healthyTree())
@@ -395,6 +426,10 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     expect(scan.orphans, scan.orphans.join(' ')).toEqual([])
     expect(scan.phantomRows, scan.phantomRows.join(' ')).toEqual([])
     expect(scan.forwardingNotes, scan.forwardingNotes.join(' ')).toEqual([])
+    expect(
+      await backlogMarkerViolations(docs),
+      'every docs/backlog/BACKLOG.md row needs a KEEP, DEFER, or OBSOLETE Category marker (TASK-070)',
+    ).toEqual([])
 
     // #6 over the real history. `scenario()` is not used because this reads the
     // repository and writes nothing; `git log` with no pathspec is the only

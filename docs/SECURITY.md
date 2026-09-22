@@ -268,12 +268,14 @@ CI (Semgrep deep packs are the usual offender, not gitleaks).
 
 ### CI / pipeline gate — not all of these run on every push
 
-Only Deep SAST runs on every push, in the shared `security` workflow
-(`secret-scan` + `sast` + `sca` jobs — this blueprint's own
-`.github/workflows/security.yml` has no trivy or ZAP job at all, because it
-ships no container and deploys nothing). Container scan, IaC scan and DAST
-baseline are recipe content for a project that has wired the matching
-pipeline stage: they fire only when that stage runs, not on every push.
+Of the four steps below, only Deep SAST runs on every push — alongside the
+secret scan and SCA, which are documented above under "Pre-push gate" and
+also run in CI on every push (`secret-scan` + `sast` + `sca` jobs in
+`.github/workflows/security.yml`). That workflow has no trivy or ZAP job at
+all, because this blueprint ships no container and deploys nothing. Container
+scan, IaC scan and DAST baseline are recipe content for a project that has
+wired the matching pipeline stage: they fire only when that stage runs, not
+on every push.
 
 | Step | Tool | Runs when | Blocks on | Where the finding lives |
 |---|---|---|---|---|

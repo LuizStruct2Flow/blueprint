@@ -72,7 +72,20 @@ until there is one. Anyone picking up work reads this and advances it.
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
 | Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
-| Back-End | Matthias (Claude) — TASK-063 | Andreas (Codex) — TASK-070 | Jonathan (Kimi) |
+| Back-End | Andreas (Codex) — TASK-070 | — | Jonathan (Kimi) |
+
+**Another session writes to this checkout.** On 2026-09-22 storm2flow's
+Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147
+straight into this repo, on top of unpushed Orchestrator work. It stopped when
+asked, and its two commits are kept on local branch `storm2flow/bug147`. Before
+committing here, check `git log origin/main..HEAD` for commits you did not make.
+A derived project reaches the blueprint through `blueprint a2bp`, not by
+committing into this checkout.
+
+**BUG-144 is reopened:** the recovery misses a dispatch that already claimed
+ACTIVE, which is the common path. Until it is fixed, after every watcher
+dispatch read the run log for `FAILED`; a stranded `State=ACTIVE` is not
+recovered.
 | QA | Vijay (Kimi) — TASK-068 | — | Vitali (Claude), then Jesko (Codex) for an item Codex can verify |
 
 **TASK-062 runs task by task** from

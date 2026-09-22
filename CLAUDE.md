@@ -285,7 +285,7 @@ migration, but nobody adds a new shell script either.
 **A shell file you must change is migrated first, whole file — never a
 subcommand or a function.** The founder overruled the 2-to-1 majority that
 wanted a shrink-into-a-dispatcher middle ground, on cost, in front of him
-(docs/doing/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis"): a
+(docs/done/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis"): a
 one-line fix to `scripts/blueprint` means porting all 2,257 lines first, not
 extracting the one function that changed. The migration is its own commit,
 behaviour-identical, proven by the existing suites and by a mutant caught in

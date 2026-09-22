@@ -1,6 +1,6 @@
 {
   // TASK-067 — the tsconfig for scripts/**/*.mts, the enablement half of
-  // "shell to TypeScript, organically" (docs/doing/PLAN-TASK-067-shell-to-typescript.md).
+  // "shell to TypeScript, organically" (docs/done/PLAN-TASK-067-shell-to-typescript.md).
   // No script has migrated yet; this makes the rule ENFORCEABLE, not retroactive.
   //
   // .mts, not .ts: a plain .ts under scripts/ needs a scripts/package.json

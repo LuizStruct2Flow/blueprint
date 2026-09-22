@@ -44,7 +44,12 @@ import { startWatcher, until } from '../harness/watcher.js'
 
 const WATCHER = join(REPO_ROOT, 'scripts', 'signal-watch.sh')
 
+// bp_roster_rows (scripts/lib/roster.sh) only reads rows under a heading
+// matching "Members" — any other pipe table in the file is deliberately
+// ignored, so the heading is load-bearing here, not decoration.
 const ROSTER = `# Agent Roster
+
+## Members
 
 | Role | Name | Backing agent | Model |
 |---|---|---|---|

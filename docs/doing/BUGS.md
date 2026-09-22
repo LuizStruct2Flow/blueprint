@@ -33,7 +33,6 @@ about to work on something, give it a `BUG-`/`FEATURE-` number first.
 
 | # | Bug | Severity | Status | Detail |
 |---|---|---|---|---|
-| **BUG-144** | **A dispatch that fails leaves the mic at `OVER_TO_<X>`, and nothing tells the Orchestrator.** | S2 | OPEN | **Observed live 2026-09-21 13:05Z:** Thomas (Kimi) was dispatched TASK-067, and `kimi -p` failed 3 s later with `403 You've reached your 5-hour usage limit`. The launcher logged `kimi FAILED (exit 1)` correctly (BUG-141's status file works), but the baton stayed `Holder=Thomas State=OVER_TO_KIMI` for 30 minutes. The Orchestrator's mic Monitor watches `Holder`/`State` and saw no change, so the failure surfaced only when the Monitor expired and someone read `kimi-runs.log` by hand. Every watcher-backed launcher (Codex, Kimi, Gemini) has the same shape: on a non-zero exit, nothing flips the mic. **Fix direction:** on `FAILED`, the launcher hands the mic back to the Orchestrator itself through `scripts/signal-set.sh` (`OVER_TO_CLAUDE`, Task naming the failure and exit code), so the Monitor fires. Leave the provider's refusal text in the Task, not a guess: that is the input TASK-065(c) needs for quota detection. **Re-open if** a failed dispatch can leave the mic with a provider that is no longer running. |
 
 **Do not narrate status here.** Which items are where is answered by the
 folders: `doing/` is what is being implemented, `waiting-acceptance/` is what is

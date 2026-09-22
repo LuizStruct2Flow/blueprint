@@ -144,7 +144,7 @@ management and the handoff checklist. Walk its §7 before flipping the baton.
 docs/
 ├── DoD.md                ← Definition of Done (read before every handoff)
 ├── config/               ← stable reference (FEATURES.md, ACCEPTANCE_TESTS.md, findings.md)
-├── backlog/              ← parked work (KEEP / DEFER / OBSOLETE)
+├── backlog/              ← parked work
 ├── doing/                ← active work (BUGS.md, BACKLOG.md, PLAN-*.md, HANDOVER.md)
 ├── waiting-acceptance/   ← landed on main, awaiting founder acceptance
 ├── done/                 ← founder-accepted work

@@ -16,15 +16,13 @@ docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
 
 | State | What lives here | How items leave |
 |---|---|---|
-| `backlog/` | **Parked** work. Every row carries `KEEP`, `DEFER` (with its re-open trigger) or `OBSOLETE`. | **Promotion** into `doing/`, or **cancellation**: delete the row and leave a one-line pointer in `docs/config/findings.md`. |
+| `backlog/` | **Parked** work. Category is `KEEP`, `DEFER` (with its re-open trigger), or `OBSOLETE`. **Enforced by: `tests/lifecycle-docs` "TASK-070: every parked BACKLOG row has a KEEP, DEFER, or OBSOLETE Category marker".** | **Promotion** into `doing/`, or **cancellation**: delete the row and leave a one-line pointer in `docs/config/findings.md`. |
 | `doing/` | Active work: `BUGS.md` and `BACKLOG.md` rows, `PLAN-*.md`, multi-file item folders, `HANDOVER.md`. | Its work is on `main` and CI is green. A plan with open slices stays, with its shipped slices marked DONE. |
 | `waiting-acceptance/` | Landed work awaiting the founder's acceptance test. | The founder accepts it ("BUG-0XX is done", "accept item Y"). |
 | `done/` | Founder-accepted work: the record of what was delivered, not merely merged. | Items don't leave. |
 
 - **Reopen:** a rejected acceptance, a regression or a rework request moves the
   row back to `doing/` in the same turn.
-- `backlog/` is not a graveyard: a row with neither a trigger nor `OBSOLETE` is
-  groomed out.
 - `waiting-acceptance/` is the only path into `done/`, and only the founder's
   acceptance moves anything there.
 - **Someday / maybe** lives in `backlog/`; work starting this session or the next
@@ -77,8 +75,7 @@ When the founder says `lcm`, reconcile the folders with reality:
    beside it.
 2. The live baton's `Task` claims nothing that `ls docs/waiting-acceptance/`
    does not show.
-3. Every `backlog/` row has a re-open trigger or `OBSOLETE`, and `done/` holds
-   only founder-accepted work.
+3. `done/` holds only founder-accepted work.
 4. The lifecycle documents say something true. Do not narrate status the folders
    already answer; where a second record is wanted, a test holds the two together
    (`tests/lifecycle-docs`, `tests/doc-links`).

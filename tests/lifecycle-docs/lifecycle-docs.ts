@@ -92,6 +92,43 @@ export interface LifecycleScan {
   readonly looseGroups: readonly string[]
 }
 
+/** A parked-backlog row whose Category cell is not a lifecycle marker. */
+export interface BacklogMarkerViolation {
+  readonly line: number
+  readonly marker: string
+  readonly reason: 'invalid marker' | 'missing DEFER re-open trigger'
+}
+
+const BACKLOG_MARKERS = new Set(['KEEP', 'DEFER', 'OBSOLETE'])
+
+/**
+ * Read the one parked-work table that `docs/backlog/README.md` defines as the
+ * backlog: `backlog/BACKLOG.md`. `doing/BACKLOG.md` is explicitly active work,
+ * so applying parked-work dispositions there would be a category error.
+ */
+export async function backlogMarkerViolations(docsDir: string): Promise<BacklogMarkerViolation[]> {
+  const rows = (await readOrEmpty(join(docsDir, 'backlog', 'BACKLOG.md'))).split('\n')
+  const violations: BacklogMarkerViolation[] = []
+
+  for (const [index, row] of rows.entries()) {
+    // Backlog rows start with their bold item id. Table separators and prose can
+    // contain pipes too, but are not rows whose Category is a disposition.
+    if (!/^\| \*\*[^|]+\*\* \|/.test(row)) continue
+    // Markdown escapes literal pipes inside cells (`\\|`); splitting on every
+    // pipe would shift the Category index for exactly the long prose rows this
+    // table contains.
+    const cells = row.split(/(?<!\\)\|/).map((cell) => cell.trim())
+    const marker = cells[4] ?? ''
+    if (!BACKLOG_MARKERS.has(marker)) {
+      violations.push({ line: index + 1, marker, reason: 'invalid marker' })
+    } else if (marker === 'DEFER' && !(cells[5] ?? '').trim()) {
+      violations.push({ line: index + 1, marker, reason: 'missing DEFER re-open trigger' })
+    }
+  }
+
+  return violations
+}
+
 const RECORD_FILES = ['BUGS.md', 'BACKLOG.md']
 
 async function readOrEmpty(path: string): Promise<string> {

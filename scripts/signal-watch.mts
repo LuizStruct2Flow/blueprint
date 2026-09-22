@@ -117,6 +117,10 @@ interface ShFnResult {
 // a shell caller's `$(...)` never captured stderr either, so this keeps that
 // visible the same way.
 const STATE_DIR_LIB = join(BP_CODE_ROOT, 'scripts/lib/state-dir.sh')
+// scripts/lib/roster.sh and scripts/signal-set.sh, reached the same way, for
+// the BUG-144 mic-recovery fix below.
+const ROSTER_LIB = join(BP_CODE_ROOT, 'scripts/lib/roster.sh')
+const SIGNAL_SET = join(BP_CODE_ROOT, 'scripts/signal-set.sh')
 
 function stateDirFn(
   fn: string,
@@ -246,6 +250,76 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+// BUG-144 — a failed dispatch must not strand the mic.
+//
+// Neither dispatch path reports its outcome usefully to the poller: a `--`
+// COMMAND has no status convention at all, and every launcher's own
+// AGENT_WAKE_COMMAND already swallows the dispatched CLI's exit code into a
+// printed finished/FAILED line (BUG-143) — that status was never meant to
+// reach here. The poller does not need it: it already knows exactly which
+// Holder/State it just dispatched. If the baton STILL reads that same pair
+// once the dispatch call returns, the dispatch ended without handing the mic
+// back — quota exhaustion, a crash, or an agent that forgot — observed live
+// as a Kimi 403. Fixed ONCE HERE, in the poller, for every provider, rather
+// than in each of the three launchers (Orchestrator decision, BUG-144): if
+// the baton MOVED — the agent handed back, even mid-dispatch as in BUG-143 —
+// this does nothing.
+//
+// THE ROSTER IS RESOLVED BESIDE THE BATON (`dirname(signalFile)`), not from
+// BP_STATE_ROOT — same reasoning as scripts/lib/watcher-lock.sh's lock path
+// (its own docblock): BP_STATE_ROOT is this WATCHER's own checkout, and a
+// watcher run directly against a fixture baton (as tests/signal-dispatch and
+// tests/mic-recovery both do, `--file` pointed elsewhere) would otherwise
+// resolve the OPERATOR's real, gitignored AGENT_ROSTER.md — a fixture
+// depending on whatever machine happens to run it, exactly the class of bug
+// A-09 and BUG-013 are about. A project with the flat layout this repo still
+// has keeps AGENT_ROSTER.md beside its baton's directory today, so this is a
+// no-op there; it is what keeps a fixture's baton isolated too.
+function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string): void {
+  if (readField(signalFile, 'Holder') !== dispatchedHolder) return
+  if (readField(signalFile, 'State') !== dispatchedState) return
+
+  const rosterRoot = dirname(signalFile)
+  const orchestrator = spawnSync(
+    'sh',
+    ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'sh', ROSTER_LIB, rosterRoot],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
+  )
+  const orchestratorName = (orchestrator.stdout ?? '').trim()
+  // bp_roster_name_for_role already explained why on its own stderr
+  // (inherited above, via bp_roster_warn) — never crash the watcher over an
+  // unresolved label; leaving the mic where it is is still strictly better
+  // than a crashed poller watching nothing.
+  if (orchestrator.status !== 0 || orchestratorName === '') {
+    process.stderr.write(
+      `signal-watch: ${dispatchedHolder}'s dispatch ended without handing back the mic, ` +
+        'and no Orchestrator could be resolved to hand it to — leaving the mic where it is.\n',
+    )
+    return
+  }
+
+  const task = `${dispatchedHolder}'s dispatch ended without handing back the mic - read the provider run log`
+  // AGENT_ROSTER_FILE, for the SAME reason `--file` targets the baton at
+  // signalFile rather than signal-set.sh's own derived one: signal-set.sh
+  // validates --holder against a roster of its OWN, resolved from its own
+  // BP_STATE_ROOT unless told otherwise (its own docblock on this env var).
+  // Left unset, that validation would read whichever roster happens to sit
+  // beside THIS SCRIPT's checkout — not the one `rosterRoot` above just
+  // resolved the orchestrator name FROM — and refuse a name that fixture
+  // roster used correctly. One roster for one recovery, not two resolutions
+  // of one fact (A-09).
+  const result = spawnSync(
+    'bash',
+    [SIGNAL_SET, '--file', signalFile, '--holder', orchestratorName, '--state', 'OVER_TO_CLAUDE', '--task', task],
+    { stdio: 'inherit', env: { ...process.env, AGENT_ROSTER_FILE: rosterRoot } },
+  )
+  if (result.status !== 0) {
+    process.stderr.write(
+      `signal-watch: recovering the mic to ${orchestratorName} failed (exit ${result.status ?? 'null'}) — see above.\n`,
+    )
+  }
+}
+
 function triggerIfNeeded(): boolean {
   const holder = readField(signalFile, 'Holder')
   const state = readField(signalFile, 'State')
@@ -306,6 +380,8 @@ function triggerIfNeeded(): boolean {
   } else if (wakeCommand !== '') {
     spawnSync('sh', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
+
+  recoverStrandedMic(holder, state)
 
   return true
 }

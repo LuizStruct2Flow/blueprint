@@ -32,7 +32,9 @@
 // Against BASE, this refuses:
 //   - a shell file in the tree that BASE's legacy/exempt does not cover (a
 //     new .sh, or one HEAD's json newly claims — self-authorization, see
-//     below);
+//     below), UNLESS it is the exact two-line shim with a tracked .mts target:
+//     a valid shim is MIGRATED, not new (BUG-145 — after the port push itself
+//     becomes BASE, the shim has no row anywhere and must still pass);
 //   - a `legacy` file whose blob no longer matches BASE's recorded one,
 //     UNLESS the new content is the exact two-line shim AND the shim's
 //     target .mts exists and is tracked (a shim pointing at nothing is not a
@@ -227,6 +229,11 @@ function checkTrackedFile(
   if (effectiveExempt.has(file)) return undefined
   const recorded = base.legacy[file]
   if (recorded === undefined) {
+    // BUG-145: a valid shim is MIGRATED, not new — accept it whether or not
+    // any list names it. Once the port push (which removed the legacy row) is
+    // itself the BASE, the shim has no row anywhere and would otherwise read
+    // as new shell on every subsequent push.
+    if (isValidShim(root, file)) return undefined
     return (
       `NEW: ${file} is a shell file tracked in scripts/ or .githooks/ but BASE's ` +
       `scripts/shell-inventory.json covers it in neither list. New code is TypeScript ` +

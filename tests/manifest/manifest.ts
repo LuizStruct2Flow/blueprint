@@ -106,6 +106,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseDocument } from 'yaml'
+import ts from 'typescript'
 import { notGithubActions } from '../helpers/project-config.js'
 
 /** One check's verdict. `ok: false` carries the message the operator reads. */
@@ -433,6 +434,38 @@ export function markerBalance(text: string, prefix: string): [number, number] {
     lines.filter((l) => l.includes(`${prefix}:BEGIN`)).length,
     lines.filter((l) => l.includes(`${prefix}:END`)).length,
   ]
+}
+
+/**
+ * TASK-068 / audit row N025 — a bare `ctx.skip(` can never land.
+ *
+ * DoD §3 rule 7: a skip must say why (a SKIP-NOTE via `skipVisibly` / `skipNote`),
+ * so a suite never reads green while a behaviour goes unchecked in silence.
+ * This walks the PARSED tree, not the text: a `ctx.skip(` mentioned in a comment
+ * or a string is prose about the rule, not a call, and must not trip it
+ * (Alexey's review). The match is any zero-argument `.skip(...)` member call —
+ * `ctx.skip()`, with or without `await` — while every accepted form
+ * (`ctx.skip(reason)`, `skipVisibly(ctx, reason)`) carries arguments and passes.
+ * Returns `path:line` per hit, for the manifest case to render as the failure.
+ */
+export function bareSkips(source: string, file: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const hits: string[] = []
+  const visit = (n: ts.Node): void => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      n.expression.name.text === 'skip' &&
+      n.arguments.length === 0 &&
+      !n.typeArguments
+    ) {
+      const { line } = sf.getLineAndCharacterOfPosition(n.getStart(sf))
+      hits.push(`${file}:${line + 1}`)
+    }
+    ts.forEachChild(n, visit)
+  }
+  visit(sf)
+  return hits
 }
 
 interface Derivation {

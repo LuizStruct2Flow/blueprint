@@ -156,7 +156,8 @@ Every bug, minor or major:
    suite belongs in the gate.
 7. **A check that cannot judge this project skips out loud**, printing
    `SKIP-NOTE: <case>: <reason>` via `skipVisibly` / `skipNote` in
-   `tests/helpers/project-config.ts`. A bare `ctx.skip` reads as a pass.
+   `tests/helpers/project-config.ts`. A bare `ctx.skip` reads as a pass —
+   enforced by: tests/manifest "#live no runner under tests/ calls a bare skip — every skip states why".
 
 ## §4 Pre-push gate
 

@@ -275,9 +275,30 @@ function nowSeconds(): number {
 // A-09 and BUG-013 are about. A project with the flat layout this repo still
 // has keeps AGENT_ROSTER.md beside its baton's directory today, so this is a
 // no-op there; it is what keeps a fixture's baton isolated too.
+//
+// REOPENED 2026-09-22 (observed live): the first fix here only matched the
+// dispatched `OVER_TO_<X>` state verbatim, but every well-behaved agent
+// claims the mic first — flips State to ACTIVE while keeping the same
+// Holder — before doing its actual work. Andreas (Codex) did exactly that,
+// then his CLI died on "model at capacity" 16s later, leaving the baton at
+// Holder=Andreas State=ACTIVE forever: the dispatch was over (this function
+// only runs after the wake command has RETURNED) and nobody was going to
+// move it again. So the dispatched Holder still sitting in EITHER the
+// dispatched OVER_TO_<X> state OR ACTIVE, once the wake command has
+// returned, means the same thing: this dispatch ended without a real
+// handback, and the mic is stranded.
+//
+// This does assume the wake command runs to completion before this function
+// is called — true for every launcher today, all of which run in the
+// foreground (`spawnSync`, above). A backgrounded, fire-and-forget launcher
+// would still be legitimately working when the poller checks and would look
+// identical to a stranded ACTIVE — noted in review (Thomas/Kimi) and left as
+// a documented constraint rather than a guard, since nothing dispatches that
+// way today.
 function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string): void {
   if (readField(signalFile, 'Holder') !== dispatchedHolder) return
-  if (readField(signalFile, 'State') !== dispatchedState) return
+  const state = readField(signalFile, 'State')
+  if (state !== dispatchedState && state !== 'ACTIVE') return
 
   const rosterRoot = dirname(signalFile)
   const orchestrator = spawnSync(

@@ -104,7 +104,7 @@ function healthyTree(): Record<string, string> {
 }
 
 describe('lifecycle-docs — a record that states something untrue costs more than an absent one', () => {
-  it('TASK-070: every parked BACKLOG row has a KEEP, DEFER, or OBSOLETE Category marker', async () => {
+  it('TASK-070: every parked BACKLOG row has a valid Category marker and non-OBSOLETE rows have a re-open trigger', async () => {
     await scenario('lifecycle-070-backlog-markers', async (s) => {
       const docs = await s.workspace.dir('bp', 'docs')
       await s.fs.write(
@@ -116,6 +116,7 @@ describe('lifecycle-docs — a record that states something untrue costs more th
           '| **TASK-702** | planted unmarked row | S3 |  | decide later |',
           '| **TASK-703** | planted invalid row | S3 | PARKED | decide later |',
           '| **TASK-704** | deferred without a trigger | S3 | DEFER |  |',
+          '| **TASK-705** | kept without a trigger | S3 | KEEP |  |',
           '',
         ].join('\n'),
       )
@@ -129,7 +130,8 @@ describe('lifecycle-docs — a record that states something untrue costs more th
       expect(await backlogMarkerViolations(docs)).toEqual([
         { line: 4, marker: '', reason: 'invalid marker' },
         { line: 5, marker: 'PARKED', reason: 'invalid marker' },
-        { line: 6, marker: 'DEFER', reason: 'missing DEFER re-open trigger' },
+        { line: 6, marker: 'DEFER', reason: 'missing re-open trigger' },
+        { line: 7, marker: 'KEEP', reason: 'missing re-open trigger' },
       ])
     })
   })
@@ -428,7 +430,7 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     expect(scan.forwardingNotes, scan.forwardingNotes.join(' ')).toEqual([])
     expect(
       await backlogMarkerViolations(docs),
-      'every docs/backlog/BACKLOG.md row needs a KEEP, DEFER, or OBSOLETE Category marker (TASK-070)',
+      'every docs/backlog/BACKLOG.md row needs a valid Category marker and every non-OBSOLETE row needs a re-open trigger (TASK-070)',
     ).toEqual([])
 
     // #6 over the real history. `scenario()` is not used because this reads the

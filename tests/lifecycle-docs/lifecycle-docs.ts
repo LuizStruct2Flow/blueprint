@@ -92,11 +92,11 @@ export interface LifecycleScan {
   readonly looseGroups: readonly string[]
 }
 
-/** A parked-backlog row whose Category cell is not a lifecycle marker. */
+/** A parked-backlog row whose Category or re-open trigger is invalid. */
 export interface BacklogMarkerViolation {
   readonly line: number
   readonly marker: string
-  readonly reason: 'invalid marker' | 'missing DEFER re-open trigger'
+  readonly reason: 'invalid marker' | 'missing re-open trigger'
 }
 
 const BACKLOG_MARKERS = new Set(['KEEP', 'DEFER', 'OBSOLETE'])
@@ -121,8 +121,8 @@ export async function backlogMarkerViolations(docsDir: string): Promise<BacklogM
     const marker = cells[4] ?? ''
     if (!BACKLOG_MARKERS.has(marker)) {
       violations.push({ line: index + 1, marker, reason: 'invalid marker' })
-    } else if (marker === 'DEFER' && !(cells[5] ?? '').trim()) {
-      violations.push({ line: index + 1, marker, reason: 'missing DEFER re-open trigger' })
+    } else if (marker !== 'OBSOLETE' && !(cells[5] ?? '').trim()) {
+      violations.push({ line: index + 1, marker, reason: 'missing re-open trigger' })
     }
   }
 

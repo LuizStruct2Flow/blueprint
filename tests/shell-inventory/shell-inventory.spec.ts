@@ -277,6 +277,28 @@ describe('TASK-067 — the shell inventory gate', () => {
     })
   })
 
+  it('#13 BUG-145 the push AFTER a port: the ported shim, no row in BASE, is accepted', async () => {
+    await scenario('shell-inventory-13', async (s) => {
+      const repo = await s.gitRepo('repo')
+      // BASE already has the port: foo.sh is the exact shim, foo.mts is
+      // tracked, and the inventory names neither — the row was removed in the
+      // port push. This is the state CI on main was in at 3cfa5e1.
+      await s.fs.write('repo/scripts/foo.sh', SHIM)
+      await s.fs.write('repo/scripts/foo.mts', 'console.log("one")\n')
+      await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
+      await repo.commitAll('seed: the port has already landed')
+      const base = await repo.head()
+
+      // A later push touches something unrelated.
+      await s.fs.write('repo/docs-note.md', 'an unrelated change\n')
+      await repo.commitAll('unrelated change')
+
+      const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
+
+      expect(r.code).toBe(0)
+    })
+  })
+
   it('#12 a legacy row removed WITHOUT its file migrating or disappearing is refused', async () => {
     await scenario('shell-inventory-12', async (s) => {
       const repo = await s.gitRepo('repo')

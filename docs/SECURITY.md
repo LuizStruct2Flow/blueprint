@@ -266,14 +266,21 @@ Per the blueprint pre-push hook (DoD §4):
 There is no wall-clock ceiling. A scan too slow for every push moves to
 CI (Semgrep deep packs are the usual offender, not gitleaks).
 
-### CI / pipeline gate — what runs after push
+### CI / pipeline gate — not all of these run on every push
 
-| Step | Tool | Blocks on | Where the finding lives |
-|---|---|---|---|
-| Deep SAST | `semgrep --config=p/owasp-top-ten --config=p/r2c-security-audit` | Any HIGH | PR comment + `findings.md` |
-| Container scan | `trivy image` (Recipe C only) | HIGH+ CVE | Blocks ECR push |
-| IaC scan | `trivy config` | HIGH+ misconfig | Blocks deploy |
-| DAST baseline | `zap-baseline.py` | HIGH+ alert | Blocks promote to prod |
+Only Deep SAST runs on every push, in the shared `security` workflow
+(`secret-scan` + `sast` + `sca` jobs — this blueprint's own
+`.github/workflows/security.yml` has no trivy or ZAP job at all, because it
+ships no container and deploys nothing). Container scan, IaC scan and DAST
+baseline are recipe content for a project that has wired the matching
+pipeline stage: they fire only when that stage runs, not on every push.
+
+| Step | Tool | Runs when | Blocks on | Where the finding lives |
+|---|---|---|---|---|
+| Deep SAST | `semgrep --config=p/owasp-top-ten --config=p/r2c-security-audit` | Every push (CI) | Any HIGH | PR comment + `findings.md` |
+| Container scan | `trivy image` (Recipe C only) | Right after `docker build`, not every push | HIGH+ CVE | Blocks ECR push |
+| IaC scan | `trivy config` | Before a deploy that touches CDK/Terraform/k8s output, not every push | HIGH+ misconfig | Blocks deploy |
+| DAST baseline | `zap-baseline.py` | After the preview env is healthy (deploy pipeline), not every push | HIGH+ alert | Blocks promote to prod |
 
 ### Nightly scans
 

@@ -1,5 +1,5 @@
 // scripts/shell-inventory-check.mts — TASK-067 §5: the enforcement half of
-// "shell to TypeScript, organically" (docs/doing/PLAN-TASK-067-shell-to-typescript.md).
+// "shell to TypeScript, organically" (docs/done/PLAN-TASK-067-shell-to-typescript.md).
 //
 // BLUEPRINT-ONLY (like scripts/new-project.sh, scripts/build-deck.sh): this
 // file and scripts/shell-inventory.json are export-ignore'd. A derived

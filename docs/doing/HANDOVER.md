@@ -40,10 +40,14 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Acceptance: TASK-066 and TASK-067** are in
-  [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md) with
-  what to test. No bug is waiting: all of them were accepted on 2026-09-22,
-  BUG-140's unbuilt "never runs in CI" half included, as moot.
+- **Nothing waits for acceptance.** Every bug and task landed through
+  2026-09-22 is accepted and in `../done/`, BUG-140's unbuilt "never runs in
+  CI" half included, as moot.
+- **BUG-146 is open, and its next step is the founder's to start:**
+  [`BUGS.md`](BUGS.md). `tests/sync-by-address` #20d hangs about 1 CI run in 10
+  and has never reproduced locally (162 clean runs). The proposed next step is
+  a harness change that dumps the process tree when a scenario's wait times
+  out, so the next CI hang is captured rather than rerun.
 - **TASK-062 (backlog) is the live epic:** enforcement in code, not in agent
   context. Its input is the refreshed audit in
   [`../done/TASK-022-anchor-rules/`](../done/TASK-022-anchor-rules/): of 309 rules
@@ -97,16 +101,13 @@ any you find with `pgrep -af '[s]ignal-watch.sh'`.
 shell file, check `scripts/shell-inventory.json`. A legacy file is migrated
 whole to `.mts` behind the two-line shim first, and the gate refuses anything
 else. **Follow the port method** in
-[`../waiting-acceptance/PLAN-TASK-067-shell-to-typescript.md`](../waiting-acceptance/PLAN-TASK-067-shell-to-typescript.md)
+[`../done/PLAN-TASK-067-shell-to-typescript.md`](../done/PLAN-TASK-067-shell-to-typescript.md)
 §"The port method": a test-preparation commit first, then the port proven three
 ways.
 
-BUG-141, 142 and 143 were the first work the rule routed — Elias (Codex), Thomas
-(Kimi), Philipp (Claude), one full turn of Infrastructure — each reviewed by
-another provider. All three landed together, CI green on `3c4d133`, and wait in
-`waiting-acceptance/`. The founder accepted their single-commit form over DoD
-§3.1's two-commit reproducer convention at push (2026-09-21); do not read that
-as a standing waiver.
+The founder accepted BUG-141 to 143's single-commit form over DoD §3.1's
+two-commit reproducer convention (2026-09-21). Do not read that as a standing
+waiver.
 
 **Codex can commit.** TASK-066 keeps `--sandbox workspace-write` and adds only
 Git's common directory with `--add-dir`, so a linked worktree grants its actual
@@ -125,11 +126,9 @@ in parallel.
   is written (`AGENTS.md` §"Who does the work") and the roster now backs it:
   every delivery role carries one persona per provider. **The MECHANISM is not
   built**, so routing is still an agent remembering a section — which is the
-  exact shape TASK-062 exists to delete. **Four commits UNPUSHED:** `00e0242`,
-  `cdfc38b`, `e38a5bd`, `309191e`. They are doc-and-roster only, so the code
-  stages skip, but the four-eyes rule still applies and has NOT been run on them.
-  **The first real test of the rule is the next code item** — it must go to the
-  next provider in that role's rotation, not to whichever agent is convenient.
+  exact shape TASK-062 exists to delete. Its quota-detection input now exists:
+  BUG-144 hands a failed dispatch's mic back, and the provider's refusal is in
+  its run log.
 - **TASK-063 (Kimi) and TASK-064 (scratch) are ACCEPTED** (founder, 2026-09-20)
   and live in [`../done/BACKLOG.md`](../done/BACKLOG.md). Kept here only for what
   they cost, because every item below was a plausible wrong answer that

@@ -112,6 +112,53 @@ export async function strayHandoverCopies(docsDir: string): Promise<string[]> {
     /^HANDOVER-.*\.md$/.test(name),
   )
 }
+
+/** A `## F-NNN` finding block whose `Status:` line is absent or incomplete. */
+export interface FindingStatusViolation {
+  readonly id: string
+  readonly reason: 'missing' | 'Deferred without a date' | 'Accepted without a sign-off'
+}
+
+const STATUS_LINE = /\*\*Status:\s*(Open|Fixed|Deferred|Accepted)([^*]*)\*\*/
+const CALENDAR_DATE = /\d{4}-\d{2}-\d{2}/
+
+/**
+ * TASK-074 (audit rows D114, D075, D079). Every finding below
+ * `docs/config/findings.md`'s own "Status schema" header carries a
+ * `**Status: …**` line, and the schema names four values: `Open`, `Fixed`,
+ * `Deferred: <date>`, `Accepted: <sign-off>`. A `Deferred` with no date or an
+ * `Accepted` with no sign-off passes a bare presence check while telling the
+ * next reader nothing they can act on — the same shape as a `Status:` line
+ * missing outright — so both fail here, not only the absent case.
+ *
+ * Takes the file's content directly, not a path: the schema is a property of
+ * the text, and the fixture population in the spec is text, not a tree.
+ */
+export function findingsMissingValidStatus(findingsMd: string): FindingStatusViolation[] {
+  const violations: FindingStatusViolation[] = []
+
+  for (const block of findingsMd.split(/\n(?=## F-\d+)/)) {
+    const heading = /^## (F-\d+)/.exec(block)
+    if (!heading?.[1]) continue
+    const id = heading[1]
+
+    const match = STATUS_LINE.exec(block)
+    if (!match) {
+      violations.push({ id, reason: 'missing' })
+      continue
+    }
+
+    const [, value, rest] = match
+    if (value === 'Deferred' && !CALENDAR_DATE.test(rest ?? '')) {
+      violations.push({ id, reason: 'Deferred without a date' })
+    } else if (value === 'Accepted' && !(rest ?? '').replace(/^:/, '').trim()) {
+      violations.push({ id, reason: 'Accepted without a sign-off' })
+    }
+  }
+
+  return violations
+}
+
 /**
  * Read the one parked-work table that `docs/backlog/README.md` defines as the
  * backlog: `backlog/BACKLOG.md`. `doing/BACKLOG.md` is explicitly active work,

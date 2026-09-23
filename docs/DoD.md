@@ -193,7 +193,12 @@ from the feed and from `blueprint drift`, and reports it on every run.
 - **A code-state change moves the internal artefact that describes it**, in the
   same commit: a fixed review finding gets `Status: Fixed` in
   `docs/config/findings.md`, not just its row; a new trust boundary gets its
-  threat-model entry before the route ships. *Judgement.*
+  threat-model entry before the route ships. *Judgement — except that every
+  finding carries a `Status:` line at all, and that `Deferred`/`Accepted`
+  values carry the date/sign-off `docs/config/findings.md` §"Status schema"
+  requires, which is not: enforced by: `tests/lifecycle-docs` "TASK-074:
+  findingsMissingValidStatus flags a missing line, an undated Deferred, and a
+  bare Accepted" and its `#live` counterpart over the real register.*
 - **A rule change updates every document that restates the rule**, in the same
   commit. *Judgement.*
 - **Project user-surface rules** (localization parity, no internal customer

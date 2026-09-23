@@ -299,7 +299,15 @@ on every push.
 security finding lives until fixed or accepted. Same register as
 Codex review findings — security findings carry a `[SEC]` tag.
 A finding marked **Status: Accepted** has a sign-off line naming
-who accepted the risk and why.
+who accepted the risk and why. A sub-`MEDIUM` CVE tracked here
+instead of blocking the push uses **`Status: Deferred: <date>`**
+for its planned upgrade date — one field, not a separate one (the
+register's own §"Status schema" says why). Every finding block
+carries a valid `Status:` line at all — enforced by:
+`tests/lifecycle-docs` "TASK-074: findingsMissingValidStatus flags
+a missing line, an undated Deferred, and a bare Accepted" and its
+`#live` counterpart. Whether the named status is still true stays
+judgement.
 
 ### Incident response
 

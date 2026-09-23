@@ -144,6 +144,7 @@ export async function checkRotationIsShared(root: string): Promise<string | null
   try {
     source = await readFile(join(root, rel), 'utf8')
   } catch {
+    // Reported as the violation, not swallowed.
     return `${rel} not found`
   }
   if (!source.includes('lib/feed.sh')) {

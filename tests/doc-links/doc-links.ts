@@ -43,14 +43,10 @@ export interface DocLinkScan {
 /** Every `*.md` under `dir`, recursively, sorted by path. */
 async function markdownFiles(dir: string): Promise<string[]> {
   const found: string[] = []
+  // No swallow: a directory this walk is handed either reads or the scan
+  // cannot judge, and a scan that quietly covers less is the F-002 shape.
   const walk = async (d: string): Promise<void> => {
-    let entries
-    try {
-      entries = await readdir(d, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
+    for (const entry of await readdir(d, { withFileTypes: true })) {
       const full = join(d, entry.name)
       if (entry.isDirectory()) await walk(full)
       else if (entry.name.endsWith('.md')) found.push(full)
@@ -109,6 +105,7 @@ async function physical(path: string): Promise<string | null> {
   try {
     return await realpath(path)
   } catch {
+    // Nothing at the link's target. That is the broken link null reports.
     return null
   }
 }

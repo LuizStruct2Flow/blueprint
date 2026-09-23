@@ -21,6 +21,7 @@ export async function declaration(root: string, name: string): Promise<string | 
   try {
     text = await readFile(join(root, 'project_config_paths.md'), 'utf8')
   } catch {
+    // No project_config_paths.md means nothing is declared, which null says.
     return null
   }
   return new RegExp(`^- ${name}: \`(.*)\`[ \\t]*$`, 'm').exec(text)?.[1] || null

@@ -80,6 +80,7 @@ function fileMtime(path: string): number | undefined {
   try {
     return statSync(path).mtimeMs
   } catch {
+    // The baton may not exist yet. Absence is a polled state, not an error.
     return undefined
   }
 }
@@ -93,6 +94,7 @@ function readField(signalFile: string, field: string): string {
   try {
     content = readFileSync(signalFile, 'utf8')
   } catch {
+    // No baton yet is a state the poll loop expects, not an error.
     return ''
   }
   for (const line of content.split('\n')) {

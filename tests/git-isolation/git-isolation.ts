@@ -114,6 +114,7 @@ export async function hookUnsetsGitDir(hookPath: string): Promise<boolean> {
   try {
     return UNSETS_GIT_DIR.test(codeOnly(await readFile(hookPath, 'utf8')))
   } catch {
+    // An unreadable hook cannot be shown to unset GIT_DIR, so false is the honest answer.
     return false
   }
 }

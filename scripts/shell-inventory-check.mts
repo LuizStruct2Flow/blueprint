@@ -84,6 +84,8 @@ function readInventoryAtRef(root: string, ref: string): Inventory | undefined {
       stdio: ['ignore', 'pipe', 'ignore'], // the bootstrap case is expected, not an error to surface
     })
   } catch {
+    // The ref is verified upstream (ts_shell_inventory_base), so what fails
+    // here is the file being absent at BASE: the bootstrap case.
     return undefined
   }
   return JSON.parse(raw) as Inventory
@@ -107,6 +109,8 @@ function blobHash(root: string, path: string): string | undefined {
       encoding: 'utf8',
     })
   } catch {
+    // git refusing leaves the file unrecorded, which checkTrackedFile reports
+    // as CHANGED. Never a pass.
     return undefined
   }
   const line = out.trim()
@@ -124,6 +128,7 @@ function isTracked(root: string, path: string): boolean {
     })
     return true
   } catch {
+    // --error-unmatch exits non-zero for an untracked path. That exit code is the answer.
     return false
   }
 }
@@ -149,6 +154,7 @@ function readFileOrUndefined(path: string): string | undefined {
   try {
     return readFileSync(path, 'utf8')
   } catch {
+    // Absence is the probed state: the caller compares against undefined.
     return undefined
   }
 }

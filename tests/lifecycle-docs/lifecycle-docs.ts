@@ -146,6 +146,7 @@ async function readOrEmpty(path: string): Promise<string> {
   try {
     return await readFile(path, 'utf8')
   } catch {
+    // A record file a lifecycle state does not have yet reads as no rows.
     return ''
   }
 }
@@ -154,6 +155,7 @@ async function entries(dir: string): Promise<string[]> {
   try {
     return (await readdir(dir)).sort()
   } catch {
+    // A lifecycle folder that does not exist yet has no entries.
     return []
   }
 }
@@ -184,14 +186,10 @@ async function recordedHere(docsDir: string, id: string, state: string): Promise
 /** Every `BUGS.md` / `BACKLOG.md` under `docsDir`, recursively. */
 async function recordFiles(docsDir: string): Promise<string[]> {
   const found: string[] = []
+  // No swallow: a directory this walk is handed either reads or the check
+  // cannot judge, and a check that quietly covers less is the F-002 shape.
   const walk = async (d: string): Promise<void> => {
-    let items
-    try {
-      items = await readdir(d, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const item of items) {
+    for (const item of await readdir(d, { withFileTypes: true })) {
       const full = join(d, item.name)
       if (item.isDirectory()) await walk(full)
       else if (RECORD_FILES.includes(item.name)) found.push(full)

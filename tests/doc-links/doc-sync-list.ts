@@ -45,6 +45,7 @@ async function pathExists(path: string): Promise<boolean> {
     await stat(path)
     return true
   } catch {
+    // Absence is the probed state.
     return false
   }
 }
@@ -76,6 +77,7 @@ export async function scanDocSyncList(repoRoot: string): Promise<DocSyncScan> {
   try {
     text = await readFile(join(repoRoot, 'project_config_dod.md'), 'utf8')
   } catch {
+    // No project_config_dod.md: nothing to scan, and the live case's non-vacuity floor refuses a zero.
     return { checked: 0, skippedNA: 0, broken: [] }
   }
 

@@ -248,8 +248,9 @@ export async function createWorkspace(
       try {
         await stat(root)
         survived = true
-      } catch {
-        // ENOENT — the expected, correct path.
+      } catch (e) {
+        // ENOENT is the expected, correct path. Anything else is not "removed".
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
       }
       if (survived) {
         throw new Error(

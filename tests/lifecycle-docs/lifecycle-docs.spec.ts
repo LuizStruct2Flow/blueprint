@@ -61,6 +61,7 @@ import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import {
   backlogMarkerViolations,
   bugsWithoutRows,
+  findingsMissingValidStatus,
   rowedBugIds,
   scanLifecycleDocs,
   strayHandoverCopies,
@@ -118,6 +119,53 @@ describe('lifecycle-docs — a record that states something untrue costs more th
       await strayHandoverCopies(join(REPO_ROOT, 'docs')),
       'docs/doing/HANDOVER.md is the single canonical resume document; remove suffixed copies',
     ).toEqual([])
+  })
+
+  it('TASK-074: findingsMissingValidStatus flags a missing line, an undated Deferred, and a bare Accepted', () => {
+    const findingsMd = [
+      '## F-101 — no status line at all',
+      '',
+      '**Raised by** nobody in particular.',
+      '',
+      '## F-102 — fixed, valid',
+      '',
+      '**Status: Fixed** — closed by TASK-999.',
+      '',
+      '## F-103 — deferred with no date',
+      '',
+      '**Status: Deferred** — will revisit sometime.',
+      '',
+      '## F-104 — accepted with no sign-off',
+      '',
+      '**Status: Accepted** —',
+      '',
+      '## F-105 — deferred, dated, valid',
+      '',
+      '**Status: Deferred: 2026-12-01** — CVE upgrade due then.',
+      '',
+      '## F-106 — open, valid',
+      '',
+      '**Status: Open** — still under investigation.',
+      '',
+    ].join('\n')
+
+    expect(findingsMissingValidStatus(findingsMd)).toEqual([
+      { id: 'F-101', reason: 'missing' },
+      { id: 'F-103', reason: 'Deferred without a date' },
+      { id: 'F-104', reason: 'Accepted without a sign-off' },
+    ])
+  })
+
+  it('#live every finding in docs/config/findings.md carries a valid Status line', async () => {
+    const findingsMd = await readFile(join(REPO_ROOT, 'docs', 'config', 'findings.md'), 'utf8')
+    const ids = [...findingsMd.matchAll(/^## (F-\d+)/gm)].map((m) => m[1])
+
+    expect(
+      findingsMissingValidStatus(findingsMd),
+      'every finding needs Status: Open / Fixed / Deferred: <date> / Accepted: <sign-off> (docs/config/findings.md §"Status schema")',
+    ).toEqual([])
+    // Non-vacuity floor: the register has findings and this scanned them.
+    expect(ids.length, 'no F-NNN heading was found, so this proves nothing').toBeGreaterThanOrEqual(5)
   })
 
   it('TASK-070: every parked BACKLOG row has a valid Category marker and non-OBSOLETE rows have a re-open trigger', async () => {

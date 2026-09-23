@@ -79,7 +79,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { FixtureRepo } from '../harness/fixture-repo.js'
-import { skipNote } from '../helpers/project-config.js'
+import { skipNote, skipVisibly } from '../helpers/project-config.js'
 
 const execFileP = promisify(execFile)
 
@@ -577,11 +577,10 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
   it('#13 THE REAL RANGE — no BUG-NNN commit this push introduces lands without its declared reproducer', async (ctx) => {
     const base = await resolvePushBase(realGit)
     if (base === null) {
-      skipNote(
-        ctx.task.name,
+      skipVisibly(
+        ctx,
         'neither @{u} nor origin/main resolves here, so the pushed range cannot be determined',
       )
-      ctx.skip()
       return
     }
 

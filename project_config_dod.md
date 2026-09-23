@@ -72,13 +72,25 @@ marker — the blueprint sync preserves your additions.
 
 ## Doc-sync list (DoD §6.4)
 
-> The files that must move together with code changes. The blueprint
-> names the rule; you name the file set. The agent uses these lists
-> to gate handoffs (DoD §7.D).
+> The files that must move together with code changes. `templates/project_config_dod.md`
+> keeps the seeded template shape (Recipe A/B/C rows, `{{PROJECT_NAME}}`
+> placeholders) for a new project to fill in — that file is untouched by
+> this task. **This is the root file: the blueprint's OWN doc-sync list,**
+> judged surface by surface against THIS tree, not copied from the
+> template (TASK-072, closing audit row D058).
 >
-> Pick a recipe in [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)
-> (A / B / C) and the rows below are the starting set — extend per
-> your project's surfaces.
+> This repo ships **no** docs-site, help portal, status page, legal pages,
+> pricing page or API — the template rows naming those (`docs-site/…`,
+> `frontend/public/help.html`, …) are Recipe B/C rows and this repo is
+> none of those recipes for itself. Every such row is marked **N/A**
+> below rather than deleted, so the question is recorded as asked and
+> answered, not silently missing.
+>
+> `tests/doc-links` scans this section and fails if a path named in a
+> non-N/A row does not exist in the tree — a glob row (`PLAN-*.md`) checks
+> its directory, not that an instance already exists (enforced by:
+> `tests/doc-links` "THE REAL TREE — every path named in the doc-sync list
+> exists").
 
 ### External (customer-facing)
 
@@ -87,18 +99,12 @@ marker — the blueprint sync preserves your additions.
 
 | File / surface | Audience | Trigger | Sync rule |
 |---|---|---|---|
-| `README.md` | Visitor / future hire | Architecture / install / CLI surface change | Same commit |
-| `docs/RELEASE-NOTES.md` *(or `docs-site/content/release-notes/YYYY-MM-DD.md`)* | Customer | Every push shipping a user-noticed change | Append-only; never edit history |
-| `docs-site/content/features/*.md` *(Recipe B/C)* | Customer | New / removed / renamed feature | Same commit |
-| `docs-site/content/pricing.md` *(Recipe B/C)* | Customer | Plan / tier / price change | Same commit as billing code |
-| `frontend/public/help.html` *(Recipe A)* | Customer | New / changed user-facing feature | Same commit |
-| Help portal article index *(Recipe C)* | Customer / support | New article published or retired | Index entry same commit; article same week |
-| `docs-site/content/legal/privacy-vYYYY-MM-DD.md` *(Recipe C)* | Customer / regulator | New data class, processor, region | Same commit + `legal-reviewed` PR label |
-| `docs-site/content/legal/terms-vYYYY-MM-DD.md` *(Recipe C)* | Customer / regulator | Pricing / liability / dispute terms | Same commit + `legal-reviewed` PR label |
-| Public status page *(Recipe C)* | Customer | Outage / planned maintenance / postmortem | Real-time (tooling) for incidents; same-day manual for postmortem |
-| Public roadmap *(Recipe C — Productboard / Canny)* | Customer / investor | Lifecycle move (`backlog/` → `doing/` → `waiting-acceptance/`) | Same week |
-| `docs-site/content/api/*.md` + OpenAPI spec *(Recipe B/C)* | Customer / integrator | API surface change | Same commit; spec generated from code |
-| | | | |
+| `README.md` | Visitor / prospective adopter | Architecture, bootstrap/install, or `blueprint` CLI surface change | Same commit |
+| `docs/way-of-working.md` | Customer / investor / hire — the canonical pitch deck | Any of the ten concerns it mirrors (`CLAUDE.blueprint.md` §"docs/way-of-working.md is the canonical pitch surface") | Same commit for the markdown; the PDF is deferred (`project_config_overview.md` §"Standing founder decisions") |
+| N/A — `docs/RELEASE-NOTES.md` | — | This repo has none; its own history is its `git log`. A project bootstrapped from `templates/` gets Recipe A's release-notes row — this repo does not inherit its own template's row | N/A |
+| N/A — `docs-site/content/features/*.md`, `pricing.md`, `api/*.md` + OpenAPI, `legal/*.md` | — | No docs-site exists; Recipe B/C do not apply to the blueprint itself | N/A |
+| N/A — `frontend/public/help.html` | — | No `frontend/` tree in this repo | N/A |
+| N/A — help portal article index, public status page, public roadmap | — | No portal, no status-page tooling; `docs/backlog/` and `docs/doing/` are the roadmap, read directly by the founder | N/A |
 
 ### Internal (team-facing)
 
@@ -108,18 +114,18 @@ marker — the blueprint sync preserves your additions.
 
 | File / surface | Audience | Trigger | Sync rule |
 |---|---|---|---|
-| `docs/config/FEATURES.md` | Team / agent | New / removed / renamed feature | Same commit as the code |
-| `docs/config/ACCEPTANCE_TESTS.md` | Team / QA | New acceptance test catalogued / retired | Same commit as the test |
 | `docs/config/findings.md` | Team / Codex review | Finding raised, fixed, or accepted | `Status: Fixed` block same commit as the fix |
-| `docs/doing/BUGS.md` → `waiting-acceptance/` → `done/` | Team / agent | Bug numbered, fixed, founder-accepted | Lifecycle move in same commit as the action (DoD §1) |
+| `docs/doing/BUGS.md` → `docs/waiting-acceptance/BUGS.md` → `docs/done/BUGS.md` | Team / agent | Bug numbered, fixed, founder-accepted | Lifecycle move in same commit as the action (DoD §1) |
+| `docs/doing/BACKLOG.md` | Team / agent | Task/Feature/Spike numbered, parked, or resolved | Lifecycle move in same commit as the action (DoD §1) |
 | `docs/doing/PLAN-*.md` | Team / Codex | Plan-driven work in flight | Lifecycle move at each transition |
-| `project_config_security.md` (threat model) | Team / agent | New trust boundary / auth surface / data class | Same commit as the route / data path |
-| `project_config_infra.md` (rollback) | Team / on-call | New prod resource | Same commit as the IaC change |
-| `docs/architecture/ADR-*.md` *(Recipe C)* | Team / new hire | Architectural decision taken or reversed | Numbered, dated, same commit as embodying code |
-| `docs/runbooks/*.md` *(Recipe C)* | On-call / agent | New alert wired | Same PR as the alert; link in the alert payload |
-| `docs/done/INCIDENT-YYYY-MM-DD.md` | Team / regulator | Production incident | Within 48h of resolution (DoD §6.2) |
 | `docs/doing/HANDOVER.md` | Future-self / next session | End of any meaningful unit of work | Overwrite in place (DoD §10) |
-| | | | |
+| `docs/done/INCIDENT-*.md` (dated INCIDENT-YYYY-MM-DD.md) | Team / regulator | A defect on `main` reaches (or nearly reaches) a derived project via `blueprint pull` before being caught | Within 48h of resolution (DoD §6.2) — none exist yet; the folder and naming convention are real, no incident has happened |
+| N/A — `project_config_security.md` (threat model, product-surface sense) | — | This repo has no deployed service, API, or auth surface of its own — same reasoning as C035/D086 (no `src/`, no `infra/`). The one real trust boundary this repo has, `a2bp`'s push access, is already written up in `project_config_paths.md` §"Back-propagation trust boundary", not here | N/A |
+| N/A — `project_config_infra.md` (rollback) | — | No `infra/` tree, no prod resource this repo owns (D086) | N/A |
+| N/A — `docs/architecture/ADR-*.md` | — | No `docs/architecture/` tree (Recipe C only) | N/A |
+| N/A — `docs/runbooks/*.md` | — | No `docs/runbooks/` tree, no alert wired (Recipe C only) | N/A |
+| N/A — `docs/config/FEATURES.md` | — | No such file; this repo's own concern-ripple list is `CLAUDE.blueprint.md`'s ten-concern list, already the deck row above | N/A |
+| N/A — `docs/config/ACCEPTANCE_TESTS.md` | — | No such file; this repo's acceptance tests ARE its `tests/` vitest suites (catalogued by `scripts/lib/suites.sh`), not a separate prose list | N/A |
 
 **Promotion / removal** — see [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) §"Promotion criteria for the sync list". Changes to the lists above are committed as part of a doc-sync-list change PR, not silently.
 

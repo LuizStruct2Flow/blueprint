@@ -185,7 +185,11 @@ from the feed and from `blueprint drift`, and reports it on every run.
   in the project's doc-sync list, `project_config_dod.md` §"Doc-sync list", in
   the same commit as the code. `README.md` is on that list by default: if a
   visitor would notice the change, the README moves with it. Release notes are
-  append-only. *Judgement.*
+  append-only. *Judgement* — which files belong on the list, and whether a
+  given change touches one, stays a human call. What is not judgement is
+  whether a listed row names a real surface: every non-`N/A` path on the list
+  is checked against the tree (enforced by: `tests/doc-links` "THE REAL TREE
+  — every path named in the doc-sync list exists").
 - **A code-state change moves the internal artefact that describes it**, in the
   same commit: a fixed review finding gets `Status: Fixed` in
   `docs/config/findings.md`, not just its row; a new trust boundary gets its

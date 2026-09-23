@@ -309,7 +309,9 @@ all eight concerns below, plus the agent infra, live in one git repo.
   leaked one. So `a2bp` reverse-substitutes the project's name back to
   `{{PROJECT_NAME}}` and **blocks** on host paths, foreign state dirs, and
   any project name that survived. Suppressions are per-line and must carry a
-  justification.
+  justification. The blueprint's own CI runs the same checker over every
+  pushed diff's added lines, so `released` never advances over contamination
+  that reached `main` another way.
 - **A request, not a delivery — and we say exactly what that buys.** `a2bp`
   pushes to `a2bp/<project>/<hash>`, never to `main`, and has no verb that
   merges: it lands nothing, and a human merges the PR. It is *not* a wall

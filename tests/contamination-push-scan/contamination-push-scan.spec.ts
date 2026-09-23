@@ -17,19 +17,29 @@
  * THE PROPERTY THAT MATTERS MOST IS REUSE. The job's value is that it applies
  * contamination.sh's OWN checker to the pushed diff — not a forked copy of its
  * patterns, which would drift silently (the audit CSV's re-open condition).
- * Case #1 pins that mechanically: the script sources the library and contains
- * none of its regexes itself.
+ * Case #1 is a TEXT PROXY for that: it pins that the script names
+ * contamination.sh and that three of the checker's regexes are absent from it.
+ * A re-spelled fork would pass it. The real coverage is the red/green case,
+ * which drives the actual checker through the script and would go green on a
+ * fork only if the fork reproduced the checker's verdicts.
  *
  * A GitHub job cannot be run locally, so the fixture cases below drive the
  * checker EXACTLY the way the job's step does — `node
  * scripts/contamination-push-scan.mts --range/--before/--after` — over a
  * fixture repo, with the plant shown red and its removal shown green.
  *
- * SCOPE, stated so the fixture cases read as intent and not omission: the
- * scan runs only where `.blueprint-root` exists. A derived project's push
- * publishes nothing (a2bp's own scan is its pre-publication stop), and
- * scanning a project's whole diff would block its own files for naming their
- * own project — so there the script announces the skip and exits 0.
+ * SCOPE, stated so the fixture cases read as intent and not omission: the job
+ * runs only in the blueprint's own repository (guarded on `github.repository`,
+ * so a derived project sees it SKIPPED, not green — #2), the script itself
+ * skips, announced, where `.blueprint-root` is absent (#3), and only files
+ * that SHIP are judged: a path whose `export-ignore` attribute is set reaches
+ * no derived project and cannot contaminate one (#8). A derived project's push
+ * publishes nothing (a2bp's own scan is its pre-publication stop), and scanning
+ * a project's whole diff would block its own files for naming their own project.
+ *
+ * The fixture plants below carry `a2bp-allow` markers because this suite SHIPS
+ * (tests/contamination-push-scan/ is not export-ignore'd), so the scan judges
+ * this file's own added lines on the push that lands it.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -61,12 +71,19 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
     expect(job, 'security.yml has a contamination job').not.toBeNull()
     expect(job?.[0]).toContain('node scripts/contamination-push-scan.mts')
     expect(text).toMatch(/needs: \[[^\]]*\bcontamination\b[^\]]*\]/)
+    // Job-level repository guard, the release job's precedent: in a derived
+    // project the job renders SKIPPED, never a green check that scanned nothing.
+    const guard = job?.[0].match(/^ {4}if: (.*)$/m)?.[1] ?? ''
+    expect(guard, 'the contamination job is not guarded to this repository').toMatch(
+      /github\.repository\s*==\s*'[^']+'/,
+    )
+    expect(guard, 'a workflow_dispatch run has no range to scan').not.toContain("!= 'schedule'")
   })
 
   it('#3 a derived project checkout skips, announced, and never blocks', async () => {
     await scenario('cps-derived', async (s) => {
       const repo = await s.gitRepo('acme-flow', { initialCommit: true })
-      await s.fs.write('acme-flow/README.md', 'see /home/alice/notes\n')
+      await s.fs.write('acme-flow/README.md', 'see /home/alice/notes\n') // a2bp-allow: fixture plant, not a live path
       await repo.commitAll('add readme')
       // No .blueprint-root: contamination publishes only from the blueprint.
       const r = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
@@ -86,7 +103,7 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
       await repo.commitAll('base')
 
       // RED — the plant, driven exactly as the job drives it.
-      await s.fs.write('bp/README.md', 'generic docs\nsee /home/alice/secret-notes for details\n')
+      await s.fs.write('bp/README.md', 'generic docs\nsee /home/alice/secret-notes for details\n') // a2bp-allow: fixture plant, not a live path
       await repo.commitAll('plant a host path')
       const red = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
         cwd: repo.dir,
@@ -95,8 +112,11 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
       expect(red.output).toContain('BLOCK')
       expect(red.output).toContain('host home path')
       expect(red.output).toContain('README.md')
+      // The verdict says what it judged.
+      expect(red.output).toContain('scanned 1 file(s), 1 added line(s)')
 
-      // GREEN — the plant removed.
+      // GREEN — the plant removed. That commit ADDS no line, so the pass
+      // judged nothing and says so: "scanned 0" cannot be read as "clean".
       await s.fs.write('bp/README.md', 'generic docs\n')
       await repo.commitAll('remove the plant')
       const green = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
@@ -104,6 +124,8 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
       })
       expect(green.code).toBe(0)
       expect(green.output).toContain('PASS')
+      expect(green.output).toContain('scanned 0 file(s), 0 added line(s)')
+      expect(green.output).toContain('::warning::')
     })
   })
 
@@ -130,21 +152,24 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
     })
   })
 
-  it('#6 the residual-name class has no operand on a blueprint push and is demoted, not deleted', async () => {
+  it('#6 the residual-name class has no operand on a blueprint push: counted in one line, never blocking, never printed per hit', async () => {
     await scenario('cps-demote', async (s) => {
       // The repo's own basename IS "acme-flow": on the blueprint's own pushes
       // the name class would flag the repo's docs for naming themselves.
       const repo = await s.gitRepo('acme-flow', { initialCommit: true })
       await s.fs.write('acme-flow/.blueprint-root', 'blueprint\n')
-      await s.fs.write('acme-flow/README.md', 'mentions acme-flow by name\n')
+      await s.fs.write('acme-flow/README.md', 'mentions acme-flow by name\nand acme-flow again\n')
       await repo.commitAll('name the repo')
       const r = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
         cwd: repo.dir,
       })
       expect(r.code).toBe(0)
-      expect(r.output).toContain('demoted')
+      expect(r.output).toContain('2 residual-name hit(s) demoted')
+      // Measured before this: 86 of 100 log lines over one real push range
+      // were per-hit `|BLOCK|` lines of this class, burying the real findings.
+      expect(r.output).not.toContain('|BLOCK|')
       // The other classes stand unfiltered in the same mode.
-      await s.fs.write('acme-flow/TOOLS.md', 'state lives in ~/.other-project/state/\n')
+      await s.fs.write('acme-flow/TOOLS.md', 'state lives in ~/.other-project/state/\n') // a2bp-allow: fixture plant, not a live path
       await repo.commitAll('plant a foreign state dir')
       const foreign = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
         cwd: repo.dir,
@@ -158,7 +183,7 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
     await scenario('cps-ranges', async (s) => {
       const repo = await s.gitRepo('bp', { initialCommit: true })
       await s.fs.write('bp/.blueprint-root', 'blueprint\n')
-      await s.fs.write('bp/README.md', 'see /home/alice/notes\n')
+      await s.fs.write('bp/README.md', 'see /home/alice/notes\n') // a2bp-allow: fixture plant, not a live path
       await repo.commitAll('tip with a plant')
       const zero = '0000000000000000000000000000000000000000'
       const after = (await repo.git(['rev-parse', 'HEAD'])).stdout.trim()
@@ -180,6 +205,39 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
       )
       expect(rollback.code).toBe(0)
       expect(rollback.output).toContain('nothing new')
+    })
+  })
+
+  it('#8 only files that ship are judged: an export-ignore’d record with a plant passes and is counted, the same plant in a shipped file blocks, and a vacuous range says so', async () => {
+    await scenario('cps-export-ignore', async (s) => {
+      const repo = await s.gitRepo('bp', { initialCommit: true })
+      await s.fs.write('bp/.blueprint-root', 'blueprint\n')
+      // The decision is .gitattributes, read through git check-attr — the same
+      // attribute git archive honours when the managed set is derived.
+      await s.fs.write('bp/.gitattributes', 'docs/done/**  export-ignore\n')
+      await repo.commitAll('base')
+
+      // An incident record quoting a host path on purpose: ships to nobody.
+      await s.fs.write('bp/docs/done/BUGS.md', '| BUG-1 | fixture at /home/alice/state | fixed |\n') // a2bp-allow: fixture plant, not a live path
+      await repo.commitAll('record an incident')
+      const record = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
+        cwd: repo.dir,
+      })
+      expect(record.code).toBe(0)
+      expect(record.output).toContain('1 changed file(s) skipped')
+      // Skipping the record means NOTHING was judged, and the pass says so.
+      expect(record.output).toContain('scanned 0 file(s), 0 added line(s)')
+      expect(record.output).toContain('::warning::')
+
+      // The same line in a file that ships is the BUG-002 shape and blocks.
+      await s.fs.write('bp/README.md', 'fixture at /home/alice/state\n') // a2bp-allow: fixture plant, not a live path
+      await repo.commitAll('plant in a shipped file')
+      const shipped = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
+        cwd: repo.dir,
+      })
+      expect(shipped.code).toBe(1)
+      expect(shipped.output).toContain('::error::README.md')
+      expect(shipped.output).toContain('0 changed file(s) skipped')
     })
   })
 })

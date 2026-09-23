@@ -40,7 +40,8 @@ export interface DocSyncScan {
   readonly broken: readonly string[]
 }
 
-async function pathExists(path: string): Promise<boolean> {
+/** Exported for the spec's own blueprint-detection (`.blueprint-root`), not just internal use. */
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path)
     return true

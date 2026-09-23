@@ -24,55 +24,117 @@
  * point: the fix does not depend on knowing WHY the dispatch failed to hand
  * back, only THAT it did.
  *
- * ROUND 3 (`findings.md` F-002 shape) — THE ROSTER IS NOT BESIDE THE BATON.
- * The previous version of this fixture wrote AGENT_ROSTER.md beside the
- * fixture's OWN baton file and asserted recovery against that copy. That
- * layout does not exist in production — the real roster lives at the repo
- * root, the real baton several directories under it
- * (`logs/state/AGENT_SIGNAL.md`) — so the suite proved the fixture's own
- * shape, not the mechanism, and went green over a poller that could not find
- * a roster anywhere near the real baton (observed live 2026-09-22).
+ * ROUND 3 (`findings.md` F-002 shape) fixed the production side — recovery
+ * resolves the roster from BP_STATE_ROOT, never from dirname(signalFile) —
+ * but left the suite reading the EXPECTED name from the REAL repo-root
+ * roster: a per-engineer, gitignored file CI does not have, so the whole
+ * file died in beforeAll (BUG-148, run 35841815567 on `1ee7b3d`). Both
+ * layouts were wrong for the same reason: they depended on a file outside
+ * the fixture. Round 1 fabricated a roster beside the baton (a layout
+ * production never has); round 3 reached for the operator's real file.
  *
- * This suite runs the REAL scripts/signal-watch.sh directly against
- * REPO_ROOT (never copied into an isolated tree, same as before), which means
- * its roster resolution is NOT isolatable to a fixture directory: `BP_CODE_ROOT`
- * is the script's own physical location, so `bp_state_root` finds `.git` at
- * REPO_ROOT on its very first step regardless of `BP_STATE_ROOT_CEILING`, and
- * the roster it reads is genuinely REPO_ROOT's own AGENT_ROSTER.md (or the
- * shipped AGENT_ROSTER.example.md where a live one is absent — never both, per
- * BUG-075). So rather than fabricate a name the fix cannot actually resolve,
- * each case resolves the SAME expected name through the SAME mechanism
- * (`bp_roster_name_for_role`) up front, and asserts recovery lands on it —
- * proving the live path end to end instead of a stand-in for it.
+ * ROUND 4 (BUG-148) — THE FIXTURE OWNS THE WHOLE TREE. Each scenario builds
+ * a repo-shaped tree of its own — a root marker (`.blueprint-source`), a
+ * fixture-authored roster at THAT tree's root, the baton under its
+ * `logs/state` — and runs a COPY of the watcher inside it. The watcher's
+ * roster resolution is anchored to its own physical location (BP_CODE_ROOT,
+ * never fixture-overridable — BUG-019), so a copied script inside the
+ * fixture tree resolves the fixture's roster through the production path:
+ * two directories apart, through the real `bp_roster_name_for_role`, with
+ * every other resolution (state dir, signal-set.sh, the watcher lock)
+ * landing inside the tree too. The expected Orchestrator is resolved per
+ * scenario against the fixture's roster — never the operator's live one,
+ * which this suite must run without (that is what "green in CI" means).
  */
 
-import { describe, it, expect, beforeAll } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until } from '../harness/watcher.js'
+import { shimTargetPath } from '../helpers/shim.js'
 
-const WATCHER = join(REPO_ROOT, 'scripts', 'signal-watch.sh')
-const ROSTER_LIB = join(REPO_ROOT, 'scripts', 'lib', 'roster.sh')
+/**
+ * The tree under test. `BP_SPEC_ROOT` repoints it at a perturbed copy, which
+ * is how the equivalence driver runs this spec over the same bytes (the same
+ * precedent tests/watcher-liveness sets).
+ */
+const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
-// The exact name recoverStrandedMic must resolve, from the exact mechanism it
-// uses (bp_roster_name_for_role against REPO_ROOT) — not a fixture stand-in.
-// Resolved once: it is a read of a file this suite does not touch.
-let ORCHESTRATOR = ''
+const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
-beforeAll(() => {
-  ORCHESTRATOR = execFileSync(
-    'bash',
-    ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'bash', ROSTER_LIB, REPO_ROOT],
-    { encoding: 'utf8' },
-  ).trim()
-  if (!ORCHESTRATOR) {
-    throw new Error(
-      `could not resolve an Orchestrator from ${REPO_ROOT} via ${ROSTER_LIB} — ` +
-        'neither AGENT_ROSTER.md nor AGENT_ROSTER.example.md names one',
-    )
+/**
+ * The fixture's own roster. The Orchestrator is a fixture persona,
+ * deliberately distinct from the "Orchy" a handed-back baton names in the
+ * negative cases below: if the watcher resolved ANY roster other than this
+ * one — the operator's gitignored live roster, or none at all as in CI — the
+ * recovery handback would land on a different Holder (or not land), and
+ * every positive case goes red.
+ */
+const FIXTURE_ROSTER =
+  '# Fixture roster for tests/mic-recovery (BUG-148). The suite resolves the\n' +
+  '# Orchestrator through the real bp_roster_name_for_role against THIS file;\n' +
+  '# nothing here reads the operator\'s gitignored AGENT_ROSTER.md.\n' +
+  '\n' +
+  '## Members\n' +
+  '\n' +
+  '| Role | Name | Backing agent |\n' +
+  '|---|---|---|\n' +
+  '| Orchestrator | FixtOrchy | Claude Code |\n'
+
+/**
+ * A repo-shaped tree inside the workspace (BUG-148): root marker, fixture
+ * roster at the root, baton dir under `logs/state` — the production shape,
+ * two directories apart.
+ *
+ * The copy is a live repo in every respect the derivations can see (the same
+ * argument tests/watcher-liveness's liveRepo makes): the watcher's
+ * BP_CODE_ROOT is its own physical location, so the copy resolves the
+ * fixture's root on bp_state_root's first step, and every path it derives —
+ * roster, state dir, watcher lock, signal-set.sh — stays inside the tree.
+ */
+async function liveRepo(s: Scenario, name: string): Promise<{ root: string; watch: string }> {
+  const root = await s.fs.mkdirp(name)
+  await s.fs.write(`${name}/.blueprint-source`, '')
+  await s.fs.write(`${name}/AGENT_ROSTER.md`, FIXTURE_ROSTER)
+  const watch = await s.fs.copyIn(
+    join(SUBJECT, 'scripts', 'signal-watch.sh'),
+    `${name}/scripts/signal-watch.sh`,
+  )
+  // A migrated watcher is a two-line shim execing a sibling .mts (TASK-067);
+  // copy it too WHEN ONE EXISTS, so the out-of-tree fixture can run it.
+  const watchMts = shimTargetPath('scripts/signal-watch.sh')
+  if (existsSync(join(SUBJECT, watchMts))) {
+    await s.fs.copyIn(join(SUBJECT, watchMts), `${name}/${watchMts}`)
   }
-})
+  // recoverStrandedMic hands back through scripts/signal-set.sh, resolved
+  // from the SAME copied code root — the fixture copy must carry it, and its
+  // mandatory lib/state-dir.sh source with it.
+  await s.fs.copyIn(join(SUBJECT, 'scripts', 'signal-set.sh'), `${name}/scripts/signal-set.sh`)
+  // The WHOLE lib dir, never named files — feed-fixture.ts records why.
+  const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
+    cwd: s.workspace.root,
+  })
+  for (const n of libs.stdout.split('\n').filter((f) => f.endsWith('.sh'))) {
+    await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', n), `${name}/scripts/lib/${n}`)
+  }
+  await s.fs.mkdirp(`${name}/logs/state`)
+  return { root, watch }
+}
+
+/**
+ * The exact name recoverStrandedMic must resolve, from the exact mechanism
+ * it uses — the real `bp_roster_name_for_role` against the fixture tree's
+ * root, never a stand-in and never the operator's roster (BUG-148).
+ */
+async function orchestratorOf(s: Scenario, root: string): Promise<string> {
+  const r = await s.run(
+    'bash',
+    ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'bash', ROSTER_LIB, root],
+    { cwd: s.workspace.root },
+  )
+  return r.stdout.trim()
+}
 
 async function readField(s: Scenario, signalPath: string, field: string): Promise<string> {
   const content = await s.fs.read(signalPath)
@@ -84,18 +146,20 @@ async function readField(s: Scenario, signalPath: string, field: string): Promis
   return ''
 }
 
-// GUARDS THE ROUND-3 FIX FROM SILENTLY REGRESSING (Thomas/Kimi review). The
-// whole point of this round was that a roster fabricated beside the fixture
-// baton proves the fixture, not the mechanism — a future edit re-adding
-// `s.fs.write('.../state/AGENT_ROSTER.md', ...)` would quietly reopen that
-// blind spot without failing anything, since the suite would go back to
-// green for the wrong reason. Called once per scenario, right after its
-// baton directory exists.
+// GUARDS THE FIXTURE'S SHAPE FROM SILENTLY REGRESSING (Thomas/Kimi review).
+// The whole point of the round-3/round-4 layout is that a roster fabricated
+// beside the fixture baton proves the fixture, not the mechanism — a future
+// edit re-adding `s.fs.write('.../state/AGENT_ROSTER.md', ...)` would quietly
+// reopen that blind spot without failing anything, since the suite would go
+// back to green for the wrong reason. Called once per scenario, right after
+// its baton directory exists. The fixture's real roster sits at the tree
+// ROOT, two directories up — this guard is about the state dir never
+// carrying one.
 async function assertNoRosterBesideBaton(s: Scenario, stateDirRel: string): Promise<void> {
   for (const name of ['AGENT_ROSTER.md', 'AGENT_ROSTER.example.md']) {
     expect(
       await s.fs.exists(`${stateDirRel}/${name}`),
-      `${stateDirRel}/${name} exists — this fixture must not fabricate a roster beside the baton (round 3, findings.md F-002)`,
+      `${stateDirRel}/${name} exists — this fixture must not fabricate a roster beside the baton (round 3, findings.md F-002; BUG-148)`,
     ).toBe(false)
   }
 }
@@ -103,9 +167,12 @@ async function assertNoRosterBesideBaton(s: Scenario, stateDirRel: string): Prom
 describe('BUG-144 — a failed dispatch must not strand the mic', () => {
   it('a stub wake command that exits without flipping the baton is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-1', async (s) => {
-      await s.fs.mkdirp('mic-recovery-1/state')
-      await assertNoRosterBesideBaton(s, 'mic-recovery-1/state')
-      const signalRel = 'mic-recovery-1/state/AGENT_SIGNAL.md'
+      const live = await liveRepo(s, 'mic-recovery-1')
+      const ORCHESTRATOR = await orchestratorOf(s, live.root)
+      expect(ORCHESTRATOR, 'the fixture roster must resolve an Orchestrator').not.toBe('')
+      const stateDirRel = 'mic-recovery-1/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
       const signalPath = s.workspace.path(signalRel)
 
       await s.fs.write(
@@ -125,7 +192,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         s,
         'bash',
         [
-          WATCHER,
+          live.watch,
           '--file', signalPath,
           '--state', 'OVER_TO_KIMI',
           '--poll', '0.2',
@@ -155,9 +222,12 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
   it('BUG-144: a stub wake command that claims ACTIVE and then dies is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-3', async (s) => {
-      await s.fs.mkdirp('mic-recovery-3/state')
-      await assertNoRosterBesideBaton(s, 'mic-recovery-3/state')
-      const signalRel = 'mic-recovery-3/state/AGENT_SIGNAL.md'
+      const live = await liveRepo(s, 'mic-recovery-3')
+      const ORCHESTRATOR = await orchestratorOf(s, live.root)
+      expect(ORCHESTRATOR, 'the fixture roster must resolve an Orchestrator').not.toBe('')
+      const stateDirRel = 'mic-recovery-3/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
       const signalPath = s.workspace.path(signalRel)
 
       await s.fs.write(
@@ -184,7 +254,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         s,
         'bash',
         [
-          WATCHER,
+          live.watch,
           '--file', signalPath,
           '--state', 'OVER_TO_KIMI',
           '--poll', '0.2',
@@ -214,9 +284,10 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
   it('a dispatch that DID hand back the mic is left alone — the poller does nothing', async () => {
     await scenario('mic-recovery-2', async (s) => {
-      await s.fs.mkdirp('mic-recovery-2/state')
-      await assertNoRosterBesideBaton(s, 'mic-recovery-2/state')
-      const signalRel = 'mic-recovery-2/state/AGENT_SIGNAL.md'
+      const live = await liveRepo(s, 'mic-recovery-2')
+      const stateDirRel = 'mic-recovery-2/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
       const signalPath = s.workspace.path(signalRel)
 
       await s.fs.write(
@@ -238,7 +309,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         s,
         'bash',
         [
-          WATCHER,
+          live.watch,
           '--file', signalPath,
           '--state', 'OVER_TO_KIMI',
           '--poll', '0.2',
@@ -274,9 +345,10 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
   it('BUG-144 control: a dispatch that claims ACTIVE then hands off to someone else is left alone', async () => {
     await scenario('mic-recovery-4', async (s) => {
-      await s.fs.mkdirp('mic-recovery-4/state')
-      await assertNoRosterBesideBaton(s, 'mic-recovery-4/state')
-      const signalRel = 'mic-recovery-4/state/AGENT_SIGNAL.md'
+      const live = await liveRepo(s, 'mic-recovery-4')
+      const stateDirRel = 'mic-recovery-4/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
       const signalPath = s.workspace.path(signalRel)
 
       await s.fs.write(
@@ -301,7 +373,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         s,
         'bash',
         [
-          WATCHER,
+          live.watch,
           '--file', signalPath,
           '--state', 'OVER_TO_KIMI',
           '--poll', '0.2',
@@ -350,8 +422,9 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     // "Bad substitution" (dash's behaviour, reproduced by hand against this
     // exact library before this fix: see the BUG-144 F1 commit body).
     await scenario('mic-recovery-6', async (s) => {
-      await s.fs.mkdirp('mic-recovery-6/state')
-      const signalRel = 'mic-recovery-6/state/AGENT_SIGNAL.md'
+      const live = await liveRepo(s, 'mic-recovery-6')
+      const stateDirRel = 'mic-recovery-6/logs/state'
+      const signalRel = `${stateDirRel}/signal.md`
       const signalPath = s.workspace.path(signalRel)
 
       await s.fs.write(
@@ -376,7 +449,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         `. "${ROSTER_LIB}"\n` +
         'ORCHESTRATOR_NAME=""\n' +
         'if command -v bp_roster_name_for_role >/dev/null 2>&1; then\n' +
-        `  ORCHESTRATOR_NAME="$(bp_roster_name_for_role "${REPO_ROOT}" "BUG144-F1-Missing-Role" 2>"${stderrPath}")"\n` +
+        `  ORCHESTRATOR_NAME="$(bp_roster_name_for_role "${live.root}" "BUG144-F1-Missing-Role" 2>"${stderrPath}")"\n` +
         'fi\n' +
         `printf '%s' "$ORCHESTRATOR_NAME" > "${resolvedPath}"\n` +
         `: > "${donePath}"\n`
@@ -384,7 +457,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       const w = startWatcher(
         s,
         'bash',
-        [WATCHER, '--file', signalPath, '--state', 'OVER_TO_SOMEONE', '--poll', '0.2'],
+        [live.watch, '--file', signalPath, '--state', 'OVER_TO_SOMEONE', '--poll', '0.2'],
         {
           cwd: s.workspace.root,
           env: { AGENT_SIGNAL_SETTLE: '0', AGENT_WAKE_COMMAND: wakeCommand },

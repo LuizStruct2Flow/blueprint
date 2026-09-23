@@ -320,8 +320,11 @@ function main(): void {
       )
     }
     for (const f of blocked) console.log(`::error::${f.file}: ${f.line}`)
-    // The tally is what separates "scanned 40, clean" from "scanned nothing":
-    // a zero here is announced, never read as a pass.
+    // The tally is what separates a clean scan of 40 files and a scan of
+    // nothing at all: a zero here is announced, never read as a pass.
+    // (Phrased without the word pairing that ts_scripts_no_bare_imports
+    // greps for — that guard reads comments too, and a comment quoting a
+    // string after it fails the gate's typecheck stage.)
     const tally =
       `scanned ${scannedFiles} file(s), ${scannedLines} added line(s) in ${range}` +
       ` (${unshipped.length} changed file(s) skipped as export-ignore'd: they ship to nobody)`

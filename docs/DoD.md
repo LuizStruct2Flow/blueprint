@@ -135,7 +135,12 @@ Every bug, minor or major:
 
 1. **Reproducer first for product bugs.** A product or runtime bug fix lands as
    two commits, `BUG#XX: minimal reproducer (failing)` and then `BUG#XX: <fix>`.
-   The reproducer fails before the fix, and `git log` is the evidence. *Judgement.*
+   The reproducer fails before the fix, and `git log` is the evidence. Whether
+   the pattern applies to a given bug is *judgement*, recorded on the row's
+   `Reproducer:` field (§2 rule 4) rather than inferred. Once a row declares
+   `required`, the git-log order for it is checked — enforced by:
+   `tests/reproducer-order` "#13 THE REAL RANGE — no BUG-NNN commit this push
+   introduces lands without its declared reproducer".
 2. **Determinism.** The project names its non-deterministic stages in
    `project_config_dod.md`. Everything downstream of them is tested without
    calling them, from captured fixtures with provenance metadata.

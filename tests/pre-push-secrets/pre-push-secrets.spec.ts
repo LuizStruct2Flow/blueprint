@@ -496,6 +496,7 @@ async function fixture(s: Scenario): Promise<SecretsFixture> {
       try {
         return await readFile(argvFile, 'utf8')
       } catch {
+        // No argv file means the stub was never invoked, which '' says.
         return ''
       }
     },

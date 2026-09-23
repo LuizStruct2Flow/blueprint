@@ -154,6 +154,7 @@ async function readOr(path: string, fallback = ''): Promise<string> {
   try {
     return await readFile(path, 'utf8')
   } catch {
+    // A fixture tree may lack the file on purpose. The fallback is the caller's, and its check judges it.
     return fallback
   }
 }
@@ -163,6 +164,7 @@ async function exists(path: string): Promise<boolean> {
     await stat(path)
     return true
   } catch {
+    // Absence is the probed state.
     return false
   }
 }
@@ -609,6 +611,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
     try {
       entries = await readdir(join(root, dir))
     } catch {
+      // No helpers directory in this tree, so nothing to orphan.
       continue
     }
     for (const e of entries.sort()) if (e.endsWith('.sh')) helperNames.push(e)
@@ -645,14 +648,10 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   // cost of a false green is a dead helper left on disk, the cost of a false red
   // is a live one deleted.
   const sources: string[] = []
+  // No swallow: a directory this walk is handed either reads or the check
+  // cannot judge, and a check that quietly covers less is the F-002 shape.
   const walk = async (dir: string, inHelpers: boolean): Promise<void> => {
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of entries) {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
       if (e.isDirectory()) {
         if (e.name === 'node_modules') continue
         await walk(join(dir, e.name), e.name === 'helpers' || e.name === '__helpers__')
@@ -960,6 +959,7 @@ async function exportBoundary(
   try {
     harnessFiles = (await readdir(join(root, 'tests/harness'))).filter((f) => f.endsWith('.ts'))
   } catch {
+    // No harness directory in this tree. #2c judges that, not this walk.
     harnessFiles = []
   }
   for (const h of harnessFiles.sort()) {

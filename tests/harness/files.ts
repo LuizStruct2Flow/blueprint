@@ -116,6 +116,7 @@ export class ScopedFs {
       await stat(await this.resolve(relPath))
       return true
     } catch {
+      // Absence is the probed state.
       return false
     }
   }

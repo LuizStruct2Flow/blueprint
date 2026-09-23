@@ -61,6 +61,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFile, readdir } from 'node:fs/promises'
+import ts from 'typescript'
 import { join } from 'node:path'
 import { REPO_ROOT } from '../harness/index.js'
 
@@ -146,5 +147,114 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
     // And the waiver needs a reason, not a token.
     expect(WAIVED.test('x  # bp-allow-toplevel: the caller IS the repo under test')).toBe(true)
     expect(WAIVED.test('x  # bp-allow-toplevel:')).toBe(false)
+  })
+})
+
+/**
+ * TASK-073 / audit row C095 — a swallowed error can never land silently.
+ *
+ * CLAUDE.md §"Observability is a main concern": every error path is captured,
+ * no silent fallback, no try/catch that returns success. Whole, that is
+ * judgement. The Architects' review narrowed the audit row to the ONE syntactic
+ * sub-rule a check can hold: a bindingless `catch {` whose block neither
+ * rethrows nor carries a comment saying why swallowing is right there. Only
+ * that sub-rule is enforced here. Whether a commented swallow is CORRECT stays
+ * a review question, as does a bound `catch (e)` that never reads `e`.
+ *
+ * The walk is over the PARSED tree (the TASK-068 pattern): a comment counts
+ * only when it sits inside the catch block or trails the `catch {` line, so
+ * prose three lines above a helper cannot be mistaken for its justification.
+ * Returns the number of bindingless clauses seen, for the non-vacuity floor.
+ */
+function silentCatches(source: string, file: string): { seen: number; silent: string[] } {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const silent: string[] = []
+  let seen = 0
+
+  const rethrows = (n: ts.Node): boolean => ts.isThrowStatement(n) || ts.forEachChild(n, rethrows) === true
+
+  // Every token inside the braces. A comment is leading trivia of the token
+  // after it, or trailing trivia of the token before it when on the same line.
+  const commented = (block: ts.Block): boolean => {
+    const tokens: ts.Node[] = []
+    const collect = (n: ts.Node): void => {
+      for (const c of n.getChildren(sf)) {
+        tokens.push(c)
+        collect(c)
+      }
+    }
+    collect(block)
+    return tokens.some(
+      (t, i) =>
+        (i > 0 && (ts.getLeadingCommentRanges(source, t.getFullStart())?.length ?? 0) > 0) ||
+        (ts.getTrailingCommentRanges(source, t.getEnd())?.length ?? 0) > 0,
+    )
+  }
+
+  const visit = (n: ts.Node): void => {
+    if (ts.isCatchClause(n) && n.variableDeclaration === undefined) {
+      seen++
+      if (!rethrows(n.block) && !commented(n.block)) {
+        const { line } = sf.getLineAndCharacterOfPosition(n.getStart(sf))
+        silent.push(`${file}:${line + 1}`)
+      }
+    }
+    ts.forEachChild(n, visit)
+  }
+  visit(sf)
+  return { seen, silent }
+}
+
+/** Every `.ts` / `.mts` under scripts/ and tests/, node_modules excluded. Derived, never listed. */
+async function typescriptFiles(): Promise<string[]> {
+  const out: string[] = []
+  const walk = async (rel: string): Promise<void> => {
+    for (const e of await readdir(join(REPO_ROOT, rel), { withFileTypes: true })) {
+      if (e.name === 'node_modules') continue
+      const p = `${rel}/${e.name}`
+      if (e.isDirectory()) await walk(p)
+      else if (/\.m?ts$/.test(e.name)) out.push(p)
+    }
+  }
+  for (const dir of ['scripts', 'tests']) await walk(dir)
+  return out.sort()
+}
+
+describe('TASK-073 / C095 — a bindingless catch says why it swallows, or rethrows', () => {
+  it('silentCatches flags a bare swallow and accepts a rethrow, a comment, or a binding', () => {
+    const source = [
+      'function a() { try { f() } catch { return 1 } }', // 1: silent, returns success
+      'function b() { try { f() } catch {} }', // 2: silent, empty
+      'function c() { try { f() } catch { // absence is the probed state', // 3: trailing comment on the catch line
+      '  return null } }',
+      'function d() { try { f() } catch {', // 5: comment inside the block
+      '  // ENOENT is the expected path here',
+      '} }',
+      'function e() { try { f() } catch { if (x) throw new Error("y") } }', // 8: rethrows, nested
+      'function g() { try { f() } catch (err) { return 1 } }', // 9: bound — outside this sub-rule
+      '// a catch { in a comment is prose, not a clause',
+      "const s = 'catch { in a string is data'",
+    ].join('\n')
+    expect(silentCatches(source, 'x.ts')).toEqual({ seen: 5, silent: ['x.ts:1', 'x.ts:2'] })
+  })
+
+  it('#live no bindingless catch under scripts/ or tests/ swallows without saying why', async () => {
+    const files = await typescriptFiles()
+    let seen = 0
+    const silent: string[] = []
+    for (const rel of files) {
+      const r = silentCatches(await readFile(join(REPO_ROOT, rel), 'utf8'), rel)
+      seen += r.seen
+      silent.push(...r.silent)
+    }
+
+    expect(
+      silent,
+      'a bindingless catch with no rethrow and no comment hides an error path — rethrow, report, or say in the block why swallowing is right (CLAUDE.md §"Observability is a main concern")',
+    ).toEqual([])
+
+    // Non-vacuity. 72 files and 41 clauses ship to a derived project, 48 clauses live here.
+    expect(files.length, 'scripts/ and tests/ are not being scanned').toBeGreaterThanOrEqual(30)
+    expect(seen, 'no bindingless catch was parsed, so this proves nothing').toBeGreaterThanOrEqual(20)
   })
 })

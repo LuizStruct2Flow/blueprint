@@ -58,6 +58,7 @@ async function readOrEmpty(path: string): Promise<string> {
   try {
     return await readFile(path, 'utf8')
   } catch {
+    // A missing file reads as '' and the check reports it absent: fail-closed.
     return ''
   }
 }
@@ -68,6 +69,7 @@ async function isExecutable(path: string): Promise<boolean> {
     await access(path, constants.X_OK)
     return true
   } catch {
+    // Not there or not executable: either way false, which the check reports.
     return false
   }
 }

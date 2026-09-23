@@ -406,6 +406,7 @@ function resolvesInsideWorkspace(value: string, workspaceRoot: string): boolean 
         physicalTarget.startsWith(workspaceRoot + sep)
       )
     } catch {
+      // This ancestor does not resolve. Try its parent, until one does or the root refuses.
       const parent = dirname(ancestor)
       if (parent === ancestor) return false
       ancestor = parent

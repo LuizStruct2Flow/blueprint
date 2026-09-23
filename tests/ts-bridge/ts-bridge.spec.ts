@@ -1039,6 +1039,7 @@ async function fixture(s: Scenario): Promise<BridgeFixture> {
         const lines = (await readFile(seenPath, 'utf8')).split('\n').filter(Boolean)
         return { names: lines.filter((l) => l !== 'ran') }
       } catch {
+        // The stub never ran, so nothing was recorded. null is that answer.
         return null
       }
     },
@@ -1199,6 +1200,7 @@ async function recordedNames(file: string): Promise<string[] | null> {
     const lines = (await readFile(file, 'utf8')).split('\n').filter(Boolean)
     return lines.filter((l) => l !== 'ran')
   } catch {
+    // The stub never ran, so nothing was recorded. null is that answer.
     return null
   }
 }
@@ -1443,6 +1445,7 @@ async function lintFixture(
       try {
         return (await readFile(argsFile, 'utf8')).split('\n').filter(Boolean)
       } catch {
+        // The stub never ran, so nothing was recorded. null is that answer.
         return null
       }
     },

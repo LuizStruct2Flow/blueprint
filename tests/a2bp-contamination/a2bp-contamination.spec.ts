@@ -317,6 +317,7 @@ async function fixture(s: Scenario, projectName = 'acme-flow'): Promise<Fixture>
     try {
       return await s.fs.read(join('blueprint', rel))
     } catch {
+      // Nothing landed at that path in the blueprint. Empty is the asserted state.
       return ''
     }
   }

@@ -867,6 +867,7 @@ async function fixture(s: Scenario): Promise<ScannerFixture> {
       try {
         return Number((await readFile(join(callsDir, name), 'utf8')).trim())
       } catch {
+        // No counter file means the stub was never called.
         return 0
       }
     },

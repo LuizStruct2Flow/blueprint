@@ -180,6 +180,7 @@ export function startWatcher(
           process.kill(-pid, 0)
           return true
         } catch {
+          // kill(0) refused: no such group, so it is not alive.
           return false
         }
       }
@@ -188,6 +189,7 @@ export function startWatcher(
         try {
           process.kill(-pid, 'SIGTERM')
         } catch {
+          // No group to signal: fall back to the single pid.
           try {
             child.kill('SIGTERM')
           } catch {
@@ -206,6 +208,7 @@ export function startWatcher(
       try {
         process.kill(-pid, 'SIGKILL')
       } catch {
+        // Gone between the check and the SIGKILL, which is the outcome wanted.
         return
       }
       await vi.waitFor(

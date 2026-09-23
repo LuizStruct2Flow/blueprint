@@ -1001,6 +1001,7 @@ async function readIfPresent(path: string): Promise<string> {
   try {
     return await readFile(path, 'utf8')
   } catch {
+    // Not there yet, as the doc comment says. Empty is what callers compare against.
     return ''
   }
 }
@@ -1011,6 +1012,7 @@ async function fileExists(path: string): Promise<boolean> {
     await stat(path)
     return true
   } catch {
+    // Absence is the probed state.
     return false
   }
 }

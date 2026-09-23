@@ -43,6 +43,7 @@ function readFileOrUndefined(path: string): string | undefined {
   try {
     return readFileSync(path, 'utf8')
   } catch {
+    // Absence is the probed state: the caller compares against undefined.
     return undefined
   }
 }
@@ -54,6 +55,7 @@ function isTracked(root: string, path: string): boolean {
     })
     return true
   } catch {
+    // --error-unmatch exits non-zero for an untracked path. That exit code is the answer.
     return false
   }
 }

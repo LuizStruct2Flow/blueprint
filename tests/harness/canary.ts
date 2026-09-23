@@ -65,6 +65,7 @@ async function snapshotOne(target: CanaryTarget): Promise<Snapshot> {
       size: s.size,
     }
   } catch {
+    // A target that does not exist snapshots as null, and both snapshots compare alike.
     return { target, content: null, size: null }
   }
 }

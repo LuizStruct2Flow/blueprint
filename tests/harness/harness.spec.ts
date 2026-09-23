@@ -910,6 +910,7 @@ describe('harness — the real-state canary (BUG-030)', () => {
       try {
         await stat(realBaton)
       } catch {
+        // No live baton in this checkout. The branch below is for one that has it.
         exists = false
       }
       if (exists) {
@@ -939,6 +940,7 @@ describe('harness — the real-state canary (BUG-030)', () => {
         try {
           flips = (await readFile(journal, 'utf8')).split('\n').filter((l) => l.trim()).length
         } catch {
+          // No journal yet means no flips.
           flips = 0
         }
         if (flips > 1) {

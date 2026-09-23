@@ -320,6 +320,7 @@ export class ProcessRegistry {
       try {
         process.kill(-pgid, 'SIGKILL')
       } catch {
+        // Gone between the wait and the signal, which is what SIGKILL was for.
         continue
       }
       // A group that outlives SIGKILL is unkillable (uninterruptible sleep), and

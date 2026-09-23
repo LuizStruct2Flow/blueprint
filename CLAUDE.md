@@ -228,10 +228,10 @@ declared in `project_config_overview.md` §"Observability stack".
 
 Of the capture rule, one syntactic form is checked and the rest is judgement
 (TASK-073, audit row C095): a bindingless `catch {}` under `scripts/` or
-`tests/` that neither rethrows nor carries a comment saying why swallowing is
-right there cannot land —
+`tests/` that neither rethrows nor carries a comment of at least two words in
+the block saying why swallowing is right there cannot land —
 enforced by: tests/forbidden-idiom "#live no bindingless catch under scripts/ or tests/ swallows without saying why".
-Whether that comment is true, a bound `catch (e)` that never reads `e`, and a
+Whether those words are true, a bound `catch (e)` that never reads `e`, and a
 catch that logs and then returns success remain review questions.
 
 ## Cost is a main concern

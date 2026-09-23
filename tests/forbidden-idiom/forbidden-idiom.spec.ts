@@ -163,7 +163,8 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
  *
  * The walk is over the PARSED tree (the TASK-068 pattern): a comment counts
  * only when it sits inside the catch block or trails the `catch {` line, so
- * prose three lines above a helper cannot be mistaken for its justification.
+ * prose three lines above a helper cannot be mistaken for its justification,
+ * and only when it carries at least two words (see `reasoned` below).
  * Returns the number of bindingless clauses seen, for the non-vacuity floor.
  */
 function silentCatches(source: string, file: string): { seen: number; silent: string[] } {
@@ -175,7 +176,15 @@ function silentCatches(source: string, file: string): { seen: number; silent: st
 
   // Every token inside the braces. A comment is leading trivia of the token
   // after it, or trailing trivia of the token before it when on the same line.
-  const commented = (block: ts.Block): boolean => {
+  // The comments' TEXT is what counts, pooled across the block: Jesko (Codex)
+  // found that a bare `//` satisfied the first version, so two characters
+  // silenced the check forever — a comment token standing in for a reason is
+  // the F-002 shape one level up. The floor is two words: one word is a label
+  // ("ENOENT", "ignore"), and two is the smallest thing that can relate a
+  // cause to a consequence ("absence expected"). A longer floor would be an
+  // arbitrary number that rejects honest terse reasons; whether the words are
+  // TRUE no check can hold, and the prose says so.
+  const reasoned = (block: ts.Block): boolean => {
     const tokens: ts.Node[] = []
     const collect = (n: ts.Node): void => {
       for (const c of n.getChildren(sf)) {
@@ -184,17 +193,19 @@ function silentCatches(source: string, file: string): { seen: number; silent: st
       }
     }
     collect(block)
-    return tokens.some(
-      (t, i) =>
-        (i > 0 && (ts.getLeadingCommentRanges(source, t.getFullStart())?.length ?? 0) > 0) ||
-        (ts.getTrailingCommentRanges(source, t.getEnd())?.length ?? 0) > 0,
-    )
+    const ranges: ts.CommentRange[] = []
+    tokens.forEach((t, i) => {
+      if (i > 0) ranges.push(...(ts.getLeadingCommentRanges(source, t.getFullStart()) ?? []))
+      ranges.push(...(ts.getTrailingCommentRanges(source, t.getEnd()) ?? []))
+    })
+    const text = ranges.map((r) => source.slice(r.pos, r.end)).join(' ')
+    return (text.match(/[A-Za-z0-9]+/g) ?? []).length >= 2
   }
 
   const visit = (n: ts.Node): void => {
     if (ts.isCatchClause(n) && n.variableDeclaration === undefined) {
       seen++
-      if (!rethrows(n.block) && !commented(n.block)) {
+      if (!rethrows(n.block) && !reasoned(n.block)) {
         const { line } = sf.getLineAndCharacterOfPosition(n.getStart(sf))
         silent.push(`${file}:${line + 1}`)
       }
@@ -234,8 +245,19 @@ describe('TASK-073 / C095 — a bindingless catch says why it swallows, or rethr
       'function g() { try { f() } catch (err) { return 1 } }', // 9: bound — outside this sub-rule
       '// a catch { in a comment is prose, not a clause',
       "const s = 'catch { in a string is data'",
+      'function h() { try { f() } catch { //', // 12: an EMPTY comment is two characters, not a reason
+      '  return null } }',
+      'function i() { try { f() } catch { /*   */ return null } }', // 14: whitespace-only, the same
+      'function j() { try { f() } catch { // ENOENT', // 15: one word is a label, not a reason
+      '  return null } }',
+      'function k() { try { f() } catch { // not', // 17: two words pooled across two comments
+      '  return null // there',
+      '} }',
     ].join('\n')
-    expect(silentCatches(source, 'x.ts')).toEqual({ seen: 5, silent: ['x.ts:1', 'x.ts:2'] })
+    expect(silentCatches(source, 'x.ts')).toEqual({
+      seen: 9,
+      silent: ['x.ts:1', 'x.ts:2', 'x.ts:12', 'x.ts:14', 'x.ts:15'],
+    })
   })
 
   it('#live no bindingless catch under scripts/ or tests/ swallows without saying why', async () => {

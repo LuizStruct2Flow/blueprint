@@ -300,6 +300,11 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/no-chain-guard.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/flip-checks.mts\" --hook",
+            "timeout": 15
           }
         ]
       }

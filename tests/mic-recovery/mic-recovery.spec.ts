@@ -24,37 +24,55 @@
  * point: the fix does not depend on knowing WHY the dispatch failed to hand
  * back, only THAT it did.
  *
- * THE ROSTER IS RESOLVED BESIDE THE BATON, not beside the checkout the
- * watcher script happens to run from — same reasoning as
- * scripts/lib/watcher-lock.sh's lock path (its own docblock), and for the
- * same failure this fixture would otherwise reproduce: this suite runs the
- * REAL scripts/signal-watch.sh directly against REPO_ROOT (never copied into
- * an isolated tree), so resolving the roster from the script's own state
- * root would read THIS MACHINE's real, gitignored AGENT_ROSTER.md — a
- * fixture depending on whatever the operator's roster happens to contain,
- * and on some machines finding none at all. Placing AGENT_ROSTER.md beside
- * the fixture's own baton file, the same directory `--file` already isolates
- * the baton to, keeps the roster lookup exactly as isolated.
+ * ROUND 3 (`findings.md` F-002 shape) — THE ROSTER IS NOT BESIDE THE BATON.
+ * The previous version of this fixture wrote AGENT_ROSTER.md beside the
+ * fixture's OWN baton file and asserted recovery against that copy. That
+ * layout does not exist in production — the real roster lives at the repo
+ * root, the real baton several directories under it
+ * (`logs/state/AGENT_SIGNAL.md`) — so the suite proved the fixture's own
+ * shape, not the mechanism, and went green over a poller that could not find
+ * a roster anywhere near the real baton (observed live 2026-09-22).
+ *
+ * This suite runs the REAL scripts/signal-watch.sh directly against
+ * REPO_ROOT (never copied into an isolated tree, same as before), which means
+ * its roster resolution is NOT isolatable to a fixture directory: `BP_CODE_ROOT`
+ * is the script's own physical location, so `bp_state_root` finds `.git` at
+ * REPO_ROOT on its very first step regardless of `BP_STATE_ROOT_CEILING`, and
+ * the roster it reads is genuinely REPO_ROOT's own AGENT_ROSTER.md (or the
+ * shipped AGENT_ROSTER.example.md where a live one is absent — never both, per
+ * BUG-075). So rather than fabricate a name the fix cannot actually resolve,
+ * each case resolves the SAME expected name through the SAME mechanism
+ * (`bp_roster_name_for_role`) up front, and asserts recovery lands on it —
+ * proving the live path end to end instead of a stand-in for it.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until } from '../harness/watcher.js'
 
 const WATCHER = join(REPO_ROOT, 'scripts', 'signal-watch.sh')
+const ROSTER_LIB = join(REPO_ROOT, 'scripts', 'lib', 'roster.sh')
 
-// bp_roster_rows (scripts/lib/roster.sh) only reads rows under a heading
-// matching "Members" — any other pipe table in the file is deliberately
-// ignored, so the heading is load-bearing here, not decoration.
-const ROSTER = `# Agent Roster
+// The exact name recoverStrandedMic must resolve, from the exact mechanism it
+// uses (bp_roster_name_for_role against REPO_ROOT) — not a fixture stand-in.
+// Resolved once: it is a read of a file this suite does not touch.
+let ORCHESTRATOR = ''
 
-## Members
-
-| Role | Name | Backing agent | Model |
-|---|---|---|---|
-| Orchestrator | Orchy | Claude Code | session-based |
-`
+beforeAll(() => {
+  ORCHESTRATOR = execFileSync(
+    'bash',
+    ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'bash', ROSTER_LIB, REPO_ROOT],
+    { encoding: 'utf8' },
+  ).trim()
+  if (!ORCHESTRATOR) {
+    throw new Error(
+      `could not resolve an Orchestrator from ${REPO_ROOT} via ${ROSTER_LIB} — ` +
+        'neither AGENT_ROSTER.md nor AGENT_ROSTER.example.md names one',
+    )
+  }
+})
 
 async function readField(s: Scenario, signalPath: string, field: string): Promise<string> {
   const content = await s.fs.read(signalPath)
@@ -78,7 +96,6 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
           '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
       )
-      await s.fs.write('mic-recovery-1/state/AGENT_ROSTER.md', ROSTER)
 
       // A dispatch that ends without ever touching the baton — the simplest
       // stand-in for "quota exhausted", "crashed" or "forgot to hand back":
@@ -105,7 +122,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         w.assertStillRunning('the watcher must keep polling after recovering the mic')
         const holder = await readField(s, signalRel, 'Holder')
         const state = await readField(s, signalRel, 'State')
-        return holder === 'Orchy' && state === 'OVER_TO_CLAUDE'
+        return holder === ORCHESTRATOR && state === 'OVER_TO_CLAUDE'
       })
 
       const task = await readField(s, signalRel, 'Task')
@@ -130,7 +147,6 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
           '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
       )
-      await s.fs.write('mic-recovery-3/state/AGENT_ROSTER.md', ROSTER)
 
       // The common failure path (observed live 2026-09-22): the dispatched
       // agent claims the mic first (Holder stays the same, State flips to
@@ -164,7 +180,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         w.assertStillRunning('the watcher must keep polling after recovering the mic')
         const holder = await readField(s, signalRel, 'Holder')
         const state = await readField(s, signalRel, 'State')
-        return holder === 'Orchy' && state === 'OVER_TO_CLAUDE'
+        return holder === ORCHESTRATOR && state === 'OVER_TO_CLAUDE'
       })
 
       const task = await readField(s, signalRel, 'Task')
@@ -189,7 +205,6 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
           '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
       )
-      await s.fs.write('mic-recovery-2/state/AGENT_ROSTER.md', ROSTER)
 
       // A dispatch that DOES hand back — writes a new baton before exiting,
       // the same shape a genuine agent's own signal-set.sh call produces.
@@ -249,7 +264,6 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
           '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
       )
-      await s.fs.write('mic-recovery-4/state/AGENT_ROSTER.md', ROSTER)
 
       // Claims ACTIVE (same as the stranded case) but, unlike it, goes on to
       // hand the mic to someone else before the wake command returns — the

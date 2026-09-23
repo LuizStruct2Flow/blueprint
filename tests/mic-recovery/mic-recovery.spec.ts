@@ -84,10 +84,27 @@ async function readField(s: Scenario, signalPath: string, field: string): Promis
   return ''
 }
 
+// GUARDS THE ROUND-3 FIX FROM SILENTLY REGRESSING (Thomas/Kimi review). The
+// whole point of this round was that a roster fabricated beside the fixture
+// baton proves the fixture, not the mechanism — a future edit re-adding
+// `s.fs.write('.../state/AGENT_ROSTER.md', ...)` would quietly reopen that
+// blind spot without failing anything, since the suite would go back to
+// green for the wrong reason. Called once per scenario, right after its
+// baton directory exists.
+async function assertNoRosterBesideBaton(s: Scenario, stateDirRel: string): Promise<void> {
+  for (const name of ['AGENT_ROSTER.md', 'AGENT_ROSTER.example.md']) {
+    expect(
+      await s.fs.exists(`${stateDirRel}/${name}`),
+      `${stateDirRel}/${name} exists — this fixture must not fabricate a roster beside the baton (round 3, findings.md F-002)`,
+    ).toBe(false)
+  }
+}
+
 describe('BUG-144 — a failed dispatch must not strand the mic', () => {
   it('a stub wake command that exits without flipping the baton is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-1', async (s) => {
       await s.fs.mkdirp('mic-recovery-1/state')
+      await assertNoRosterBesideBaton(s, 'mic-recovery-1/state')
       const signalRel = 'mic-recovery-1/state/AGENT_SIGNAL.md'
       const signalPath = s.workspace.path(signalRel)
 
@@ -139,6 +156,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
   it('BUG-144: a stub wake command that claims ACTIVE and then dies is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-3', async (s) => {
       await s.fs.mkdirp('mic-recovery-3/state')
+      await assertNoRosterBesideBaton(s, 'mic-recovery-3/state')
       const signalRel = 'mic-recovery-3/state/AGENT_SIGNAL.md'
       const signalPath = s.workspace.path(signalRel)
 
@@ -197,6 +215,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
   it('a dispatch that DID hand back the mic is left alone — the poller does nothing', async () => {
     await scenario('mic-recovery-2', async (s) => {
       await s.fs.mkdirp('mic-recovery-2/state')
+      await assertNoRosterBesideBaton(s, 'mic-recovery-2/state')
       const signalRel = 'mic-recovery-2/state/AGENT_SIGNAL.md'
       const signalPath = s.workspace.path(signalRel)
 
@@ -256,6 +275,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
   it('BUG-144 control: a dispatch that claims ACTIVE then hands off to someone else is left alone', async () => {
     await scenario('mic-recovery-4', async (s) => {
       await s.fs.mkdirp('mic-recovery-4/state')
+      await assertNoRosterBesideBaton(s, 'mic-recovery-4/state')
       const signalRel = 'mic-recovery-4/state/AGENT_SIGNAL.md'
       const signalPath = s.workspace.path(signalRel)
 

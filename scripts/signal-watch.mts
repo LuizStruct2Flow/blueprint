@@ -380,8 +380,8 @@ function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, d
   // State=OVER_TO_CLAUDE, silently erasing a dispatch nobody asked to cancel —
   // caught live by tests/signal-dispatch #5, which races a genuine round 3
   // publish against exactly this window. Re-reading the baton right before the
-  // write narrows the race from "however long two bash spawns take" to the
-  // instant between this check and signal-set.sh's own atomic rename — the same
+  // write narrows the race — from however long two bash spawns take, down to
+  // the instant between this check and signal-set.sh's own atomic rename — the same
   // bound every other publisher of this file already accepts (case #6's own
   // docblock: "ONE atomic rename" is what makes a race here survivable, never a
   // claim that no two writers can overlap).

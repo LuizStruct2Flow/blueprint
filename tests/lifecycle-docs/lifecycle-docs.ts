@@ -17,6 +17,7 @@
  *   #4  no table carries an all-empty placeholder row
  *   #5  no empty table says where its items went
  *   #6  a bug with commits has a row SOMEWHERE (BUG-086 — new, see below)
+ *   TASK-071  the canonical HANDOVER.md has no suffixed copies beside it
  *
  * #6 IS NOT A PORT. It is the gap the 2026-09-11 `lcm` pass found by hand, and
  * it is in this file because the property is exactly this suite's subject.
@@ -101,6 +102,16 @@ export interface BacklogMarkerViolation {
 
 const BACKLOG_MARKERS = new Set(['KEEP', 'DEFER', 'OBSOLETE'])
 
+/**
+ * Any suffixed handover is a second record of the same live fact. The canonical
+ * `HANDOVER.md` is deliberately excluded; every `HANDOVER-*.md` entry is a
+ * violation, regardless of whether its suffix looks like a date.
+ */
+export async function strayHandoverCopies(docsDir: string): Promise<string[]> {
+  return (await entries(join(docsDir, 'doing'))).filter((name) =>
+    /^HANDOVER-.*\.md$/.test(name),
+  )
+}
 /**
  * Read the one parked-work table that `docs/backlog/README.md` defines as the
  * backlog: `backlog/BACKLOG.md`. `doing/BACKLOG.md` is explicitly active work,

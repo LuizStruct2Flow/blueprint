@@ -245,7 +245,8 @@ the mic holder's scope owns the DoD for its own changes.
 
 A woken prompt has none of the sleeping prompt's memory and none of its background
 tasks. `docs/doing/HANDOVER.md` is the bridge: one file, overwritten in place,
-kept current as work lands and committed with the work that changes what is open.
+kept current as work lands and committed with the work that changes what is open
+(enforced by: `tests/lifecycle-docs` "TASK-071: the canonical HANDOVER.md has no HANDOVER-*.md copies").
 
 It is a take-over brief (founder, 2026-08-05), and it holds only:
 

@@ -212,8 +212,8 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
     await scenario('cps-export-ignore', async (s) => {
       const repo = await s.gitRepo('bp', { initialCommit: true })
       await s.fs.write('bp/.blueprint-root', 'blueprint\n')
-      // The decision is .gitattributes, read through git check-attr — the same
-      // attribute git archive honours when the managed set is derived.
+      // The decision is .gitattributes, read the way git archive resolves it:
+      // the archive at the range tip, the same listing bp_managed_files uses.
       await s.fs.write('bp/.gitattributes', 'docs/done/**  export-ignore\n')
       await repo.commitAll('base')
 
@@ -238,6 +238,28 @@ describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own ch
       expect(shipped.code).toBe(1)
       expect(shipped.output).toContain('::error::README.md')
       expect(shipped.output).toContain('0 changed file(s) skipped')
+    })
+  })
+
+  it('#9 a trailing-slash DIRECTORY rule excludes what it contains: the shape check-attr misses, the shape this repo’s tests/<suite>/ lines use', async () => {
+    await scenario('cps-dir-rule', async (s) => {
+      const repo = await s.gitRepo('bp', { initialCommit: true })
+      await s.fs.write('bp/.blueprint-root', 'blueprint\n')
+      // `dir/  export-ignore` (no glob) sets the attribute on the DIRECTORY, so
+      // `git check-attr` answers `unspecified` for every file under it — yet
+      // `git archive` drops them all. Round 2 read check-attr and judged these.
+      await s.fs.write('bp/.gitattributes', 'tests/only-here/  export-ignore\n')
+      await repo.commitAll('base')
+      await s.fs.write('bp/tests/only-here/x.spec.ts', "const fixture = '/home/alice/state'\n") // a2bp-allow: fixture plant, not a live path
+      await repo.commitAll('a blueprint-only suite quotes a host path')
+      const attr = await repo.git(['check-attr', 'export-ignore', 'tests/only-here/x.spec.ts'])
+      expect(attr.stdout, 'the premise: check-attr does not see a directory rule').toContain('unspecified')
+      const r = await s.run('node', [SCRIPT, '--repo', repo.dir, '--range', 'HEAD~1..HEAD'], {
+        cwd: repo.dir,
+      })
+      expect(r.code).toBe(0)
+      expect(r.output).toContain('1 changed file(s) skipped')
+      expect(r.output).toContain('scanned 0 file(s), 0 added line(s)')
     })
   })
 })

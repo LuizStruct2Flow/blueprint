@@ -84,6 +84,7 @@ the sixth rather than investigated as a novelty.
 | BUG-067 | `feed_is_running` after `setsid` | the lock is held **by anyone** | my child started |
 | BUG-068 | `console.warn` emitted the note | a string was written to a buffer | the operator sees it |
 | — (found 2026-09-11) | `grep -rqE 'BUG-0*NN\b' tests/` | the pattern is absent **or the file looks binary** | no test names this bug |
+| BUG-144 (round 3) | `tests/mic-recovery` writing AGENT_ROSTER.md beside the fixture baton and asserting against it | the recovery works against a roster placed next to the baton | the recovery works against the roster's real location (the repo root, two directories away from the real baton) |
 
 **The shape.** Each check tests a **proxy** for the property it is trusted to
 establish, and in each case the proxy is satisfiable **without** the property. The

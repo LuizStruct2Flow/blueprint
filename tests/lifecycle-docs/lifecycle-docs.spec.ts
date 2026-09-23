@@ -63,6 +63,7 @@ import {
   bugsWithoutRows,
   rowedBugIds,
   scanLifecycleDocs,
+  strayHandoverCopies,
   LIFECYCLE_STATES,
   type LifecycleScan,
 } from './lifecycle-docs.js'
@@ -104,6 +105,21 @@ function healthyTree(): Record<string, string> {
 }
 
 describe('lifecycle-docs — a record that states something untrue costs more than an absent one', () => {
+  it('TASK-071: the canonical HANDOVER.md has no HANDOVER-*.md copies', async () => {
+    await scenario('lifecycle-071-single-handover', async (s) => {
+      const docs = await s.workspace.dir('bp', 'docs')
+      await s.fs.write('bp/docs/doing/HANDOVER.md', '# Canonical handover\n')
+      await s.fs.write('bp/docs/doing/HANDOVER-2026-01-01.md', '# Stray dated copy\n')
+
+      expect(await strayHandoverCopies(docs)).toEqual(['HANDOVER-2026-01-01.md'])
+    })
+
+    expect(
+      await strayHandoverCopies(join(REPO_ROOT, 'docs')),
+      'docs/doing/HANDOVER.md is the single canonical resume document; remove suffixed copies',
+    ).toEqual([])
+  })
+
   it('TASK-070: every parked BACKLOG row has a valid Category marker and non-OBSOLETE rows have a re-open trigger', async () => {
     await scenario('lifecycle-070-backlog-markers', async (s) => {
       const docs = await s.workspace.dir('bp', 'docs')

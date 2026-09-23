@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Test harness for the struct2flow blueprint's own regression suites (TASK-018). Lives under tests/, which is a blueprint-managed directory no derived project owns a copy of — so it cannot collide with a project's own root package.json (TASK-020).",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": ". ../scripts/run-ts-suites.sh && ts_scrubbed vitest run",
+    "test:watch": ". ../scripts/run-ts-suites.sh && ts_scrubbed vitest",
     "typecheck": "tsc --noEmit"
   },
+  "_testScriptNote": "BUG-149 — `npm test` is the documented human entry point, and a normal terminal (VS Code) exports GIT_ASKPASS, which tests/harness/env.ts rightly refuses. The script sources scripts/run-ts-suites.sh and runs vitest through its ts_scrubbed, so the ONE scrub (BUG-117) applies here too — do not inline a second unset list (A-09). A plain `vitest run` without the scrub still fails BY DESIGN: specs that spawn directly are guarded by assertProcessEnvClean.",
   "devDependencies": {
     "@types/node": "20.19.9",
     "typescript": "5.9.2",

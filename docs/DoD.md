@@ -55,7 +55,10 @@ docs/backlog/  →  docs/doing/  →  docs/waiting-acceptance/  →  docs/done/
    the item and costs nothing more: no reproducer, no mutant, no re-review. The
    implementer applies this filter to every finding; a reviewer's "push after
    these fixes" is input, not an order (founder, 2026-09-16).
-5. **All gates green** (§4). No `--no-verify`, no "CI will catch it".
+5. **All local gates green** (§4). Do not use `--no-verify`; Git records no
+   attestation that a local hook ran, so this instruction is operational, not a
+   detectable fact. CI independently re-runs the covered committed-content
+   checks and gates `released`; §4 states the exact boundary and residual.
 6. **Land it.** A maintainer pushes to `main`: trunk-based, no branches. An
    external contribution, such as a derived project asking the blueprint for a
    change, is a pull request, which `blueprint a2bp` files; there, landing is
@@ -159,12 +162,34 @@ Every bug, minor or major:
 ## §4 Pre-push gate
 
 `.githooks/pre-push` blocks a push when any stage fails, and prints every stage
-with its duration and skip reason; CI runs the same checks as the backstop. It
-binds only a checkout whose `core.hooksPath` is `.githooks`: `arm_gate` sets that
-from the feed and from `blueprint drift`, and reports it on every run.
+with its duration and skip reason. It binds only a checkout whose
+`core.hooksPath` is `.githooks`: `arm_gate` sets that from the feed and from
+`blueprint drift`, and reports it on every run.
 
-- **Never `--no-verify`** unless the founder asks. After pushing, watch CI, and
-  fix a red run before moving on.
+Git does not record whether that hook ran, so neither CI nor repository history
+can detect a `--no-verify` bypass. The observable backstop in this repository is
+that CI re-runs the covered committed-content checks on the pushed revision, and
+`.github/workflows/security.yml` advances `released` only after `secret-scan`,
+`sast`, `sca`, `commit-subjects`, and `ts-tests` are green. A bypassed push can
+therefore land on `main`, but cannot fan out to derived projects, which pull
+`released`. Every local stage relied on by that backstop has a CI counterpart —
+enforced by: `tests/gate-ci-parity` "TASK-078: every local gate stage relied on
+as a CI backstop has a CI counterpart". The check is directional: CI may be
+stricter, and currently adds Semgrep's `p/javascript` and `p/typescript` packs
+to the local `p/owasp-top-ten` pack.
+
+The residual is explicit. CI does not re-run the local `settings.json` host-path
+guard or two `dod-gate.sh` stages: `§7G` reads the untracked live baton, and
+`§D·F·H` only prints judgement prompts. The backend, frontend, and IaC stages
+are also dormant in this repository because those trees do not exist. Thus “CI
+catches it” covers the security and committed-content checks named above, not
+the whole local gate. The direction is consistent with the BUG-005 founder
+decision of 2026-08-02: local coverage must not be silently demoted to CI-only;
+any exception or deeper CI-only coverage is named and reviewable.
+
+- **Never `--no-verify`** unless the founder asks. This cannot be inferred from
+  Git history; the CI/`released` mechanism above contains the observable
+  outcome. After pushing, watch CI, and fix a red run before moving on.
 - **Lint warnings are ratcheted:** never loosen `--max-warnings` without a stated
   reason. ESLint and Prettier `--check` both block, and CI never rewrites files.
 - **Project guards go after the `BLUEPRINT:END` marker** in

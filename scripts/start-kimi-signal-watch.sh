@@ -273,17 +273,29 @@ cd "$ROOT"
 # reintroduce the duplicate-line defect the line-by-line read was written to
 # fix in the first place.
 #
-# THE EXIT STATUS (cross-provider review finding 1). This whole pipeline runs
-# under dash (`sh -c`, no PIPESTATUS, no `set -o pipefail`), so `$?` after the
-# pipe is the status of the last stage — the `while read` loop, which always
-# exits 0. Capturing the real status needs the classic pipefail-free trick: the
-# command group below writes the KIMI BIN exit status to KIMI_STATUS_FILE right
-# after it finishes, which happens before its stdout (feeding tee) closes, so
-# the file is always fully written by the time the downstream stages see EOF
-# and this script reads it back. A failed dispatch (proven live with a probe
-# exiting non-zero, TASK-063 cross-provider review) must never read as one
-# that finished cleanly — that is what the run log and the feed line below
-# now say.
+# THE EXIT STATUS (cross-provider review finding 1). This whole pipeline was
+# written for dash (`sh -c`, no PIPESTATUS, no `set -o pipefail`), so `$?`
+# after the pipe is the status of the last stage — the `while read` loop,
+# which always exits 0. BUG-144 F1 moved the poller wake spawn to `bash -c`
+# (roster.sh lookup-miss path needs a bash-only expansion — see the comment
+# on that spawn in signal-watch.mts), so PIPESTATUS and `set -o pipefail` ARE
+# available here now; the premise that motivated this workaround no longer
+# holds. Kept anyway — it is proven, and swapping a working mechanism for
+# PIPESTATUS buys nothing this bug needs fixed. The classic pipefail-free
+# trick still works: the command group below writes the KIMI BIN exit status
+# to KIMI_STATUS_FILE right after it finishes, which happens before its
+# stdout (feeding tee) closes, so the file is always fully written by the
+# time the downstream stages see EOF and this script reads it back. A failed
+# dispatch (proven live with a probe exiting non-zero, TASK-063
+# cross-provider review) must never read as one that finished cleanly — that
+# is what the run log and the feed line below now say.
+#
+# CAUTION when editing this file below this point, down to the closing single
+# quote hundreds of lines on: this block is the CONTENT of a single-quoted
+# shell string executed later, not outer-script comment text read now. An
+# apostrophe here closes that string early and turns everything after it
+# into outer-shell syntax — how one unescaped apostrophe produced this exact
+# BUG-144 F1 syntax error. Write around apostrophes in this region.
 KIMI_STATUS_FILE="$(mktemp "$STATE_DIR/.kimi-exit-status.XXXXXX" 2>/dev/null)" || KIMI_STATUS_FILE="$STATE_DIR/.kimi-exit-status.$$"
 {
   "$KIMI_BIN" "$@" --prompt "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you produced. Do NOT hand-edit any baton file. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \

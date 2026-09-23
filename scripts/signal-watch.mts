@@ -35,7 +35,7 @@ Options:
   --once            Exit after the first trigger
   -h, --help        Show this help
 
-If no command is passed after --, AGENT_WAKE_COMMAND is executed with sh -c
+If no command is passed after --, AGENT_WAKE_COMMAND is executed with bash -c
 (CODEX_WAKE_COMMAND is still honoured as a back-compat alias — see below).
 If neither is provided, the watcher only writes the trigger log line.
 `
@@ -226,6 +226,18 @@ for (let i = 0; i < argv.length; i++) {
 if (!existsSync(signalFile)) {
   process.stderr.write(`Signal file not found: ${signalFile}\n`)
   process.exit(1)
+}
+
+// BUG-144 round 3 (Thomas/Kimi review) — an exported AGENT_SIGNAL_RECOVERY=0
+// disables mic recovery for this watcher's WHOLE LIFE, silently, if nothing
+// says so. tests/signal-dispatch sets it deliberately (see the comment on
+// recoverStrandedMic); an operator's shell exporting it ambiently would turn
+// off recovery for a real dispatcher with no visible sign. One line at
+// startup, not per-trigger — the fact is static for the run, so repeating it
+// on every poll would be the muted-noise failure CLAUDE.md's roster.sh
+// docblock warns about for a different check.
+if (process.env.AGENT_SIGNAL_RECOVERY === '0') {
+  process.stderr.write('signal-watch: AGENT_SIGNAL_RECOVERY=0 — mic recovery is DISABLED for this watcher.\n')
 }
 
 mkdirSync(dirname(logFile), { recursive: true })
@@ -467,7 +479,33 @@ function triggerIfNeeded(): boolean {
   if (command.length > 0) {
     spawnSync(command[0] as string, command.slice(1), { stdio: 'inherit', env: childEnv })
   } else if (wakeCommand !== '') {
-    spawnSync('sh', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
+    // `bash`, not `sh` — BUG-144 F1 (Thomas/Kimi review, round 3). All three
+    // launchers (start-codex/kimi/gemini-signal-watch.sh) build this string
+    // themselves and source scripts/lib/roster.sh INSIDE it to resolve the
+    // hand-back Orchestrator name; roster.sh is `#!/usr/bin/env bash` and its
+    // lookup-MISS path uses `${want// /_}`, a bash-only expansion. `/bin/sh`
+    // is dash on this box, so the happy path (an Orchestrator row present)
+    // dodges it, but a miss makes dash abort the command substitution that
+    // called it — silently, since the launchers pipe its output through
+    // `2>/dev/null` — collapsing to the SAME empty-string fallback the
+    // launchers already guard for a clean miss (BUG-140's "literal
+    // 'Orchestrator' gets refused" failure), just via script abort instead of
+    // a graceful return. Verified directly: sourcing roster.sh under dash and
+    // calling bp_roster_name_for_role for an absent role prints "Bad
+    // substitution" and kills the subshell; the identical call under bash
+    // resolves the miss cleanly (empty output, clean return).
+    //
+    // `bash` is a safe superset here, not a narrower shell swapped in: every
+    // construct the three launchers write directly into this string (this
+    // file's own `sh -c` docblock aside) is already POSIX — `set -u`, `[ ]`
+    // tests, no `[[`, no arrays, no bash-only expansions of their own — so
+    // nothing that worked under dash stops working under bash. The one thing
+    // that changes is real: dash has no PIPESTATUS, which is WHY BUG-143's
+    // status-file pattern exists (see the three launchers' own comments on
+    // it) — bash has PIPESTATUS, but the status-file mechanism is proven and
+    // kept rather than swapped for it; nothing here depends on dash's
+    // narrower feature set being absent.
+    spawnSync('bash', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
 
   if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, task)

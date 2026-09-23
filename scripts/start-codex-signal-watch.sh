@@ -252,12 +252,26 @@ CODEX_GIT_DIR="$(cd -P "$CODEX_GIT_DIR" && pwd)" || {
   exit 7
 }
 
-# BUG-143, cause 1: `codex exec` sits in a pipeline under dash (`sh -c`, no
-# PIPESTATUS, no `set -o pipefail`), so its exit status was lost — a run that
-# died still logged "codex exec finished". Same fix as the Kimi launcher
-# (TASK-063 cross-provider review): the command group writes `$?` to a status
-# file right after codex exits, before its stdout (feeding tee) reaches EOF,
-# so the file is always complete by the time the downstream stages finish.
+# BUG-143, cause 1: `codex exec` sits in a pipeline that was written for dash
+# (`sh -c`, no PIPESTATUS, no `set -o pipefail`), so its exit status was
+# lost — a run that died still logged "codex exec finished". BUG-144 F1 moved
+# the poller wake spawn to `bash -c` (see the comment on that spawn in
+# signal-watch.mts), so PIPESTATUS and `set -o pipefail` are available now;
+# the original premise behind this workaround no longer holds, but it stays —
+# proven, cheap, and not worth swapping for PIPESTATUS. Same fix as the Kimi
+# launcher (TASK-063 cross-provider review): the command group writes `$?` to
+# a status file right after codex exits, before its stdout (feeding tee)
+# reaches EOF, so the file is always complete by the time the downstream
+# stages finish.
+#
+# CAUTION when editing anything below this line, all the way down to the
+# closing single quote hundreds of lines further on: this entire block is the
+# CONTENT of a single-quoted shell string, executed later, not outer-script
+# comment text read now. An apostrophe here closes that string early and
+# turns everything after it into outer-shell syntax, which is how a single
+# unescaped one produced BUG-144 F1 own syntax error. Write around
+# apostrophes in this region rather than using the classic escape trick,
+# which is easy to get wrong under review pressure.
 CODEX_STATUS_FILE="$(mktemp "$STATE_DIR/.codex-exit-status.XXXXXX" 2>/dev/null)" || CODEX_STATUS_FILE="$STATE_DIR/.codex-exit-status.$$"
 # --json + codex-feed-filter.sh keeps the activity feed at one concise line per
 # action (codex prose, commands, file changes) instead of echoing every file

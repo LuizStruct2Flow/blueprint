@@ -5,6 +5,7 @@
 #   gitleaks  → any leak blocks
 #   semgrep   → WARNING+ blocks
 #   osv-scanner → MEDIUM+ blocks
+#   contamination scan → any BLOCK finding in the pushed diff blocks (TASK-079)
 #
 # Per project_config_security.md §6 Findings register: failures land
 # as `[SEC-XXX]` entries in docs/config/findings.md.
@@ -249,6 +250,59 @@ jobs:
           dod_stage_bugtests "$RANGE" || rc=1
           exit "$rc"
 
+  contamination:
+    # TASK-079 (TASK-062-16), audit row C168. NOTHING scanned a push for
+    # contamination before this job: contamination_scan (scripts/lib/
+    # contamination.sh) ran only on the a2bp path, and the audit's premise of a
+    # pre-push call site to extend was measured to be wrong — the absence IS
+    # the finding. Founder decision 2026-09-22 (PLAN-TASK-062 §"Founder
+    # decisions" #3): the CI-only route, reusing the existing checker.
+    #
+    # The script sources scripts/lib/contamination.sh and hands the push's
+    # ADDED lines to the real contamination_scan — no pattern is duplicated
+    # here. It scans only where .blueprint-root exists (blueprint-only, the
+    # checkout where contamination PUBLISHES); elsewhere it announces the skip
+    # itself, so no hashFiles guard is needed and a derived project sees the
+    # reason in the job log.
+    #
+    # WHAT THIS DOES NOT DO: it does not prevent a contaminated push from
+    # landing on main — it detects after the push, and the release job's
+    # needs-list is what keeps a red result from advancing `released`, the
+    # ref downstream projects pull. Detection before publication, not
+    # prevention of the push.
+    name: contamination scan (pushed diff)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0 # the pushed range needs the base commit, not a shallow tip
+      - name: Set up Node
+        # Same floor as ts-tests: scripts/**/*.mts runs on Node's own type
+        # stripping, on by default from 22.18.0, with no flag and no install.
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: '22.18.0'
+      - name: Scan the pushed diff for contamination
+        # The push-event range semantics (new branch, rollback, rewritten
+        # history) live IN THE SCRIPT, so the job stays a thin caller and the
+        # red/green proof drives the checker exactly the way this step does.
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            node scripts/contamination-push-scan.mts --range "$BASE_SHA..$HEAD_SHA"
+          else
+            node scripts/contamination-push-scan.mts --before "$BEFORE" --after "$AFTER"
+          fi
+
   ts-tests:
     name: TypeScript regression suites (vitest)
     runs-on: ubuntu-latest
@@ -430,7 +484,7 @@ jobs:
     name: release (fast-forward released to the tested commit)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.repository == 'LuizStruct2Flow/blueprint'
-    needs: [secret-scan, sast, sca, commit-subjects, ts-tests]
+    needs: [secret-scan, sast, sca, commit-subjects, contamination, ts-tests]
     permissions:
       contents: write
     steps:

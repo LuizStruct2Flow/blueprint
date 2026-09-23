@@ -181,6 +181,16 @@ const ENV_KIND = {
   // measures is the BUG-046 shape with a number instead of a path.
   AGENT_SIGNAL_SETTLE: 'opaque',
   AGENT_WAIT_MIC_POLL: 'opaque',
+  // AGENT_SIGNAL_RECOVERY — scripts/signal-watch.mts's BUG-144 mic-recovery
+  // opt-out ('0' disables it, unset/anything else leaves it on). 'opaque' for
+  // the same reason as the two above: a fixed enumerated flag, names nothing
+  // on disk, activates no second variable, redirects no write.
+  // tests/signal-dispatch sets it — its dispatcher stub is the documented
+  // "backgrounded, fire-and-forget" shape recoverStrandedMic's own docblock
+  // excludes, and round 3 made recovery load-bearing enough to actually race
+  // that suite's own settle-window assertions (see signal-watch.mts's comment
+  // on the call site).
+  AGENT_SIGNAL_RECOVERY: 'opaque',
   // THE TWO FEED KNOBS, declared for the same reason and by the same test as the
   // two above: each is a NUMBER handed to `sleep` or compared against a byte
   // count, so it names nothing on disk, activates no second variable, and

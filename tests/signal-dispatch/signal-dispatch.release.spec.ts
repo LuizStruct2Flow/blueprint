@@ -219,7 +219,23 @@ async function dispatcher(s: Scenario, name: string): Promise<Dispatcher> {
         ],
         {
           cwd: s.workspace.root,
-          env: { PATH: shims.path(), AGENT_SIGNAL_SETTLE: String(SETTLE) },
+          // AGENT_SIGNAL_RECOVERY=0 — this suite is not testing BUG-144's mic
+          // recovery, and `record` (below) is exactly the "backgrounded,
+          // fire-and-forget" shape recoverStrandedMic's own docblock
+          // documents as indistinguishable from a stranded ACTIVE: it returns
+          // instantly, and every later state transition this suite drives
+          // (claim, hand-back, the next round) arrives as a SEPARATE write
+          // after the wake command has already returned, never inside it.
+          // Once BUG-144 round 3 made recovery load-bearing, that made every
+          // dispatch here look stranded to it, and #5 could race a genuine
+          // round-3 publish against a round-2 recovery still resolving the
+          // roster and lose it — no re-check closes that gap, because
+          // "stranded on ACTIVE" and "still legitimately claimed, working"
+          // carry identical Holder/State/Task. Opting out here changes
+          // nothing about the mechanism this test's own case #5 exists to
+          // characterize (the settle window), and nothing about production,
+          // where this variable is unset.
+          env: { PATH: shims.path(), AGENT_SIGNAL_SETTLE: String(SETTLE), AGENT_SIGNAL_RECOVERY: '0' },
         },
       )
 

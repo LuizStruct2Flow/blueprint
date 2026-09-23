@@ -265,16 +265,24 @@ function nowSeconds(): number {
 // the baton MOVED — the agent handed back, even mid-dispatch as in BUG-143 —
 // this does nothing.
 //
-// THE ROSTER IS RESOLVED BESIDE THE BATON (`dirname(signalFile)`), not from
-// BP_STATE_ROOT — same reasoning as scripts/lib/watcher-lock.sh's lock path
-// (its own docblock): BP_STATE_ROOT is this WATCHER's own checkout, and a
-// watcher run directly against a fixture baton (as tests/signal-dispatch and
-// tests/mic-recovery both do, `--file` pointed elsewhere) would otherwise
-// resolve the OPERATOR's real, gitignored AGENT_ROSTER.md — a fixture
-// depending on whatever machine happens to run it, exactly the class of bug
-// A-09 and BUG-013 are about. A project with the flat layout this repo still
-// has keeps AGENT_ROSTER.md beside its baton's directory today, so this is a
-// no-op there; it is what keeps a fixture's baton isolated too.
+// THE ROSTER IS RESOLVED FROM BP_STATE_ROOT, never from dirname(signalFile).
+//
+// ROUND 3 (observed live 2026-09-22, `findings.md` F-002 shape): this used to
+// read `dirname(signalFile)` on the theory that the roster sits "beside the
+// baton" — true only of the FIXTURE, never of production. The real baton is
+// `<repo>/logs/state/AGENT_SIGNAL.md` (scripts/lib/state-dir.sh's
+// agent_state_dir) and the real roster is `<repo>/AGENT_ROSTER.md` — two
+// directories apart, not siblings. Live, this printed "no AGENT_ROSTER.md ...
+// under '.../logs/state'" and left the mic stranded. `tests/mic-recovery`
+// missed it because its own fixture wrote a roster beside the fixture baton,
+// which only proved the fixture's layout, not production's.
+//
+// BP_STATE_ROOT is the fix: it is the one root every other roster consumer
+// (agent-activity.sh, signal-set.sh, dod-gate.sh) already resolves from, and
+// this watcher already computes it once at startup (state-dir.sh's own
+// contract, same as agentStateDir()/agentSignalFile() above) rather than
+// inventing a second derivation that only agrees with the first by
+// coincidence (A-09).
 //
 // REOPENED 2026-09-22 (observed live): the first fix here only matched the
 // dispatched `OVER_TO_<X>` state verbatim, but every well-behaved agent
@@ -295,15 +303,59 @@ function nowSeconds(): number {
 // identical to a stranded ACTIVE — noted in review (Thomas/Kimi) and left as
 // a documented constraint rather than a guard, since nothing dispatches that
 // way today.
-function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string): void {
-  if (readField(signalFile, 'Holder') !== dispatchedHolder) return
+//
+// AGENT_SIGNAL_RECOVERY=0 OPTS OUT, for exactly that documented shape.
+// tests/signal-dispatch's own dispatcher stub IS that excluded shape: its
+// wake command returns instantly (records a hit, nothing else) and the
+// fixture supplies "the rest of the agent's work" as SEPARATE writes some
+// time later — not a real launcher, but indistinguishable from one to this
+// function once round 3 made it load-bearing (it used to fail resolving the
+// roster and never reach this far). Round 3 caught it live:
+// tests/signal-dispatch #5 raced a genuine round-3 dispatch against a
+// round-2 recovery still resolving the roster, and — irreducibly, because
+// "stranded on ACTIVE" and "still legitimately working, claimed ACTIVE" carry
+// the SAME Holder/State/Task — no amount of re-checking the baton closes
+// that particular gap. The opt-out is scoped to suites that are not testing
+// recovery and whose fixture cannot honour the foreground contract, never to
+// production, where AGENT_SIGNAL_RECOVERY is unset.
+//
+// stillStranded's OWN match is Holder AND Task, always — State alone (or even
+// State+Holder) is not enough
+// to identify a PARTICULAR dispatch. A well-behaved agent claims ACTIVE
+// without touching Task, so State legitimately varies between the dispatched
+// OVER_TO_<X> and ACTIVE for the SAME stranded round — but a genuinely NEW
+// round to the same Holder in the same target State (ordinary and common:
+// tests/signal-dispatch #2 and #3 both do it) carries a DIFFERENT Task, and
+// that is exactly what distinguishes it from the original dispatch this call
+// is checking on. Holder+State alone cannot tell those apart — caught live by
+// tests/signal-dispatch #5, whose round 3 write reused the same Holder and
+// target State with only the Task text changed.
+function stillStranded(dispatchedHolder: string, dispatchedState: string, dispatchedTask: string): boolean {
+  if (readField(signalFile, 'Holder') !== dispatchedHolder) return false
+  if (readField(signalFile, 'Task') !== dispatchedTask) return false
   const state = readField(signalFile, 'State')
-  if (state !== dispatchedState && state !== 'ACTIVE') return
+  return state === dispatchedState || state === 'ACTIVE'
+}
 
-  const rosterRoot = dirname(signalFile)
+function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, dispatchedTask: string): void {
+  if (!stillStranded(dispatchedHolder, dispatchedState, dispatchedTask)) return
+
+  // BP_STATE_ROOT, not dirname(signalFile): the roster lives at the project
+  // root (AGENT_ROSTER.md), the baton several levels under it
+  // (logs/state/AGENT_SIGNAL.md — see scripts/lib/state-dir.sh's
+  // agent_state_dir). dirname(signalFile) resolves to the STATE dir, which
+  // never holds the roster in production — that mismatch is what round 3 of
+  // BUG-144 caught live. BP_STATE_ROOT is the one mechanism every consumer
+  // (agent-activity.sh, signal-set.sh) already resolves the roster from.
+  const rosterRoot = BP_STATE_ROOT
   const orchestrator = spawnSync(
-    'sh',
-    ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'sh', ROSTER_LIB, rosterRoot],
+    // roster.sh is `#!/usr/bin/env bash` and uses `${var// /_}` (BUG-144
+    // round 3: dash's `sh` on this box throws "Bad substitution" on that
+    // parameter expansion). state-dir.sh and watcher-lock.sh, sourced the
+    // same way elsewhere in this file, are POSIX `#!/bin/sh` and stay on
+    // `sh` — this is the one lib here that actually needs bash.
+    'bash',
+    ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'bash', ROSTER_LIB, rosterRoot],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   )
   const orchestratorName = (orchestrator.stdout ?? '').trim()
@@ -319,16 +371,32 @@ function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string): 
     return
   }
 
+  // RE-CHECK, IMMEDIATELY BEFORE THE PUBLISH. Round 3 made this call load-bearing
+  // for the first time (it used to fail resolving the roster and return before
+  // ever reaching here), which exposed a real TOCTOU: the two spawnSync calls
+  // above — roster resolution, then this one — take real wall-clock time, and a
+  // legitimate new dispatch can land on the baton in that window. Without this
+  // guard the belated publish below clobbers it back to Holder=<Orchestrator>
+  // State=OVER_TO_CLAUDE, silently erasing a dispatch nobody asked to cancel —
+  // caught live by tests/signal-dispatch #5, which races a genuine round 3
+  // publish against exactly this window. Re-reading the baton right before the
+  // write narrows the race from "however long two bash spawns take" to the
+  // instant between this check and signal-set.sh's own atomic rename — the same
+  // bound every other publisher of this file already accepts (case #6's own
+  // docblock: "ONE atomic rename" is what makes a race here survivable, never a
+  // claim that no two writers can overlap).
+  if (!stillStranded(dispatchedHolder, dispatchedState, dispatchedTask)) return
+
   const task = `${dispatchedHolder}'s dispatch ended without handing back the mic - read the provider run log`
   // AGENT_ROSTER_FILE, for the SAME reason `--file` targets the baton at
   // signalFile rather than signal-set.sh's own derived one: signal-set.sh
   // validates --holder against a roster of its OWN, resolved from its own
   // BP_STATE_ROOT unless told otherwise (its own docblock on this env var).
-  // Left unset, that validation would read whichever roster happens to sit
-  // beside THIS SCRIPT's checkout — not the one `rosterRoot` above just
-  // resolved the orchestrator name FROM — and refuse a name that fixture
-  // roster used correctly. One roster for one recovery, not two resolutions
-  // of one fact (A-09).
+  // That is normally the same root `rosterRoot` above just resolved the
+  // orchestrator name FROM — but pinning it explicitly means the two calls
+  // agree even when a caller's environment diverges (e.g. a test pins
+  // BP_STATE_ROOT_CEILING for this process but not for the child). One
+  // roster for one recovery, not two resolutions of one fact (A-09).
   const result = spawnSync(
     'bash',
     [SIGNAL_SET, '--file', signalFile, '--holder', orchestratorName, '--state', 'OVER_TO_CLAUDE', '--task', task],
@@ -402,7 +470,7 @@ function triggerIfNeeded(): boolean {
     spawnSync('sh', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
 
-  recoverStrandedMic(holder, state)
+  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, task)
 
   return true
 }

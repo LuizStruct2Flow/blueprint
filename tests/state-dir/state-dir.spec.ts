@@ -347,6 +347,16 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
         }
       }
       await s.fs.copyIn(HELPER, join('work', 'scripts/lib/state-dir.sh'))
+      // BUG-144 round 3 — recoverStrandedMic (scripts/signal-watch.mts) now
+      // actually reaches scripts/lib/roster.sh after every dispatch (it used
+      // to fail resolving the roster and never get this far). This minimal
+      // out-of-tree fixture never carried that file, so `bash -c '. "$1"; …'`
+      // failed with "No such file or directory" — a genuinely new failure mode
+      // this test's own assertion (line ~423) exists to catch, not the state
+      // dir this suite is about. Copying the real lib in is what production
+      // already requires: BP_CODE_ROOT-relative paths only resolve when the
+      // code root actually carries the tree it claims to.
+      await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/roster.sh'), join('work', 'scripts/lib/roster.sh'))
       await s.gitRepo('work')
 
       // BUG-019 — the watcher reads the LIVE baton (untracked, under the state

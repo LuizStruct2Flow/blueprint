@@ -259,11 +259,27 @@ jobs:
     # decisions" #3): the CI-only route, reusing the existing checker.
     #
     # The script sources scripts/lib/contamination.sh and hands the push's
-    # ADDED lines to the real contamination_scan — no pattern is duplicated
-    # here. It scans only where .blueprint-root exists (blueprint-only, the
-    # checkout where contamination PUBLISHES); elsewhere it announces the skip
-    # itself, so no hashFiles guard is needed and a derived project sees the
-    # reason in the job log.
+    # ADDED lines, for the files that SHIP (export-ignore'd records are
+    # skipped and counted), to the real contamination_scan — no pattern is
+    # duplicated here.
+    #
+    # BLUEPRINT-ONLY, AND SKIPPED — NOT GREEN — EVERYWHERE ELSE. Contamination
+    # publishes only from this repository's `released`; a derived project's
+    # push publishes nothing. This file is MANAGED and ships to every derived
+    # project, so the job is guarded the way the `release` job is: on
+    # `github.repository`, at JOB level, where it renders as skipped. A
+    # `hashFiles('.blueprint-root')` guard cannot do that — at job level it
+    # runs before checkout and sees an empty workspace (always false, here
+    # too), and at step level the job still renders green with a skipped
+    # step, which is the "green because it checked nothing" shape (BUG-004,
+    # A-22). A fork of the blueprint edits the repository name here and in
+    # `release` together. The script's own .blueprint-root check stays as the
+    # second mechanism: a fork that edited only one guard gets an announced
+    # skip, never a block on its own files.
+    #
+    # Push and pull_request only: a workflow_dispatch run has no range
+    # (empty BEFORE/AFTER resolved to `^!` and failed as "refusing to scan
+    # nothing"), so it is skipped rather than run on nothing.
     #
     # WHAT THIS DOES NOT DO: it does not prevent a contaminated push from
     # landing on main — it detects after the push, and the release job's
@@ -272,7 +288,7 @@ jobs:
     # prevention of the push.
     name: contamination scan (pushed diff)
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule'
+    if: (github.event_name == 'push' || github.event_name == 'pull_request') && github.repository == 'LuizStruct2Flow/blueprint'
     permissions:
       contents: read
     steps:

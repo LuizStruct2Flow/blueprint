@@ -18,27 +18,44 @@
 // <justification>` suppression, which works unchanged because it sits on the
 // added line itself.
 //
-// TWO THINGS THE CALLER MUST KNOW:
+// THREE THINGS THE CALLER MUST KNOW:
 //
-//   1. BLUEPRINT-ONLY BY CONSTRUCTION. The job runs the scan only where
-//      `.blueprint-root` exists. Contamination PUBLISHES from the blueprint's
-//      `released` branch; a derived project's push publishes nothing (a2bp's
-//      own scan is the project's pre-publication stop), and scanning a
-//      project's whole diff would block its own files for naming their own
-//      project. In a checkout without `.blueprint-root` this script announces
-//      the skip and exits 0 — an announced skip, never a silent green
-//      (BUG-004's lesson).
+//   1. BLUEPRINT-ONLY BY CONSTRUCTION. The job runs only in the blueprint's own
+//      repository — its `if:` guards on `github.repository`, the `release`
+//      job's precedent — so a derived project sees the job SKIPPED, never a
+//      green check that scanned nothing. This script keeps its own
+//      `.blueprint-root` check as the second mechanism: a fork that renamed the
+//      repository and edited only one of the two guards still gets an
+//      announced skip (exit 0), never a block on its own files for naming their
+//      own project. Contamination PUBLISHES from the blueprint's `released`
+//      branch; a derived project's push publishes nothing (a2bp's own scan is
+//      its pre-publication stop).
 //
-//   2. THE RESIDUAL-NAME CLASS HAS NO OPERAND HERE. contamination_scan's third
+//   2. ONLY FILES THAT SHIP ARE SCANNED. The rule this mechanises (CLAUDE.md
+//      §"What blueprint sync covers") is about a blueprint-MANAGED file, and a
+//      path whose `export-ignore` attribute is set ships to nobody — it cannot
+//      contaminate anything. This repo's own records (`docs/done/**`,
+//      `docs/config/**`, the audit CSV) quote host paths ON PURPOSE, and the
+//      DoD lifecycle re-adds those rows as added lines at every acceptance, so
+//      scanning them would go red on every push that moves a bug. The decision
+//      is read from `git check-attr export-ignore` — the same `.gitattributes`
+//      `git archive` honours when the managed set is derived — so no path list
+//      is kept here. Skipped files are counted in the summary, never dropped
+//      silently.
+//
+//   3. THE RESIDUAL-NAME CLASS HAS NO OPERAND HERE. contamination_scan's third
 //      BLOCK class flags a project's name that survived reverse-substitution —
 //      meaningful on the a2bp path, where the name is the project's own. On a
 //      push to the blueprint there is no reverse-substitution and no single
 //      project name to scan for (the repo's own basename is "blueprint", a
-//      word its docs use constantly — measured unusable as a pattern). So in
-//      blueprint mode this script demotes exactly that class to a printed
-//      notice. The host-path and foreign-dot-dir classes — the BUG-002 and
-//      A-09 shapes — stand unfiltered. The filter keys on the checker's own
-//      reason string; no pattern is duplicated to do it.
+//      word its docs use constantly — measured unusable as a pattern). The
+//      checker's signature demands a name, so it runs with the repo's basename;
+//      this script keys on the checker's own reason string, never blocks on
+//      that class, and prints its hit COUNT as one line instead of every hit —
+//      measured, the per-hit form was 86 of 100 log lines over one real push
+//      range, burying the findings that do block. The host-path and
+//      foreign-dot-dir classes — the BUG-002 and A-09 shapes — stand
+//      unfiltered. No pattern is duplicated to do any of this.
 //
 // WHAT CI-ONLY DOES NOT PROTECT. A contaminated push still LANDS on main; this
 // scan detects it after the push, and the `release` job's needs-list is what
@@ -163,6 +180,43 @@ function changedFiles(repo: string, range: string): string[] {
   return r.out.split('\0').filter((e) => e.length > 0)
 }
 
+/**
+ * Splits `files` into what ships and what does not: a path whose
+ * `export-ignore` attribute is set ships to nobody (header, point 2). Read
+ * from `git check-attr`, the same `.gitattributes` decision `git archive`
+ * applies when the managed set is derived.
+ */
+function shippedFiles(repo: string, files: string[]): { shipped: string[]; unshipped: string[] } {
+  if (files.length === 0) return { shipped: [], unshipped: [] }
+  let out: string
+  try {
+    out = execFileSync('git', ['-C', repo, 'check-attr', '-z', '--stdin', 'export-ignore'], {
+      encoding: 'utf8',
+      input: files.map((f) => `${f}\0`).join(''),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  } catch (err) {
+    const e = err as { status?: number; stderr?: string }
+    console.error(
+      `::error::git check-attr failed (exit ${e.status ?? 127}): ${e.stderr ?? ''} — refusing to guess what ships`,
+    )
+    process.exit(1)
+  }
+  // -z output is path\0attribute\0value\0 per queried path; the value is
+  // "set", "unset" (a `-export-ignore` override) or "unspecified".
+  const fields = out.split('\0')
+  const shipped: string[] = []
+  const unshipped: string[] = []
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    const path = fields[i]
+    const value = fields[i + 2]
+    if (path === undefined || value === undefined) break
+    if (value === 'set') unshipped.push(path)
+    else shipped.push(path)
+  }
+  return { shipped, unshipped }
+}
+
 /** The lines a push ADDED to one file — what the checker judges. */
 function addedLines(repo: string, range: string, file: string): string[] {
   const r = git(repo, ['diff', '--unified=0', '--no-color', range, '--', file])
@@ -225,19 +279,24 @@ function main(): void {
   const range = resolveRange(repo, opts)
   if (range === null) return
 
-  // In the blueprint checkout the repo's own name is a word its docs use
-  // constantly, and there is no reverse-substitution for a residual to
-  // survive — the name class has no operand here (see the header). The host
-  // path, foreign dot-dir and email classes still run unfiltered.
+  // The checker's signature demands a name. In the blueprint checkout that is
+  // the repo's own basename, and the class it feeds is counted, not blocked
+  // on (header, point 3). The host path, foreign dot-dir and email classes
+  // run unfiltered.
   const projName = basename(repo)
   const tmp = mkdtempSync(join(tmpdir(), 'contamination-push-scan-'))
   try {
     const blocked: Finding[] = []
     const notices: Finding[] = []
-    const demoted: Finding[] = []
-    for (const file of changedFiles(repo, range)) {
+    let demoted = 0
+    let scannedFiles = 0
+    let scannedLines = 0
+    const { shipped, unshipped } = shippedFiles(repo, changedFiles(repo, range))
+    for (const file of shipped) {
       const added = addedLines(repo, range, file)
       if (added.length === 0) continue
+      scannedFiles++
+      scannedLines += added.length
       const contentFile = join(tmp, 'added-lines')
       writeFileSync(contentFile, `${added.join('\n')}\n`)
       const r = scan(contentFile, projName, file)
@@ -246,7 +305,7 @@ function main(): void {
         const fields = line.split('|')
         const finding: Finding = { file, line }
         if (fields[2]?.startsWith(NAME_CLASS_REASON)) {
-          demoted.push(finding)
+          demoted++
         } else if (fields[1] === 'BLOCK') {
           blocked.push(finding)
         } else {
@@ -255,19 +314,27 @@ function main(): void {
       }
     }
     for (const f of notices) console.log(`${f.file}: ${f.line}`)
-    for (const f of demoted) {
-      console.log(`${f.file}: ${f.line}  [demoted: the residual-name class has no operand on a blueprint push]`)
+    if (demoted > 0) {
+      console.log(
+        `${demoted} residual-name hit(s) demoted and not printed: the class has no operand on a blueprint push (see the header)`,
+      )
     }
     for (const f of blocked) console.log(`::error::${f.file}: ${f.line}`)
+    // The tally is what separates "scanned 40, clean" from "scanned nothing":
+    // a zero here is announced, never read as a pass.
+    const tally =
+      `scanned ${scannedFiles} file(s), ${scannedLines} added line(s) in ${range}` +
+      ` (${unshipped.length} changed file(s) skipped as export-ignore'd: they ship to nobody)`
     if (blocked.length > 0) {
       console.log(
-        `contamination-push-scan: ${blocked.length} BLOCK finding(s) in ${range}. ` +
+        `contamination-push-scan: ${blocked.length} BLOCK finding(s); ${tally}. ` +
           'Move project-specific content out of the managed file, or mark a known-benign line ' +
           '`a2bp-allow: <why it is safe>` — the same override a2bp honours.',
       )
       process.exit(1)
     }
-    console.log(`contamination-push-scan: no BLOCK findings in ${range}. PASS.`)
+    if (scannedFiles === 0) console.log(`::warning::contamination-push-scan: ${tally} — nothing was judged`)
+    console.log(`contamination-push-scan: no BLOCK findings; ${tally}. PASS.`)
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

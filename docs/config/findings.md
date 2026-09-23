@@ -290,3 +290,42 @@ as a known limit, not a verdict that the observation was wrong.
 **Re-open when** one of these is observed causing a wrong result in real use
 (a wrong gate verdict, a lost feed line, a wrong a2bp base), not when a review
 re-derives it.
+
+---
+
+## F-006 — `contamination_scan` blocks on shipped lines the blueprint has always shipped with
+
+**Status: Open** — recorded, not fixed: the defect is in
+`scripts/lib/contamination.sh`, legacy shell, and CLAUDE.md §"Shell to
+TypeScript" prices any edit to it as a whole-file port, which is not
+TASK-079's job. It bites on the first push that RE-ADDS one of the lines
+below, and this row is what the author of that push will find.
+
+**Raised by** Markus (Security-1), 2026-09-23, reviewing TASK-079 (`0db7d4e`),
+from a whole-tree run of the checker over the managed set. Two classes of
+false positive on lines that ship today and have shipped for weeks:
+
+- **`kimi-code` is not on `_CONTAMINATION_KNOWN_DOTDIRS`.** `~/.kimi-code`
+  is the Kimi CLI's own home, as generic as `~/.codex` or `~/.claude`, and it
+  is named in `AGENTS.md` (once) and `scripts/start-kimi-signal-watch.sh`
+  (seven times). The list was written before Kimi joined the roster.
+- **A shell default `${X:-$HOME/.name}` defeats `_contamination_is_known_dotdir`.**
+  The dot-dir grep captures `[A-Za-z0-9_.{}-]*` after `/.`, so the closing
+  `}` of the parameter expansion becomes part of the captured name
+  (`codex}`, `cache}`), which no longer equals the allowlisted `codex` /
+  `cache`. Hits today: `scripts/lib/roster.sh` (`${CODEX_HOME:-$HOME/.codex}`),
+  `scripts/lib/codex-session.sh` (`${1:-$HOME/.codex}`), `scripts/blueprint`
+  (`${XDG_CACHE_HOME:-$HOME/.cache}`).
+
+**Why it did not bite before:** the checker ran only on the a2bp path, over a
+file a project chose to send back. TASK-079 now runs it over every pushed
+diff's added lines, so the first edit that re-adds one of these lines goes red
+in CI on a line that is not contamination. Per-line `a2bp-allow` markers
+would paper over it at each site rather than fix the pattern.
+
+**Fix when** `scripts/lib/contamination.sh` is ported (whole file, behind a
+shim, per CLAUDE.md §"Shell to TypeScript"): add `kimi-code` to the known
+dot-dirs, and strip a trailing `}` (or stop the capture at `}`) before the
+allowlist lookup, with a case for each in `tests/a2bp-contamination`. Until
+then, an author who hits it marks the line `a2bp-allow: <tool home, generic
+to every machine>` and links this row.

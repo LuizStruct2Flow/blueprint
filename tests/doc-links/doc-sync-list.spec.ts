@@ -10,8 +10,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { scanDocSyncList } from './doc-sync-list.js'
+import { skipVisibly } from '../helpers/project-config.js'
+import { pathExists, scanDocSyncList } from './doc-sync-list.js'
 
 async function scanFixture(s: Scenario, content: string): Promise<ReturnType<typeof scanDocSyncList>> {
   const root = await s.workspace.dir('bp')
@@ -147,7 +149,31 @@ describe('doc-sync-list — every path named in the list exists in the tree', ()
     },
   )
 
-  it('THE REAL TREE — every path named in the doc-sync list exists', async () => {
+  it('THE REAL TREE — every path named in the doc-sync list exists', async (ctx) => {
+    // BLUEPRINT-ONLY, on purpose (bootstrap-gate #2/#3 caught the first
+    // version failing this). "Every named path exists" is a property this
+    // task's PO EARNED for THIS list by rewriting it row by row against this
+    // tree — it is not a structural fact every checkout gets for free. A
+    // freshly bootstrapped project's project_config_dod.md is still
+    // templates/project_config_dod.md's SEED: real-looking Recipe A/B/C rows
+    // nobody has judged against that project's tree yet, so most of them
+    // legitimately do not exist there — the same shape D058 found here,
+    // expected on day one rather than a regression. This suite ships
+    // (tests/doc-links/ is not export-ignored) and therefore runs inside
+    // every derived project's own gate too, so the assertion is scoped to
+    // the one tree it is actually true of via the same positive marker
+    // `drift` and `tests/manifest` use for this exact question
+    // (`.blueprint-root`, export-ignored so it can never reach a derived
+    // project — tests/manifest/manifest.ts's `inBlueprint` check). A derived
+    // project earns this assertion the same way the blueprint did: its own
+    // PO judging its own list real, the same process TASK-072 was.
+    if (!(await pathExists(join(REPO_ROOT, '.blueprint-root')))) {
+      skipVisibly(
+        ctx,
+        'not the blueprint checkout — this project has not yet judged its own doc-sync list real (see doc-sync-list.spec.ts)',
+      )
+    }
+
     // No scenario(): this reads the repository and writes nothing.
     const scan = await scanDocSyncList(REPO_ROOT)
 

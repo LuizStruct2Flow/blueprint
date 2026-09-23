@@ -314,4 +314,77 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       await w.stop()
     })
   })
+
+  it('BUG-144 F1 (Thomas/Kimi review): the wake command runs under bash, so a roster MISS inside it does not abort', async () => {
+    // All three launchers (start-codex/kimi/gemini-signal-watch.sh) build
+    // their own AGENT_WAKE_COMMAND string and source scripts/lib/roster.sh
+    // INSIDE it to resolve the hand-back Orchestrator name — this is a
+    // SEPARATE roster lookup from recoverStrandedMic's own (which already
+    // runs under bash from round 3). roster.sh's lookup-MISS path uses
+    // `${want// /_}`, a bash-only expansion; the happy path (a role that
+    // resolves) never reaches it, which is why this stayed hidden. Reproduces
+    // the launchers' own pattern verbatim — source, `command -v` guard,
+    // resolve in a `$(...)` subshell — against a role that is guaranteed
+    // absent from ANY roster, and proves the miss degrades cleanly (empty
+    // result, roster.sh's own warning) rather than aborting the subshell with
+    // "Bad substitution" (dash's behaviour, reproduced by hand against this
+    // exact library before this fix: see the BUG-144 F1 commit body).
+    await scenario('mic-recovery-6', async (s) => {
+      await s.fs.mkdirp('mic-recovery-6/state')
+      const signalRel = 'mic-recovery-6/state/AGENT_SIGNAL.md'
+      const signalPath = s.workspace.path(signalRel)
+
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
+          '| Holder | Someone |\n| State | OVER_TO_SOMEONE |\n| Task | f1-probe |\n',
+      )
+
+      const resolvedPath = s.workspace.path('mic-recovery-6', 'resolved')
+      const stderrPath = s.workspace.path('mic-recovery-6', 'roster-stderr')
+      const donePath = s.workspace.path('mic-recovery-6', 'done')
+
+      // Verbatim shape of start-codex-signal-watch.sh:159-166 (and its Kimi
+      // and Gemini mirrors): source the lib, guard with `command -v`, resolve
+      // in a command substitution. The only difference is the role
+      // ("BUG144-F1-Missing-Role" instead of "Orchestrator") and that stderr
+      // is captured to a file this test can read, instead of the launchers'
+      // own `2>/dev/null` — which is exactly what let this hide: dash's
+      // abort message never had anywhere to be seen.
+      const wakeCommand =
+        'set -u\n' +
+        `. "${ROSTER_LIB}"\n` +
+        'ORCHESTRATOR_NAME=""\n' +
+        'if command -v bp_roster_name_for_role >/dev/null 2>&1; then\n' +
+        `  ORCHESTRATOR_NAME="$(bp_roster_name_for_role "${REPO_ROOT}" "BUG144-F1-Missing-Role" 2>"${stderrPath}")"\n` +
+        'fi\n' +
+        `printf '%s' "$ORCHESTRATOR_NAME" > "${resolvedPath}"\n` +
+        `: > "${donePath}"\n`
+
+      const w = startWatcher(
+        s,
+        'bash',
+        [WATCHER, '--file', signalPath, '--state', 'OVER_TO_SOMEONE', '--poll', '0.2'],
+        {
+          cwd: s.workspace.root,
+          env: { AGENT_SIGNAL_SETTLE: '0', AGENT_WAKE_COMMAND: wakeCommand },
+        },
+      )
+
+      try {
+        await until('the wake command has run to completion', () => s.fs.exists('mic-recovery-6/done'))
+
+        const stderr = await s.fs.read('mic-recovery-6/roster-stderr')
+        expect(stderr, 'dash aborted the subshell on the miss instead of returning cleanly').not.toContain(
+          'Bad substitution',
+        )
+        expect(stderr, "roster.sh's own miss warning should still fire").toContain('identity unresolved')
+
+        const resolved = await s.fs.read('mic-recovery-6/resolved')
+        expect(resolved, 'a genuine miss should resolve to nothing, not a stray partial value').toBe('')
+      } finally {
+        await w.stop()
+      }
+    })
+  })
 })

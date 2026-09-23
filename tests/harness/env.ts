@@ -191,6 +191,19 @@ const ENV_KIND = {
   // that suite's own settle-window assertions (see signal-watch.mts's comment
   // on the call site).
   AGENT_SIGNAL_RECOVERY: 'opaque',
+  // AGENT_WAKE_COMMAND / CODEX_WAKE_COMMAND — scripts/signal-watch.mts's own
+  // wake hook (BUG-143's engine), and the whole point of a fixture setting it
+  // is to run a REAL shell script — one that legitimately sources a REAL
+  // repo-relative path (e.g. scripts/lib/roster.sh under REPO_ROOT, never
+  // inside the workspace) to reproduce what the three launchers actually run.
+  // 'opaque' because it is not a path at all — it is a multi-line shell
+  // script that CONTAINS paths among other things, and a containment check
+  // built for a single path would reject every legitimate value (the same
+  // BUG-041/BUG-042 misdirection the 'opaque' kind's own docblock names).
+  // tests/mic-recovery's BUG-144 F1 case sets this to reproduce, verbatim,
+  // the launchers' own roster-lookup-in-a-wake-string pattern.
+  AGENT_WAKE_COMMAND: 'opaque',
+  CODEX_WAKE_COMMAND: 'opaque',
   // THE TWO FEED KNOBS, declared for the same reason and by the same test as the
   // two above: each is a NUMBER handed to `sleep` or compared against a byte
   // count, so it names nothing on disk, activates no second variable, and

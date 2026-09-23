@@ -38,10 +38,15 @@
 //      `docs/config/**`, the audit CSV) quote host paths ON PURPOSE, and the
 //      DoD lifecycle re-adds those rows as added lines at every acceptance, so
 //      scanning them would go red on every push that moves a bug. The decision
-//      is read from `git check-attr export-ignore` — the same `.gitattributes`
-//      `git archive` honours when the managed set is derived — so no path list
-//      is kept here. Skipped files are counted in the summary, never dropped
-//      silently.
+//      is `git archive` at the range tip, listed — the SAME command
+//      bp_managed_files (scripts/blueprint) derives the managed set with, so
+//      no path list is kept here and no second reading of `.gitattributes`
+//      exists to disagree with it. NOT `git check-attr`: round 2 read that,
+//      and a trailing-slash directory rule (`tests/<suite>/  export-ignore`,
+//      the shape ten of this repo's lines use) sets the attribute on the
+//      directory, so check-attr answers `unspecified` for every file the
+//      archive drops (tests/contamination-push-scan #9, tests/suite-sync #1c).
+//      Skipped files are counted in the summary, never dropped silently.
 //
 //   3. THE RESIDUAL-NAME CLASS HAS NO OPERAND HERE. contamination_scan's third
 //      BLOCK class flags a project's name that survived reverse-substitution —
@@ -181,39 +186,49 @@ function changedFiles(repo: string, range: string): string[] {
 }
 
 /**
- * Splits `files` into what ships and what does not: a path whose
- * `export-ignore` attribute is set ships to nobody (header, point 2). Read
- * from `git check-attr`, the same `.gitattributes` decision `git archive`
- * applies when the managed set is derived.
+ * The commit whose tree ships: the AFTER side of `BASE..AFTER`, or the one
+ * commit of `X^!` — the two shapes resolveRange produces and usage documents.
  */
-function shippedFiles(repo: string, files: string[]): { shipped: string[]; unshipped: string[] } {
+function rangeTip(range: string): string {
+  const tip = range.replace(/\^!$/, '').split(/\.{2,3}/).pop() ?? ''
+  if (tip === '') {
+    console.error(`::error::cannot tell the tip commit of range ${range} — refusing to guess what ships`)
+    process.exit(1)
+  }
+  return tip
+}
+
+/**
+ * Splits `files` into what ships and what does not (header, point 2): what
+ * `git archive` lists at the range tip ships, everything else reaches nobody.
+ * One archive per push, not a git call per file — a 3 MB tar listed once.
+ * Not `blueprint files`: that lists HEAD, not the pushed tip, and subtracts
+ * the project-owned seeds (TEMPLATE_FILES), which bootstrap still ships.
+ */
+function shippedFiles(repo: string, tip: string, files: string[]): { shipped: string[]; unshipped: string[] } {
   if (files.length === 0) return { shipped: [], unshipped: [] }
-  let out: string
+  let listing: string
   try {
-    out = execFileSync('git', ['-C', repo, 'check-attr', '-z', '--stdin', 'export-ignore'], {
-      encoding: 'utf8',
-      input: files.map((f) => `${f}\0`).join(''),
-      stdio: ['pipe', 'pipe', 'pipe'],
+    const tar = execFileSync('git', ['-C', repo, 'archive', '--format=tar', tip], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 256 * 1024 * 1024,
     })
+    listing = execFileSync('tar', ['-t'], { input: tar, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   } catch (err) {
-    const e = err as { status?: number; stderr?: string }
+    const e = err as { status?: number; stderr?: string | Buffer }
     console.error(
-      `::error::git check-attr failed (exit ${e.status ?? 127}): ${e.stderr ?? ''} — refusing to guess what ships`,
+      `::error::listing git archive ${tip} failed (exit ${e.status ?? 127}): ${String(e.stderr ?? '')} — refusing to guess what ships`,
     )
     process.exit(1)
   }
-  // -z output is path\0attribute\0value\0 per queried path; the value is
-  // "set", "unset" (a `-export-ignore` override) or "unspecified".
-  const fields = out.split('\0')
+  const archived = new Set(listing.split('\n').filter((l) => l !== '' && !l.endsWith('/')))
+  if (archived.size === 0) {
+    console.error(`::error::git archive ${tip} lists no files — refusing to read an empty archive as "nothing ships"`)
+    process.exit(1)
+  }
   const shipped: string[] = []
   const unshipped: string[] = []
-  for (let i = 0; i + 2 < fields.length; i += 3) {
-    const path = fields[i]
-    const value = fields[i + 2]
-    if (path === undefined || value === undefined) break
-    if (value === 'set') unshipped.push(path)
-    else shipped.push(path)
-  }
+  for (const f of files) (archived.has(f) ? shipped : unshipped).push(f)
   return { shipped, unshipped }
 }
 
@@ -291,7 +306,7 @@ function main(): void {
     let demoted = 0
     let scannedFiles = 0
     let scannedLines = 0
-    const { shipped, unshipped } = shippedFiles(repo, changedFiles(repo, range))
+    const { shipped, unshipped } = shippedFiles(repo, rangeTip(range), changedFiles(repo, range))
     for (const file of shipped) {
       const added = addedLines(repo, range, file)
       if (added.length === 0) continue
@@ -327,7 +342,7 @@ function main(): void {
     // string after it fails the gate's typecheck stage.)
     const tally =
       `scanned ${scannedFiles} file(s), ${scannedLines} added line(s) in ${range}` +
-      ` (${unshipped.length} changed file(s) skipped as export-ignore'd: they ship to nobody)`
+      ` (${unshipped.length} changed file(s) skipped: absent from git archive at the tip, they ship to nobody)`
     if (blocked.length > 0) {
       console.log(
         `contamination-push-scan: ${blocked.length} BLOCK finding(s); ${tally}. ` +

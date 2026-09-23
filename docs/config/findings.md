@@ -8,9 +8,48 @@ or because they are accepted risk with a documented re-open trigger.
 and the next review raises it again. Every finding leaves a row here — most of
 all the ones that turned out to be wrong.
 
+## Status schema (TASK-074 / TASK-062-09, audit rows D114, D075, D079)
+
+Every finding below carries exactly one `**Status: …**` line, in the same bold
+form the file already uses for `**Verdict: …**`. Four values, and each MEANS
+something specific here — not the abstract dictionary sense:
+
+- **`Status: Open`** — triaged and written up, but not yet resolved to one of
+  the three terminal states below. The default for a finding still under
+  active investigation or awaiting a trigger it names (e.g. F-002, waiting on
+  two other bugs landing before it can be judged).
+- **`Status: Fixed`** — the underlying issue was corrected, by a code change,
+  a doc rewrite, or another item that landed and is itself founder-accepted.
+  The line names what closed it.
+- **`Status: Deferred: <YYYY-MM-DD>`** — known, not fixed, with the date it
+  must be revisited by. **This is also the form a CVE-tagged `[SEC]` finding
+  uses for D075's upgrade-due date** — `Deferred` already carries a date field
+  in the schema, so a second "upgrade date" field would duplicate it rather
+  than add information. One field, one meaning: the date after which the
+  finding is stale and must be re-triaged (fixed, re-deferred with a new date
+  and a reason, or moved to `Accepted`).
+- **`Status: Accepted: <who signed off>`** — risk accepted, no fix planned.
+  Names the person (the founder, per `project_config_dod.md`
+  §"Acceptance authority") and, for a `[SEC]`-tagged finding, the sign-off is
+  never bare — it points at the threat-model entry or the approving item that
+  makes the acceptance safe (`docs/SECURITY.md` "mark `Status: Accepted` with
+  a sign-off").
+
+**Enforced:** every finding block below carries a `Status:` line whose value
+starts with one of the four words above, `Deferred`/`Accepted` carry the
+date/sign-off the schema requires — enforced by: `tests/lifecycle-docs`
+"TASK-074: every finding in findings.md carries a valid Status line". What
+is NOT enforced, and stays judgement: whether the named status is actually
+true (a `Fixed` finding whose fix regressed), and whether a `[SEC]` finding's
+`Accepted` sign-off really is safe under the threat model it cites.
+
 ---
 
 ## F-001 — `run-ts-suites.sh`'s failure report aborts the gate
+
+**Status: Fixed** — the claimed mechanism does not hold (see Verdict below);
+hardened anyway by the `|| true` landed in TASK-018, which closes the
+residual regardless of the verdict.
 
 **Raised by** Codex, 2026-09-10, against `scripts/run-ts-suites.sh:165,173`.
 Two mechanisms: a zero-match `grep` returns 1, and >40 matching lines may
@@ -67,6 +106,9 @@ of `.githooks/pre-push-project`, or if any gate file on that chain adopts
 ---
 
 ## F-002 — the recurring shape: a check that infers a property from a proxy that is satisfiable without it
+
+**Status: Open** — a pattern record, not a fixable defect; its own text says
+it is "not a rule proposal yet" and names its trigger explicitly (below).
 
 **Raised by** Eto (Orchestrator), 2026-09-10, from eight instances found within one
 week. Not a bug row: there is no single site to fix. It is a claim about how
@@ -154,6 +196,9 @@ someone to write it down.
 
 ## F-003 — the bridge's only non-vitest assertion is gone, and the loss is accepted
 
+**Status: Accepted: the founder, 2026-09-16** (TASK-047 — "migrate the tests
+to be spec driven ts tests, we don't need exceptions").
+
 **Closes TASK-023**, which sat in `docs/backlog/BACKLOG.md` as `KEEP` from
 2026-09-10. Accepted by the founder on **2026-09-16**, deciding TASK-047
 (*"migrate the tests to be spec driven ts tests, we don't need exceptions"*):
@@ -195,6 +240,10 @@ which is a founder decision, not an agent's.
 
 ## F-004 — A-13 (the privacy block never updates) is absorbed by TASK-048
 
+**Status: Fixed** — by TASK-048, landed and founder-accepted
+(`docs/done/BACKLOG.md`), which rewrites the instruction A-13 caught
+describing a mechanism that does not exist.
+
 **Cancelled as a backlog row, 2026-09-16**, and pointed here so it is not raised
 a third time. A-13 recorded that `.gitignore` is **not** in `MANAGED_FILES` while
 its privacy block told the reader not to edit between the blueprint markers
@@ -220,6 +269,9 @@ not fix.
 ---
 
 ## F-005 — eight review-found bugs and TASK-024 cancelled as known limits
+
+**Status: Accepted: the founder, 2026-09-16** (TASK-058) — each bullet below
+is its own documented known limit, not a pending fix.
 
 **Cancelled 2026-09-16, founder-approved** (TASK-058), under docs/DoD.md §1b rule 4:
 a finding becomes work only if it is real and practical. Each is recorded here

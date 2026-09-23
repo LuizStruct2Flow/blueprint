@@ -44,14 +44,15 @@ because another machine only sees what is pushed.
    commits on its own branch; collect it with `git cherry-pick`, or, if it
    stopped before committing, `git -C <worktree> add -A` then
    `git diff --cached --binary` into a patch and `git apply -3` here.
-7. **A worktree can disarm the gate silently.** After the 2026-09-22 worktree
-   run, `core.hooksPath` had been rewritten from `.githooks` to an ABSOLUTE
-   path, and `session-start.sh` then reports *"the struct2flow pre-push gate is
-   NOT active"* — it compares literally, and an absolute path also breaks in
-   any other worktree or clone. Hooks do still fire while the path resolves, so
-   this is a false alarm that will one day be a real one. Fix:
-   `git config --local core.hooksPath .githooks`. Read the wake report; never
-   push past that line.
+7. **BUG-152: a worktree agent un-arms the gate's own check, every time.**
+   Launching a worktree-isolated agent rewrites `core.hooksPath` from
+   `.githooks` to an ABSOLUTE path, and `session-start.sh` then reports *"the
+   struct2flow pre-push gate is NOT active"*. Reproduced four times on
+   2026-09-23. Hooks still fire (the path resolves and the gate ran its stages
+   on every push), so it is a false alarm — but re-arm before every push with
+   `git config --local core.hooksPath .githooks`, read the wake report, and
+   never push past that line. The fix is behind a `scripts/lib/gate.sh` port,
+   which is why BUG-152 is filed rather than patched.
 
 ---
 
@@ -59,9 +60,9 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Five rows wait for acceptance:** TASK-071 to TASK-075 in
+- **Nine rows wait for acceptance:** TASK-071 to TASK-079 in
   [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md), all on
-  `main` with CI green at `d1917cb`. Each row's "Done when" is what to test;
+  `main` with CI green (`d1917cb` for 071-075, `0271a20` for 076-079). Each row's "Done when" is what to test;
   `npm --prefix tests test -- <suite>` runs the check behind it, and
   `node scripts/flip-checks.mts` prints TASK-075's three observations directly.
   Everything landed through 2026-09-22 is already accepted and in `../done/`.
@@ -94,8 +95,10 @@ until there is one. Anyone picking up work reads this and advances it.
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
 | Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
-| Back-End | Matthias (Claude) — TASK-075 | — | Jonathan (Kimi), then Andreas (Codex) |
-| PO | Klaus (Claude) — TASK-074 | — | the next PO item is Claude's only: no other provider has a PO persona |
+| Back-End | Matthias (Claude) — TASK-077 | — | Jonathan (Kimi) once its quota returns, then Andreas (Codex) |
+| PO | Klaus (Claude) — TASK-076 | — | the next PO item is Claude's only: no other provider has a PO persona |
+| Security | Markus (Claude) — TASK-079 | — | Florian (Kimi) once its quota returns; Stefan (Codex) did TASK-078 |
+| QA / review | Jesko (Codex) — TASK-077 + TASK-079 | — | Vijay (Kimi), then Vitali (Claude) |
 
 **Another session writes to this checkout.** On 2026-09-22 storm2flow's
 Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147
@@ -125,6 +128,16 @@ repos the Codex sandbox cannot build.
   fixture-git suites, which the Codex sandbox cannot run (AGENTS.md §"Who does
   the work", founder 2026-09-21). His blind attempt was never pushed, and its
   local branch was deleted when BUG-144 was accepted.
+
+**Kimi hit its 5-hour quota mid-item on 2026-09-23** (`provider.auth_error:
+403`), cutting Jonathan off in the middle of TASK-077's design with nothing
+committed. His partial work was preserved, then dropped once Matthias landed the
+item with a better implementation — but the idea Jonathan had reached, that a
+docs-only commit is row work and not a fix a reproducer must precede, was TESTED
+against real history and adopted. **A provider at zero quota leaves the rotation
+until it returns**, and the item goes to a provider that can VERIFY it: Codex
+could take neither open item here, because its sandbox cannot build the fixture
+git repos both suites need.
 
 **Gemini is now on the roster as QA-4 Gemma (2026-09-22), and two facts about
 it cost a review:**

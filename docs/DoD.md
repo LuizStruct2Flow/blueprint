@@ -111,7 +111,15 @@ Every bug, minor or major:
      reason must be non-empty.
 
    A parked bug needs no test yet.
-4. **No recurring bugs**: a bug that comes back means its regression test was
+4. **A row states whether §3.1's reproducer-first pattern applies to it**:
+   `**Reproducer: required.**` or `**Reproducer: not applicable — <reason>.**`,
+   on the row itself. Whether a bug is the "product or runtime bug" §3.1 scopes
+   the two-commit pattern to is judgement — a checker that infers it from
+   touched files, labels or prose is the shape `findings.md` F-002 names, not a
+   control. This follows BUG-139: turn the judgement call into data ON the row
+   instead of asking anything to guess it. A missing field is an unjudged row,
+   not a default either way.
+5. **No recurring bugs**: a bug that comes back means its regression test was
    wrong, not "refile it".
 
 **Minor vs major**:

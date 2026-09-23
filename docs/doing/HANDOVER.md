@@ -37,6 +37,21 @@ because another machine only sees what is pushed.
 4. **`gh run list --commit` needs the full SHA.** A short one returns nothing and a
    wait loop never ends.
 5. **Codex sandboxes cannot write `~/.cache`**: give a Codex reviewer `TMPDIR=/dev/shm`.
+6. **One agent per checkout — dispatch with `isolation: "worktree"`.** Three
+   agents shared this checkout on 2026-09-22 and their git indexes collided:
+   one agent's CSV edit was swept into another's commit by a shared `git add`,
+   and two of them cost hand-trimmed patches to separate. A worktree agent
+   commits on its own branch; collect it with `git cherry-pick`, or, if it
+   stopped before committing, `git -C <worktree> add -A` then
+   `git diff --cached --binary` into a patch and `git apply -3` here.
+7. **A worktree can disarm the gate silently.** After the 2026-09-22 worktree
+   run, `core.hooksPath` had been rewritten from `.githooks` to an ABSOLUTE
+   path, and `session-start.sh` then reports *"the struct2flow pre-push gate is
+   NOT active"* — it compares literally, and an absolute path also breaks in
+   any other worktree or clone. Hooks do still fire while the path resolves, so
+   this is a false alarm that will one day be a real one. Fix:
+   `git config --local core.hooksPath .githooks`. Read the wake report; never
+   push past that line.
 
 ---
 
@@ -44,9 +59,12 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Nothing waits for acceptance.** Every bug and task landed through
-  2026-09-22 is accepted and in `../done/`, BUG-140's unbuilt "never runs in
-  CI" half included, as moot.
+- **Five rows wait for acceptance:** TASK-071 to TASK-075 in
+  [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md), all on
+  `main` with CI green at `d1917cb`. Each row's "Done when" is what to test;
+  `npm --prefix tests test -- <suite>` runs the check behind it, and
+  `node scripts/flip-checks.mts` prints TASK-075's three observations directly.
+  Everything landed through 2026-09-22 is already accepted and in `../done/`.
 - **BUG-146 is open, and its next step is the founder's to start:**
   [`BUGS.md`](BUGS.md). `tests/sync-by-address` #20d hangs about 1 CI run in 10
   and has never reproduced locally (162 clean runs). The proposed next step is
@@ -76,7 +94,8 @@ until there is one. Anyone picking up work reads this and advances it.
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
 | Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
-| Back-End | Andreas (Codex) — TASK-070 | — | Jonathan (Kimi) |
+| Back-End | Matthias (Claude) — TASK-075 | — | Jonathan (Kimi), then Andreas (Codex) |
+| PO | Klaus (Claude) — TASK-074 | — | the next PO item is Claude's only: no other provider has a PO persona |
 
 **Another session writes to this checkout.** On 2026-09-22 storm2flow's
 Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147
@@ -86,10 +105,11 @@ committing here, check `git log origin/main..HEAD` for commits you did not make.
 A derived project reaches the blueprint through `blueprint a2bp`, not by
 committing into this checkout.
 
-**BUG-144 is reopened:** the recovery misses a dispatch that already claimed
-ACTIVE, which is the common path. Until it is fixed, after every watcher
-dispatch read the run log for `FAILED`; a stranded `State=ACTIVE` is not
-recovered.
+**BUG-150 is open, and it is the common path:** the stranded-mic recovery
+matches on Holder AND Task, but an agent rewrites the Task when it claims
+ACTIVE, so recovery never fires for the failure it was built for. Until it is
+fixed, after every watcher dispatch read the run log for `FAILED` yourself — a
+stranded `State=ACTIVE` is not recovered.
 | QA | Vijay (Kimi) — TASK-068 | — | Vitali (Claude), then Jesko (Codex) for an item Codex can verify |
 
 **TASK-062 runs task by task** from

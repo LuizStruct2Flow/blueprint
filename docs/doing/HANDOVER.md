@@ -20,10 +20,14 @@ because another machine only sees what is pushed.
 
 ## 0. THE THINGS THAT WILL COST YOU FIRST
 
-1. **Run vitest with the pinned binary and a scrubbed env**, from anywhere:
-   `env -u GIT_ASKPASS -u GIT_EDITOR -u GIT_PAGER -u AGENT_PERSONA tests/node_modules/.bin/vitest run --root "$PWD/tests" <suite>`.
-   The harness refuses ambient `GIT_*` / `AGENT_*` variables (a VS Code terminal sets
-   `GIT_ASKPASS`), and the repo root has no vitest config.
+1. **Run the suites with one command, from anywhere:**
+   `npm --prefix tests test` (or `cd tests && npm test`).
+   The `test` script scrubs the terminal's `GIT_*` / `AGENT_*` exports through
+   `run-ts-suites.sh`'s `ts_scrubbed` itself (BUG-149), so a VS Code terminal's
+   `GIT_ASKPASS` no longer matters. To run one suite, append it:
+   `npm --prefix tests test -- doc-links`. A bare `vitest run` still fails by
+   design — the harness guard (`assertProcessEnvClean`) protects specs that
+   spawn directly; only the documented entry point scrubs for you.
 2. **The gate is fast now** (~30 s): suites run in parallel, five
    `*.release.spec.ts` suites run in CI only, and a push of only `.md` files skips the
    code stages. **CI is the release gate**: `released` moves only on green, and the

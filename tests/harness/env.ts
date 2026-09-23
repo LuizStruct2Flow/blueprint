@@ -90,6 +90,14 @@ const ENV_KIND = {
   GIT_OBJECT_DIRECTORY: 'path',
   GIT_ALTERNATE_OBJECT_DIRECTORIES: 'path-list',
   GIT_CEILING_DIRECTORIES: 'path-list',
+  // BUG-149 — the variable a VS Code terminal exports: it names the program
+  // git execs to prompt for credentials. The AMBIENT population was already
+  // scrubbed as an undeclared GIT_* name; declaring it changes only the
+  // OVERRIDE arm: a scenario may now set one deliberately, and because the
+  // value names a program on disk it is 'path', so the fake must live inside
+  // the workspace — which is exactly how tests/ts-bridge #10 reproduces the
+  // founder's terminal.
+  GIT_ASKPASS: 'path',
   // git identity/config resolution — a fixture must not read the developer's
   // real config, and must not be able to write it either.
   GIT_CONFIG: 'path',

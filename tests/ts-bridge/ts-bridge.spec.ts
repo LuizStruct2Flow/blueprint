@@ -552,6 +552,39 @@ describe('BUG-117 — CI starts vitest under the same scrub as the gate', () => 
   })
 })
 
+describe('BUG-149 — the documented entry point scrubs a normal terminal for itself', () => {
+  it('#10 npm test with GIT_ASKPASS set runs the suites green', async () => {
+    await scenario('tsbridge-149', async (s) => {
+      // The founder's terminal exports GIT_ASKPASS (VS Code does), and the
+      // harness rightly refuses to run under it — that guard is BUG-046/047's
+      // class and stays. What was wrong is that the entry point the project
+      // itself documents (`npm test` in tests/) inherited the variable, so
+      // the person who must run acceptance tests was the one person the
+      // command failed for (969 cases). The package.json script now runs
+      // vitest through run-ts-suites.sh's ts_scrubbed; this case executes the
+      // REAL entry point against the REAL tree with GIT_ASKPASS deliberately
+      // set, and expects green.
+      //
+      // The filter narrows the nested run to one cheap suite whose scenarios
+      // call assertProcessEnvClean — the exact guard that fired 969 times —
+      // so a package.json that lost its scrub, or a harness that stopped
+      // declaring GIT_ASKPASS (this case's override would then be refused),
+      // turns RED. The fake askpass is a program inside the workspace, which
+      // is what the 'path' kind in tests/harness/env.ts requires.
+      const askpass = await s.fs.write('askpass.sh', '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+      const r = await s.run('npm', ['test', '--', 'doc-links/doc-links.spec.ts'], {
+        cwd: join(REPO_ROOT, 'tests'),
+        env: { GIT_ASKPASS: askpass },
+        timeoutMs: 180_000,
+      })
+      expect(
+        r.code,
+        `npm test failed with GIT_ASKPASS set — the documented entry point does not scrub a normal terminal\n${r.output}`,
+      ).toBe(0)
+    })
+  })
+})
+
 describe('BUG-132 — CI runs the suites on a machine the installer prepared', () => {
   it('#9 after the suites job’s provisioning steps, install-toolchain.sh check passes on a runner that had none of its tools', async (ctx) => {
     const notGithub = await notGithubActions(REPO_ROOT)

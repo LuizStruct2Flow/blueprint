@@ -58,6 +58,8 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { skipVisibly } from '../helpers/project-config.js'
+import { existsSync } from 'node:fs'
 import {
   backlogMarkerViolations,
   bugsWithoutRows,
@@ -156,16 +158,34 @@ describe('lifecycle-docs — a record that states something untrue costs more th
     ])
   })
 
-  it('#live every finding in docs/config/findings.md carries a valid Status line', async () => {
-    const findingsMd = await readFile(join(REPO_ROOT, 'docs', 'config', 'findings.md'), 'utf8')
+  it('#live every finding in docs/config/findings.md carries a valid Status line', async (ctx) => {
+    // This suite ships, so it also runs inside every derived project's gate. A
+    // freshly bootstrapped project has raised no finding yet and therefore has
+    // no register at all — that is day one, not a violation, and reading the
+    // file unconditionally made the bootstrap gate red (caught by
+    // tests/bootstrap-gate before it could reach a project).
+    const findingsPath = join(REPO_ROOT, 'docs', 'config', 'findings.md')
+    let findingsMd: string
+    try {
+      findingsMd = await readFile(findingsPath, 'utf8')
+    } catch {
+      // Swallowed deliberately: absence IS the answer here — a project with no
+      // findings register has nothing for the schema to be true or false about.
+      skipVisibly(ctx, 'no docs/config/findings.md in this project — no finding has been raised yet')
+    }
     const ids = [...findingsMd.matchAll(/^## (F-\d+)/gm)].map((m) => m[1])
 
     expect(
       findingsMissingValidStatus(findingsMd),
       'every finding needs Status: Open / Fixed / Deferred: <date> / Accepted: <sign-off> (docs/config/findings.md §"Status schema")',
     ).toEqual([])
-    // Non-vacuity floor: the register has findings and this scanned them.
-    expect(ids.length, 'no F-NNN heading was found, so this proves nothing').toBeGreaterThanOrEqual(5)
+    // Non-vacuity floor, blueprint-only: this register has 5 findings, so a
+    // pass here proves the scanner ran. A derived project's register is its
+    // own and may legitimately hold one finding — the schema still binds it,
+    // the count cannot.
+    if (existsSync(join(REPO_ROOT, '.blueprint-root'))) {
+      expect(ids.length, 'no F-NNN heading was found, so this proves nothing').toBeGreaterThanOrEqual(5)
+    }
   })
 
   it('TASK-070: every parked BACKLOG row has a valid Category marker and non-OBSOLETE rows have a re-open trigger', async () => {

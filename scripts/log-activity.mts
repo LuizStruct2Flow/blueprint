@@ -258,17 +258,20 @@ async function runDeferredChild(): Promise<never> {
   process.exit(0)
 }
 
-// Ported verbatim from the shell version's own read: an external `cat`, its
-// exit code folding EVERY failure — "no such file" same as a transient
-// fork/exec error under load — into "no owner" (`_ds_pid="$(cat "$_ds_slot/pid"
-// 2>/dev/null)" || _ds_pid=""`). BUG-153 is that fold; the fix is tracked
-// separately so the port and the behaviour change are not the same commit.
-function readSlotPid(slot: string): { pid: string } {
-  const r = spawnSync('cat', [join(slot, 'pid')], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  })
-  return { pid: r.status === 0 ? (r.stdout ?? '').trim() : '' }
+function readSlotPid(slot: string): { pid: string; unknown: boolean } {
+  try {
+    return { pid: readFileSync(join(slot, 'pid'), 'utf8').trim(), unknown: false }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pid: '', unknown: false }
+    // BUG-153: a read failure on a slot that EXISTS must not read as "no
+    // owner" — the shell version's `cat` could fail transiently (fork/exec
+    // EAGAIN under load) and still fold into `_ds_pid=""`, so a live
+    // reservation was reclaimed out from under its real owner. Reading
+    // in-process removes the fork/exec hazard entirely for the ordinary case
+    // (ENOENT), and fails CLOSED — owner unknown, so treated as live — for
+    // every other one.
+    return { pid: '', unknown: true }
+  }
 }
 
 // defer_spawn — reserve a slot and hand it a detached child, atomically:
@@ -334,9 +337,9 @@ async function deferSpawn(): Promise<boolean> {
     while (n < BP_SUBAGENT_DEFER_MAX) {
       const slot = join(deferDir, `slot-${n}`)
       if (existsSync(slot)) {
-        const { pid } = readSlotPid(slot)
-        let alive = false
-        if (pid) {
+        const { pid, unknown } = readSlotPid(slot)
+        let alive = unknown
+        if (!alive && pid) {
           const pidNum = Number(pid)
           if (Number.isInteger(pidNum)) {
             try {

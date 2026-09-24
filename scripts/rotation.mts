@@ -130,6 +130,7 @@ export function readEvents(path: string, report: (message: string) => void = (me
     try {
       events.push(JSON.parse(line) as RotationEvent)
     } catch {
+      // reported on stderr below, never silently dropped
       report(`rotation: malformed complete record at ${path} line ${index + 1}; skipped`)
     }
   })

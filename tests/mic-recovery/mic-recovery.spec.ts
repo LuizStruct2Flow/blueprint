@@ -80,7 +80,8 @@ const FIXTURE_ROSTER =
   '\n' +
   '| Role | Name | Backing agent |\n' +
   '|---|---|---|\n' +
-  '| Orchestrator | FixtOrchy | Claude Code |\n'
+  '| Orchestrator | FixtOrchy | Claude Code |\n' +
+  '| Back-End-3 | Kimi | Kimi |\n'
 
 /**
  * A repo-shaped tree inside the workspace (BUG-148): root marker, fixture
@@ -107,6 +108,7 @@ async function liveRepo(s: Scenario, name: string): Promise<{ root: string; watc
   if (existsSync(join(SUBJECT, watchMts))) {
     await s.fs.copyIn(join(SUBJECT, watchMts), `${name}/${watchMts}`)
   }
+  await s.fs.copyIn(join(SUBJECT, 'scripts', 'rotation.mts'), `${name}/scripts/rotation.mts`)
   // recoverStrandedMic hands back through scripts/signal-set.sh, resolved
   // from the SAME copied code root — the fixture copy must carry it, and its
   // mandatory lib/state-dir.sh source with it.
@@ -165,6 +167,69 @@ async function assertNoRosterBesideBaton(s: Scenario, stateDirRel: string): Prom
 }
 
 describe('BUG-144 — a failed dispatch must not strand the mic', () => {
+  it('TASK-065: records the dispatched run-log slice as quota before recovering the mic', async () => {
+    await scenario('mic-recovery-rotation-quota', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-rotation-quota')
+      const stateDirRel = 'mic-recovery-rotation-quota/logs/state'
+      const agentStateRel = 'state'
+      const signalRel = `${stateDirRel}/signal.md`
+      const signalPath = s.workspace.path(signalRel)
+      const runLogPath = s.workspace.path(`${agentStateRel}/kimi-runs.log`)
+      await s.fs.write(signalRel, '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n')
+      await s.fs.write(`${agentStateRel}/kimi-runs.log`, 'older run\n')
+      const stub = await s.fs.write('mic-recovery-rotation-quota/stub-wake', '#!/bin/sh\n' +
+        `printf "error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit\\nkimi FAILED (exit 1)\\n" >> "${runLogPath}"\n`, { mode: 0o755 })
+      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      await until('quota outcome is recorded', async () => {
+        if (!await s.fs.exists(`${agentStateRel}/rotation.log`)) return false
+        return (await s.fs.read(`${agentStateRel}/rotation.log`)).includes('"class":"quota"')
+      })
+      expect(await s.fs.read(`${agentStateRel}/rotation.log`)).toContain('"source":"' + runLogPath + '@10"')
+      await w.stop()
+    })
+  })
+
+  it('TASK-065: records a clean dispatched run-log slice as ok', async () => {
+    await scenario('mic-recovery-rotation-ok', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-rotation-ok')
+      const stateDirRel = 'mic-recovery-rotation-ok/logs/state'
+      const agentStateRel = 'state'
+      const signalRel = `${stateDirRel}/signal.md`
+      const signalPath = s.workspace.path(signalRel)
+      const runLogPath = s.workspace.path(`${agentStateRel}/kimi-runs.log`)
+      await s.fs.write(signalRel, '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n')
+      await s.fs.write(`${agentStateRel}/kimi-runs.log`, '')
+      const stub = await s.fs.write('mic-recovery-rotation-ok/stub-wake', '#!/bin/sh\n' +
+        `printf 'kimi finished\\n' >> "${runLogPath}"\n`, { mode: 0o755 })
+      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      await until('ok outcome is recorded', async () => (await s.fs.exists(`${agentStateRel}/rotation.log`)) && (await s.fs.read(`${agentStateRel}/rotation.log`)).includes('"class":"ok"'))
+      await w.stop()
+    })
+  })
+
+  it('TASK-065: a missing outcome recorder is logged and mic recovery still runs', async () => {
+    await scenario('mic-recovery-rotation-missing', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-rotation-missing')
+      const orchestrator = await orchestratorOf(s, live.root)
+      const signalRel = 'mic-recovery-rotation-missing/logs/state/signal.md'
+      const signalPath = s.workspace.path(signalRel)
+      const runLogPath = s.workspace.path('state/kimi-runs.log')
+      const rotationPath = join(live.root, 'scripts', 'rotation.mts')
+      await s.fs.write(signalRel, '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n')
+      await s.fs.write('state/kimi-runs.log', '')
+      const stub = await s.fs.write('mic-recovery-rotation-missing/stub-wake', '#!/bin/sh\n' +
+        `printf 'kimi FAILED (exit 1)\\n' >> "${runLogPath}"\n` +
+        `mv "${rotationPath}" "${rotationPath}.gone"\n`, { mode: 0o755 })
+      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      await until('recorder failure is visible and the mic is recovered', async () => {
+        const recovered = await readField(s, signalRel, 'Holder') === orchestrator
+        const logged = (await s.fs.exists('state/signal.log')) && /rotation outcome recorder failed/.test(await s.fs.read('state/signal.log'))
+        return recovered && logged
+      })
+      await w.stop()
+    })
+  })
+
   it('a stub wake command that exits without flipping the baton is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-1', async (s) => {
       const live = await liveRepo(s, 'mic-recovery-1')

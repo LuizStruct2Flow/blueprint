@@ -20,7 +20,7 @@
 // the project's state dir (<repo>/logs/state/signal.log; see scripts/lib/state-dir.sh).
 
 import { spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -123,6 +123,7 @@ const STATE_DIR_LIB = join(BP_CODE_ROOT, 'scripts/lib/state-dir.sh')
 // the BUG-144 mic-recovery fix below.
 const ROSTER_LIB = join(BP_CODE_ROOT, 'scripts/lib/roster.sh')
 const SIGNAL_SET = join(BP_CODE_ROOT, 'scripts/signal-set.sh')
+const ROTATION = join(BP_CODE_ROOT, 'scripts/rotation.mts')
 
 function stateDirFn(
   fn: string,
@@ -164,12 +165,46 @@ function agentSignalFile(clearOverride: boolean): string {
 // tee -a LOG_FILE: write the line to our own stdout AND append it to the
 // trigger log.
 function teeLine(logFile: string, text: string): void {
-  process.stdout.write(`${text}\n`)
+  writeSync(1, `${text}\n`)
   appendFileSync(logFile, `${text}\n`)
 }
 
 function isoNow(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+export function providerRunLogName(state: string): string {
+  return `${state.replace(/^OVER_TO_/, '').toLowerCase()}-runs.log`
+}
+
+function runLogOffset(path: string): number | undefined {
+  try {
+    return statSync(path).size
+  } catch {
+    // a missing run log is the ordinary cold-start case, not an error to report
+    return undefined
+  }
+}
+
+function recordDispatchOutcome(holder: string, runLog: string, from: number | undefined): string | undefined {
+  const after = runLogOffset(runLog)
+  if (from === undefined || after === undefined || after <= from) {
+    teeLine(logFile, `[${isoNow()}] rotation outcome not recorded for ${holder}: ${runLog} is missing or did not grow`)
+    return undefined
+  }
+  const result = spawnSync(process.execPath, [ROTATION, 'record', holder, '--run-log', runLog, '--from', String(from)], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, AGENT_ROSTER_FILE: BP_STATE_ROOT },
+  })
+  if (result.status !== 0) {
+    const details = (result.stderr ?? '').trim().split('\n')
+    const detail = details[details.length - 1] || `exit ${result.status ?? 'null'}`
+    teeLine(logFile, `[${isoNow()}] rotation outcome recorder failed for ${holder}: ${detail}`)
+    return undefined
+  }
+  const outcomes = (result.stdout ?? '').trim().split('\n')
+  return outcomes[outcomes.length - 1]
 }
 
 // --- argument parsing --------------------------------------------------------
@@ -424,8 +459,9 @@ function stillStranded(dispatchedHolder: string, dispatchedState: string, dispat
 
   const since = journalLinesSince(dispatchMarker)
   if ('anomaly' in since) {
-    process.stderr.write(
-      `signal-watch: ${since.anomaly} — leaving the mic where it is rather than risk recovering over a dispatch the journal can no longer show.\n`,
+    teeLine(
+      logFile,
+      `signal-watch: ${since.anomaly} — leaving the mic where it is rather than risk recovering over a dispatch the journal can no longer show.`,
     )
     return false
   }
@@ -544,6 +580,8 @@ function triggerIfNeeded(): boolean {
   // everything from this instant on, which is exactly what recovery needs
   // to ask "has anything new been dispatched since".
   const dispatchMarker = journalMarker()
+  const dispatchRunLog = join(agentStateDir(), providerRunLogName(targetState))
+  const dispatchRunLogOffset = runLogOffset(dispatchRunLog)
 
   // Built as a FRESH env object for the dispatched child only — never
   // assigned onto process.env. The shell version has to export these into
@@ -606,6 +644,8 @@ function triggerIfNeeded(): boolean {
     // narrower feature set being absent.
     spawnSync('bash', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
+
+  recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
 
   if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, dispatchMarker)
 

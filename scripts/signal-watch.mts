@@ -384,19 +384,59 @@ function journalMarker(): number {
   return journalLines().length
 }
 
-// hasNewDispatchSince — a genuinely NEW dispatch to `holder` recorded in the
-// journal strictly after `marker`. Matched on the exact `Holder=%s State=%s`
-// substring printf writes (scripts/signal-set.sh), anchored by the literal
-// space between the two fields, so a Task that happens to contain similar
-// text cannot spoof a different line's Holder/State pair.
-function hasNewDispatchSince(marker: number, holder: string): boolean {
-  const needle = `Holder=${holder} State=OVER_TO_`
-  return journalLines().slice(marker).some((line) => line.includes(needle))
+// journalLinesSince — the journal's content strictly after `marker`, OR the
+// reason it cannot be trusted. Reviewer finding on the BUG-150 fix:
+// journalLines() above degrades a read failure to `[]` unconditionally, which
+// is correct ONLY at the cold-start marker (0 — nothing has ever been
+// recorded, so there is nothing a vanished file could be hiding) and WRONG
+// once marker > 0 — the journal was readable with at least `marker` lines
+// when this dispatch was marked, so a shorter or unreadable journal now is
+// not "no new dispatch", it is the journal no longer answering the question
+// at all. Recovery must fail SAFE on that distinction: anomaly, not absence.
+function journalLinesSince(marker: number): { lines: string[] } | { anomaly: string } {
+  let content: string
+  try {
+    content = readFileSync(journalPath(), 'utf8')
+  } catch {
+    // Missing/unreadable journal: at marker 0 this is the ordinary cold
+    // start (nothing recorded yet), everywhere else it is the anomaly
+    // returned below — never silently swallowed either way.
+    if (marker === 0) return { lines: [] }
+    return {
+      anomaly:
+        `the journal at ${journalPath()} is unreadable, but had ${marker} line(s) ` +
+        'recorded when this dispatch was marked',
+    }
+  }
+  const lines = content.split('\n').filter((line) => line.length > 0)
+  if (lines.length < marker) {
+    return {
+      anomaly:
+        `the journal at ${journalPath()} has ${lines.length} line(s), fewer than the ` +
+        `${marker} recorded when this dispatch was marked`,
+    }
+  }
+  return { lines: lines.slice(marker) }
 }
 
 function stillStranded(dispatchedHolder: string, dispatchedState: string, dispatchMarker: number): boolean {
   if (readField(signalFile, 'Holder') !== dispatchedHolder) return false
-  if (hasNewDispatchSince(dispatchMarker, dispatchedHolder)) return false
+
+  const since = journalLinesSince(dispatchMarker)
+  if ('anomaly' in since) {
+    process.stderr.write(
+      `signal-watch: ${since.anomaly} — leaving the mic where it is rather than risk recovering over a dispatch the journal can no longer show.\n`,
+    )
+    return false
+  }
+  // A genuinely NEW dispatch to `dispatchedHolder` recorded since the marker.
+  // Matched on the exact `Holder=%s State=%s` substring printf writes
+  // (scripts/signal-set.sh), anchored by the literal space between the two
+  // fields, so a Task that happens to contain similar text cannot spoof a
+  // different line's Holder/State pair.
+  const needle = `Holder=${dispatchedHolder} State=OVER_TO_`
+  if (since.lines.some((line) => line.includes(needle))) return false
+
   const state = readField(signalFile, 'State')
   return state === dispatchedState || state === 'ACTIVE'
 }

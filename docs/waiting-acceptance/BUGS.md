@@ -22,6 +22,7 @@ belong where the decision happens.
 
 | # | Bug | Severity | Status | What to test | Detail |
 |---|---|---|---|---|---|
+| **BUG-149** | **The founder cannot run the test suite: the obvious commands fail with 969 errors in an ordinary terminal.** | S2 | FIXED `97c7cb4`, CI green | In a VS Code terminal (which exports `GIT_ASKPASS`), run `npm --prefix tests test`. Expect the whole suite green. A bare `vitest run` still fails closed, by design. The regression test is `tests/ts-bridge` "BUG-149 — the documented entry point scrubs a normal terminal for itself". | `tests/package.json`'s `test` script now runs vitest through `run-ts-suites.sh`'s existing `ts_scrubbed`, and `tests/harness/env.ts` declares `GIT_ASKPASS` as a known override. The harness guard still protects specs that spawn directly. **Re-open if** the documented command fails in a normal terminal. |
 
 The 2026-07-29 QA pass dispositioned the earlier bugs: BUG-001, BUG-002 and
 BUG-003 are all ACCEPTED and live in [`../done/BUGS.md`](../done/BUGS.md) with

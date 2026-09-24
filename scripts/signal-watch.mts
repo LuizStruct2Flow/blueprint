@@ -477,7 +477,12 @@ function stillStranded(dispatchedHolder: string, dispatchedState: string, dispat
   return state === dispatchedState || state === 'ACTIVE'
 }
 
-function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, dispatchMarker: number): void {
+function recoverStrandedMic(
+  dispatchedHolder: string,
+  dispatchedState: string,
+  dispatchMarker: number,
+  outcome: string | undefined,
+): void {
   if (!stillStranded(dispatchedHolder, dispatchedState, dispatchMarker)) return
 
   // BP_STATE_ROOT, not dirname(signalFile): the roster lives at the project
@@ -527,7 +532,12 @@ function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, d
   // claim that no two writers can overlap).
   if (!stillStranded(dispatchedHolder, dispatchedState, dispatchMarker)) return
 
-  const task = `${dispatchedHolder}'s dispatch ended without handing back the mic - read the provider run log`
+  // TASK-065 slice 5: the recorded outcome, not a generic pointer to go
+  // read the run log by hand — `rotation.mts coverage` has the reason and
+  // the source line for anyone who wants more than the class name.
+  const task = outcome === undefined
+    ? `${dispatchedHolder}'s dispatch ended without handing back the mic - read the provider run log`
+    : `${dispatchedHolder}'s dispatch ended without handing back the mic - rotation recorded a '${outcome}' outcome, see node scripts/rotation.mts coverage`
   // AGENT_ROSTER_FILE, for the SAME reason `--file` targets the baton at
   // signalFile rather than signal-set.sh's own derived one: signal-set.sh
   // validates --holder against a roster of its OWN, resolved from its own
@@ -645,9 +655,9 @@ function triggerIfNeeded(): boolean {
     spawnSync('bash', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
 
-  recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
+  const outcome = recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
 
-  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, dispatchMarker)
+  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, dispatchMarker, outcome)
 
   return true
 }

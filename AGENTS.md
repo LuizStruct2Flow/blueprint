@@ -185,8 +185,9 @@ rotate at all. **That is a roster gap, not a licence to cross roles**: a back-en
 task does not go to a front-end persona because the back-end rotation is
 exhausted. It waits, or the founder is told the role is short.
 
-`bp_roster_rows` plus a strip of the `-N` suffix answers "who covers this role"
-in one pass — TASK-065 makes it a command rather than a thing to remember.
+`node scripts/rotation.mts coverage [<family>]` answers "who covers this role"
+in one command, rather than a thing to remember: `bp_roster_rows` plus a strip
+of the `-N` suffix, for every family or one.
 
 ### The rotation turns per WORK ITEM, and the agent ends with it
 
@@ -221,13 +222,17 @@ subagent that did the work and accumulated the context.
 **Round-robin picks the AUTHOR. Four-eyes constrains the REVIEWER.** They
 compose: the rotation chooses who writes, and the review must then come from a
 provider that did not. No conflict unless the rotation has shrunk to one.
+`node scripts/rotation.mts next <family> --item <ID>` picks the author,
+`node scripts/rotation.mts review <family> --item <ID>` the reviewer.
 
 **When only one provider has quota, four-eyes cannot be satisfied.** That is a
 real state, not a hypothetical, and it must not be resolved by quietly letting a
 provider review itself — the rule's entire value is that the reviewer has a
-different blind spot. Hold the push and tell the founder, who decides whether to
-wait for quota or waive the review for that change. **A waiver is the founder's,
-never an agent's.**
+different blind spot. `review` exits 4 in exactly that state, naming the
+family and the one provider left. Hold the push and tell the founder, who
+decides whether to wait for quota or waive the review for that change. **A
+waiver is the founder's, never an agent's**, recorded as
+`node scripts/rotation.mts assign <persona> --item <ID> --reason "<founder's waiver>"`.
 
 ### Defaults the Orchestrator applies until told otherwise
 
@@ -240,13 +245,17 @@ decisions — correct them and they change.
   decides. A reviewer's finding is input, not an order (DoD §1b rule 4), so
   "two out of three" is not a verdict.
 - **Quota exhaustion is detected from the provider's own refusal**, not
-  predicted. Until the mechanism in TASK-065 lands, this is the Orchestrator
-  noticing a dispatch fail and saying so.
+  predicted. The signal watcher records it automatically after every dispatch
+  (`node scripts/rotation.mts record`, wired into `scripts/signal-watch.mts`);
+  an agent that is not watcher-dispatched (a Claude subagent, an Ollama
+  junior) records its own with the same command.
 
-**This is prose, and prose is the weak form.** TASK-065 mechanises the rotation
-and the quota state so that the selection is made by code rather than by an
-agent remembering this section — the direction TASK-062 sets for every rule in
-this repo.
+**This used to be prose, and prose is the weak form.** TASK-065 mechanised the
+rotation and the quota state: `node scripts/rotation.mts <next|review|assign|
+record|retry|coverage>` is now where this section's rules are enforced, not
+just written down — the direction TASK-062 sets for every rule in this repo.
+Its event log is `logs/state/rotation.log`, per-checkout state, exactly like
+the baton.
 
 ## Four-eyes cross-provider review (mandatory before push)
 

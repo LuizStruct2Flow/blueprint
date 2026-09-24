@@ -97,18 +97,14 @@ because another machine only sees what is pushed.
 
 ### The rotation, as of 2026-09-24
 
-**There is no rotation state file yet** (TASK-065 builds it; its plan is
-[PLAN-TASK-065-rotation.md](PLAN-TASK-065-rotation.md)), so it lives here until
-there is one. Anyone picking up work reads this and advances it.
-
-| Role | Last completed by | In flight | Next |
-|---|---|---|---|
-| Infrastructure | Philipp (Claude) — BUG-146 | Philipp (Claude) — BUG-152, BUG-153 (both reassigned) | Elias (Codex) for an item Codex can verify, then Thomas (Kimi) |
-| Back-End | Matthias (Claude) — BUG-147 | Matthias (Claude) — BUG-150 (reassigned from Andreas) | Jonathan (Kimi): BUG-151, after TASK-065 lands |
-| Architect | Christian (Claude) — TASK-065 plan | — | Alexey (Codex), then Slava (Kimi) |
-| PO | Klaus (Claude) — TASK-065 plan review | — | Claude only: no other provider has a PO persona |
-| Security | Markus (Claude) — TASK-079 | — | Florian (Kimi) once its quota returns |
-| QA / review | Vitali (Claude) — TASK-062 goal (d); Jesko (Codex) — review of BUG-146/147, TASK-062 | — | Vijay (Kimi), then Jesko (Codex) |
+**TASK-065 landed: the rotation is a command, not a table.** Run
+`node scripts/rotation.mts coverage` (or `coverage <family>`) for who covers
+each role family, their state, and the next pick — `logs/state/rotation.log`
+is the per-checkout event log behind it, seeded from this section's last hand
+table with `node scripts/rotation.mts assign <persona> --item <ID> --reason
+"seeded from HANDOVER 2026-09-22"`. The table that used to live here is gone;
+`coverage` is now the one place this is read from, so it cannot drift out of
+sync with what actually got dispatched the way a hand-updated table did.
 
 **2026-09-24: both other providers ran out mid-item, and the founder waived
 four-eyes for that batch only.** Kimi hit its 5-hour limit at 13:41Z during

@@ -687,20 +687,22 @@ Runnable on your own projects this week, with no new tooling.
 
 ---
 
-# What the original audit told me to do
+# What the audit told me to do
 
-The original 309-rule triage:
+Every one of the 373 audited rows carries a verdict:
 
-| Disposition | Rules | |
-|---|---|---|
-| **Mechanise** | 169 | worth a real control |
-| **Already fine** | 52 | a mechanism exists and was proven to fire |
-| **Keep, stop claiming** | 52 | real rule, honestly unenforceable |
-| **Delete as aspiration** | 36 | describes a project this is not |
+| Disposition | Audit | Today | |
+|---|---:|---:|---|
+| **Mechanise** | 47 | **30** | worth a real control, still owed |
+| **Already fine** | 125 | **141** | a mechanism exists and was proven to fire |
+| **Keep, stop claiming** | 166 | **167** | real rule, honestly unenforceable |
+| **Delete, or aspiration** | 35 | 35 | removed, or describes a project this is not |
 
 <br>
 
-**88 rules get downgraded or deleted.** That is the deliverable, not a concession — a small honest protocol beats a large decorative one.
+**202 rules get downgraded or deleted.** That is the deliverable, not a concession — a small honest protocol beats a large decorative one.
+
+<span class="small">The middle column is the audit as accepted on 2026-09-17; the right is today. Only <strong>Mechanise</strong> is a queue — it shrinks as controls land, and it is the one number an outsider can hold me to.</span>
 
 ---
 

@@ -322,21 +322,23 @@ One question per rule:
 
 > **What mechanism enforces this, and can you make it fail?**
 
-<div class="stat">309</div>
+<div class="stat">373</div>
 
-**rules inventoried.** Every normative line in `CLAUDE.md` and `docs/DoD.md`.
+**audited rows today.** Every normative line in `CLAUDE.md` and `docs/DoD.md`, plus mechanism-only controls found in the refresh.
+
+<span class="small">The original audit had 309 rows. The accepted refresh added 64 newly written or mechanism-only rules; that is scope growth, not enforcement progress. Excluding 35 rows marked for deletion leaves the 338 live-rule denominator used from here on.</span>
 
 ---
 
 # The result
 
-<div class="stat">233 / 309</div>
+<div class="stat">204 → 189 / 338</div>
 
-**had no mechanism at all** — prose in an agent's context, nothing more.
+**live rules had no mechanism at all** — accepted audit → today.
 
 <br>
 
-Uncomfortable, but not the interesting number. **Rules without mechanisms are a known problem with a known fix.**
+The enforcement epic moved **15 rules out of prose-only**. Real movement, and small enough to be honest about.
 
 The interesting result was among the rules that *did* have one.
 
@@ -414,16 +416,18 @@ That is not exotic — it is where most teams already are: **different engineers
 
 # The layer decides the reach
 
-Same 309 rules, one different question.
+Same 338 live rules, one different question — and the baseline beside today.
 
-| Enforced by | Binds | Rules |
-|---|---|---|
-| nothing — prose only | nobody | **233** |
-| a git hook | everyone, *if* hooks are armed | **67** |
-| a setting inside one agent's own client | that one agent | **8** |
-| CI | everyone, unconditionally | **1** |
+| Enforced by (`ENFORCED`) | Binds | Baseline | Today |
+|---|---|---:|---:|
+| nothing — prose only | nobody | **204** | **189** |
+| one client's hook | that client | **16** | **18** |
+| repository script | whoever invokes it | **23** | **23** |
+| repository test | every run of the suite | **41** | **51** |
+| local git control | everyone, *if* hooks are armed | **42** | **42** |
+| CI-backed control | every pushed change | **12** | **15** |
 
-<span class="small">"Inside one agent's own client" means a file only that tool reads — <code>.claude/settings.json</code>, a Cursor rule, a Copilot instructions file. No other agent honours it.</span>
+<span class="small">Counts use <code>ENFORCED</code>, not the stale <code>BINDS</code> field: four newly mechanised rows still say <code>UNANCHORED</code>. Six live rows are marked <code>STALE</code>; this is an audit trajectory, not a claim that every row has passed a fresh consistency review.</span>
 
 ---
 
@@ -683,7 +687,9 @@ Runnable on your own projects this week, with no new tooling.
 
 ---
 
-# What the audit told me to do
+# What the original audit told me to do
+
+The original 309-rule triage:
 
 | Disposition | Rules | |
 |---|---|---|
@@ -700,16 +706,22 @@ Runnable on your own projects this week, with no new tooling.
 
 # My scoreboard, so yours has a reference
 
-<div class="stat">62 / 309</div>
+<div class="stat">134 → 149 / 338</div>
 
-**enforced by a mechanism that both actually runs and is not tied to one agent.**
+**live rules with a named mechanism** — accepted audit → today.
 
 <br>
 
-Low — and **the first time the number existed.** A month ago the honest answer was *"most of them, I think."*
+The development is visible in the CSV history:
+
+**134 → 138 → 141 → 143 → 147 → 148 → 149**
+
+Low — and now a ratchet rather than a feeling. The epic's net movement so far is **+15**.
 
 > **Knowing the number is the whole difference.**
 > You cannot ratchet a number you have never measured.
+
+<span class="small">Denominator: 338 live rows; 35 <code>DELETED</code>/<code>DELETE-AS-ASPIRATION</code> rows are excluded. “Named mechanism” is the CSV's <code>ENFORCED != NONE</code>; reach is shown separately because those are different claims.</span>
 
 ---
 
@@ -761,7 +773,7 @@ I have **one**. That works because they are my projects and they follow my stand
 - one per **adopted technology** — Kafka, your cloud, your UI kit
 - one for **agentic-coding standards**, which every project pulls
 
-<span class="small">My own numbers argue it: 309 rules, 88 being deleted — a single blueprint straining at pet-project scale.</span>
+<span class="small">My own numbers argue it: 338 live rules, 189 still prose-only — a single blueprint already straining at pet-project scale.</span>
 
 ---
 
@@ -794,4 +806,4 @@ and let your incidents grow them.**
 **Luiz Scheidegger**
 luiz@struct2flow.com
 
-<span class="small">Every number here comes from an audit of the live repository,<br>reproducible from <code>git show dc225c9:docs/doing/TASK-022-rule-enforcement.xlsx</code></span>
+<span class="small">Every enforcement number here is derived from the tracked CSV history:<br><code>git log -- docs/done/TASK-022-anchor-rules/TASK-022-rule-enforcement.csv</code></span>

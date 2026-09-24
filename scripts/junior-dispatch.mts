@@ -9,6 +9,8 @@
  * whereas bp_roster_model_for_name resolves the frontier aliases used by the
  * remote providers. bp_roster_rows is therefore the canonical resolver for
  * this one literal-model backing; no Markdown parsing is duplicated here.
+ * Blank answer lines are omitted from the activity feed; the run log preserves
+ * the complete cleaned output.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -92,6 +94,10 @@ feed_append "$3"
   if (result.stderr) writeSync(process.stderr.fd, result.stderr)
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /** Render the CSI cursor/erase operations Ollama uses for streaming redraws. */
 function cleanTerminalOutput(raw: string): string {
   const trailingNewline = raw.endsWith('\n')
@@ -162,32 +168,39 @@ async function main(): Promise<number> {
 
   feedAppend(stateRoot, `[${persona} - Ollama] dispatched — ${briefPath}, model ${model}`)
   const started = Date.now()
-  const result = await runOllama(model, brief)
+  let terminalLine = `[${persona} - Ollama] FAILED (dispatcher ended without a result)`
+  try {
+    const result = await runOllama(model, brief)
 
-  const runLog = join(stateRoot, 'logs', 'state', 'ollama-runs.log')
-  await mkdir(dirname(runLog), { recursive: true })
-  await appendFile(runLog, result.output, 'utf8')
-  if (result.output) writeSync(process.stdout.fd, result.output)
+    const runLog = join(stateRoot, 'logs', 'state', 'ollama-runs.log')
+    await mkdir(dirname(runLog), { recursive: true })
+    await appendFile(runLog, result.output, 'utf8')
+    if (result.output) writeSync(process.stdout.fd, result.output)
 
-  const lines = result.output.split('\n')
-  if (lines.at(-1) === '') lines.pop()
-  for (const line of lines) {
-    if (line) feedAppend(stateRoot, `[${persona} - Ollama] ${line}`)
+    const lines = result.output.split('\n')
+    if (lines.at(-1) === '') lines.pop()
+    for (const line of lines) {
+      if (line) feedAppend(stateRoot, `[${persona} - Ollama] ${line}`)
+    }
+
+    if (result.status === 0) {
+      const seconds = Math.floor((Date.now() - started) / 1000)
+      terminalLine = `[${persona} - Ollama] finished (exit 0, ${seconds}s)`
+    } else {
+      terminalLine = `[${persona} - Ollama] FAILED (exit ${result.status})`
+    }
+    return result.status
+  } catch (error) {
+    terminalLine = `[${persona} - Ollama] FAILED (${errorMessage(error)})`
+    throw error
+  } finally {
+    feedAppend(stateRoot, terminalLine)
   }
-
-  if (result.status === 0) {
-    const seconds = Math.floor((Date.now() - started) / 1000)
-    feedAppend(stateRoot, `[${persona} - Ollama] finished (exit 0, ${seconds}s)`)
-  } else {
-    feedAppend(stateRoot, `[${persona} - Ollama] FAILED (exit ${result.status})`)
-  }
-  return result.status
 }
 
 try {
   process.exitCode = await main()
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error)
-  writeSync(process.stderr.fd, `junior-dispatch: ${message}\n`)
+  writeSync(process.stderr.fd, `junior-dispatch: ${errorMessage(error)}\n`)
   process.exitCode = 2
 }

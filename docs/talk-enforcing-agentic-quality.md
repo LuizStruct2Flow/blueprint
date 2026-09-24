@@ -390,9 +390,19 @@ Line 215 of my own pitch deck. Written in good faith. Presented to real people:
 
 # The fleet is already mixed
 
-On this project, work is done by personas backed by **Claude Code, Codex, Gemini and Copilot**, coordinated through a roster in the repo.
+On this project, work is done by personas backed by five agents on five different plans, coordinated through a roster in the repo:
+
+| Backing agent | Plan |
+|---|---|
+| Claude Code | Max |
+| ChatGPT / Codex | Pro |
+| Kimi | Pro |
+| Qwen (`qwen3-coder`) | local, on my own machine |
+| Gemini | free |
 
 That is not exotic — it is where most teams already are: **different engineers, different subscriptions, different agents, one codebase.**
+
+<span class="small">The plan column is not trivia: a free tier runs out mid-review, a paid one hits its five-hour window mid-task, and a local model is unmetered but only worth simple work. <strong>The fleet composition changes during the working day</strong> — all three happened to me while preparing this.</span>
 
 **So ask the question that decides everything about a guardrail:** *which of them does it actually bind?*
 

@@ -141,6 +141,14 @@ tests/env-namespace/               export-ignore
 # tree would judge a contract that belongs only to the blueprint.
 tests/gate-ci-parity/              export-ignore
 
+# TASK-080 — `link-guard` drives the Stop hook against REAL lifecycle rows
+# (TASK-080 in docs/doing/BACKLOG.md, BUG-035 in docs/backlog/BUGS.md), and a
+# derived project ships no row tables at all (docs/* is export-ignored above),
+# so every behavioural case there would be vacuous at best. Blueprint-only by
+# subject, like managed-references. The HOOK itself ships: in a derived tree
+# it finds no rows, demands nothing, and exits 0 — correct, not untested.
+tests/link-guard/                  export-ignore
+
 # TASK-067 — the shell inventory gate is blueprint-only (review synthesis,
 # "the inventory check runs in the blueprint only"): downstream, managed
 # scripts are placeholder-substituted, so every legacy blob sha would differ

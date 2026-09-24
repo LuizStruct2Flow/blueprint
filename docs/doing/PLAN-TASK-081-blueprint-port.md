@@ -388,7 +388,9 @@ case is green. BUG-152 then ports `gate.sh` on top.
 
 ## 9. Open questions
 
-- **A. For the founder: Node on drift's gate-arming path.**
+- **A. For the founder: Node on drift's gate-arming path.** **Decided
+  2026-09-24 by the founder: accept.** The sync CLI requires Node like the
+  rest of the toolchain, with no shell fallback. The port commit states it.
   - After the port, `blueprint drift` needs a Node that strips types. It is one
     of A-22's two paths that arm the pre-push gate. Without Node it exits 127:
     the wake reports `UNKNOWN` and the gate is not armed by drift. The feed

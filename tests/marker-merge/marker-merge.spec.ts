@@ -95,6 +95,7 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
 
 const CLI = join(REPO_ROOT, 'scripts/blueprint')
 const FIXTURES = join(REPO_ROOT, 'tests/marker-merge')
@@ -298,16 +299,27 @@ describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file',
       // and one of whose comments starts with one. Under substring detection
       // every pull of the CLI took the fallback — and on the day its counts
       // happened to balance, the awk would have "merged" the CLI into itself.
-      const cli = await readFile(CLI, 'utf8')
+      //
+      // TASK-081 §8 slice 0: once the port lands, scripts/blueprint is the
+      // two-line shim and this marker-grepping code moves to
+      // scripts/blueprint.mts. resolveConsumer follows the shim to find
+      // where the code this case is ABOUT actually lives, so it keeps
+      // testing the right file instead of a shim that mentions no markers at
+      // all. A no-op today: resolveConsumer returns scripts/blueprint
+      // unchanged (kind 'shell'), because no scripts/blueprint.mts exists yet.
+      const consumer = resolveConsumer(REPO_ROOT, 'scripts/blueprint')
+      expect(consumer, 'scripts/blueprint is missing from this checkout').toBeDefined()
+      const rel = consumer?.rel ?? 'scripts/blueprint'
+      const cli = consumer?.source ?? ''
       expect(cli, 'the fixture is vacuous: the CLI no longer mentions the markers').toContain('BLUEPRINT:BEGIN')
-      const { proj } = await pair(s, 'c', 'scripts/blueprint', cli, cli + '# an older local copy\n')
+      const { proj } = await pair(s, 'c', rel, cli, cli + '# an older local copy\n')
 
-      const r = await s.run(CLI, ['pull', 'scripts/blueprint', '--yes'], { cwd: proj })
+      const r = await s.run(CLI, ['pull', rel, '--yes'], { cwd: proj })
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).not.toMatch(FALLBACK)
-      expect(await s.fs.exists(join(proj, 'scripts/blueprint.bp-bak')), r.output).toBe(false)
-      expect(await readFile(join(proj, 'scripts/blueprint'), 'utf8')).toBe(cli)
+      expect(await s.fs.exists(join(proj, `${rel}.bp-bak`)), r.output).toBe(false)
+      expect(await readFile(join(proj, rel), 'utf8')).toBe(cli)
     })
   })
 })

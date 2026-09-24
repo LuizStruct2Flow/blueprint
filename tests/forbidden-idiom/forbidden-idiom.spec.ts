@@ -64,6 +64,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import ts from 'typescript'
 import { join } from 'node:path'
 import { REPO_ROOT } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
 
 /**
  * `git … rev-parse … --show-toplevel` on one line.
@@ -110,15 +111,29 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
     const offenders: string[] = []
 
     for (const rel of files) {
-      const body = await readFile(join(REPO_ROOT, rel), 'utf8')
+      // TASK-081 §8 slice 0: once a file in this population becomes a
+      // two-line shim (scripts/blueprint is the first candidate), the shell
+      // idiom this case guards against moves with the logic, to the shim's
+      // `.mts` target — the shim itself has nothing to scan. resolveConsumer
+      // follows it, so the population keeps scanning where the code actually
+      // lives. A no-op today: every file here is still its own consumer.
+      const resolved = resolveConsumer(REPO_ROOT, rel)
+      if (resolved === undefined) continue
+      const body = resolved.source
+      // A 'ts' consumer's comments are `//`, not `#` — following the shim to
+      // scripts/signal-watch.mts (already migrated) surfaced this: its own
+      // doc comment explaining why it does NOT use the idiom is line-prefixed
+      // with `//`, and stripping only `#` left the idiom visible inside it,
+      // a false positive the shell-only stripping never had to handle.
+      const stripComment = resolved.kind === 'ts' ? /\/\/.*$/ : /#.*$/
       body.split('\n').forEach((line, i) => {
         // Comments are documentation: this very file's subjects explain in
         // prose why they do NOT use the idiom, and flagging that would train
         // people to ignore the guard.
-        const code = line.replace(/#.*$/, '')
+        const code = line.replace(stripComment, '')
         if (!FORBIDDEN.test(code)) return
         if (WAIVED.test(line)) return
-        offenders.push(`${rel}:${i + 1}`)
+        offenders.push(`${resolved.rel}:${i + 1}`)
       })
     }
 

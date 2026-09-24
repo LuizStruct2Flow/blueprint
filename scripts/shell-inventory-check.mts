@@ -60,8 +60,9 @@
 // caller (scripts/run-ts-suites.sh's ts_shell_inventory) pipes `sh_lint_files`
 // straight in, so "a shell file" has exactly one definition in this repo.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 interface Inventory {
   exempt: string[]
@@ -102,7 +103,7 @@ function readFileList(): string[] {
 // a clean checkout), or undefined if git does not track it. Deliberately NOT
 // `git hash-object`: that would hash an uncommitted edit in the working tree,
 // and this check reads the TREE, the same thing CI's fresh checkout sees.
-function blobHash(root: string, path: string): string | undefined {
+export function blobHash(root: string, path: string): string | undefined {
   let out: string
   try {
     out = execFileSync('git', ['-C', root, 'ls-files', '-s', '--', path], {
@@ -121,7 +122,7 @@ function blobHash(root: string, path: string): string | undefined {
 // isTracked — is `path` in git's index right now? Used for the shim TARGET,
 // which readFileOrUndefined alone cannot prove is not just some untracked
 // scratch file sitting on disk (Elias's second finding).
-function isTracked(root: string, path: string): boolean {
+export function isTracked(root: string, path: string): boolean {
   try {
     execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', '--', path], {
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -133,24 +134,24 @@ function isTracked(root: string, path: string): boolean {
   }
 }
 
-function shimStem(path: string): string {
+export function shimStem(path: string): string {
   const base = path.split('/').pop() ?? path
   return base.endsWith('.sh') ? base.slice(0, -3) : base
 }
 
-function shimContent(path: string): string {
+export function shimContent(path: string): string {
   return `#!/usr/bin/env bash\nexec node "$(dirname "$0")/${shimStem(path)}.mts" "$@"\n`
 }
 
 // shimTargetPath — where the shim's own text says its .mts lives: beside it,
 // same directory as `path`.
-function shimTargetPath(path: string): string {
+export function shimTargetPath(path: string): string {
   const idx = path.lastIndexOf('/')
   const dir = idx === -1 ? '' : path.slice(0, idx + 1)
   return `${dir}${shimStem(path)}.mts`
 }
 
-function readFileOrUndefined(path: string): string | undefined {
+export function readFileOrUndefined(path: string): string | undefined {
   try {
     return readFileSync(path, 'utf8')
   } catch {
@@ -162,7 +163,7 @@ function readFileOrUndefined(path: string): string | undefined {
 // isValidShim — the content matches the exact two-line shim AND its target
 // .mts is both present and TRACKED. A shim whose target does not exist (or
 // exists only as an untracked scratch file) is not a migration.
-function isValidShim(root: string, path: string): boolean {
+export function isValidShim(root: string, path: string): boolean {
   if (readFileOrUndefined(`${root}/${path}`) !== shimContent(path)) return false
   const target = shimTargetPath(path)
   return isTracked(root, target) && readFileOrUndefined(`${root}/${target}`) !== undefined
@@ -467,4 +468,17 @@ function main(): number {
   return 0
 }
 
-process.exit(main())
+// TASK-081 §8 slice 0: an entry-point guard, so `tests/helpers/shim.ts` can
+// import the shim helpers above (shimStem, shimContent, shimTargetPath,
+// isValidShim, isTracked, readFileOrUndefined, blobHash) without running
+// main() and exiting the test process. Mirrors scripts/rotation.mts's guard:
+// argv[1] may not resolve (a wrapper, a different extension) as cleanly as a
+// direct `node scripts/shell-inventory-check.mts` invocation, so the endsWith
+// fallback covers that without weakening the realpath check for the normal
+// case.
+const isEntryPoint =
+  process.argv[1] !== undefined &&
+  (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)) ||
+    process.argv[1].endsWith('/shell-inventory-check.mts'))
+
+if (isEntryPoint) process.exit(main())

@@ -142,6 +142,17 @@
  * missing → #16b. It also reddens #4, #20, #20b and #20c, whose remotes the
  * mutant's extra ls-remote hangs on or cannot reach.
  *
+ * TASK-081 slice 0 (PLAN-TASK-081-blueprint-port.md §3 P2, §8): #23b is
+ * rewritten from a structural read of `_bp_shielded_write`'s TEXT to a
+ * behavioural case — a `cp -p` seam, group-signalled, asserting DEST ends
+ * with the blueprint's NEW bytes and mode. "The file is complete" (the old
+ * #23 shape) passes on a shield that dies at `cp` under a temp-and-rename
+ * write, because the OLD file is what's left complete; only "DEST holds the
+ * NEW content" catches it. The M23c note above (the redirect-outside-subshell
+ * mutant, invisible to any runtime case) describes the helper's shape before
+ * TASK-025's S1-S2 review moved it to temp-and-rename entirely inside the
+ * ignore; it is kept as history, not as this test's current proof.
+ *
  * Plan: docs/done/PLAN-TASK-025.md §9.2.
  */
 
@@ -385,6 +396,14 @@ async function childNames(s: Scenario, pid: number): Promise<string[]> {
   }
   return names.sort()
 }
+
+/**
+ * TASK-081 §3 P1: the refresh child's identity is process comm `bash` on the
+ * shell CLI, and will be `sh` under the port's `spawn` launch (§3 P1: `sh -c
+ * 'exec 2>"$1"; …'`, no bash in the chain). Widened here so slice 0's tests
+ * stay green on both, ahead of any port code existing.
+ */
+const isRefreshChild = (names: string[]) => names.includes('bash') || names.includes('sh')
 
 async function reached(seam: Seam) {
   await vi.waitFor(
@@ -1095,12 +1114,13 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       const pid = run1.child.pid ?? 0
 
       // Held: the cache exists (the last step before the launch) and the run has
-      // a `bash` child — the refresh child, blocked opening its stderr. No
-      // timing: that child cannot get past the open until something reads.
+      // a `bash` (shell CLI) or `sh` (port, TASK-081 §3 P1) child — the refresh
+      // child, blocked opening its stderr. No timing: that child cannot get past
+      // the open until something reads.
       await vi.waitFor(
         async () => {
           if ((await caches(s)).length === 0) throw new Error('the cache is not created yet')
-          if (!(await childNames(s, pid)).includes('bash')) throw new Error('no refresh child yet')
+          if (!isRefreshChild(await childNames(s, pid))) throw new Error('no refresh child yet')
         },
         { timeout: 60_000, interval: 10 },
       )
@@ -1184,7 +1204,7 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
           vi.waitFor(
             async () => {
               if (!existsSync(fifo)) throw new Error('the refresh scratch is not created yet')
-              if (!(await childNames(s, pid)).includes('bash')) throw new Error('no refresh child yet')
+              if (!isRefreshChild(await childNames(s, pid))) throw new Error('no refresh child yet')
             },
             { timeout: 60_000, interval: 10 },
           ),
@@ -1216,6 +1236,77 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         expect(diedOf(d, 'SIGINT'), `${tag}: ${show(d)}`).toBe(true)
         expect(ending, `${tag}: the run sat out the fetch budget — cleanup's TERM was lost (BUG-120)`).toBeLessThan(2_000)
         await expectNothingLeft(s, `${tag}: a TERM with the release`)
+      }
+    })
+  })
+
+  it('#20f two signals while cleanup is already in progress end the run once, with nothing left (TASK-081 §2 rule 7, §3 P1)', async () => {
+    await scenario('sync-by-address-20f', async (s) => {
+      // TASK-081 §3 P1 "Repeated signals are serialised": under the port, the
+      // first recorded signal decides and a signal arriving while the handler
+      // runs is recorded but never re-enters it. The shell has no such
+      // mechanism — bash's own trap handling decides what happens when a
+      // second signal arrives while `_bp_sync_cleanup` is already running (in
+      // its `wait` on the held refresh child). This case PINS that outcome so
+      // slice 5's port has a real answer to match, per #20f's own rule:
+      // "if the shell's observable outcome differs from this rule, the port
+      // follows the shell and the plan records the difference."
+      //
+      // Same held-FIFO technique as #20c/#20d: the refresh child is blocked
+      // opening its stderr redirect, so cleanup's `wait` is still pending when
+      // the second signal arrives.
+      for (const [tag, first, second] of [
+        ['int-term', 'SIGINT', 'SIGTERM'],
+        ['int-int', 'SIGINT', 'SIGINT'],
+      ] as const) {
+        const never = await seam(s, `never-20f-${tag}`, 'ssh')
+        const proj = await project(s, BLACKHOLE, 'no-sha', 'OLD', { tag })
+        const cli = await cliCopy(s, `cli-20f-${tag}`)
+        const before = await snapshot(proj)
+        const tmp = s.workspace.path('tmp')
+        const held = join(tmp, `blueprint-sync.HELD20F${tag}`)
+        const fifo = join(held, 'fetch.err')
+
+        const real = (await s.run('sh', ['-c', 'command -v mktemp'], { cwd: s.workspace.root })).stdout.trim()
+        expect(real, 'no real mktemp to hand over to').not.toBe('')
+        const shims = await s.shimDir(`mktemp-held-20f-${tag}`)
+        await shims.add(
+          'mktemp',
+          `case "$*" in\n` +
+            `  *blueprint-sync.XXXXXXXX*) mkdir '${held}' && mkfifo '${fifo}' && printf '%s\\n' '${held}' ;;\n` +
+            `  *) exec '${real}' "$@" ;;\n` +
+            `esac`,
+        )
+
+        const run1 = start(s, cli, proj, ['drift'], {
+          PATH: `${shims.dir}:${never.path}`,
+          BP_FETCH_TIMEOUT: '3',
+        })
+        const pid = run1.child.pid ?? 0
+
+        await vi.waitFor(
+          async () => {
+            if ((await caches(s)).length === 0) throw new Error('the cache is not created yet')
+            if (!isRefreshChild(await childNames(s, pid))) throw new Error('no refresh child yet')
+          },
+          { timeout: 60_000, interval: 10 },
+        )
+
+        run1.child.kill(first)
+        run1.child.kill(second)
+        await revoked(join(held, 'go'))
+        const reader = openReader(fifo)
+        const d = await run1.done
+        if (reader !== null) closeSync(reader)
+        release(never)
+
+        expect(
+          diedOf(d, first as Sig) || diedOf(d, second as Sig),
+          `${tag}: the run did not die of either signal\n${show(d)}`,
+        ).toBe(true)
+        await expectNothingLeft(s, `${tag}: two signals during cleanup`)
+        expect(await snapshot(proj), `${tag}: a project file changed`).toEqual(before)
+        expectNoReport(d)
       }
     })
   })
@@ -1339,32 +1430,58 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     })
   })
 
-  it('#23b the shield ignores INT and TERM BEFORE it opens the destination (structural)', async () => {
-    // WHY STRUCTURAL. `( trap '' INT TERM; cat "$1" ) > "$2"` opens and
-    // truncates the destination in the child BEFORE the trap runs, still
-    // killable. That window is microseconds wide and no command on PATH runs in
-    // it, so #23's `cat` seam, which blocks after the trap, cannot reach it: the
-    // mutant that moves the redirect outside reddened nothing (Alexey, S2). The
-    // ordering is a property of the helper's text, so the text is asserted.
-    const text = await readFile(join(REPO_ROOT, 'scripts/blueprint'), 'utf8')
-    const found = text.match(/^_bp_shielded_write\(\) \{\n([\s\S]*?)\n\}$/m)
-    expect(found, 'no multi-line _bp_shielded_write() { … } definition to check').not.toBeNull()
-    const body = (found?.[1] ?? '')
-      .split('\n')
-      .map((l) => l.replace(/\s+#.*$/, ''))
-      .join('\n')
-      .trim()
+  it("#23b group INT and group TERM at the `cp -p` step (DEST already exists): DEST ends with the blueprint's NEW bytes and mode, nothing later is written", async () => {
+    await scenario('sync-by-address-23b', async (s) => {
+      // WHY BEHAVIOURAL NOW, AND WHY THIS SEAM. `_bp_shielded_write` first
+      // `cp -p`s the EXISTING destination to a temp beside it (so an untouched
+      // destination keeps its own mode), then overwrites the temp's bytes, then
+      // renames the temp over the destination. Under a temp-and-rename write, a
+      // shield that dies AT the `cp` step — because its ignore was set too late,
+      // or because the `cp` sits outside the ignore wrapper — leaves the temp
+      // incomplete and the OLD destination untouched. "The file is complete"
+      // alone would pass on that broken shield, because the OLD file IS
+      // complete; what must be asserted is that DEST ends holding the
+      // blueprint's NEW bytes and mode, not merely SOME complete file (Alexey,
+      // S2; Markus, Slava). The `cp` shim blocks the whole group signal exactly
+      // at that step, as a terminal's Ctrl-C would.
+      const tool = 'scripts/signal-set.sh'
+      const bytes = '#!/bin/sh\necho v2\n'
+      const remote = await blueprintRemote(s, 'published')
+      await s.fs.write(join(remote.dir, tool), bytes, { mode: 0o755 })
+      const head = await commitAll(s, remote.dir, 'an executable managed file')
 
-    expect(body, 'the subshell does not open with the INT and TERM ignore').toMatch(/^\(\s*trap '' INT TERM\s*\n/)
-    expect(body.endsWith(')'), 'something follows the subshell — a redirect there opens the file unshielded').toBe(true)
-    // Atomic since the S1-S2 review (managed-references #5): the bytes go to a
-    // temp beside the destination, and a rename replaces it. Both are writes.
-    const ignore = body.indexOf("trap '' INT TERM")
-    const redirect = body.search(/>\s*"\$tmp"/)
-    const rename = body.search(/mv -f "\$tmp" "\$2"/)
-    expect(redirect, 'no redirect to the temp inside the helper').toBeGreaterThan(ignore)
-    expect(rename, 'the destination is not replaced by a rename of the temp').toBeGreaterThan(redirect)
-    expect(body.lastIndexOf(')'), 'the destination is written outside the shielded subshell').toBeGreaterThan(rename)
+      for (const sig of SIGNALS) {
+        const tag = sig.toLowerCase()
+        // cp -p "$2" "$tmp" — $2 is DEST (the project's own copy), $tmp is
+        // "$2.bp-new.$$". The seam blocks only that call, not any other cp.
+        const blocker = await seam(
+          s,
+          `cp-${tag}`,
+          'cp',
+          `[ "$1" = -p ] && [ "$2" = ${tool} ] && case "$3" in ${tool}.bp-new.*) true ;; *) false ;; esac`,
+        )
+        const proj = await project(s, remote.dir, head, 'published', { tag })
+        await s.fs.write(join(proj, tool), '#!/bin/sh\necho v1\n', { mode: 0o644 })
+        const cli = await cliCopy(s, `cli-${tag}`)
+        const config = await readFile(join(proj, '.blueprint-source'), 'utf8')
+
+        const { child, done } = start(s, cli, proj, ['pull', '--yes'], { PATH: blocker.path })
+        await reached(blocker)
+        process.kill(-(child.pid ?? 0), sig)
+        release(blocker)
+        const d = await done
+
+        expect(diedOf(d, sig), `group ${sig} did not end the run\n${show(d)}`).toBe(true)
+        expect(await readFile(join(proj, tool), 'utf8'), `group ${sig}: DEST does not hold the blueprint's NEW bytes`).toBe(bytes)
+        const { mode } = await stat(join(proj, tool))
+        expect(
+          (mode & 0o111) !== 0,
+          `group ${sig}: DEST kept its old mode ${(mode & 0o777).toString(8)} instead of the blueprint's`,
+        ).toBe(true)
+        expect(await readFile(join(proj, '.blueprint-source'), 'utf8'), `group ${sig}: a later write (bootstrap_sha) ran`).toBe(config)
+        await expectNothingLeft(s, `group ${sig}`)
+      }
+    })
   })
 
   it('#23c group INT and TERM while the executable bit is set: the pulled file ends with the blueprint\'s mode', async () => {

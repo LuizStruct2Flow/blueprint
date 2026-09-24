@@ -1255,6 +1255,16 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       // Same held-FIFO technique as #20c/#20d: the refresh child is blocked
       // opening its stderr redirect, so cleanup's `wait` is still pending when
       // the second signal arrives.
+      //
+      // THE WITNESS. Sending both signals back to back proves nothing about a
+      // signal arriving DURING cleanup — the second one could just as well land
+      // before the first signal's handler has even started. `_bp_sync_cleanup`
+      // (scripts/blueprint, BUG-120 comment) truncates `$BP_SYNC_GO` as its very
+      // FIRST action, before it sends TERM to the held child and blocks in
+      // `wait`; the FIFO is still held, so that `wait` cannot have returned.
+      // Waiting for the token's truncation between the two signals is therefore
+      // a real, deterministic proof that cleanup is already running — not just
+      // signalled — when the second signal is sent.
       for (const [tag, first, second] of [
         ['int-term', 'SIGINT', 'SIGTERM'],
         ['int-int', 'SIGINT', 'SIGINT'],
@@ -1293,8 +1303,8 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         )
 
         run1.child.kill(first)
-        run1.child.kill(second)
         await revoked(join(held, 'go'))
+        run1.child.kill(second)
         const reader = openReader(fifo)
         const d = await run1.done
         if (reader !== null) closeSync(reader)

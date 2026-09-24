@@ -185,6 +185,9 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         return (await s.fs.read(`${agentStateRel}/rotation.log`)).includes('"class":"quota"')
       })
       expect(await s.fs.read(`${agentStateRel}/rotation.log`)).toContain('"source":"' + runLogPath + '@10"')
+      // TASK-065 slice 5: the recovered mic's Task names the outcome instead
+      // of the old generic "read the provider run log" pointer.
+      await until('the recovered mic names the outcome', async () => (await readField(s, signalRel, 'Task')).includes("rotation recorded a 'quota' outcome"))
       await w.stop()
     })
   })

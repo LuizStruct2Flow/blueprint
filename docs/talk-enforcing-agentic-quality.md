@@ -568,7 +568,7 @@ Someone with the whole blueprint in front of them decides whether one project's 
 
 <br>
 
-**Do not design your blueprint from first principles.** You will encode guesses, and guesses are what rot.
+**Do not write rules for problems you have not had yet.** You will encode guesses, and guesses are what rot.
 
 ---
 
@@ -628,9 +628,9 @@ Nothing was factually wrong. Every artefact was well-formed. **And the project h
 
 A control that checks *"everything in this list"* is blind to whatever is not in the list. Three separate incidents:
 
-- A test manifest anchored on `*.sh` — invisible to `.ts` suites
-- A propagation check over a hand-written subset — one file shipped alone to every project and broke their CI on first push
-- Rows scoped to one tier — enforcing nothing on the other
+- A test manifest that matched `*.sh` — the TypeScript suites it existed to govern were invisible to it
+- A hand-kept list of what ships — `package-lock.json` travelled to every project without the four files it needs, and their CI died on the first push with `ENOENT … package.json`
+- A suite catalogue that ships while the suites it lists do not — every project inherited rows demanding files that could not exist there
 
 **Do instead:** derive the set from the filesystem. Then failing to enumerate something is not expressible.
 

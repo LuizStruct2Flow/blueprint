@@ -350,6 +350,170 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     })
   })
 
+  it('BUG-150: a journal truncated below the marker leaves the mic alone, with the reason logged', async () => {
+    // Reviewer finding on the BUG-150 fix: hasNewDispatchSince/journalLines
+    // FAILS OPEN when the journal cannot answer "was anything new dispatched"
+    // — a missing, unreadable, or shorter-than-the-marker journal degrades to
+    // "no new dispatch" and recovery clobbers the baton on top of whatever
+    // really happened. The journal had 2 lines when the watcher captured its
+    // marker (recoverStrandedMic's `dispatchMarker`); this stub then shrinks
+    // it to 1 line — fewer than the marker — before dying, the same shape a
+    // half-written truncation or a losing race with log rotation would leave
+    // behind. The mic must be left exactly where the stub left it (Kimi,
+    // ACTIVE) and the watcher must say why, not silently recover as if
+    // nothing had been recorded.
+    await scenario('mic-recovery-7', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-7')
+      const stateDirRel = 'mic-recovery-7/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
+      const signalPath = s.workspace.path(signalRel)
+      const journalRel = `${stateDirRel}/signal-history.log`
+      const journalPath = s.workspace.path(journalRel)
+
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
+          '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      // Two lines already on the journal BEFORE the watcher starts, so its
+      // dispatch marker is 2 by the time it fires on the already-OVER_TO_KIMI
+      // baton above.
+      await s.fs.write(
+        journalRel,
+        '[2026-09-23T00:00:00Z] Holder=Kimi State=OVER_TO_KIMI Task=earlier\n' +
+          '[2026-09-23T00:00:01Z] Holder=Kimi State=ACTIVE Task=earlier\n',
+      )
+
+      const stub = await s.fs.write(
+        'mic-recovery-7/stub-wake',
+        '#!/bin/sh\n' +
+          // Shrinks the journal to ONE line — below the marker (2) — before
+          // the baton is left stranded.
+          `printf '[2026-09-23T00:00:02Z] Holder=Kimi State=ACTIVE Task=earlier\\n' > "${journalPath}"\n` +
+          `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Kimi |\\n| State | ACTIVE |\\n| Task | do the thing |\\n' > "${signalPath}"\n` +
+          'exit 1\n',
+        { mode: 0o755 },
+      )
+
+      const w = startWatcher(
+        s,
+        'bash',
+        [
+          live.watch,
+          '--file', signalPath,
+          '--state', 'OVER_TO_KIMI',
+          '--poll', '0.2',
+          '--',
+          stub,
+        ],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the baton reflects the stub\'s own stranded write', async () => {
+        const holder = await readField(s, signalRel, 'Holder')
+        const state = await readField(s, signalRel, 'State')
+        return holder === 'Kimi' && state === 'ACTIVE'
+      })
+
+      // Recovery, if it fires at all, runs synchronously inside the watcher's
+      // poll tick (spawnSync all the way down) — so waiting for its OWN
+      // announcement is the deterministic signal, not a fixed sleep raced
+      // against however long roster resolution + signal-set.sh happen to
+      // take. Pre-fix, this line never appears (the anomaly is never
+      // detected) and this `until` times out — that IS the red.
+      w.assertStillRunning('the watcher must still be polling')
+      await until(
+        'the watcher explains it left the mic alone because of the journal',
+        () => /journal/i.test(w.output()),
+        5000,
+      )
+
+      const holder = await readField(s, signalRel, 'Holder')
+      const state = await readField(s, signalRel, 'State')
+      const task = await readField(s, signalRel, 'Task')
+      expect(
+        { holder, state, task },
+        'the baton must be left exactly where the stub put it, not clobbered by a recovery that could not safely reason about the journal',
+      ).toEqual({ holder: 'Kimi', state: 'ACTIVE', task: 'do the thing' })
+
+      await w.stop()
+    })
+  })
+
+  it('BUG-150: a deleted journal leaves the mic alone, with the reason logged', async () => {
+    // Same anomaly as above, the other shape the docblock names: the journal
+    // is gone entirely (unlink, not truncate) by the time the watcher
+    // re-checks — readFileSync throws ENOENT, and a marker > 0 means this is
+    // not the legitimate cold-start case (journalLines' own docblock), it is
+    // a journal that existed and stopped existing.
+    await scenario('mic-recovery-8', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-8')
+      const stateDirRel = 'mic-recovery-8/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
+      const signalPath = s.workspace.path(signalRel)
+      const journalRel = `${stateDirRel}/signal-history.log`
+      const journalPath = s.workspace.path(journalRel)
+
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
+          '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      await s.fs.write(
+        journalRel,
+        '[2026-09-23T00:00:00Z] Holder=Kimi State=OVER_TO_KIMI Task=earlier\n',
+      )
+
+      const stub = await s.fs.write(
+        'mic-recovery-8/stub-wake',
+        '#!/bin/sh\n' +
+          `rm -f "${journalPath}"\n` +
+          `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Kimi |\\n| State | ACTIVE |\\n| Task | do the thing |\\n' > "${signalPath}"\n` +
+          'exit 1\n',
+        { mode: 0o755 },
+      )
+
+      const w = startWatcher(
+        s,
+        'bash',
+        [
+          live.watch,
+          '--file', signalPath,
+          '--state', 'OVER_TO_KIMI',
+          '--poll', '0.2',
+          '--',
+          stub,
+        ],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the baton reflects the stub\'s own stranded write', async () => {
+        const holder = await readField(s, signalRel, 'Holder')
+        const state = await readField(s, signalRel, 'State')
+        return holder === 'Kimi' && state === 'ACTIVE'
+      })
+
+      w.assertStillRunning('the watcher must still be polling')
+      await until(
+        'the watcher explains it left the mic alone because of the journal',
+        () => /journal/i.test(w.output()),
+        5000,
+      )
+
+      const holder = await readField(s, signalRel, 'Holder')
+      const state = await readField(s, signalRel, 'State')
+      const task = await readField(s, signalRel, 'Task')
+      expect(
+        { holder, state, task },
+        'the baton must be left exactly where the stub put it, not clobbered by a recovery that could not safely reason about the journal',
+      ).toEqual({ holder: 'Kimi', state: 'ACTIVE', task: 'do the thing' })
+
+      await w.stop()
+    })
+  })
+
   it('a dispatch that DID hand back the mic is left alone — the poller does nothing', async () => {
     await scenario('mic-recovery-2', async (s) => {
       const live = await liveRepo(s, 'mic-recovery-2')

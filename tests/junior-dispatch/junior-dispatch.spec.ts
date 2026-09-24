@@ -145,14 +145,14 @@ exit 99
 
   it('passes the brief on stdin and the roster model as Ollama argv', async () => {
     await scenario('junior-dispatch-contract', async (s) => {
-      const f = await fixture(s, 'repo', `printf 'argv=%s|%s\n' "$1" "$2"
+      const f = await fixture(s, 'repo', `printf 'argv=%s|%s|%s\n' "$1" "$2" "$3"
 printf 'brief='
 cat
 `)
 
       const r = await f.run()
       expect(r.code, r.output).toBe(0)
-      expect(r.stdout).toBe('argv=run|qwen3-coder-64k:latest\nbrief=Return a short answer.\n')
+      expect(r.stdout).toBe('argv=run|--nowordwrap|qwen3-coder-64k:latest\nbrief=Return a short answer.\n')
     })
   })
 })

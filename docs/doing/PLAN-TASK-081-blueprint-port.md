@@ -24,7 +24,7 @@ Method: [`../done/PLAN-TASK-067-shell-to-typescript.md`](../done/PLAN-TASK-067-s
 | `main`, slice 0 | Test preparation only (§8). No `scripts/` change except the shim-helper export. Green against the unported shell. |
 | branch `task-081-blueprint-port`, slices 1-4 | `scripts/blueprint.mts` grows one subcommand family per commit, each with its own differential rows and unit tests. `scripts/blueprint` is untouched, so every suite on the branch still runs the shell. |
 | `main`, slice 5 | ONE port commit: the branch squashed, plus the shim, the inventory row, the doc lines. |
-| `main`, slice 5b | The `drift` line announcing the full-pull rule (§7), its own commit, in the same push as slice 5. |
+| ~~`main`, slice 5b~~ | Dropped by the founder (§9 E): no `drift` line; the commit body and release announcement carry the full-pull rule. |
 | `main`, slice 6 | The `_bp_cli_libs` change BUG-152 needs, as its own reproducer and fix. |
 
 **Between slices `main` is exactly today's `main`.** `scripts/blueprint.mts`
@@ -584,7 +584,9 @@ deliver for a pre-port one. BUG-152 then ports `gate.sh` on top.
   - Dropping it if #20c and #20d stay green without it would make libuv's
     child-side signal reset a load-bearing assumption. The gate costs one `sh`
     exec.
-- **D. For the founder: the placeholder hole.** OPEN.
+- **D. For the founder: the placeholder hole.** **Decided 2026-09-24 by the
+  founder: Option 1.** The `.mts` never spells the token, pinned by the grep
+  case in slice 1.
   - **The hole.** `bp_should_substitute` (`scripts/lib/placeholders.sh:87-94`)
     exempts `*scripts/blueprint`, and that pattern does not match
     `scripts/blueprint.mts`. So pull and drift substitute the `.mts` like any
@@ -623,7 +625,9 @@ deliver for a pre-port one. BUG-152 then ports `gate.sh` on top.
     when `placeholders.sh` is ported for a reason of its own. The grep case
     then retires.
 - **E. For the founder: is the drift line (§7 item 3, slice 5b) still
-  wanted?** OPEN, and minor. It was in the decision, but it can only live in
+  wanted?** **Decided 2026-09-24 by the founder: dropped.** Slice 5b is not
+  built; the full-pull rule is announced in the port commit body and the
+  release announcement only. The reasoning below is kept as the record. It was in the decision, but it can only live in
   the ported `drift`, which never meets the hazard: the projects at risk are
   running their pre-port `drift`. **Recommendation:** drop slice 5b and rely
   on the commit body and the release announcement, which reach those projects

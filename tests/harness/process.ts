@@ -284,6 +284,16 @@ export class ProcessRegistry {
   }
 
   /**
+   * Every process group this scenario currently has a live handle on — the
+   * roots `dumpProcessTree` (dump.ts) walks down from. A snapshot, not a
+   * live view: taken at the moment a wait times out, before teardown reaps
+   * anything (BUG-146).
+   */
+  trackedPids(): number[] {
+    return [...this.groups]
+  }
+
+  /**
    * Reap everything. Returns the pids that had to be killed — a non-empty
    * result is a DEFECT in the scenario, not routine housekeeping, and the
    * harness fails the test on it.

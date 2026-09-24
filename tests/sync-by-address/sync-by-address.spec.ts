@@ -1174,18 +1174,33 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         })
         const pid = child.pid ?? 0
 
-        await vi.waitFor(
-          async () => {
-            if (!existsSync(fifo)) throw new Error('the refresh scratch is not created yet')
-            if (!(await childNames(s, pid)).includes('bash')) throw new Error('no refresh child yet')
-          },
-          { timeout: 60_000, interval: 10 },
+        // BUG-146: both waits below are given their OWN, much shorter budget
+        // through waitOrDump, so a hang here fails in seconds WITH a process-
+        // tree dump instead of running out vitest's global 320s testTimeout
+        // with nothing captured — which is exactly what the three CI
+        // occurrences of this hang (61cfe01, 374a8d9, c7c47f6) cost: 320019-
+        // 320024ms each, and none of it evidence.
+        await s.waitOrDump(
+          vi.waitFor(
+            async () => {
+              if (!existsSync(fifo)) throw new Error('the refresh scratch is not created yet')
+              if (!(await childNames(s, pid)).includes('bash')) throw new Error('no refresh child yet')
+            },
+            { timeout: 60_000, interval: 10 },
+          ),
+          65_000,
+          `#20d ${tag}: waiting for the refresh child`,
         )
 
         const signalled = Date.now()
         child.kill('SIGINT')
         const reader = openReader(fifo)
-        const d = await done
+        // `done` has no bound of its own — it resolves on the child's `close`
+        // event and nothing else. That is exactly the wait BUG-146's row is
+        // about: a lost TERM (the defect this test exists to catch) means the
+        // child never exits, and until now nothing bounded this await short
+        // of vitest's own test timeout.
+        const d = await s.waitOrDump(done, 30_000, `#20d ${tag}: waiting for the run to exit`)
         const ending = Date.now() - signalled
         if (reader !== null) closeSync(reader)
         release(never)

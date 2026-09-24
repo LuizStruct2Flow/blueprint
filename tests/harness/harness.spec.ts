@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { appendFile, chmod, readFile, rename, writeFile, stat, symlink } from 'node:fs/promises'
+import { appendFile, chmod, readFile, readdir, rename, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
 import { RealStateCanary } from './canary.js'
@@ -1504,6 +1504,71 @@ describe('harness — process ownership', () => {
       // If the kill did not work the scenario would hang until vitest's own
       // timeout, so a quick return is itself part of the assertion.
       expect(Date.now() - started).toBeLessThan(10_000)
+    })
+  })
+})
+
+describe('harness — timeout evidence capture (BUG-146)', () => {
+  it('BUG-146: waitOrDump writes a process-tree dump (pid/ppid/stat/wchan/args + fds) before its timeout propagates', async () => {
+    // BUG-146's row: tests/sync-by-address #20d has hung ~320s in CI three
+    // times and reproduced locally zero times, and 320019-320024ms is
+    // vitest's global testTimeout catching an unbounded await, not a budget
+    // anything in the test chose. This proves the capture that row asks for:
+    // a wait given its OWN short bound fails fast, WITH a dump of what was
+    // still alive, instead of running out the whole test's clock with
+    // nothing to show for it.
+    await scenario('harness-bug146-dump', async (s) => {
+      const dumpDirOverride = s.workspace.path('dumps')
+      process.env.BP_HARNESS_DUMP_DIR = dumpDirOverride
+      try {
+        // A live process for the dump to find — timeoutMs reaps it the same
+        // proven way "a timed-out process does not survive" (above) does, so
+        // this case adds no new leak surface.
+        const running = s.run('sh', ['-c', 'sleep 5'], {
+          cwd: s.workspace.root,
+          timeoutMs: 3_000,
+        })
+
+        let caught: Error | undefined
+        try {
+          // Never resolves on its own — only waitOrDump's 200ms bound ends it.
+          await s.waitOrDump(new Promise<never>(() => {}), 200, 'BUG-146 capture test')
+        } catch (err) {
+          caught = err as Error
+        }
+        expect(caught?.message).toMatch(/timed out after 200ms/)
+        expect(caught?.message).toMatch(/process-tree dump: (.+\.txt)/)
+
+        const file = /process-tree dump: (.+\.txt)/.exec(caught?.message ?? '')?.[1]
+        expect(file, `no dump path in: ${caught?.message}`).toBeDefined()
+        const text = await readFile(file as string, 'utf8')
+
+        expect(text).toMatch(/# process-tree dump: BUG-146 capture test/)
+        expect(text).toMatch(/pid=\d+ ppid=\d+ stat=\S+ wchan\(ps\)=\S+ args=.*sleep/)
+        expect(text).toMatch(/\/proc\/\d+\/wchan:/)
+        expect(text).toMatch(/\/proc\/\d+\/stack:/)
+        expect(text).toMatch(/fds: \d+/)
+
+        await expect(running).rejects.toThrow(/Timed out/)
+      } finally {
+        delete process.env.BP_HARNESS_DUMP_DIR
+      }
+    })
+  })
+
+  it('BUG-146: a wait that fails for its own reason — not a timeout — still gets a dump', async () => {
+    await scenario('harness-bug146-non-timeout', async (s) => {
+      const dumpDirOverride = s.workspace.path('dumps')
+      process.env.BP_HARNESS_DUMP_DIR = dumpDirOverride
+      try {
+        await expect(
+          s.waitOrDump(Promise.reject(new Error('not a timeout, just a failure')), 5_000, 'BUG-146 non-timeout'),
+        ).rejects.toThrow(/process-tree dump:/)
+        const files = await readdir(dumpDirOverride)
+        expect(files.length).toBeGreaterThan(0)
+      } finally {
+        delete process.env.BP_HARNESS_DUMP_DIR
+      }
     })
   })
 })

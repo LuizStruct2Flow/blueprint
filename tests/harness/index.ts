@@ -47,6 +47,7 @@ import {
   type FixtureRepoOptions,
   type ShimDir,
 } from './fixture-repo.js'
+import { dumpDir, dumpProcessTree, writeDump } from './dump.js'
 
 /** Absolute path to the blueprint checkout under test. */
 export const REPO_ROOT = resolve(
@@ -120,6 +121,22 @@ export interface Scenario {
    * system PATH is a portability bug (tests/staleness #8 recorded the gap).
    */
   pathWithout(names: string[]): Promise<string>
+
+  /**
+   * Race `promise` against `timeoutMs`. On timeout — or on any other
+   * rejection; a wait that fails for its own reason is just as worth a dump
+   * as one that runs out the clock — write this scenario's whole tracked
+   * process tree (BUG-146: tests/harness/dump.ts) to a file BEFORE the
+   * original error propagates, and name that file in the message.
+   *
+   * Built for `tests/sync-by-address` #20d, which has hung ~320s in CI three
+   * times and never once locally: 320s is not any wait's own budget, it is
+   * vitest's global `testTimeout` catching an unbounded await from outside.
+   * `waitOrDump` gives a wait its own much shorter bound, so a hang fails
+   * fast WITH evidence instead of slow with none — and it is generic: any
+   * scenario, any wait, not only #20d.
+   */
+  waitOrDump<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T>
 }
 
 /**
@@ -324,6 +341,26 @@ export async function scenario(
       }
       return dir
     },
+
+    async waitOrDump<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+      let timer: NodeJS.Timeout | undefined
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`waitOrDump: timed out after ${timeoutMs}ms — ${label}`)),
+          timeoutMs,
+        )
+      })
+      try {
+        return await Promise.race([promise, timeout])
+      } catch (err) {
+        const text = await dumpProcessTree(registry.trackedPids(), label)
+        const file = await writeDump(dumpDir(REPO_ROOT), label, text)
+        const message = err instanceof Error ? err.message : String(err)
+        throw new Error(`${message}\nprocess-tree dump: ${file}`)
+      } finally {
+        clearTimeout(timer)
+      }
+    },
   }
 
   let bodyError: unknown
@@ -373,5 +410,6 @@ afterEach(() => {
 })
 
 export { RealStateCanary, realStateTargets } from './canary.js'
+export { dumpDir, dumpProcessTree, writeDump } from './dump.js'
 export type { RunResult } from './process.js'
 export type { Workspace } from './workspace.js'

@@ -283,6 +283,17 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
             // inside the workspace, so the feed it derives lands there too. Drop
             // either clause and tests/harness refuses this call.
             AGENT_FEED_TAG: undefined,
+            // BUG-146 — the derived gate runs its OWN nested vitest, whose
+            // harness resolves REPO_ROOT to `target`, which is INSIDE this
+            // scenario's workspace and gone the moment this `s.run` returns
+            // (workspace.ts `dispose()` removes it unconditionally). A
+            // process-tree dump written at the nested run's own default
+            // location would not survive to be uploaded. Pointing it at the
+            // OUTER repo's own tests/.timeout-dumps — never inside any
+            // scenario's workspace — is what makes a nested hang's dump
+            // (tests/sync-by-address #20d has hung here, nested, twice:
+            // 374a8d9, c7c47f6) outlive this scenario's teardown.
+            BP_HARNESS_DUMP_DIR: join(REPO_ROOT, 'tests', '.timeout-dumps'),
           },
           timeoutMs: 600_000,
         },

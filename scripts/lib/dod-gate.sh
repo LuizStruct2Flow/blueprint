@@ -2,7 +2,7 @@
 # scripts/lib/dod-gate.sh — GENERATED sourced adapter. DO NOT HAND-EDIT.
 #
 # TASK-067 / BUG-147: the DoD gate's policy lives in scripts/lib/dod-gate.mts
-# now (docs/doing/PLAN-BUG-147-dod-gate-port.md, "Option C"). This file is the
+# now (PLAN-BUG-147-dod-gate-port.md, "Option C"). This file is the
 # small, mechanically re-renderable bridge that keeps both production callers
 # (.githooks/pre-push-project and .github/workflows/security.yml) byte-
 # identical: it defines the same shell function names the old shell library

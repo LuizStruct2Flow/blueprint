@@ -309,7 +309,7 @@ there is no smaller unit that also counts.
 
 **One narrow, file-specific ceiling on that rule: a sourced library a
 still-shell caller must keep SOURCING cannot use the exec shim** (BUG-147,
-`docs/doing/PLAN-BUG-147-dod-gate-port.md`, "Option C") — an exec shim
+`PLAN-BUG-147-dod-gate-port.md`, "Option C") — an exec shim
 replaces the process with `node`, which cannot hand shell functions back to a
 caller that sourced it. `scripts/lib/dod-gate.sh` is the one file this
 applies to today: it is sourced by `.githooks/pre-push-project` and by

@@ -1,6 +1,6 @@
 // scripts/lib/dod-gate.mts — TASK-067 port of scripts/lib/dod-gate.sh.
 //
-// docs/doing/PLAN-BUG-147-dod-gate-port.md ("Option C") is the design this file
+// PLAN-BUG-147-dod-gate-port.md ("Option C") is the design this file
 // implements: one CLI, one subcommand per compatibility function of the
 // original shell library. scripts/lib/dod-gate.sh is now a mechanically
 // generated SOURCED ADAPTER (never hand-edited — see its own header and

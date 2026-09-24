@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
@@ -89,6 +90,24 @@ exit 23
       expect(r.stdout).toBe('model refused\n')
       expect(await s.fs.read(f.feed)).toContain('[Nils - Ollama] FAILED (exit 23)')
       expect(await s.fs.read(f.runLog)).toBe('model refused\n')
+    })
+  })
+
+  it('renders Ollama redraws without spinner, duplicate, or empty feed lines', async () => {
+    await scenario('junior-dispatch-terminal', async (s) => {
+      const sample = await readFile(join(REPO_ROOT, 'tests/junior-dispatch/fixtures/ollama-raw-sample.bin'))
+      const encoded = sample.toString('base64')
+      const stub = ['cat >/dev/null', `printf '%s' '${encoded}' | base64 -d`, ''].join('\n')
+      const f = await fixture(s, 'repo', stub)
+
+      const r = await f.run()
+      expect(r.code, r.output).toBe(0)
+      const output = await s.fs.read(f.feed)
+      expect(output).not.toMatch(/[\u2800-\u28ff]/u)
+      expect(output).not.toContain('[Nils - Ollama] \n')
+      expect(output).not.toContain('ctx.skip() skips the current test execution')
+      expect(output).toContain('`it.skip(...)` skips the entire test suite before it runs, while')
+      expect(output).toContain('`ctx.skip()` skips only the current test case during execution.')
     })
   })
 

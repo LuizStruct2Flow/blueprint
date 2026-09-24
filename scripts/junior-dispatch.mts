@@ -16,7 +16,6 @@ import { writeSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { stripVTControlCharacters } from 'node:util'
 
 const codeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const rosterLib = join(codeRoot, 'scripts', 'lib', 'roster.sh')
@@ -93,8 +92,44 @@ feed_append "$3"
   if (result.stderr) writeSync(process.stderr.fd, result.stderr)
 }
 
+/** Render the CSI cursor/erase operations Ollama uses for streaming redraws. */
 function cleanTerminalOutput(raw: string): string {
-  return stripVTControlCharacters(raw).replaceAll('\r', '')
+  const trailingNewline = raw.endsWith('\n')
+  const lines = ['']
+  let line = 0
+  let column = 0
+  const put = (value: string) => {
+    const current = lines[line]
+    lines[line] = current.padEnd(column, ' ').slice(0, column) + value + current.slice(column + value.length)
+    column += value.length
+  }
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index]
+    if (character === '\u001b' && raw[index + 1] === '[') {
+      index += 2
+      let sequence = ''
+      while (index < raw.length && !/[\u0040-\u007e]/.test(raw[index])) {
+        sequence += raw[index]
+        index += 1
+      }
+      const final = raw[index]
+      const parameter = Number.parseInt(sequence.replace(/^\?/, '').split(';')[0] || '1', 10)
+      if (final === 'G') column = Math.max(0, parameter - 1)
+      else if (final === 'D') column = Math.max(0, column - parameter)
+      else if (final === 'K' && (sequence === '' || sequence === '0')) lines[line] = lines[line].slice(0, column)
+      continue
+    }
+    if (character === '\r') column = 0
+    else if (character === '\n') {
+      line += 1
+      lines[line] = ''
+      column = 0
+    } else if (character >= ' ') put(character)
+  }
+
+  while (lines.length > 1 && lines.at(-1) === '') lines.pop()
+  return lines.join('\n') + (trailingNewline ? '\n' : '')
 }
 
 async function runOllama(model: string, brief: string): Promise<{ output: string; status: number }> {
@@ -137,7 +172,7 @@ async function main(): Promise<number> {
   const lines = result.output.split('\n')
   if (lines.at(-1) === '') lines.pop()
   for (const line of lines) {
-    feedAppend(stateRoot, `[${persona} - Ollama] ${line}`)
+    if (line) feedAppend(stateRoot, `[${persona} - Ollama] ${line}`)
   }
 
   if (result.status === 0) {

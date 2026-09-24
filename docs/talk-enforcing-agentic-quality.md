@@ -245,6 +245,10 @@ Pick your organisation. Where is the authoritative answer to *"how do we build s
 
 **None of those can enforce anything.** They can only be *consulted* — by someone who already knows to look.
 
+<br>
+
+> ## The truth lives in the code.
+
 ---
 
 # What changes with agents

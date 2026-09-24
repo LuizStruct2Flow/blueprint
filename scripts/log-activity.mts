@@ -30,6 +30,7 @@ import {
   realpathSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +57,22 @@ function readable(path: string): boolean {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+// A notice written and then followed by process.exit() in the same turn can
+// be dropped: stderr is a synchronous pipe on this host, but is not
+// guaranteed to be one everywhere, and Node does not flush a pending async
+// write on exit (BUG-153 round 3, cases #15/#18 went red in a sandbox where
+// it wasn't). The old shell hook used `printf >&2`, itself synchronous —
+// `fs.writeSync` on fd 2 is the same guarantee: the write completes before
+// this call returns, so there is nothing left pending for exit to drop.
+function stderrNotice(text: string): void {
+  try {
+    writeSync(2, text)
+  } catch {
+    // stderr itself is closed or invalid — the notice is lost, but a hook
+    // must never fail the tool call over its own diagnostic output.
+  }
 }
 
 // bp_clamp_int, ported: the wait/cap knobs are digit STRINGS, not integers —
@@ -173,9 +190,7 @@ if (readable(ROSTER_LIB) && meta) {
   )
   tcmd = (r.stdout ?? '').trim()
   if (!tcmd) {
-    process.stderr.write(
-      '[log-activity] no timeout(1)/gtimeout(1) available — skipping the roster lookup; labelling by agent type\n',
-    )
+    stderrNotice('[log-activity] no timeout(1)/gtimeout(1) available — skipping the roster lookup; labelling by agent type\n')
   }
 }
 
@@ -394,14 +409,34 @@ async function deferSpawn(): Promise<boolean> {
       })
       child.unref()
       // THE OWNER, recorded before the lock is dropped. A slot whose pid is
-      // not yet written reads as reclaimable to the next caller.
+      // not yet written reads as reclaimable to the next caller — and BUG-153
+      // round 3 is exactly that read: a write that fails (ENOSPC, an I/O
+      // error) used to be swallowed here, leaving the slot claimed on disk
+      // with a live, unrecorded child. The next caller's read then hits
+      // ENOENT, which readSlotPid correctly reports as "no owner" (it IS
+      // absent — round 1/2's fail-closed branches are for a read failure or
+      // unparsable content, not this), and reclaims a slot whose owner is
+      // still running: BUG-153's exact failure through another door. A slot
+      // must never stay claimed with no pid file while its child lives, so a
+      // failed write kills the child and releases the slot instead of
+      // limping on with an unrecorded owner.
       try {
         writeFileSync(join(slot, 'pid'), `${child.pid}\n`)
+        claimed = true
       } catch {
-        // Best-effort: losing the pid loses this slot's future liveness
-        // check, not the child itself.
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // Already gone — nothing left to kill.
+        }
+        try {
+          rmSync(slot, { recursive: true, force: true })
+        } catch {
+          // Best-effort: the hazard that mattered (a live, unrecorded owner)
+          // is already closed by the kill above, even if the empty slot
+          // directory itself lingers.
+        }
       }
-      claimed = true
       break
     }
   } finally {
@@ -420,13 +455,13 @@ function deferNotice(): void {
     stdio: 'ignore',
   })
   if (flockCheck.status === 0) {
-    process.stderr.write(
+    stderrNotice(
       `[log-activity] no deferred slot free (cap ${BP_SUBAGENT_DEFER_MAX}) — labelling this dispatch by agent type\n`,
     )
     return
   }
 
-  process.stderr.write(
+  stderrNotice(
     '[log-activity] no flock(1) — subagent bookends are labelled by agent type, not by persona. ' +
       'Install it: bash scripts/install-toolchain.sh\n',
   )

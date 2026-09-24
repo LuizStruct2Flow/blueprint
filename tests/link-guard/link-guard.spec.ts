@@ -22,12 +22,23 @@
  *   - later mentions of an id already linked demand nothing.
  *   - an id with no row anywhere demands nothing — the guard reports what it
  *     found, never invents a target.
+ *   - an id whose row sits in TWO folders at once — the spec'd REOPEN
+ *     transition of docs/DoD.md §1 — accepts a link to ANY folder that really
+ *     holds the row, and a bare mention names every candidate. The guard
+ *     never picks a winner by ordering (#12, #13).
  *   - refusal is exit 2 naming each id AND the exact path it should have
  *     linked to, so the fix is mechanical.
  *   - `stop_hook_active` in the payload short-circuits (a guard that re-fires
  *     on its own stop loops the session), and any failure of the guard's own
  *     machinery exits 0 — a guard that blocks the session on its own bug is
  *     worse than the miss it was built for.
+ *
+ * THE DOCS ROOT. The guard reads the lifecycle docs from the payload's `cwd`
+ * — the session's project root, which in these cases is REPO_ROOT. Cases
+ * #12/#13 plant their own docs/ tree in the scenario workspace and point the
+ * payload's cwd at it: the dual-folder state does not occur in the live tree
+ * today (checked 2026-09-24), and a suite that waited for one would be
+ * untestable by construction.
  *
  * Parallelism hazard: none. Every case writes into its own scenario workspace
  * and spawns a short-lived `node`; the lifecycle docs under docs/ are read
@@ -98,7 +109,7 @@ function transcript(message: string): string {
 async function runHook(
   s: Scenario,
   message: string,
-  options: { stopHookActive?: boolean; payload?: string } = {},
+  options: { stopHookActive?: boolean; payload?: string; payloadCwd?: string } = {},
 ): Promise<{ code: number | null; stderr: string }> {
   const transcriptFile = await s.fs.write('transcript.jsonl', transcript(message))
   const payload =
@@ -106,7 +117,9 @@ async function runHook(
     JSON.stringify({
       session_id: '11111111-2222-3333-4444-555555555555',
       transcript_path: transcriptFile,
-      cwd: REPO_ROOT,
+      // The docs root the guard reads. Defaults to the real checkout; the
+      // dual-folder cases point it at a planted docs/ tree in the workspace.
+      cwd: options.payloadCwd ?? REPO_ROOT,
       permission_mode: 'default',
       hook_event_name: 'Stop',
       stop_hook_active: options.stopHookActive ?? false,
@@ -259,5 +272,68 @@ describe('TASK-080 — the link guard refuses unlinked item ids in the reply tex
       commands.some((c) => c.includes('link-guard')),
       `the guard is referenced by no Stop hook — it runs nowhere. Saw: ${JSON.stringify(commands)}`,
     ).toBe(true)
+  })
+
+  // THE DUAL-FOLDER CASE, both directions. docs/DoD.md §1's REOPEN transition
+  // legitimately leaves one id in two folders at once — BUG-500 was accepted
+  // (row in done/) and then reopened (row moved back to doing/), and until
+  // the done/ row is removed the id is in both. This is the state the live
+  // tree does not currently exhibit (221 ids, none in two folders, checked
+  // 2026-09-24), so each case plants its own docs/ tree in the workspace and
+  // points the payload's cwd at it.
+  const DUAL_TREE = `# Fixture bugs
+
+| Id | Title |
+|---|---|
+| **BUG-500** | reopened per docs/DoD.md §1 |
+`
+
+  it('#12 a reopened row in two folders: a BARE mention names EVERY candidate, not the done/ side', async () => {
+    await scenario('linkguard-12', async (s) => {
+      await s.fs.write('docs/done/BUGS.md', DUAL_TREE)
+      await s.fs.write('docs/doing/BUGS.md', DUAL_TREE)
+      const r = await runHook(s, 'Reopened: BUG-500 needs another pass.', {
+        payloadCwd: s.workspace.root,
+      })
+      expect(r.code, `a bare mention with a dual-folder row was not refused\n${r.stderr}`).toBe(
+        BLOCKED,
+      )
+      // The refusal must name BOTH folders that really hold the row — naming
+      // only docs/done/BUGS.md would send the founder to the stale, closed
+      // row, which is the defect this case exists to pin.
+      expect(r.stderr).toContain('BUG-500')
+      expect(r.stderr).toContain('docs/done/BUGS.md')
+      expect(r.stderr).toContain('docs/doing/BUGS.md')
+      // Non-vacuity: the planted row was actually resolved (1 of 1, not 0 of 1).
+      expect(r.stderr).toMatch(/rows found: 1 of 1/)
+    })
+  })
+
+  it('#13 a reopened row in two folders: a link to EITHER folder passes — the guard never picks a winner', async () => {
+    await scenario('linkguard-13', async (s) => {
+      await s.fs.write('docs/done/BUGS.md', DUAL_TREE)
+      await s.fs.write('docs/doing/BUGS.md', DUAL_TREE)
+
+      // The CURRENT side. Pre-fix code scanned done/ first, called this the
+      // stale link and refused it — the exact failure the review found.
+      const current = await runHook(s, 'See [BUG-500](docs/doing/BUGS.md) for the reopened row.', {
+        payloadCwd: s.workspace.root,
+      })
+      expect(
+        current.code,
+        `a link to the doing/ side of a dual-folder row was refused\n${current.stderr}`,
+      ).toBe(0)
+      expect(current.stderr).toMatch(/rows found: 1 of 1/)
+
+      // The STALE side. Pre-fix code endorsed this one — also wrong, but the
+      // contract's answer is the same: it really holds the row, so it passes.
+      const stale = await runHook(s, 'See [BUG-500](docs/done/BUGS.md) for the record.', {
+        payloadCwd: s.workspace.root,
+      })
+      expect(
+        stale.code,
+        `a link to the done/ side of a dual-folder row was refused\n${stale.stderr}`,
+      ).toBe(0)
+    })
   })
 })

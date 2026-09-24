@@ -308,6 +308,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/link-guard.mts\" --hook",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

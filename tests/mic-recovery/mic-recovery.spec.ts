@@ -282,6 +282,74 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     })
   })
 
+  it('BUG-150: a stub wake command that claims ACTIVE with a CHANGED Task and then dies is still recovered', async () => {
+    // The docblock's old assumption — "a well-behaved agent claims ACTIVE
+    // without touching Task" — is false: every dispatch brief tells the agent
+    // to write its own summary when it claims ACTIVE, exactly like mic-recovery-3
+    // above except the Task text actually changes (the real-world case, observed
+    // live 2026-09-23 with Thomas/Kimi on BUG-148). Round 3's Holder+Task match
+    // treated the rewritten Task as "not my dispatch any more" and left the mic
+    // stranded — this case must recover exactly like mic-recovery-3 despite the
+    // Task no longer reading "do the thing".
+    await scenario('mic-recovery-5', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-5')
+      const ORCHESTRATOR = await orchestratorOf(s, live.root)
+      expect(ORCHESTRATOR, 'the fixture roster must resolve an Orchestrator').not.toBe('')
+      const stateDirRel = 'mic-recovery-5/logs/state'
+      await assertNoRosterBesideBaton(s, stateDirRel)
+      const signalRel = `${stateDirRel}/signal.md`
+      const signalPath = s.workspace.path(signalRel)
+
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n' +
+          '| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+
+      // Same shape as mic-recovery-3, except the ACTIVE claim REWRITES Task to
+      // the agent's own summary — the thing every real dispatch brief asks the
+      // agent to do, and the thing round 3's Holder+Task match could not
+      // tolerate.
+      const stub = await s.fs.write(
+        'mic-recovery-5/stub-wake',
+        '#!/bin/sh\n' +
+          `printf '# Agent Signal\\n\\n| Field | Value |\\n|---|---|\\n| Holder | Kimi |\\n| State | ACTIVE |\\n| Task | Fixing BUG-148 (own summary, not the dispatch text) |\\n' > "${signalPath}"\n` +
+          'exit 1\n',
+        { mode: 0o755 },
+      )
+
+      const w = startWatcher(
+        s,
+        'bash',
+        [
+          live.watch,
+          '--file', signalPath,
+          '--state', 'OVER_TO_KIMI',
+          '--poll', '0.2',
+          '--',
+          stub,
+        ],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the mic is handed back to the Orchestrator', async () => {
+        w.assertStillRunning('the watcher must keep polling after recovering the mic')
+        const holder = await readField(s, signalRel, 'Holder')
+        const state = await readField(s, signalRel, 'State')
+        return holder === ORCHESTRATOR && state === 'OVER_TO_CLAUDE'
+      })
+
+      const task = await readField(s, signalRel, 'Task')
+      expect(task, 'the handback Task should name who stranded the mic').toContain('Kimi')
+      expect(
+        task,
+        'the handback Task should point at the provider run log',
+      ).toContain('run log')
+
+      await w.stop()
+    })
+  })
+
   it('a dispatch that DID hand back the mic is left alone — the poller does nothing', async () => {
     await scenario('mic-recovery-2', async (s) => {
       const live = await liveRepo(s, 'mic-recovery-2')

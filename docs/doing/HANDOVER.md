@@ -95,18 +95,33 @@ because another machine only sees what is pushed.
 - **TASK-049 (backlog):** managed vs project placement for a guard that refuses to
   publish a live handover.
 
-### The rotation, as of 2026-09-22
+### The rotation, as of 2026-09-24
 
-**There is no rotation state file yet** (TASK-065 builds it), so it lives here
-until there is one. Anyone picking up work reads this and advances it.
+**There is no rotation state file yet** (TASK-065 builds it; its plan is
+[PLAN-TASK-065-rotation.md](PLAN-TASK-065-rotation.md)), so it lives here until
+there is one. Anyone picking up work reads this and advances it.
 
 | Role | Last completed by | In flight | Next |
 |---|---|---|---|
-| Infrastructure | Thomas (Kimi) — BUG-145 | — | Philipp (Claude), then Elias (Codex) for an item Codex can verify |
-| Back-End | Matthias (Claude) — TASK-077 | — | Jonathan (Kimi) once its quota returns, then Andreas (Codex) |
-| PO | Klaus (Claude) — TASK-076 | — | the next PO item is Claude's only: no other provider has a PO persona |
-| Security | Markus (Claude) — TASK-079 | — | Florian (Kimi) once its quota returns; Stefan (Codex) did TASK-078 |
-| QA / review | Jesko (Codex) — TASK-077 + TASK-079 | — | Vijay (Kimi), then Vitali (Claude) |
+| Infrastructure | Philipp (Claude) — BUG-146 | Philipp (Claude) — BUG-152, BUG-153 (both reassigned) | Elias (Codex) for an item Codex can verify, then Thomas (Kimi) |
+| Back-End | Matthias (Claude) — BUG-147 | Matthias (Claude) — BUG-150 (reassigned from Andreas) | Jonathan (Kimi): BUG-151, after TASK-065 lands |
+| Architect | Christian (Claude) — TASK-065 plan | — | Alexey (Codex), then Slava (Kimi) |
+| PO | Klaus (Claude) — TASK-065 plan review | — | Claude only: no other provider has a PO persona |
+| Security | Markus (Claude) — TASK-079 | — | Florian (Kimi) once its quota returns |
+| QA / review | Vitali (Claude) — TASK-062 goal (d); Jesko (Codex) — review of BUG-146/147, TASK-062 | — | Vijay (Kimi), then Jesko (Codex) |
+
+**2026-09-24: both other providers ran out mid-item, and the founder waived
+four-eyes for that batch only.** Kimi hit its 5-hour limit at 13:41Z during
+BUG-153 (Thomas); Codex hit its usage limit at 13:55Z during Alexey's TASK-065
+plan review, resetting at 19:31 local. Per the founder's D1 ruling (reassign,
+PLAN-TASK-065 §5), BUG-153, BUG-152 and BUG-150 moved to Claude. Asked whether
+to hold pushes until Codex returned or waive the review, the founder chose
+**"Waive for this batch"**: a fresh Claude reviewer (Vitali) reviewed the
+round-2 fixes instead. It is not a standing waiver. **Still owed a non-Claude
+review when quota returns:** the TASK-065 plan (Codex + Kimi, both unfinished).
+The waiver is for pushes, not plan consensus. BUG-150/152/153 fall under it if
+they are ready while only Claude has quota, and get a Codex review otherwise. Both outages stranded the mic at
+`State=ACTIVE` (BUG-150's exact defect); it was taken back by hand each time.
 
 **Another session writes to this checkout.** On 2026-09-22 storm2flow's
 Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147

@@ -2,7 +2,7 @@
  * tests/csv-freshness/csv-freshness.ts — TASK-022's own audit, checked for
  * drift against the tree it describes.
  *
- * TASK-062, goal (d) — Alexey's half (docs/doing/PLAN-TASK-062.md §5,
+ * TASK-062, goal (d) — Alexey's half (docs/waiting-acceptance/PLAN-TASK-062.md §5,
  * "Founder decisions" #1: "Alexey's narrow freshness task comes right after
  * wave 1"). Deliberately NARROW, per Alexey's own framing: reproduce row
  * IDENTITY and LOCATION deterministically, flag a row whose cited location no

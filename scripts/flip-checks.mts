@@ -3,7 +3,7 @@
 //
 // WHAT THIS IS NOT. It is not a port of scripts/signal-set.sh (legacy shell,
 // 302 lines). The founder ruled these three checks warning-only first
-// (docs/doing/PLAN-TASK-062.md §"Founder decisions" #4): "They print at mic
+// (docs/waiting-acceptance/PLAN-TASK-062.md §"Founder decisions" #4): "They print at mic
 // flip and block nothing, so signal-set.sh is not ported now. Port it later
 // only if a warning is shown to be ignored." A file that only prints and
 // never blocks has no reason to live inside the script that performs the

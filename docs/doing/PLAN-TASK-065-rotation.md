@@ -1,8 +1,8 @@
 # PLAN — TASK-065: provider rotation in code
 
-**Status: DRAFT v1, for three-provider review** (Codex, Kimi, Claude), per
-[`AGENTS.md`](../../AGENTS.md) §"Who does the work". Written by Christian
-(Architect-1, Claude). Nothing is implemented. Row:
+**Status: v2, revised to the three-provider review consensus** (Codex, Kimi,
+Claude; §9), per [`AGENTS.md`](../../AGENTS.md) §"Who does the work". Written
+by Christian (Architect-1, Claude). Nothing is implemented. Row:
 [TASK-065](BACKLOG.md).
 
 The row owns four things: (a) rotation state that survives a session, (b) a
@@ -108,13 +108,20 @@ Codex run, and the `resets_at` above was contradicted within the hour.
 
 ### Gemini (`gemini-cli`): observed once
 
-`logs/state/gemini-runs.log`, 2026-09-22 09:09:59Z:
+`logs/state/gemini-runs.log:19–41`, 2026-09-22 09:09:59Z:
 
 ```
-TerminalQuotaError: You have exhausted your daily quota on this model.
+Error when talking to Gemini API Full report available at: /tmp/gemini-client-error-Turn.run-sendMessageStream-2026-09-22T09-09-59-023Z.json TerminalQuotaError: You have exhausted your daily quota on this model.
+    at classifyGoogleError (file:///…/@google/gemini-cli/bundle/chunk-F3VE7C53.js:306407:16)
+    …
   cause: { code: 429, message: '… Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.5-flash\nPlease retry in 997.965142ms.' }
 [2026-09-22T09:09:59Z] gemini FAILED (exit 1) — see …/gemini-last-message.md
 ```
+
+- **The refusal is not at the start of its line.** The CLI prints it at the
+  end of its own `Error when talking to Gemini API Full report available at:
+  <path>` line, followed by a stack whose first frame is
+  `at classifyGoogleError`. §4 matches that whole shape, not the bare phrase.
 
 - **The retry hint is wrong for this error**: "retry in 997 ms" on a daily cap.
   The CLI's own classifier calls it `TerminalQuotaError`, which is the text to
@@ -151,9 +158,10 @@ the agent's final message is `You've hit your session limit · resets 4:30pm
 3. **Stated reset times are hints, not facts.** Kimi states none, Gemini's is
    wrong for its own error, and Codex's was contradicted 23 minutes later. The
    only proof that a provider is back is a dispatch that succeeds.
-4. **The run logs quote refusals in successful runs.** `kimi-runs.log:3733`,
-   `:3818–3819`, `:3950–3951` and `:8576` are agents discussing the Kimi 403 in
-   runs that exited 0. A classifier that matched text anywhere would mark a
+4. **The run logs quote refusals in successful runs.** `kimi-runs.log:3818–3819`,
+   `:3950–3951` and `:8576` are agents discussing the Kimi 403, and `:3733`
+   mentions "quota exhausted" as a stub's stand-in, all in runs that exited 0.
+   A classifier that matched text anywhere would mark a
    provider out because an agent read a bug report. Matching therefore needs
    exit ≠ 0 **and** the CLI's own line shape (anchored at the start of the
    line; the agent's quotes are indented or mid-sentence).
@@ -284,7 +292,7 @@ cooldown taken from the provider's own words:
 |---|---|---|---|
 | `quota` | `error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit` | refusal + 5 h | Kimi |
 | `quota` | `⚠ You've hit your usage limit` | refusal + 5 h (see note) | Codex |
-| `quota` | `TerminalQuotaError: You have exhausted your daily quota` (anywhere in the line) | refusal + 24 h | Gemini |
+| `quota` | `Error when talking to Gemini API Full report available at: <path> TerminalQuotaError: You have exhausted your daily quota`, **and** the next line is the stack frame `    at classifyGoogleError (` (see the provenance rule below) | refusal + 24 h | Gemini |
 | `quota` | `You've hit your session limit` | refusal + 5 h | Claude |
 | `persona` | `⚠ {"type":"error","status":400,…"is not supported when using Codex` | none | Codex (BUG-151) |
 | `persona` | the launcher's own `— dispatch refused` roster line (exit 8) | none | all launchers |
@@ -303,6 +311,17 @@ cooldown taken from the provider's own words:
   decided from the launcher's own final status line (`… finished` or
   `… FAILED (exit N)`) inside the slice. If there is no status line, the class
   is `unknown`.
+- **A pattern matches only text the provider itself emitted, in the shape and
+  position it emits it** (review, §9). Exit ≠ 0 alone does not establish that:
+  a run can fail for an unrelated reason after an agent quoted a refusal, or a
+  test fixture printed one. So every row matches the CLI's own line shape from
+  its start, never a phrase found mid-line. Gemini is the one row whose phrase
+  is not at the line start, so its row matches the CLI's whole diagnostic: the
+  `Error when talking to Gemini API Full report available at:` prefix at line
+  start, the refusal at the end of that same line, and the
+  `at classifyGoogleError` frame on the next. A bare `TerminalQuotaError: …`,
+  an indented or mid-sentence quote, or the right line without its frame is
+  `unknown`.
 - **Codex's cooldown is 5 h and deliberately not the stated time.** The stated
   time is truncated in the run log, and when it was read in full it was wrong
   by two days (§1). Both Codex and Claude report a 300-minute primary window
@@ -380,10 +399,18 @@ exists either way for an explicit `--hold`.
 
 ### D2 (reviewers): whose state is "Kimi is out", the checkout's or the machine's?
 
+**Decided 2026-09-24 by unanimous review: per-checkout `logs/state/`** (§9).
+Kimi's review added the deciding point: the log mixes persona outcomes, which
+are roster-scoped (rosters are per-engineer and gitignored), with provider
+outcomes, so a per-machine file would leak persona state across projects with
+different rosters. If cross-checkout learning ever proves worth it, split the
+provider `outcome` events into a per-machine file then, rather than moving the
+whole log.
+
 §1 point 5: the accounts are shared. storm2flow and the blueprint draw on the
 same Codex and Kimi quota.
 
-- **Per-checkout `logs/state/` (recommended).** It invents no new location and
+- **Per-checkout `logs/state/` (chosen).** It invents no new location and
   follows the BUG-019/BUG-020 anchoring. The cost: a sibling checkout learns
   that a provider is out only by paying its own refusal. For a provider already
   out, that measured 3 s (Kimi 13:05:39→42Z, 19:19:19→22Z; Codex 10:14:18→21Z)
@@ -488,7 +515,16 @@ from here.
    mapping to its class and cooldown. Negatives: a real exit-0 slice that
    quotes the Kimi 403 (`kimi-runs.log` around `:3818`) must be `ok`, and a
    FAILED slice with no known line must be `unknown`, taking nothing out.
-   **Mutant:** dropping the exit ≠ 0 requirement must fail the quoted-403 case.
+   Provenance negatives, each a slice ending `gemini FAILED (exit 1)` that must
+   be `unknown` and leave Gemini `in`: an agent's output quoting
+   `TerminalQuotaError: You have exhausted your daily quota` (bare, indented
+   and mid-sentence), and a test fixture's output printing the full
+   `Error when talking to Gemini API …` line without the `classifyGoogleError`
+   frame after it. The same holds for the Kimi and Codex patterns quoted
+   indented in a FAILED slice.
+   **Mutants:** dropping the exit ≠ 0 requirement must fail the quoted-403
+   case; relaxing the Gemini row to match the phrase anywhere in the line must
+   fail the quoted-in-a-failed-run case.
 
 3. **The selector.** `next`, `review`, `assign`, `coverage` and `--skip`.
    Test: a fixture roster via `AGENT_ROSTER_FILE`. Cases: three providers
@@ -528,3 +564,34 @@ slices run on one provider. Pick it by the hand rotation in `HANDOVER.md`
 (Back-End: Jonathan on Kimi once its quota returns, then Andreas on Codex). The
 item's four-eyes reviewer comes from a different provider. Once slice 3 lands,
 the tool can make that pick.
+
+---
+
+## 9. Review synthesis
+
+Reviewed 2026-09-24 by all three providers. Each verified the §1 citations
+against the logs.
+
+| Reviewer | Provider | Verdict | D1 | D2 |
+|---|---|---|---|---|
+| Klaus (PO) | Claude | APPROVE | reassign | per-checkout |
+| Alexey | Codex | APPROVE-WITH-CHANGES | reassign | per-checkout |
+| Slava | Kimi | APPROVE | not argued (founder's) | per-checkout |
+
+None found an F-002 violation, scope beyond (a)–(d), or an undisclosed
+legacy-shell edit.
+
+**What changed from v1:**
+
+- **Gemini provenance (Alexey, required).** v1 matched Gemini's refusal
+  "anywhere in the line", so an agent quoting it, or a fixture printing it, in
+  a run that failed for another reason could mark Gemini out. The row now
+  matches only the CLI's own diagnostic in its own shape and position, and
+  §4 states the rule for every row. Slice 2 gains the provenance negatives and
+  a mutant.
+- **Two quotation fixes (Slava).** §1's Gemini block now shows the real line,
+  which begins `Error when talking to Gemini API …`. §1 point 4 no longer
+  calls `kimi-runs.log:3733` a discussion of the 403.
+- **D2 decided** per-checkout, unanimously (§5).
+
+Nothing else in the design changed.

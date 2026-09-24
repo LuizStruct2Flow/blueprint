@@ -477,7 +477,12 @@ jobs:
         with:
           name: harness-timeout-dumps
           path: tests/.timeout-dumps/
-          if-no-files-found: ignore
+          # The directory is a dot-folder, and upload-artifact >= v4.4 skips
+          # hidden paths unless told otherwise: run 36010475442 wrote its dump
+          # and uploaded nothing. `warn`, not `ignore`, so a failure that
+          # leaves no dump says so instead of looking like a clean upload.
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 14
       # An absence has to say so. Without this the derived project sees a green
       # job with three skipped steps and no reason, which reads identically to a

@@ -333,26 +333,76 @@ function nowSeconds(): number {
 // recovery and whose fixture cannot honour the foreground contract, never to
 // production, where AGENT_SIGNAL_RECOVERY is unset.
 //
-// stillStranded's OWN match is Holder AND Task, always — State alone (or even
-// State+Holder) is not enough
-// to identify a PARTICULAR dispatch. A well-behaved agent claims ACTIVE
-// without touching Task, so State legitimately varies between the dispatched
-// OVER_TO_<X> and ACTIVE for the SAME stranded round — but a genuinely NEW
-// round to the same Holder in the same target State (ordinary and common:
-// tests/signal-dispatch #2 and #3 both do it) carries a DIFFERENT Task, and
-// that is exactly what distinguishes it from the original dispatch this call
-// is checking on. Holder+State alone cannot tell those apart — caught live by
-// tests/signal-dispatch #5, whose round 3 write reused the same Holder and
-// target State with only the Task text changed.
-function stillStranded(dispatchedHolder: string, dispatchedState: string, dispatchedTask: string): boolean {
+// BUG-150 — Holder+Task cannot identify a dispatch whose Task the holder is
+// EXPECTED to rewrite. The comment this replaces claimed "a well-behaved
+// agent claims ACTIVE without touching Task" — false: every dispatch brief
+// tells the agent to write its own summary when it claims ACTIVE, and BUG-150
+// caught it live twice (Thomas/Kimi on BUG-148, Andreas/Codex on TASK-070).
+// So the Task match, added in BUG-144 round 3 to stop a genuine race (a NEW
+// dispatch to the same Holder in the same State being clobbered — ordinary
+// and common: tests/signal-dispatch #2 and #3 both do it), defeated the
+// recovery it existed to protect.
+//
+// THE FIX: identify a dispatch by whether a NEW ONE has started, not by the
+// Task text of this one. logs/state/signal-history.log (agent_signal_journal,
+// scripts/lib/state-dir.sh) is an append-only record of every flip written
+// through scripts/signal-set.sh — never hand-edited, never rotated — so "has
+// anything been DISPATCHED (an OVER_TO_* flip) to this Holder since mine" is
+// answerable without reading Task text at all. An agent's own ACTIVE claim
+// never writes an OVER_TO_* journal line, no matter what it does to Task;
+// only a genuinely new round does (it always starts with an OVER_TO_<X>
+// flip — that is the dispatch convention every launcher and signal-set.sh
+// itself already assumes). One mechanism covers both directions: BUG-150 (a
+// same-round ACTIVE claim with a changed Task is still recognised as mine)
+// and the round-3 race (a new round to the same Holder is never clobbered),
+// with no fallback layer and no second definition of "the same dispatch".
+//
+// journalMarker() is called ONCE, when the watcher decides to fire a
+// dispatch — before the wake command runs — so the marker excludes our own
+// OVER_TO_<X> flip (already in the journal by the time we polled it) and
+// includes everything that happens from that instant on: our own ACTIVE
+// claim, our own hand-back, or someone else's new dispatch.
+function journalPath(): string {
+  return join(dirname(signalFile), 'signal-history.log')
+}
+
+function journalLines(): string[] {
+  let content: string
+  try {
+    content = readFileSync(journalPath(), 'utf8')
+  } catch {
+    // No journal yet — nothing has ever gone through signal-set.sh on this
+    // baton. Absence is a polled state (mirrors fileMtime/readField above),
+    // not an error: it just means no line has landed on either side of any
+    // marker, so every check below degrades to "no new dispatch seen".
+    return []
+  }
+  return content.split('\n').filter((line) => line.length > 0)
+}
+
+function journalMarker(): number {
+  return journalLines().length
+}
+
+// hasNewDispatchSince — a genuinely NEW dispatch to `holder` recorded in the
+// journal strictly after `marker`. Matched on the exact `Holder=%s State=%s`
+// substring printf writes (scripts/signal-set.sh), anchored by the literal
+// space between the two fields, so a Task that happens to contain similar
+// text cannot spoof a different line's Holder/State pair.
+function hasNewDispatchSince(marker: number, holder: string): boolean {
+  const needle = `Holder=${holder} State=OVER_TO_`
+  return journalLines().slice(marker).some((line) => line.includes(needle))
+}
+
+function stillStranded(dispatchedHolder: string, dispatchedState: string, dispatchMarker: number): boolean {
   if (readField(signalFile, 'Holder') !== dispatchedHolder) return false
-  if (readField(signalFile, 'Task') !== dispatchedTask) return false
+  if (hasNewDispatchSince(dispatchMarker, dispatchedHolder)) return false
   const state = readField(signalFile, 'State')
   return state === dispatchedState || state === 'ACTIVE'
 }
 
-function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, dispatchedTask: string): void {
-  if (!stillStranded(dispatchedHolder, dispatchedState, dispatchedTask)) return
+function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, dispatchMarker: number): void {
+  if (!stillStranded(dispatchedHolder, dispatchedState, dispatchMarker)) return
 
   // BP_STATE_ROOT, not dirname(signalFile): the roster lives at the project
   // root (AGENT_ROSTER.md), the baton several levels under it
@@ -399,7 +449,7 @@ function recoverStrandedMic(dispatchedHolder: string, dispatchedState: string, d
   // bound every other publisher of this file already accepts (case #6's own
   // docblock: "ONE atomic rename" is what makes a race here survivable, never a
   // claim that no two writers can overlap).
-  if (!stillStranded(dispatchedHolder, dispatchedState, dispatchedTask)) return
+  if (!stillStranded(dispatchedHolder, dispatchedState, dispatchMarker)) return
 
   const task = `${dispatchedHolder}'s dispatch ended without handing back the mic - read the provider run log`
   // AGENT_ROSTER_FILE, for the SAME reason `--file` targets the baton at
@@ -447,6 +497,13 @@ function triggerIfNeeded(): boolean {
 
   lastTriggerKey = key
   teeLine(logFile, `[${isoNow()}] Holder=${holder} State=${state} Task=${task}`)
+
+  // Captured HERE, before the wake command runs — see journalMarker's own
+  // docblock (BUG-150): this excludes the OVER_TO_<X> flip that dispatched
+  // US (already in the journal by the time we polled it) and includes
+  // everything from this instant on, which is exactly what recovery needs
+  // to ask "has anything new been dispatched since".
+  const dispatchMarker = journalMarker()
 
   // Built as a FRESH env object for the dispatched child only — never
   // assigned onto process.env. The shell version has to export these into
@@ -510,7 +567,7 @@ function triggerIfNeeded(): boolean {
     spawnSync('bash', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
 
-  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, task)
+  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, dispatchMarker)
 
   return true
 }

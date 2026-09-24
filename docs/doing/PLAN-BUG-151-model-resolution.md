@@ -131,7 +131,7 @@ than today's silent failure only in that it fails with a clearer message.
 
 Under TASK-067, changing either means porting that whole file first, in its
 own behaviour-identical commit, before BUG-151's actual change lands — same
-shape as BUG-147's `dod-gate.sh` (`docs/doing/PLAN-BUG-147-dod-gate-port.md`),
+shape as BUG-147's `dod-gate.sh` (`PLAN-BUG-147-dod-gate-port.md`),
 which the founder ruled on 2026-09-22 with "port it," no exception. That
 precedent also suggests the mechanical shape: `dod-gate.sh` is being moved to
 a `.mts` CLI with a generated **sourced adapter** left behind, because it is

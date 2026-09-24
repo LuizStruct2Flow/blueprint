@@ -273,18 +273,51 @@ function parseDodGatePairs(content: string): DodGatePair[] | undefined {
   return pairs
 }
 
+// DOD_GATE_CANONICAL_PAIRS — the one authoritative (function, subcommand)
+// list this bridge may ever forward. BUG-147 round 2 (Codex four-eyes
+// finding): re-rendering from the PARSED pairs and comparing bytes proves
+// nothing on its own — the renderer reproduces whatever shape it is fed, so
+// an appended or redefined pair (e.g. a second `dod_stage_bugtests() { ... }`
+// overriding the real one, which is exactly what shell keeps on a duplicate
+// function name) re-renders byte-identically and the old check passed it.
+// The authority chosen here is dod-gate.mts's OWN declared subcommand switch
+// (its `main()`, case 'rows' | 'bugtests' | 'signal' | 'judgement' | 'items'
+// — see its header: "forwards each of its shell function names to the
+// matching subcommand below"), transcribed once as this fixed list. Parsed
+// pairs must equal it exactly — same functions, same subcommands, same
+// order, no duplicates and no additions — which closes the whole class: no
+// pair can ever exist that "nothing authoritative vouches for".
+const DOD_GATE_CANONICAL_PAIRS: DodGatePair[] = [
+  { fn: 'dod_items_in_push', sub: 'items', hasArg: true },
+  { fn: 'dod_stage_rows', sub: 'rows', hasArg: true },
+  { fn: 'dod_stage_bugtests', sub: 'bugtests', hasArg: true },
+  { fn: 'dod_stage_signal', sub: 'signal', hasArg: false },
+  { fn: 'dod_stage_judgement', sub: 'judgement', hasArg: false },
+]
+
+function pairsMatchCanonical(pairs: DodGatePair[]): boolean {
+  if (pairs.length !== DOD_GATE_CANONICAL_PAIRS.length) return false
+  return pairs.every((p, i) => {
+    const c = DOD_GATE_CANONICAL_PAIRS[i]
+    return c !== undefined && p.fn === c.fn && p.sub === c.sub && p.hasArg === c.hasArg
+  })
+}
+
 // isValidDodGateBridge — file-specific to DOD_GATE_PATH. Parses the tail into
-// ordered pairs, RE-RENDERS the whole file from them, and requires byte
-// equality against what is actually on disk — the same "trust the renderer,
-// not the bytes" shape isValidShim uses for an ordinary exec shim. The
-// target .mts must also be present and tracked (BUG-145's shape: a bridge
-// pointing at nothing is not a migration).
+// ordered pairs, requires them to equal DOD_GATE_CANONICAL_PAIRS exactly (the
+// authoritative check above), and — belt and braces — RE-RENDERS the whole
+// file from the parsed pairs and requires byte equality against what is
+// actually on disk, the same "trust the renderer, not the bytes" shape
+// isValidShim uses for an ordinary exec shim. The target .mts must also be
+// present and tracked (BUG-145's shape: a bridge pointing at nothing is not
+// a migration).
 function isValidDodGateBridge(root: string, path: string): boolean {
   if (path !== DOD_GATE_PATH) return false
   const content = readFileOrUndefined(`${root}/${path}`)
   if (content === undefined) return false
   const pairs = parseDodGatePairs(content)
   if (pairs === undefined) return false
+  if (!pairsMatchCanonical(pairs)) return false
   if (renderDodGateAdapter(pairs) !== content) return false
   return isTracked(root, DOD_GATE_TARGET) && readFileOrUndefined(`${root}/${DOD_GATE_TARGET}`) !== undefined
 }

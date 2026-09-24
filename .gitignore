@@ -48,6 +48,11 @@ coverage/
 # SonarQube scanner work dir and the ShellCheck import scripts/sonar.sh writes
 .scannerwork/
 
+# BUG-146 — process-tree dumps a harness scenario's waitOrDump writes when a
+# wait times out (tests/harness/dump.ts). CI uploads these as an artefact on
+# failure; a local run should not leave them tracked.
+tests/.timeout-dumps/
+
 # ============================================================
 # PUBLIC-PUBLISHING PRIVACY BLOCK
 # ------------------------------------------------------------

@@ -464,6 +464,21 @@ jobs:
           . scripts/run-ts-suites.sh
           cd tests
           ts_scrubbed npx vitest run
+      # BUG-146 — tests/sync-by-address #20d has hung ~320s in CI three times
+      # (61cfe01, 374a8d9, c7c47f6) and never once locally. `waitOrDump`
+      # (tests/harness/dump.ts) now gives a scenario's own waits a bound short
+      # of vitest's global testTimeout and writes a process-tree dump before a
+      # timeout propagates, so a hang here leaves evidence instead of only a
+      # red job. `if: failure()` — a dump is only interesting when the suites
+      # actually went red; a clean run leaves the directory empty or absent.
+      - name: Upload timeout evidence dumps
+        if: failure() && hashFiles('tests/package.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: harness-timeout-dumps
+          path: tests/.timeout-dumps/
+          if-no-files-found: ignore
+          retention-days: 14
       # An absence has to say so. Without this the derived project sees a green
       # job with three skipped steps and no reason, which reads identically to a
       # suite that ran and passed.

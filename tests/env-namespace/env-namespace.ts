@@ -147,11 +147,23 @@ export async function checkRotationIsShared(root: string): Promise<string | null
     // Reported as the violation, not swallowed.
     return `${rel} not found`
   }
-  if (!source.includes('lib/feed.sh')) {
-    return `${rel} does not source the shared appender — it has its own copy of the rotation`
+
+  // TASK-067: a migrated hook is the fixed two-line exec shim, and its logic —
+  // including which appender it routes through — lives in the sibling .mts.
+  // The property this check is actually about (one shared appender, no
+  // reimplemented rotation) has to be judged against wherever the logic is.
+  const isShim = source === '#!/usr/bin/env bash\nexec node "$(dirname "$0")/log-activity.mts" "$@"\n'
+  const implRel = isShim ? 'scripts/log-activity.mts' : rel
+  const implSource = isShim
+    ? await readFile(join(root, implRel), 'utf8').catch(() => '')
+    : source
+  if (isShim && implSource === '') return `${implRel} (the shim's own target) not found`
+
+  if (!implSource.includes('feed.sh')) {
+    return `${implRel} does not source the shared appender — it has its own copy of the rotation`
   }
-  if (/tail -n .*>.*\.rot\.|wc -l < ?"?\$log/.test(stripComments(source))) {
-    return `${rel} still contains its own rotation logic`
+  if (/tail -n .*>.*\.rot\.|wc -l < ?"?\$log/.test(stripComments(implSource))) {
+    return `${implRel} still contains its own rotation logic`
   }
   return null
 }

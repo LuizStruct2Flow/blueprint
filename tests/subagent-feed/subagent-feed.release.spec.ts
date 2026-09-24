@@ -69,6 +69,10 @@ const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 const HOOK = join(SUBJECT, 'scripts', 'log-activity.sh')
+// TASK-067: the hook's own logic lives here now — scripts/log-activity.sh is
+// the fixed two-line exec shim, and a source check for the LOGIC has to read
+// its sibling, not the shim.
+const HOOK_IMPL = join(SUBJECT, 'scripts', 'log-activity.mts')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
 /** A script's source with comments stripped — this suite's own header names the idioms. */
@@ -250,6 +254,7 @@ async function hookTree(s: Scenario, name: string, rosterLib: string): Promise<s
   await s.fs.mkdirp(`${name}/logs`)
   await s.fs.write(`${name}/.blueprint-source`, '')
   await s.fs.copyIn(HOOK, `${name}/scripts/log-activity.sh`)
+  await s.fs.copyIn(HOOK_IMPL, `${name}/scripts/log-activity.mts`)
   const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
     cwd: s.workspace.root,
   })
@@ -725,18 +730,23 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
     })
   })
 
-  it('#7 pipefail is probed in a subshell before being set (source check — see the header)', async () => {
-    // BUG-031. `set -uo pipefail` on line 20 killed the hook at rc=2 under the CI
-    // runner's dash, before one defensive branch could run: the most defensive
-    // script in the repo was destroyed by its own first statement. It passed on
-    // every developer machine, because this dash ACCEPTS pipefail and the runner's
-    // rejects it — so "my /bin/sh is dash too" was never evidence.
-    const body = await code(HOOK)
-    expect(body, 'the hook is missing or empty — the assertion would be vacuous').not.toBe('')
-    expect(body, 'the hook sets pipefail unconditionally — it exits 2 on a sh without it')
-      .not.toMatch(/set -uo pipefail|^[ \t]*set -o pipefail/m)
-    expect(body, 'cannot tell how the hook handles pipefail — BUG-031 needs an explicit guard')
-      .toMatch(/\([ \t]*set -o pipefail[ \t]*\)/)
+  it('#7 the hook is the fixed exec shim, so BUG-031 cannot recur (source check — see the header)', async () => {
+    // BUG-031 was `set -uo pipefail` killing the hook at rc=2 under a `sh`
+    // that rejects the option — the most defensive script in the repo
+    // destroyed by its own first statement. TASK-067 ported the hook's whole
+    // logic to scripts/log-activity.mts, so scripts/log-activity.sh is now the
+    // fixed two-line `exec node ...` shim: no `set`, no pipefail, no `sh`
+    // running any of the logic BUG-031 was about. The concern moved rather
+    // than being re-guarded, so this checks that it moved — the exact shim
+    // text, not a probe idiom that no longer has anything to probe.
+    // code() strips `#`-lines (including the shebang) — assert on the RAW
+    // file, which is what actually runs, not the comment-stripped view every
+    // other case in this describe uses for source scanning.
+    const raw = await readFile(HOOK, 'utf8').catch(() => '')
+    expect(raw, 'the hook is missing or empty — the assertion would be vacuous').not.toBe('')
+    expect(raw, 'the hook is no longer the fixed exec shim — it is shell logic again, and BUG-031 applies').toBe(
+      '#!/usr/bin/env bash\nexec node "$(dirname "$0")/log-activity.mts" "$@"\n',
+    )
   })
 
   // =========================================================================
@@ -749,15 +759,17 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
   it('static: the hook and the feed label a subagent through the one shared function', async () => {
     // The BUG-010 shape: two copies of a rule are two rules. BUG-124 was exactly
     // that — the hook derived its label apart from the feed, and they disagreed.
-    expect(await code(HOOK)).toMatch(/bp_roster_subagent_label/)
-    expect(await code(HOOK)).toMatch(/ROSTER_LIB/)
+    // TASK-067: the hook's logic is scripts/log-activity.mts now — HOOK (the
+    // shim) carries none of it.
+    expect(await code(HOOK_IMPL)).toMatch(/bp_roster_subagent_label/)
+    expect(await code(HOOK_IMPL)).toMatch(/ROSTER_LIB/)
     expect(await code(FEED)).toMatch(/bp_roster_subagent_label/)
   })
 
   it('static: the hook resolves its timeout provider through scripts/lib/staleness.sh', async () => {
     // That question has one answer. A second way to find a timeout command is a
     // second rule that will disagree with the first on some host.
-    expect(await code(HOOK)).toMatch(/bp_staleness_timeout_cmd/)
+    expect(await code(HOOK_IMPL)).toMatch(/bp_staleness_timeout_cmd/)
   })
 })
 
@@ -785,7 +797,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         '-c',
         `. "${join(REPO_ROOT, 'tests', 'helpers', 'proc-cwd.sh')}"
          bp_proc_cwd_available || { echo NO-PROC-CWD-MECHANISM; exit 1; }
-         ps -eo pid,args 2>/dev/null | grep '[l]og-activity.sh' | while read -r p rest; do
+         ps -eo pid,args 2>/dev/null | grep -E '[l]og-activity\.(sh|mts)' | while read -r p rest; do
            case "$(bp_proc_cwd "$p")" in "$1"*) printf '%s %s\\n' "$p" "$rest" ;; esac
          done`,
         'x',

@@ -33,7 +33,6 @@
     "scripts/lib/staleness.sh": "3ab120008ee994443d82f67f7ea941d57fed3b2e",
     "scripts/lib/state-dir.sh": "83a12b7fb92515fb9b69345582d70ffb0bdf7950",
     "scripts/lib/suites.sh": "b0625b8e506098b1a9956d0e6f2aafb8ac87e854",
-    "scripts/log-activity.sh": "7096b01453818be9318de9e743ed5a80c8942aaa",
     "scripts/new-project.sh": "7442fa475b6f46e45d00a0ea6e2a37e062047770",
     "scripts/semgrep-verdict.sh": "ed70287762f6272894c46c702d76bc82a3a1c967",
     "scripts/session-resume.sh": "ffd9cfe30246ae04e0dcb63b3d535c0e4ecd8852",

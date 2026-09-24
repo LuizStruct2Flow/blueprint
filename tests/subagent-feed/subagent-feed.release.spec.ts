@@ -1182,22 +1182,30 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
     })
   })
 
-  it('BUG-153 an unreadable pid file on a LIVE slot must not read as unowned', async () => {
+  it('BUG-153 case 1: an unreadable pid file on a LIVE slot must not read as unowned', async () => {
     await scenario('sf-153', async (s) => {
       // #16 proves the two-instant select-then-remove race. BUG-153 is a
-      // narrower, deterministic mechanism into the SAME slot: the owner-pid
-      // read is an EXTERNAL `cat`, and `_ds_pid="$(cat "$_ds_slot/pid" ...)" ||
-      // _ds_pid=""` treats ANY read failure — not just "no such file" — as "no
-      // owner". A `cat` that fails transiently (fork/exec EAGAIN on a loaded
-      // host) makes a caller delete another caller's LIVE reservation.
+      // narrower, deterministic mechanism into the SAME slot: a read failure
+      // on `slot-0/pid` other than "no such file" must not read as "no
+      // owner".
       //
       // Caller A reserves slot-0 for real, with a real background child that
       // stays alive for the whole test (BP_SUBAGENT_META_WAIT is generous).
-      // Caller B then reads that slot's pid file through a `cat` shimmed to
-      // fail on exactly that one read — simulating the transient failure,
-      // never "the file is missing". On the buggy hook, B reads the empty
-      // pid, treats slot-0 as stale, deletes it and reclaims it for its OWN
-      // child — leaving two live children sharing a cap of one.
+      // The port (scripts/log-activity.mts) then reads that pid file
+      // in-process with `readFileSync` (BUG-153, TASK-067) — there is no
+      // external `cat` to shim any more, so the injection has to land the
+      // failure INSIDE that same call. Replacing the pid FILE with a pid
+      // DIRECTORY of the same name does exactly that: `readFileSync` on a
+      // directory throws EISDIR unconditionally, for every uid (the same
+      // root-safe trick as tests/bug-numbers #4), never ENOENT — so this is
+      // still "a read failure on a slot that exists", the case #16 does not
+      // cover.
+      //
+      // On the buggy hook (readSlotPid folding every non-ENOENT error into
+      // "no owner"), caller B reads through the failure, treats slot-0 as
+      // stale, deletes it and reclaims it for its OWN child — leaving two
+      // live children sharing a cap of one. Proven RED against a reverted
+      // fail-closed branch (see the fix commit's body for how).
       const f = await deferFixture(s)
 
       const callA = await s.run(
@@ -1231,50 +1239,84 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         ).stdout.includes('YES')
       expect(await running(ownerPid), `A's slot-0 owner ${ownerPid} was never alive`).toBe(true)
 
-      // ONE shimmed `cat`, firing ONLY on this one read of this one file, so
-      // the failure this case injects is exactly the transient one BUG-153
-      // describes — never "the file doesn't exist", which #16 already covers.
-      const gate = s.workspace.path('cat-gate')
-      const shims = await s.shimDir('repo/shims')
-      await shims.add(
-        'cat',
-        `case "$*" in\n` +
-          `  *subagent-defer/slot-0/pid*)\n` +
-          `    if [ ! -e ${JSON.stringify(gate)} ]; then\n` +
-          `      : >${JSON.stringify(gate)}\n` +
-          `      exit 1\n` +
-          `    fi\n` +
-          `    ;;\n` +
-          `esac\n` +
-          `exec /bin/cat "$@"`,
-      )
+      // The injection: swap the real pid FILE for a same-named DIRECTORY, so
+      // the very next in-process read of it throws EISDIR — never ENOENT.
+      await s.fs.rm('repo/subagent-defer/slot-0/pid')
+      await s.fs.mkdirp('repo/subagent-defer/slot-0/pid')
 
       const callB = await s.run(
         'sh',
         ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'bbbb00000000')],
         {
           cwd: f.repo,
-          env: {
-            ...f.env,
-            AGENT_FEED_LOG: f.log,
-            BP_SUBAGENT_META_WAIT: '10',
-            BP_SUBAGENT_DEFER_MAX: '1',
-            PATH: shims.path(),
-          },
+          env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
         },
       )
       expect(callB.code, callB.output).toBe(0)
 
-      // A's owner is STILL alive — a live slot's transient read failure must
-      // never look like "no owner" — so at most one child may be running
-      // against a cap of one.
+      // The injection actually fired: on the fixed hook, the fail-closed
+      // branch never reaches the reclaim step (`rm -rf slot` + recreate), so
+      // the directory this case planted is still there afterward. Were it
+      // gone, B would have reclaimed the slot without this case ever having
+      // exercised the failing read at all.
+      expect(
+        await s.fs.exists('repo/subagent-defer/slot-0/pid'),
+        'the injected pid directory is gone — B reclaimed the slot without the injection firing',
+      ).toBe(true)
+
+      // A's owner is STILL alive — a live slot's read failure must never
+      // look like "no owner" — so at most one child may be running against a
+      // cap of one.
       const alive = await children(s, f.repo)
       expect(alive.length, 'nothing was deferred at all, so this case proves nothing').toBeGreaterThan(0)
       expect(
         alive.length,
-        `a transient failure reading slot-0's LIVE owner pid let caller B reclaim it:\n${alive.join('\n')}`,
+        `a read failure on slot-0's LIVE owner pid let caller B reclaim it:\n${alive.join('\n')}`,
       ).toBeLessThanOrEqual(1)
       expect(await running(ownerPid), "A's original owner was killed off by B's reclaim").toBe(true)
+    })
+  })
+
+  it('BUG-153 case 2: present-but-unparseable pid content must not read as unowned', async () => {
+    await scenario('sf-153-2', async (s) => {
+      // readSlotPid's error branch (case 1, above) is not the only way
+      // "owner unknown" can be missed. A successful read that returns ''
+      // (the pid file exists but was observed between its creation and the
+      // write of its content) or garbage (not an integer) left `unknown:
+      // false` before this fix — only a THROWN read failed closed. The
+      // caller then treats present-but-unparseable content exactly like
+      // ENOENT: `pid` is falsy or `Number.isInteger(Number(pid))` is false,
+      // so the liveness check is skipped, `alive` stays `false`, and the
+      // slot is reclaimed even though a real owner may be mid-write.
+      //
+      // No live child, no injection shim needed: the slot is seeded directly
+      // with unparseable content, and the fixed hook must leave it alone.
+      const f = await deferFixture(s)
+      await s.fs.mkdirp('repo/subagent-defer')
+      await s.fs.write('repo/subagent-defer/slot-0/pid', 'not-a-pid')
+
+      const call = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'cccc00000000')],
+        {
+          cwd: f.repo,
+          env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
+        },
+      )
+      expect(call.code, call.output).toBe(0)
+
+      // Fail closed: the garbage-content slot was never reclaimed, so its
+      // content is untouched, and the caller's own dispatch was NOT deferred
+      // into it — with the cap already "occupied" by an unknown owner, there
+      // is no slot for the caller to take, so it must have emitted
+      // synchronously instead of spawning a deferred child.
+      expect(await s.fs.read('repo/subagent-defer/slot-0/pid')).toBe('not-a-pid')
+      const alive = await children(s, f.repo)
+      expect(
+        alive.length,
+        `a present-but-unparseable pid was read as "no owner" and reclaimed:\n${alive.join('\n')}`,
+      ).toBe(0)
+      await f.expectLine('→ dispatched', 15_000)
     })
   })
 

@@ -105,25 +105,25 @@ function cleanTerminalOutput(raw: string): string {
   let line = 0
   let column = 0
   const put = (value: string) => {
-    const current = lines[line]
+    const current = lines[line] ?? ''
     lines[line] = current.padEnd(column, ' ').slice(0, column) + value + current.slice(column + value.length)
     column += value.length
   }
 
   for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index]
+    const character = raw[index] ?? ''
     if (character === '\u001b' && raw[index + 1] === '[') {
       index += 2
       let sequence = ''
-      while (index < raw.length && !/[\u0040-\u007e]/.test(raw[index])) {
-        sequence += raw[index]
+      while (index < raw.length && !/[\u0040-\u007e]/.test(raw[index] ?? '')) {
+        sequence += raw[index] ?? ''
         index += 1
       }
-      const final = raw[index]
+      const final = raw[index] ?? ''
       const parameter = Number.parseInt(sequence.replace(/^\?/, '').split(';')[0] || '1', 10)
       if (final === 'G') column = Math.max(0, parameter - 1)
       else if (final === 'D') column = Math.max(0, column - parameter)
-      else if (final === 'K' && (sequence === '' || sequence === '0')) lines[line] = lines[line].slice(0, column)
+      else if (final === 'K' && (sequence === '' || sequence === '0')) lines[line] = (lines[line] ?? '').slice(0, column)
       continue
     }
     if (character === '\r') column = 0
@@ -140,7 +140,7 @@ function cleanTerminalOutput(raw: string): string {
 
 async function runOllama(model: string, brief: string): Promise<{ output: string; status: number }> {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn('ollama', ['run', model], {
+    const child = spawn('ollama', ['run', '--nowordwrap', model], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
     })

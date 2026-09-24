@@ -1,43 +1,27 @@
 /**
- * tests/helpers/shim.ts — BUG-144 commit 0.
+ * tests/helpers/shim.ts — BUG-144 commit 0, imports switched in TASK-081
+ * slice 0.
  *
  * The two-line shim `scripts/shell-inventory-check.mts` enforces for a
- * migrated file (TASK-067), mirrored here so `tests/state-dir` and
- * `tests/watcher-liveness` can tell a migrated consumer from a legacy one and
- * read the right file.
+ * migrated file (TASK-067): `tests/state-dir` and `tests/watcher-liveness`
+ * use it to tell a migrated consumer from a legacy one and read the right
+ * file.
  *
- * DUPLICATED, NOT IMPORTED — deliberately. This commit must not touch
- * anything under scripts/ (the migration itself lands in the NEXT commit),
- * and `scripts/shell-inventory-check.mts` runs `process.exit(main())` at
- * module load with nothing exported, so importing it here would tear down
- * the vitest process rather than hand back a function. The definition below
- * is byte-for-byte `shimStem`/`shimContent`/`shimTargetPath`/`isValidShim`
- * there. `tests/shell-inventory/shell-inventory.spec.ts` already proves the
- * CLI enforces exactly this shape, so the two copies drifting apart shows up
- * as a real migration passing one suite and failing the other — never as a
- * silent pass on both, which is the failure mode a shared helper usually
- * exists to prevent and duplication risks reintroducing. Kept deliberately
- * small so that risk stays visible at a glance.
+ * IMPORTED, NOT DUPLICATED. `scripts/shell-inventory-check.mts` used to run
+ * `process.exit(main())` unconditionally at module load with nothing
+ * exported, so importing it here would have torn down the vitest process
+ * rather than handed back a function — this file carried a byte-for-byte
+ * copy of `shimStem`/`shimContent`/`shimTargetPath`/`isValidShim` instead.
+ * TASK-081 slice 0 (PLAN-TASK-081-blueprint-port.md §2 rule 2, §8) gives that
+ * file an entry-point guard and exports the same helpers, which is exactly
+ * what this file and the port's own unit tests need from it, so the copy is
+ * retired: one definition, imported here.
  */
 
 import { readFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { shimStem, shimContent, shimTargetPath, isValidShim } from '../../scripts/shell-inventory-check.mts'
 
-export function shimStem(path: string): string {
-  const base = path.split('/').pop() ?? path
-  return base.endsWith('.sh') ? base.slice(0, -3) : base
-}
-
-export function shimContent(path: string): string {
-  return `#!/usr/bin/env bash\nexec node "$(dirname "$0")/${shimStem(path)}.mts" "$@"\n`
-}
-
-/** Where the shim's own text says its .mts lives: beside it, same directory as `path`. */
-export function shimTargetPath(path: string): string {
-  const idx = path.lastIndexOf('/')
-  const dir = idx === -1 ? '' : path.slice(0, idx + 1)
-  return `${dir}${shimStem(path)}.mts`
-}
+export { shimStem, shimContent, shimTargetPath, isValidShim }
 
 function readFileOrUndefined(path: string): string | undefined {
   try {
@@ -46,31 +30,6 @@ function readFileOrUndefined(path: string): string | undefined {
     // Absence is the probed state: the caller compares against undefined.
     return undefined
   }
-}
-
-function isTracked(root: string, path: string): boolean {
-  try {
-    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', '--', path], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-    })
-    return true
-  } catch {
-    // --error-unmatch exits non-zero for an untracked path. That exit code is the answer.
-    return false
-  }
-}
-
-/**
- * isValidShim — the content at `root/rel` is the exact two-line shim AND its
- * target .mts is both present and TRACKED. A shim whose target does not
- * exist, or exists only as an untracked scratch file, is not a migration —
- * same rule as the enforcement gate, so a fixture cannot be fooled by
- * something the gate would refuse.
- */
-export function isValidShim(root: string, rel: string): boolean {
-  if (readFileOrUndefined(`${root}/${rel}`) !== shimContent(rel)) return false
-  const target = shimTargetPath(rel)
-  return isTracked(root, target) && readFileOrUndefined(`${root}/${target}`) !== undefined
 }
 
 /** What kind of source a static check is looking at. */

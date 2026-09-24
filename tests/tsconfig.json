@@ -4,6 +4,10 @@
     "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // TASK-081 §8 slice 0: tests/helpers/shim.ts imports scripts/shell-
+    // inventory-check.mts by its explicit .mts specifier (required at
+    // runtime under Node ESM), instead of duplicating its helpers.
+    "allowImportingTsExtensions": true,
     "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,

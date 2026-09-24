@@ -48,7 +48,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
@@ -429,10 +429,20 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
       )
       await initRepo(s, proj)
 
+      // Under the port, the running process is `node scripts/blueprint.mts`
+      // and never re-reads `scripts/blueprint` at all, so this witness would
+      // go vacuous. The inode is what still pins "rename, never rewrite in
+      // place": a write that truncated and rewrote the SAME file would leave
+      // the running process's inode unchanged even though the bytes moved.
+      const before = await stat(join(proj, 'scripts/blueprint'))
+
       const pulled = await s.run(join(proj, 'scripts/blueprint'), ['pull', '--yes'], { cwd: proj })
       expect(await s.fs.read(join(proj, 'scripts/blueprint')), `the pull did not replace the CLI\n${pulled.output}`).toContain(tail)
       expect(pulled.output, 'the running CLI executed bytes the pull wrote over it').not.toContain('ran bytes the pull wrote')
       expect(pulled.code, pulled.output).toBe(0)
+
+      const after = await stat(join(proj, 'scripts/blueprint'))
+      expect(after.ino, 'the pulled CLI kept its old inode — the file was rewritten in place, not renamed into').not.toBe(before.ino)
     })
   })
 })

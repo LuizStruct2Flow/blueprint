@@ -148,8 +148,25 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { isValidShim, shimTargetPath } from '../helpers/shim.js'
 
 const CLI = join(REPO_ROOT, 'scripts/blueprint')
+
+/**
+ * Copy `scripts/blueprint` into a fixture blueprint's tree, as one of its
+ * MANAGED files: chmod +x, and, once TASK-081 lands, follow it as a shim to
+ * its `.mts` target, so a fixture blueprint a project pulls from still ships
+ * something that runs. A no-op today — `isValidShim` is false with no
+ * `scripts/blueprint.mts` in this tree yet.
+ */
+async function copyCliInto(s: Scenario, bp: string) {
+  await s.fs.copyIn(CLI, join(bp, 'scripts/blueprint'))
+  await s.fs.chmod(join(bp, 'scripts/blueprint'), 0o755)
+  if (isValidShim(REPO_ROOT, 'scripts/blueprint')) {
+    const target = shimTargetPath('scripts/blueprint')
+    await s.fs.copyIn(join(REPO_ROOT, target), join(bp, target))
+  }
+}
 
 /**
  * The blueprint-tier suites — the ones `.gitattributes` withholds from every
@@ -220,8 +237,7 @@ async function fixtureBlueprint(s: Scenario, tag: string) {
   const bp = await s.workspace.dir(tag, 'bp')
   await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE for {{PROJECT_NAME}}\n')
   await s.fs.write(join(bp, 'docs/DoD.md'), '# DoD\n')
-  await s.fs.copyIn(CLI, join(bp, 'scripts/blueprint'))
-  await s.fs.chmod(join(bp, 'scripts/blueprint'), 0o755)
+  await copyCliInto(s, bp)
   await s.fs.write(join(bp, '.blueprint-root'), '')
 
   await s.fs.write(join(bp, 'tests/alpha/test.sh'), 'echo alpha v1\n')
@@ -572,7 +588,7 @@ describe('BUG-029 R2-S2 — the substitution predicate reads the FILE path, not 
       await s.fs.write(join(bp, 'CLAUDE.md'), '# CLAUDE for {{PROJECT_NAME}}\n')
       await s.fs.write(join(bp, 'docs/DoD.md'), '# DoD\n')
       await s.fs.write(join(bp, 'tests/alpha/test.sh'), 'echo alpha\n')
-      await s.fs.copyIn(CLI, join(bp, 'scripts/blueprint'))
+      await copyCliInto(s, bp)
       const cp = await s.run('cp', ['-r', join(REPO_ROOT, 'scripts/lib'), join(bp, 'scripts/lib')], { cwd: bp })
       expect(cp.code, cp.output).toBe(0)
       await initRepo(s, bp)

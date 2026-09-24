@@ -389,14 +389,17 @@ describe('TASK-067 — the shell inventory gate', () => {
       })
     })
 
-    it('#16b a SYNTACTICALLY valid extra forwarding pair is accepted — pairs are the variable content', async () => {
+    it('#16b a SYNTACTICALLY valid extra forwarding pair is refused — pairs must match the canonical table', async () => {
       await scenario('shell-inventory-16b', async (s) => {
-        // The plan's own boundary: the checker re-renders from PARSED PAIRS and
-        // has "no independent authority" over whether a pair maps to a real
-        // subcommand — that is tests/dod-gate's job, behaviorally. A line
-        // shaped exactly like the generated ones (and therefore reproducible
-        // by the renderer) is accepted at this layer; only a byte the
-        // renderer could never produce is refused (see #16).
+        // BUG-147 round 2 (Codex four-eyes finding): re-rendering from PARSED
+        // PAIRS alone proves nothing — the renderer reproduces whatever shape
+        // it is fed, so an appended pair re-renders itself right back and the
+        // byte-equality check never sees a difference. The checker now also
+        // requires the parsed pairs to equal DOD_GATE_CANONICAL_PAIRS exactly
+        // (dod-gate.mts's own declared subcommand switch, transcribed once),
+        // so an extra pair — even one shaped exactly like the generated ones —
+        // is refused, whether it is a brand-new function name or a duplicate
+        // of an existing one redefining it.
         const repo = await s.gitRepo('repo')
         await s.fs.write('repo/scripts/lib/dod-gate.sh', DOD_GATE_ADAPTER)
         await s.fs.write('repo/scripts/lib/dod-gate.mts', DOD_GATE_TARGET_STUB)
@@ -408,7 +411,36 @@ describe('TASK-067 — the shell inventory gate', () => {
         await repo.commitAll('add a syntactically valid extra forwarding pair')
 
         const r = await runChecker(s, repo.dir, base, ['scripts/lib/dod-gate.sh'])
-        expect(r.code, r.output).toBe(0)
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/NEW:.*scripts\/lib\/dod-gate\.sh/)
+      })
+    })
+
+    it('#16c redefining an existing bridge function (a duplicate function name) is refused', async () => {
+      await scenario('shell-inventory-16c', async (s) => {
+        // The exact Codex-found hole: appending
+        // `dod_stage_bugtests() { _dg_call judgement; }` after the real
+        // definition re-renders byte-identically under the old check (the
+        // renderer just replays the pairs it parsed) and shell keeps only the
+        // LAST definition, so the regression-test stage would silently run
+        // `judgement` instead of `bugtests`. The canonical-pairs check refuses
+        // it: the parsed pair list no longer equals DOD_GATE_CANONICAL_PAIRS.
+        const repo = await s.gitRepo('repo')
+        await s.fs.write('repo/scripts/lib/dod-gate.sh', DOD_GATE_ADAPTER)
+        await s.fs.write('repo/scripts/lib/dod-gate.mts', DOD_GATE_TARGET_STUB)
+        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
+        await repo.commitAll('seed: the port has already landed')
+        const base = await repo.head()
+
+        await s.fs.write(
+          'repo/scripts/lib/dod-gate.sh',
+          `${DOD_GATE_ADAPTER}dod_stage_bugtests() { _dg_call judgement; }\n`,
+        )
+        await repo.commitAll('redefine dod_stage_bugtests to forward to judgement instead')
+
+        const r = await runChecker(s, repo.dir, base, ['scripts/lib/dod-gate.sh'])
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/NEW:.*scripts\/lib\/dod-gate\.sh/)
       })
     })
 

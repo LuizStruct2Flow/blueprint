@@ -113,11 +113,20 @@ plan review, resetting at 19:31 local. Per the founder's D1 ruling (reassign,
 PLAN-TASK-065 §5), BUG-153, BUG-152 and BUG-150 moved to Claude. Asked whether
 to hold pushes until Codex returned or waive the review, the founder chose
 **"Waive for this batch"**: a fresh Claude reviewer (Vitali) reviewed the
-round-2 fixes instead. It is not a standing waiver. **Still owed a non-Claude
-review when quota returns:** the TASK-065 plan (Codex + Kimi, both unfinished).
-The waiver is for pushes, not plan consensus. BUG-150/152/153 fall under it if
-they are ready while only Claude has quota, and get a Codex review otherwise. Both outages stranded the mic at
-`State=ACTIVE` (BUG-150's exact defect); it was taken back by hand each time.
+round-2 fixes instead. It is not a standing waiver, and it covered only that
+afternoon's batch.
+
+**Evening of 2026-09-24, still unpushed and owed a non-Claude review:**
+TASK-065 slices 4-5 (`dcc066d`, `e07c961`, written by Claude after Andreas ran
+out mid-item) and TASK-081 slice 0 (`4c25b50`). Codex's quota returns at 00:32
+local on 2026-09-25; the brief is `.scratch/brief-review-065-081s0.md`, for
+Jesko. The founder chose to try Gemma (Gemini) first: two attempts, 21:48 and
+22:09, both died on Gemini 503 "high demand" (not quota), and the rotation
+correctly recorded them as `unknown`. Push only after a CLEAN review.
+
+**The watchers were restarted on 2026-09-24 19:12Z** onto current code: until
+then they ran pre-BUG-150 code and stranded the mic on every provider failure.
+Since the restart the mic has come back on its own each time.
 
 **Another session writes to this checkout.** On 2026-09-22 storm2flow's
 Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147

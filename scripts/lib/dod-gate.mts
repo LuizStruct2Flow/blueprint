@@ -40,6 +40,16 @@ import { join } from 'node:path'
 // exception.
 const TS_SPEC_EXTS = ['.spec.ts', '.spec.tsx']
 
+// BUG-147 — every OTHER root is the project's OWN, run by the project's own
+// runner, never by tests/vitest.config.ts — that config was never going to
+// execute anything found there, TypeScript or not. A JavaScript project
+// (storm2flow: vitest over `*.spec.js`, no TypeScript anywhere in it) counts
+// these on such a root for the same reason `.tsx` counts above — the SAME
+// spec convention, in the project's own language, not an exception to it.
+// `*.test.*` and prose still count nowhere, on ANY root (TASK-047 #18,
+// unchanged by this).
+const PROJECT_ONLY_SPEC_EXTS = ['.spec.js', '.spec.jsx', '.spec.mjs', '.spec.cjs']
+
 interface Note {
   text: string
 }
@@ -301,6 +311,11 @@ interface PlanEntry {
   root: string
   rp: string
   mode: 'full' | 'shallow'
+  // BUG-147: true when this root resolves at or below the directory
+  // tests/vitest.config.ts itself governs — independent of shallow/full mode
+  // (the blueprint's own `tests/` root is searched in FULL mode and must
+  // still stay TypeScript-only).
+  tsGoverned: boolean
 }
 
 // depth-limited (maxDepth=1) or unbounded recursive file walk, skipping
@@ -378,6 +393,12 @@ function stageBugtests(rangeList: string, notes: Notes): { rc: number; out: stri
   const codeRoot = process.env.BP_CODE_ROOT ?? '.'
   const isBlueprint = existsSync('.blueprint-root')
   const shipped = isBlueprint ? undefined : realpathOrUndefined(join(codeRoot, 'tests'))
+  // BUG-147: independent of the shipped/blueprint-repo distinction above,
+  // `tests/` is ALWAYS the directory tests/vitest.config.ts governs — the
+  // blueprint's own copy when this IS the blueprint, the shipped copy
+  // otherwise. A root resolving into it stays TypeScript-only below no
+  // matter which search mode it uses; every other root is the project's own.
+  const tsDir = realpathOrUndefined(join(codeRoot, 'tests'))
 
   const plan: PlanEntry[] = []
   const searched: string[] = []
@@ -424,7 +445,8 @@ function stageBugtests(rangeList: string, notes: Notes): { rc: number; out: stri
       skipped.push(`${root}(${why})`)
       continue
     }
-    plan.push({ root, rp, mode })
+    const tsGoverned = tsDir !== undefined && isDirWithinOrEqual(rp, tsDir)
+    plan.push({ root, rp, mode, tsGoverned })
     searched.push(mode === 'shallow' ? `${root}(top level only)` : root)
   }
   if (skipped.length) notes.push(`not searched:${skipped.map((x) => ` ${x}`).join('')}`)
@@ -445,7 +467,8 @@ function stageBugtests(rangeList: string, notes: Notes): { rc: number; out: stri
     let hit = false
     for (const entry of plan) {
       const maxDepth = entry.mode === 'shallow' ? 1 : undefined
-      const files = walkFiles(entry.rp, maxDepth, TS_SPEC_EXTS)
+      const exts = entry.tsGoverned ? TS_SPEC_EXTS : [...TS_SPEC_EXTS, ...PROJECT_ONLY_SPEC_EXTS]
+      const files = walkFiles(entry.rp, maxDepth, exts)
       if (files.some((f) => fileNamesBugInTitle(f, n))) {
         hit = true
         break

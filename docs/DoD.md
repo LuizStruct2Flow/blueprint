@@ -99,8 +99,13 @@ Every bug, minor or major:
    The bug number must be in the test's **title** — a comment mentioning it does
    not count (BUG-139). *Checked by the gate and by CI*, over the roots
    `project_config_paths.md` declares as `BP_TEST_ROOTS` (default `tests/`):
-   - only a `*.spec.ts` or `*.spec.tsx` counts, because that is what the runner
-     executes;
+   - on the root `tests/vitest.config.ts` itself governs (the shipped
+     `tests/`), only a `*.spec.ts` or `*.spec.tsx` counts, because that config
+     is what runs it. On a project's own declared root elsewhere, its
+     `.js`/`.jsx`/`.mjs`/`.cjs` spec forms count too (BUG-147) — that root
+     runs on the project's OWN test runner, which `tests/vitest.config.ts` was
+     never going to execute either way. Prose and the retired `*.test.*` form
+     never count, on any root;
    - `docs/`, `.git/`, `scripts/` and `.githooks/` never count, nor does a root
      inside or containing one, and a root must resolve inside the project;
    - outside the blueprint, only the top level of `tests/` counts, because its

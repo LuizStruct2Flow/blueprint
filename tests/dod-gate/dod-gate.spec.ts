@@ -734,14 +734,16 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
         .sort()
 
     // TASK-067/BUG-147: the evidence set now lives in TypeScript, as the
-    // TS_SPEC_EXTS array in dod-gate.mts (the `-name '*.spec.ts'` shell form
-    // this case used to read is gone — see the port's commit body). One
-    // array literal, both extensions spelled out with their leading dot, so
-    // the same "complete pattern list, not something the reader has to
-    // re-derive" property survives the port.
+    // TS_SPEC_EXTS and PROJECT_ONLY_SPEC_EXTS arrays in dod-gate.mts (the
+    // `-name '*.spec.ts'` shell form this case used to read is gone — see
+    // the port's commit body). DEDUPED across BOTH declarations, matching
+    // the old dedup across the shell's shallow/full `-name` lists (#18):
+    // without it the comparison would fail on multiplicity while all three
+    // sides agree, which is a guard reporting a defect it invented.
     const mtsPatterns = (text: string): string[] => {
-      const m = /TS_SPEC_EXTS\s*=\s*\[([^\]]*)\]/.exec(text)
-      return [...new Set([...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] ?? ''))].filter(Boolean).sort()
+      const arrays = [...text.matchAll(/(?:TS_SPEC_EXTS|PROJECT_ONLY_SPEC_EXTS)\s*=\s*\[([^\]]*)\]/g)]
+      const values = arrays.flatMap((m) => [...(m[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] ?? ''))
+      return [...new Set(values)].filter(Boolean).sort()
     }
 
     const mts = await readFile(join(REPO_ROOT, MTS), 'utf8')

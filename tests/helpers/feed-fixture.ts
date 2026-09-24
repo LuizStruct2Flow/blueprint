@@ -170,6 +170,10 @@ export async function feedFixture(
   await s.fs.copyIn(join(source, 'scripts', 'agent-activity.sh'), `${name}/scripts/agent-activity.sh`)
   if (options.withHook) {
     await s.fs.copyIn(join(source, 'scripts', 'log-activity.sh'), `${name}/scripts/log-activity.sh`)
+    // TASK-067: the hook is now a two-line exec shim — its logic (and what the
+    // shim actually execs) lives in the sibling .mts, which has to travel with
+    // it or the shim finds nothing beside it.
+    await s.fs.copyIn(join(source, 'scripts', 'log-activity.mts'), `${name}/scripts/log-activity.mts`)
   }
   for (const extra of options.extraScripts ?? []) {
     await s.fs.copyIn(join(source, 'scripts', extra), `${name}/scripts/${extra}`)

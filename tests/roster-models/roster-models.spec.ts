@@ -119,6 +119,7 @@ describe('TASK-059 — roster Model tiers', () => {
     await scenario('rm-4', async (s) => {
       const { dir, env } = await project(s)
       await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.sh'), 'proj/scripts/log-activity.sh')
+      await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.mts'), 'proj/scripts/log-activity.mts')
       for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
         if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
@@ -153,6 +154,7 @@ describe('TASK-059 — roster Model tiers', () => {
     await scenario('rm-4b', async (s) => {
       const { dir, env } = await project(s)
       await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.sh'), 'proj/scripts/log-activity.sh')
+      await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.mts'), 'proj/scripts/log-activity.mts')
       for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
         if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }

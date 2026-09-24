@@ -494,8 +494,6 @@ tail -F logs/agent-activity.log
 1. **The provider rotates.** A model's blind spots correlate with itself — a second pass by the same model re-reads with the same priors.
 2. **Every pass must _fix_, not just report.** An agent obliged to make the change cannot hide behind a vague finding.
 
-<span class="small">A design I am adopting, not a measured result. What I have run is the parallel version — several providers auditing the same thing independently — and four of my most useful findings came only from the diff between them. The sequential relay reasons from the same premise. It is not yet proven.</span>
-
 ---
 
 <!-- _class: lead -->

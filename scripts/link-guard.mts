@@ -22,13 +22,29 @@
 // code blocks and inline code spans are quoted material (tool output, commit
 // subjects, grep results), not prose, and demand nothing. Later mentions of
 // an id already linked demand nothing. An id with NO row anywhere demands
-// nothing — the guard reports what it found, never invents a target.
+// nothing — the guard reports what it found, never invents a target. An id
+// whose row sits in TWO folders at once — the spec'd REOPEN transition of
+// docs/DoD.md §1 (a rejected acceptance, a regression or a rework request
+// moves the row back to doing/ while the done/ row is still there) — accepts
+// a link to ANY folder that really holds the row, and a bare mention names
+// every candidate: the guard never picks a winner by ordering.
+//
+// A CONTRACT WORTH ITS COST: tool output pasted inline WITHOUT a fence or
+// backticks IS prose, and every item id in it demands a link. That is
+// deliberate (quoted material is fenced code blocks and inline spans only)
+// but surprises the next reader exactly once: if the guard refuses a reply
+// whose only ids came from a pasted command result, the fix is to fence the
+// output, not to widen what counts as quoted.
 //
 // WHERE THIS RUNS. Wired as a Stop hook in .claude/settings.json beside the
 // existing PreToolUse entries. Claude Code hands the hook a JSON payload on
-// stdin carrying the transcript path; exit 2 refuses the stop and feeds the
-// message back so the fix is mechanical (each violation names the id AND the
-// exact path it should have linked to). Exit 0 in every other case.
+// stdin carrying the transcript path and the session's cwd; exit 2 refuses
+// the stop and feeds the message back so the fix is mechanical (each
+// violation names the id AND the exact path it should have linked to). Exit
+// 0 in every other case. The lifecycle docs are read from the payload's cwd
+// — the session's project root, which for a derived project is the derived
+// tree, not this script's checkout — falling back to the tree beside this
+// script when the payload carries no usable cwd.
 //
 // THE GUARD MUST NEVER LOOP OR WEDGE THE SESSION. `stop_hook_active` in the
 // payload means this stop was itself triggered by a stop hook — honouring it
@@ -60,9 +76,12 @@ const ROOT = join(HERE, '..')
 
 /**
  * The lifecycle folders a row can live in, most advanced first. A row should
- * exist in exactly one; if it somehow exists in two (a lifecycle violation
- * this guard does not adjudicate), the most advanced folder is the live one,
- * so it wins.
+ * exist in exactly one — but docs/DoD.md §1's REOPEN transition (a rejected
+ * acceptance, a regression, a rework request) legitimately leaves the id in
+ * two folders at once until the done/ row is removed. That state is named,
+ * normal traffic, not a violation, and the guard does not adjudicate it by
+ * ordering: every folder that really holds the row is an acceptable link
+ * target, and a bare mention names them all (see findRowFiles).
  */
 const LIFECYCLE_FOLDERS = ['done', 'waiting-acceptance', 'doing', 'backlog'] as const
 
@@ -116,28 +135,32 @@ function fileHoldsRow(content: string, id: string): boolean {
 }
 
 /**
- * The lifecycle file that ACTUALLY holds `id`'s row today, or null when no
- * row exists anywhere — in which case the id demands nothing. Reads the real
- * tree on every call: a row that moved folder since the session started must
- * make a stale link fail, so yesterday's answer is not good enough.
+ * EVERY lifecycle file that holds `id`'s row today — all of them, not a
+ * winner chosen by folder ordering. Usually one path; two when a REOPEN has
+ * moved the row back to doing/ while the done/ row is still there (docs/
+ * DoD.md §1). Empty when no row exists anywhere — in which case the id
+ * demands nothing. Reads the real tree on every call: a row that moved
+ * folder since the session started must make a stale link fail, so
+ * yesterday's answer is not good enough.
  */
-function findRowFile(id: string): string | null {
+function findRowFiles(id: string, docsRoot: string): string[] {
+  const found: string[] = []
   for (const folder of LIFECYCLE_FOLDERS) {
     for (const file of LIFECYCLE_FILES) {
       const rel = join('docs', folder, file)
       let content: string
       try {
-        content = readFileSync(join(ROOT, rel), 'utf8')
+        content = readFileSync(join(docsRoot, rel), 'utf8')
       } catch {
         // Swallowed deliberately: a lifecycle file this checkout does not have
         // (derived projects ship a subset) is a file that cannot hold the row,
         // not a reason to block the reply.
         continue
       }
-      if (fileHoldsRow(content, id)) return rel
+      if (fileHoldsRow(content, id)) found.push(rel)
     }
   }
-  return null
+  return found
 }
 
 /** Normalise a link target for comparison: drop <>, title, ./, anchor, /. */
@@ -152,8 +175,10 @@ function normalizeTarget(raw: string): string {
   return t
 }
 
-/** Run the rule over one reply message. Pure apart from the row lookups. */
-export function checkMessage(message: string): CheckResult {
+/** Run the rule over one reply message. Pure apart from the row lookups.
+ *  `docsRoot` is where the lifecycle docs live; the hook passes the
+ *  payload's cwd (falling back to the tree beside this script). */
+export function checkMessage(message: string, docsRoot: string = ROOT): CheckResult {
   const prose = proseOf(message)
 
   const ids = new Map<string, number>() // id -> first mention index
@@ -171,22 +196,26 @@ export function checkMessage(message: string): CheckResult {
   const violations: string[] = []
   let withRows = 0
   for (const [id, firstAt] of ids) {
-    const rowFile = findRowFile(id)
-    if (rowFile === null) continue // no row anywhere: demands nothing
+    const rowFiles = findRowFiles(id, docsRoot)
+    if (rowFiles.length === 0) continue // no row anywhere: demands nothing
     withRows++
 
+    // Where the row lives, for the refusal message. A dual-folder row (the
+    // spec'd REOPEN state) names EVERY candidate — the guard reports what it
+    // found and never picks one by ordering.
+    const where = rowFiles.join(' or ')
     const link = links.find((l) => firstAt >= l.start && firstAt < l.end)
     if (link === undefined) {
-      violations.push(
-        `${id}: first mention is not a link — write [${id}](${rowFile}).`,
-      )
+      const options = rowFiles.map((f) => `[${id}](${f})`).join(' or ')
+      violations.push(`${id}: first mention is not a link — write ${options}.`)
       continue
     }
     const target = normalizeTarget(link.target)
-    if (target !== rowFile && !target.endsWith(`/${rowFile}`)) {
+    const acceptable = rowFiles.some((f) => target === f || target.endsWith(`/${f}`))
+    if (!acceptable) {
       violations.push(
         `${id}: first mention links to ${link.target}, but the row lives at ` +
-          `${rowFile} — retarget to [${id}](${rowFile}).`,
+          `${where} — retarget to one of those.`,
       )
     }
   }
@@ -239,9 +268,13 @@ function hookMain(verbose: boolean): number {
   const payload = readStdin()
   if (payload === '') return 0
 
-  let parsed: { transcript_path?: unknown; stop_hook_active?: unknown }
+  let parsed: { transcript_path?: unknown; stop_hook_active?: unknown; cwd?: unknown }
   try {
-    parsed = JSON.parse(payload) as { transcript_path?: unknown; stop_hook_active?: unknown }
+    parsed = JSON.parse(payload) as {
+      transcript_path?: unknown
+      stop_hook_active?: unknown
+      cwd?: unknown
+    }
   } catch {
     // Swallowed deliberately: a payload this hook cannot parse is not its call
     // to adjudicate — exit 0 and let the session proceed.
@@ -271,7 +304,14 @@ function hookMain(verbose: boolean): number {
     return 0
   }
 
-  const result = checkMessage(message)
+  // The lifecycle docs are the SESSION's project tree (the payload's cwd),
+  // not necessarily this script's checkout — a derived project's hook runs
+  // this script but the rows live in the derived docs. A missing or unusable
+  // cwd falls back to the tree beside the script; the row lookups fail open
+  // either way, so a bogus cwd degrades to "no rows found", never a block.
+  const docsRoot = typeof parsed.cwd === 'string' && parsed.cwd !== '' ? parsed.cwd : ROOT
+
+  const result = checkMessage(message, docsRoot)
 
   if (verbose) {
     console.error(

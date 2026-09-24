@@ -10,9 +10,13 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { skipVisibly } from '../helpers/project-config.js'
 import { scanEnforcedByPointers } from './enforced-by-pointers.js'
+
+const exists = (p: string): Promise<boolean> => access(p).then(() => true, () => false)
 
 async function specFixture(s: Scenario): Promise<{ docsFile: string; testsRoot: string }> {
   const testsRoot = await s.workspace.dir('tests')
@@ -114,7 +118,20 @@ describe('enforced-by pointers — every `enforced by: tests/<suite> "<title>"` 
     })
   })
 
-  it('THE REAL TREE — every `enforced by:` pointer in CLAUDE.md, docs/DoD.md and AGENTS.md resolves', async () => {
+  it('THE REAL TREE — every `enforced by:` pointer in CLAUDE.md, docs/DoD.md and AGENTS.md resolves', async (ctx) => {
+    // BLUEPRINT-ONLY, same reasoning and same marker as
+    // tests/doc-links/doc-sync-list.spec.ts's own THE REAL TREE case
+    // (`.blueprint-root`, export-ignored so it never reaches a derived
+    // project): a derived project's tests/ tree is a SUBSET of the
+    // blueprint's — tests/gate-ci-parity, for one, is blueprint-only — while
+    // its CLAUDE.md/docs/DoD.md prose ships unabridged, so a pointer this
+    // suite ships to *check* would itself go unresolvable there. Caught by
+    // bootstrap-gate #2/#3 the first time this suite ran inside a fresh
+    // bootstrap.
+    if (!(await exists(join(REPO_ROOT, '.blueprint-root')))) {
+      skipVisibly(ctx, 'not the blueprint checkout — a derived project ships a subset of tests/ against the same prose')
+    }
+
     const scan = await scanEnforcedByPointers(
       [join(REPO_ROOT, 'CLAUDE.md'), join(REPO_ROOT, 'docs/DoD.md'), join(REPO_ROOT, 'AGENTS.md')],
       join(REPO_ROOT, 'tests'),

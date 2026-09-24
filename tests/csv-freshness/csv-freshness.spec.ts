@@ -6,8 +6,13 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { access } from 'node:fs/promises'
+import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { skipVisibly } from '../helpers/project-config.js'
 import { checkFreshness, parseCsv } from './csv-freshness.js'
+
+const exists = (p: string): Promise<boolean> => access(p).then(() => true, () => false)
 
 const HEADER = 'ID,SOURCE,LINE,DISPOSITION,VERIFIED,STILL_CURRENT,CURRENT_LOCATION,NOTE'
 
@@ -146,7 +151,16 @@ describe('csv-freshness — row identity and location', () => {
 })
 
 describe('csv-freshness — THE REAL TREE', () => {
-  it('every live row of docs/done/TASK-022-anchor-rules/TASK-022-rule-enforcement.csv cites a location that still exists', async () => {
+  it('every live row of docs/done/TASK-022-anchor-rules/TASK-022-rule-enforcement.csv cites a location that still exists', async (ctx) => {
+    // BLUEPRINT-ONLY, same `.blueprint-root` marker doc-sync-list.spec.ts's
+    // own THE REAL TREE case uses: TASK-022's audit is this repo's own
+    // self-review, not something a derived project inherits — the CSV lives
+    // under docs/done/TASK-022-anchor-rules/, which does not ship (caught by
+    // bootstrap-gate #2/#3: ENOENT on a fresh bootstrap).
+    if (!(await exists(join(REPO_ROOT, '.blueprint-root')))) {
+      skipVisibly(ctx, 'not the blueprint checkout — TASK-022-rule-enforcement.csv is this repo\'s own audit and does not ship')
+    }
+
     const csvPath = `${REPO_ROOT}/docs/done/TASK-022-anchor-rules/TASK-022-rule-enforcement.csv`
     const result = await checkFreshness(csvPath, REPO_ROOT)
 

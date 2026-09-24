@@ -410,6 +410,6 @@ afterEach(() => {
 })
 
 export { RealStateCanary, realStateTargets } from './canary.js'
-export { dumpDir, dumpProcessTree, writeDump } from './dump.js'
+export { collectDumps, dumpDir, dumpProcessTree, writeDump } from './dump.js'
 export type { RunResult } from './process.js'
 export type { Workspace } from './workspace.js'

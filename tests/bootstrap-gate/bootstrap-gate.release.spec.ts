@@ -45,7 +45,7 @@
 import { describe, it, expect } from 'vitest'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { REPO_ROOT, collectDumps, scenario, type Scenario } from '../harness/index.js'
 import { inspect } from '../manifest/manifest.js'
 
 /** Hermetic identity: bootstrap REFUSES without one (A-14). */
@@ -283,20 +283,32 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
             // inside the workspace, so the feed it derives lands there too. Drop
             // either clause and tests/harness refuses this call.
             AGENT_FEED_TAG: undefined,
-            // BUG-146 — the derived gate runs its OWN nested vitest, whose
-            // harness resolves REPO_ROOT to `target`, which is INSIDE this
-            // scenario's workspace and gone the moment this `s.run` returns
-            // (workspace.ts `dispose()` removes it unconditionally). A
-            // process-tree dump written at the nested run's own default
-            // location would not survive to be uploaded. Pointing it at the
-            // OUTER repo's own tests/.timeout-dumps — never inside any
-            // scenario's workspace — is what makes a nested hang's dump
-            // (tests/sync-by-address #20d has hung here, nested, twice:
-            // 374a8d9, c7c47f6) outlive this scenario's teardown.
-            BP_HARNESS_DUMP_DIR: join(REPO_ROOT, 'tests', '.timeout-dumps'),
           },
           timeoutMs: 600_000,
         },
+      ).finally(
+        // BUG-146 round 2 — the derived gate runs its OWN nested vitest, whose
+        // harness resolves REPO_ROOT to `target`, which is INSIDE this
+        // scenario's workspace and gone the moment this `s.run` returns
+        // (workspace.ts `dispose()` removes it unconditionally). A dump the
+        // nested run wrote at ITS OWN default location — `target/tests/.timeout-dumps`
+        // — would not survive that. Setting `BP_HARNESS_DUMP_DIR` on the
+        // nested process's env to point it at the outer repo directly looked
+        // like a fix, but `scripts/run-ts-suites.sh`'s `ts_scrubbed` strips
+        // every `BP_*` name from that child's environment before its vitest
+        // starts (BUG-046/047/066) — the nested run always fell back to its
+        // own workspace-local default regardless, so two of the three CI
+        // hangs this row tracks (374a8d9, c7c47f6, both nested) captured
+        // nothing. Instead: read the file the nested run actually wrote, off
+        // disk, from INSIDE this `finally` — the workspace is still alive
+        // here, before the scenario body returns and teardown removes it —
+        // and copy it out to the outer repo's own tests/.timeout-dumps, which
+        // is what CI uploads (`harness-timeout-dumps` artifact,
+        // .github/workflows/security.yml). Runs on success too: cheap
+        // (readdir on a directory that is usually empty or absent) and a
+        // stray dump from a nested case that failed its OWN assertion but
+        // still exited 0 overall is evidence worth keeping either way.
+        () => collectDumps(join(target, 'tests', '.timeout-dumps'), join(REPO_ROOT, 'tests', '.timeout-dumps')),
       )
 
       expect(gate.code, `a freshly bootstrapped project CANNOT pass its own pre-push gate:\n${gate.output}`).toBe(0)

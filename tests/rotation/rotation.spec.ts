@@ -28,6 +28,50 @@ describe('TASK-065 rotation event log', () => {
     expect(foldEvents(events, new Date('2026-09-24T12:33:00Z')).providers.Codex.state).toBe('in')
   })
 
+  it.each([
+    ['Kimi', "error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.", 'quota', 5],
+    ['Codex', "⚠ You've hit your usage limit. Upgrade to Pro", 'quota', 5],
+    ['Gemini', 'Error when talking to Gemini API Full report available at: /tmp/report.json TerminalQuotaError: You have exhausted your daily quota on this model.\n    at classifyGoogleError (file:///bundle.js:1:1)', 'quota', 24],
+    ['Claude Code', "You've hit your session limit · resets 4:30pm", 'quota', 5],
+    ['Codex', '⚠ {"type":"error","status":400,"error":{"message":"The gpt model is not supported when using Codex with a ChatGPT account."}}', 'persona', 0],
+    ['Kimi', 'Kimi — dispatch refused: roster model did not resolve', 'persona', 0],
+    ['Codex', '⚠ Selected model is at capacity. Please try a different model.', 'transient', 0],
+  ])('classifies the observed %s diagnostic from its provider-owned line', async (provider, output, expected, cooldownHours) => {
+    const { classifyOutput } = await subject()
+    const result = classifyOutput(provider, `${output}\nprovider FAILED (exit 1)\n`, 1, new Date('2026-09-24T10:00:00Z'))
+    expect(result.class).toBe(expected)
+    if (cooldownHours > 0) {
+      expect(result.until).toBe(new Date(Date.parse('2026-09-24T10:00:00Z') + cooldownHours * 3_600_000).toISOString())
+    }
+  })
+
+  it('an exit-zero run stays ok even when the agent quotes the Kimi refusal', async () => {
+    const { classifyOutput } = await subject()
+    // Verbatim line from blueprint kimi-runs.log around :3818; the surrounding
+    // dispatch succeeded, so text alone is not a refusal.
+    const quoted = "error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit"
+    expect(classifyOutput('Kimi', `${quoted}\nkimi finished\n`, 0, new Date()).class).toBe('ok')
+  })
+
+  it.each([
+    ['Gemini', 'TerminalQuotaError: You have exhausted your daily quota on this model.'],
+    ['Gemini', '    TerminalQuotaError: You have exhausted your daily quota on this model.'],
+    ['Gemini', 'agent quoted TerminalQuotaError: You have exhausted your daily quota on this model.'],
+    ['Gemini', 'Error when talking to Gemini API Full report available at: /tmp/report.json TerminalQuotaError: You have exhausted your daily quota on this model.'],
+    ['Kimi', "    error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit"],
+    ['Codex', "    ⚠ You've hit your usage limit"],
+  ])('does not trust quoted or incomplete %s quota prose in a failed run', async (provider, line) => {
+    const { classifyOutput } = await subject()
+    expect(classifyOutput(provider, `${line}\nprovider FAILED (exit 1)\n`, 1, new Date()).class).toBe('unknown')
+  })
+
+  it('records an unknown failed slice without taking its provider out', async () => {
+    const { classifyOutput, foldEvents } = await subject()
+    const result = classifyOutput('Codex', 'network broke\ncodex exec FAILED (exit 1)\n', 1, new Date())
+    expect(result.class).toBe('unknown')
+    expect(foldEvents([{ ev: 'outcome', at: new Date().toISOString(), persona: 'Andreas', provider: 'Codex', evidence: result.evidence, source: 'run@0', class: result.class }], new Date()).providers.Codex).toBeUndefined()
+  })
+
   it('keeps a persona refusal out until retry and then success', async () => {
     const { foldEvents } = await subject()
     const refused = { ev: 'outcome', at: '2026-09-24T10:00:00Z', persona: 'Andreas', provider: 'Codex', class: 'persona', evidence: 'model refused', source: 'run@0' }

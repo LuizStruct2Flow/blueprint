@@ -57,6 +57,12 @@ interface AvailabilityDetail {
   until?: string
 }
 
+export interface Classification {
+  readonly class: OutcomeClass
+  readonly evidence: string
+  readonly until?: string
+}
+
 export interface RotationState {
   providers: Record<string, AvailabilityDetail>
   personas: Record<string, AvailabilityDetail>
@@ -155,22 +161,79 @@ function required(value: string | undefined, message: string): string {
   process.exit(2)
 }
 
+function withCooldown(classification: OutcomeClass, evidence: string, now: Date, hours?: number): Classification {
+  if (hours === undefined) return { class: classification, evidence }
+  return { class: classification, evidence, until: new Date(now.getTime() + hours * 3_600_000).toISOString() }
+}
+
+function lastLine(lines: readonly string[], predicate: (line: string) => boolean): string | undefined {
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index]
+    if (line !== undefined && predicate(line)) return line
+  }
+  return undefined
+}
+
+export function classifyOutput(provider: string, content: string, exitCode: number, now: Date = new Date()): Classification {
+  const lines = content.split('\n')
+  const evidence = lines.find((line) => line !== '') ?? ''
+  if (exitCode === 0) return withCooldown('ok', lastLine(lines, (line) => line.includes('finished')) ?? evidence, now)
+
+  if (provider === 'Gemini') {
+    const index = lines.findIndex((line) =>
+      /^Error when talking to Gemini API Full report available at: \S+ TerminalQuotaError: You have exhausted your daily quota/.test(line),
+    )
+    if (index >= 0 && /^    at classifyGoogleError \(/.test(lines[index + 1] ?? '')) {
+      return withCooldown('quota', lines[index] as string, now, 24)
+    }
+  }
+
+  for (const line of lines) {
+    if (provider === 'Kimi' && /^error: failed to run prompt: provider\.auth_error: 403 You've reached your 5-hour usage limit/.test(line)) {
+      return withCooldown('quota', line, now, 5)
+    }
+    if (provider === 'Codex' && /^⚠ You've hit your usage limit/.test(line)) {
+      return withCooldown('quota', line, now, 5)
+    }
+    if (provider === 'Claude Code' && /^You've hit your session limit/.test(line)) {
+      return withCooldown('quota', line, now, 5)
+    }
+    if (provider === 'Codex' && /^⚠ \{"type":"error","status":400,.*is not supported when using Codex/.test(line)) {
+      return withCooldown('persona', line, now)
+    }
+    if (/^[^\s].* — dispatch refused(?::|$)/.test(line)) return withCooldown('persona', line, now)
+    if (provider === 'Codex' && /^⚠ Selected model is at capacity/.test(line)) {
+      return withCooldown('transient', line, now)
+    }
+  }
+  return withCooldown('unknown', lastLine(lines, (line) => line !== '') ?? '', now)
+}
+
 function record(args: readonly string[]): void {
   const persona = required(args[0], 'record needs a persona')
-  const output = required(option(args, '--output'), 'record needs --output <file>')
-  const exitText = required(option(args, '--exit'), 'record needs --exit <n>')
-  const exitCode = Number(exitText)
-  if (!Number.isInteger(exitCode)) required(undefined, '--exit must be an integer')
+  const outputOption = option(args, '--output')
+  const runLogOption = option(args, '--run-log')
+  if ((outputOption === undefined) === (runLogOption === undefined)) {
+    required(undefined, 'record needs exactly one of --output <file> or --run-log <file>')
+  }
+  const output = (outputOption ?? runLogOption) as string
+  const from = runLogOption === undefined ? 0 : Number(required(option(args, '--from'), '--run-log needs --from <offset>'))
+  if (!Number.isInteger(from) || from < 0) required(undefined, '--from must be a non-negative integer')
   const provider = process.env.AGENT_PROVIDER || persona
-  const content = readFileSync(output, 'utf8')
-  const lines = content.trimEnd().split('\n')
-  const classification: OutcomeClass = exitCode === 0 ? 'ok' : 'unknown'
-  const evidence = lines.at(-1) ?? ''
-  appendEvent(rotationLog(), {
-    ev: 'outcome', at: isoNow(), persona, provider, class: classification,
-    evidence, source: `${output}@0`,
-  })
-  process.stdout.write(`${classification}\n`)
+  const content = readFileSync(output).subarray(from).toString('utf8')
+  const exitText = outputOption === undefined
+    ? content.match(/(?:finished|FAILED \(exit (\d+)\))[^\n]*\n?$/)?.[1] ?? (/(?:^|\n)[^\n]*finished[^\n]*\n?$/.test(content) ? '0' : undefined)
+    : option(args, '--exit')
+  const exitCode = Number(required(exitText, 'record could not determine the dispatch exit status'))
+  if (!Number.isInteger(exitCode)) required(undefined, '--exit must be an integer')
+  const classification = classifyOutput(provider, content, exitCode)
+  const event: OutcomeEvent = {
+    ev: 'outcome', at: isoNow(), persona, provider, class: classification.class,
+    evidence: classification.evidence, source: `${output}@${from}`,
+    ...(classification.until === undefined ? {} : { until: classification.until }),
+  }
+  appendEvent(rotationLog(), event)
+  process.stdout.write(`${classification.class}\n`)
 }
 
 function retry(args: readonly string[]): void {

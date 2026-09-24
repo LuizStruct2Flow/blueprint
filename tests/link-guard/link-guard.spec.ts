@@ -10,7 +10,7 @@
  * finished assistant message is a Stop hook, which receives the transcript
  * path on stdin.
  *
- * The guard's contract, from the TASK-080 row (docs/doing/BACKLOG.md):
+ * The guard's contract, from the TASK-080 row:
  *
  *   - for every TASK-/BUG-/FEATURE-/SPIKE-NNN id in the last assistant
  *     message, the FIRST mention must be a markdown link whose target is the
@@ -33,12 +33,16 @@
  *     machinery exits 0 — a guard that blocks the session on its own bug is
  *     worse than the miss it was built for.
  *
- * THE DOCS ROOT. The guard reads the lifecycle docs from the payload's `cwd`
- * — the session's project root, which in these cases is REPO_ROOT. Cases
- * #12/#13 plant their own docs/ tree in the scenario workspace and point the
- * payload's cwd at it: the dual-folder state does not occur in the live tree
- * today (checked 2026-09-24), and a suite that waited for one would be
- * untestable by construction.
+ * THE DOCS ROOT. The guard reads the lifecycle docs from the payload's `cwd`.
+ * Every BEHAVIOURAL case plants its own docs/ tree in the scenario workspace
+ * and points the payload's cwd at it — the pattern #12/#13 established. That
+ * is deliberate: these cases used to assert against the live checkout with a
+ * hard-coded folder, and they went RED on main the day TASK-080's own row
+ * moved doing/ → waiting-acceptance/ — the ordinary lifecycle move this guard
+ * exists to track broke the guard's own suite (CI 89861bb). A case that
+ * asserts on a path owns the tree that path lives in. Exactly ONE case, #14,
+ * runs against the real docs/ tree, and it resolves the row's folder at
+ * runtime rather than hard-coding one, so the next move cannot break it.
  *
  * Parallelism hazard: none. Every case writes into its own scenario workspace
  * and spawns a short-lived `node`; the lifecycle docs under docs/ are read
@@ -50,13 +54,16 @@
  * that summary, so the guard cannot pass this suite by parsing nothing: a
  * guard that examined zero mentions would fail the floor in #5 and #6.
  *
- * REAL ROWS, verified against the tree on 2026-09-24 and deliberately chosen
- * from three different prefixes and two different files:
+ * FIXTURE ROWS. The planted docs/ tree holds, at locations fixed BY THE
+ * FIXTURE (two prefixes, two files):
  *
- *   TASK-080     -> docs/doing/BACKLOG.md      (the row under test)
- *   FEATURE-007  -> docs/backlog/BACKLOG.md
- *   BUG-035      -> docs/backlog/BUGS.md
- *   TASK-999     -> no row anywhere
+ *   TASK-080  -> docs/doing/BACKLOG.md   (fixture only — the live row moves)
+ *   BUG-035   -> docs/backlog/BUGS.md
+ *   TASK-999  -> no row anywhere
+ *
+ * #14 is the only case that reads the live tree; it resolves TASK-080's row
+ * at runtime, so a lifecycle move changes what it asserts, never whether it
+ * passes.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -117,8 +124,9 @@ async function runHook(
     JSON.stringify({
       session_id: '11111111-2222-3333-4444-555555555555',
       transcript_path: transcriptFile,
-      // The docs root the guard reads. Defaults to the real checkout; the
-      // dual-folder cases point it at a planted docs/ tree in the workspace.
+      // The docs root the guard reads. Defaults to the real checkout — which
+      // ONLY #14 means: every other case plants its own docs/ tree and points
+      // cwd at the workspace.
       cwd: options.payloadCwd ?? REPO_ROOT,
       permission_mode: 'default',
       hook_event_name: 'Stop',
@@ -133,13 +141,64 @@ async function runHook(
   return { code: r.code, stderr: r.stderr }
 }
 
+/**
+ * The hermetic docs/ tree every behavioural case plants: two rows, two
+ * prefixes, two files, at locations fixed BY THE FIXTURE so the assertions
+ * can name them. The live TASK-080 row's location is none of these cases'
+ * business — only #14 reads the live tree.
+ */
+const FIXTURE_BACKLOG = `# Fixture backlog
+
+| Id | Title |
+|---|---|
+| **TASK-080** | the row under test |
+`
+
+const FIXTURE_BUGS = `# Fixture bugs
+
+| Id | Title |
+|---|---|
+| **BUG-035** | a second row in a second file |
+`
+
+async function plantFixtureDocs(s: Scenario): Promise<void> {
+  await s.fs.write('docs/doing/BACKLOG.md', FIXTURE_BACKLOG)
+  await s.fs.write('docs/backlog/BUGS.md', FIXTURE_BUGS)
+}
+
+/**
+ * Where the LIVE docs/ tree holds `id`'s row today — the same scan the guard
+ * performs (same folders, same anchor shapes), so #14 can assert against
+ * reality without hard-coding a folder. Empty when no lifecycle file holds
+ * the row.
+ */
+async function liveRowPaths(id: string): Promise<string[]> {
+  const found: string[] = []
+  const tableRow = new RegExp(`^\\|\\s*\\*\\*${id}\\*\\*\\s*\\|`, 'm')
+  const heading = new RegExp(`^#{1,6}\\s+\\*{0,2}${id}\\*{0,2}(?=[\\s—]|$)`, 'm')
+  for (const folder of ['done', 'waiting-acceptance', 'doing', 'backlog'] as const) {
+    for (const file of ['BACKLOG.md', 'BUGS.md'] as const) {
+      const rel = `docs/${folder}/${file}`
+      const content = await readFile(join(REPO_ROOT, rel), 'utf8').catch(() => null)
+      if (content !== null && (tableRow.test(content) || heading.test(content))) {
+        found.push(rel)
+      }
+    }
+  }
+  return found
+}
+
 describe('TASK-080 — the link guard refuses unlinked item ids in the reply text', () => {
   it('#1 a bare id with a real row is refused, naming the exact path it should link', async () => {
     await scenario('linkguard-1', async (s) => {
-      const r = await runHook(s, 'Landed today: TASK-080, the link guard.')
+      await plantFixtureDocs(s)
+      const r = await runHook(s, 'Landed today: TASK-080, the link guard.', {
+        payloadCwd: s.workspace.root,
+      })
       expect(r.code, `a bare id with a real row was not refused\n${r.stderr}`).toBe(BLOCKED)
       // The message must name BOTH the id and the exact target — the fix is
-      // meant to be mechanical, not a hunt.
+      // meant to be mechanical, not a hunt. The path is the FIXTURE's, never
+      // the live tree's.
       expect(r.stderr).toContain('TASK-080')
       expect(r.stderr).toContain('docs/doing/BACKLOG.md')
     })
@@ -147,10 +206,14 @@ describe('TASK-080 — the link guard refuses unlinked item ids in the reply tex
 
   it('#2 an id linked to the WRONG lifecycle folder is refused — a stale link is the case worth catching', async () => {
     await scenario('linkguard-2', async (s) => {
-      // TASK-080's row lives in doing/ today. A link to backlog/ is "some link
-      // exists", the F-002 proxy: satisfiable without the property. The guard
-      // must resolve where the row ACTUALLY is and refuse the stale target.
-      const r = await runHook(s, 'See [TASK-080](docs/backlog/BACKLOG.md) for the row.')
+      await plantFixtureDocs(s)
+      // The fixture holds TASK-080's row in doing/. A link to backlog/ is
+      // "some link exists", the F-002 proxy: satisfiable without the
+      // property. The guard must resolve where the row ACTUALLY is and refuse
+      // the stale target.
+      const r = await runHook(s, 'See [TASK-080](docs/backlog/BACKLOG.md) for the row.', {
+        payloadCwd: s.workspace.root,
+      })
       expect(r.code, `a stale-folder link was not refused\n${r.stderr}`).toBe(BLOCKED)
       expect(r.stderr).toContain('TASK-080')
       expect(r.stderr).toContain('docs/doing/BACKLOG.md')
@@ -179,9 +242,11 @@ describe('TASK-080 — the link guard refuses unlinked item ids in the reply tex
 
   it('#5 a correctly linked message passes, and the summary proves the guard parsed it', async () => {
     await scenario('linkguard-5', async (s) => {
+      await plantFixtureDocs(s)
       const r = await runHook(
         s,
         'Two rows moved: [TASK-080](docs/doing/BACKLOG.md) and [BUG-035](docs/backlog/BUGS.md).',
+        { payloadCwd: s.workspace.root },
       )
       expect(r.code, r.stderr).toBe(0)
       // THE NON-VACUITY FLOOR for the whole suite: the guard reports that it
@@ -195,9 +260,11 @@ describe('TASK-080 — the link guard refuses unlinked item ids in the reply tex
 
   it('#6 an id with no row anywhere demands nothing — the guard never invents a target', async () => {
     await scenario('linkguard-6', async (s) => {
+      await plantFixtureDocs(s)
       const r = await runHook(
         s,
         'TASK-999 has no row anywhere. See [TASK-080](docs/doing/BACKLOG.md) for the guard.',
+        { payloadCwd: s.workspace.root },
       )
       expect(r.code, `an id with no row was treated as a violation\n${r.stderr}`).toBe(0)
       // The prose mention WAS examined and only one of the two ids resolved to
@@ -210,9 +277,11 @@ describe('TASK-080 — the link guard refuses unlinked item ids in the reply tex
 
   it('#7 a later bare mention of an already-linked id demands nothing', async () => {
     await scenario('linkguard-7', async (s) => {
+      await plantFixtureDocs(s)
       const r = await runHook(
         s,
         '[TASK-080](docs/doing/BACKLOG.md) is the guard. TASK-080 closes the epic gap.',
+        { payloadCwd: s.workspace.root },
       )
       expect(r.code, `a later bare mention was treated as the first\n${r.stderr}`).toBe(0)
       expect(r.stderr).toMatch(/examined [2-9]/)
@@ -333,6 +402,40 @@ describe('TASK-080 — the link guard refuses unlinked item ids in the reply tex
       expect(
         stale.code,
         `a link to the done/ side of a dual-folder row was refused\n${stale.stderr}`,
+      ).toBe(0)
+    })
+  })
+
+  // THE LIVE-TREE CASE, exactly one. Every behavioural case above owns a
+  // planted docs/ tree; this one runs the guard against the real checkout to
+  // prove the wiring end to end on true rows. It must therefore never name a
+  // folder: it resolves TASK-080's row at runtime and asserts on whatever
+  // comes back, so the next lifecycle move (waiting-acceptance/ → done/)
+  // changes what is asserted, not whether the case passes.
+  it("#14 LIVE-TREE: a bare id is refused at the row's CURRENT live location, and a link there passes", async () => {
+    const rowFiles = await liveRowPaths('TASK-080')
+    expect(
+      rowFiles.length,
+      'the live docs/ tree holds no TASK-080 row in any lifecycle folder — ' +
+        'repoint this case at an id that has one',
+    ).toBeGreaterThan(0)
+
+    await scenario('linkguard-14', async (s) => {
+      // A bare mention is refused, and the refusal names EVERY folder that
+      // really holds the row today (one, or two during a REOPEN).
+      const bare = await runHook(s, 'Landed today: TASK-080, the link guard.')
+      expect(bare.code, `a bare id with a real live row was not refused\n${bare.stderr}`).toBe(
+        BLOCKED,
+      )
+      expect(bare.stderr).toContain('TASK-080')
+      for (const f of rowFiles) expect(bare.stderr).toContain(f)
+
+      // A link to the resolved location passes — the guard endorses the row
+      // where it actually is, not where a fixture put it.
+      const linked = await runHook(s, `See [TASK-080](${rowFiles[0]}) for the row.`)
+      expect(
+        linked.code,
+        `a link to the row's live location was refused\n${linked.stderr}`,
       ).toBe(0)
     })
   })

@@ -37,6 +37,13 @@ because another machine only sees what is pushed.
 4. **`gh run list --commit` needs the full SHA.** A short one returns nothing and a
    wait loop never ends.
 5. **Codex sandboxes cannot write `~/.cache`**: give a Codex reviewer `TMPDIR=/dev/shm`.
+5b. **A `Stop` hook now judges the Orchestrator's own replies (TASK-080).** Every
+   `TASK-`/`BUG-`/`FEATURE-`/`SPIKE-NNN` id in a message to the founder must be
+   a markdown link to the lifecycle file that HOLDS that row; a stale link to
+   the folder a row has left is refused too, naming the retarget. Code fences
+   and inline code are exempt — but tool output pasted WITHOUT a fence counts as
+   prose and will block the reply, so fence it. A row in two folders at once
+   (the reopen transition) accepts a link to either and names both when bare.
 6. **One agent per checkout — dispatch with `isolation: "worktree"`.** Three
    agents shared this checkout on 2026-09-22 and their git indexes collided:
    one agent's CSV edit was swept into another's commit by a shared `git add`,
@@ -60,9 +67,10 @@ because another machine only sees what is pushed.
 
 ### The founder's
 
-- **Nine rows wait for acceptance:** TASK-071 to TASK-079 in
+- **Ten rows wait for acceptance:** TASK-071 to TASK-080 in
   [`../waiting-acceptance/BACKLOG.md`](../waiting-acceptance/BACKLOG.md), all on
-  `main` with CI green (`d1917cb` for 071-075, `0271a20` for 076-079). Each row's "Done when" is what to test;
+  `main` with CI green (`d1917cb` for 071-075, `0271a20` for 076-079, `8c128ac`
+  for 080). Each row's "Done when" is what to test;
   `npm --prefix tests test -- <suite>` runs the check behind it, and
   `node scripts/flip-checks.mts` prints TASK-075's three observations directly.
   Everything landed through 2026-09-22 is already accepted and in `../done/`.

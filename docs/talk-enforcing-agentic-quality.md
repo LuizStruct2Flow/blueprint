@@ -422,7 +422,7 @@ Same 338 live rules, one different question — with the baseline next to today.
 | Enforced by (`ENFORCED`) | Binds | Baseline | Today |
 |---|---|---:|---:|
 | nothing — prose only | nobody | **204** | **189** |
-| one client's hook | that client | **16** | **18** |
+| a hook in one agent's tool | that tool | **16** | **18** |
 | repository script | whoever invokes it | **23** | **23** |
 | repository test | every run of the suite | **41** | **51** |
 | local git control | everyone, *if* hooks are armed | **42** | **42** |
@@ -434,7 +434,7 @@ Same 338 live rules, one different question — with the baseline next to today.
 
 # The anecdote that proves it
 
-We have a rule: "no chained shell commands". A hook inside one agent's client enforces it. It was one of the few rules everybody believed was enforced.
+We have a rule: "no chained shell commands". A hook in one agent's tool enforces it. It was one of the few rules everybody believed was enforced.
 
 Then the **Codex** auditor reported:
 
@@ -449,7 +449,7 @@ Then the **Codex** auditor reported:
 # So there is only one place for a guardrail
 
 Per-engineer setup drifts, silently and privately.
-A setting in one agent's client binds one agent.
+A hook in one agent's tool binds that tool.
 Documentation binds nobody.
 
 <br>
@@ -683,7 +683,7 @@ You can run this on your own projects this week, without any new tooling.
 1. **Enumerate** every normative line in your standards docs. Count them.
 2. For each one: **name the mechanism** — `file:line` — or write `NONE`.
 3. For each mechanism: **make it fail.** If you can't, it is not a control.
-4. Write down **who and what it binds** — one agent's own config, a git hook, or CI.
+4. Write down **who and what it binds** — a hook in one agent's tool, a git hook, or CI.
 5. Sort into: *mechanise* / *already fine* / *keep but stop claiming enforcement* / *delete as aspiration*.
 
 **Use two providers and let them converge.** Where they disagree, your truth is the least certain.
@@ -786,7 +786,7 @@ I have **one**. It works because these are my projects, and they follow my stand
 
 1. **Your projects are not singletons.** A handful of shapes covers most of them — and this shared part is what you encode.
 2. **Review is a complement, not a control.** It cannot see a check that examines nothing.
-3. **The layer decides the reach.** One agent's config, a git hook, or CI — only the last two bind everybody.
+3. **The layer decides the reach.** A hook in one agent's tool, a git hook, or CI — only the last two bind everybody.
 4. **Rotate the provider, and let every pass fix instead of report.** Where two providers disagree, your code is misleading.
 5. **Measure what is enforced.** The number will be lower than you expect — and having it makes the whole difference.
 

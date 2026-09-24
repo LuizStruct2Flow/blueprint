@@ -356,6 +356,9 @@ rewrite of the same function (§6).
 
 ### D1 (founder): the item's provider runs out mid-item. Reassign, or hold?
 
+**Decided 2026-09-24 by the founder: reassign.** Reassign is the default
+branch in `next`. `--hold` (exit 5) stays available as an explicit override.
+
 Two founder rules meet here. "The item runs entirely on one provider" and "a
 provider at zero quota leaves the rotation" cannot both hold once Kimi refuses
 24 minutes into an item.

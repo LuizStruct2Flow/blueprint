@@ -1170,6 +1170,102 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
     })
   })
 
+  it('BUG-153 an unreadable pid file on a LIVE slot must not read as unowned', async () => {
+    await scenario('sf-153', async (s) => {
+      // #16 proves the two-instant select-then-remove race. BUG-153 is a
+      // narrower, deterministic mechanism into the SAME slot: the owner-pid
+      // read is an EXTERNAL `cat`, and `_ds_pid="$(cat "$_ds_slot/pid" ...)" ||
+      // _ds_pid=""` treats ANY read failure — not just "no such file" — as "no
+      // owner". A `cat` that fails transiently (fork/exec EAGAIN on a loaded
+      // host) makes a caller delete another caller's LIVE reservation.
+      //
+      // Caller A reserves slot-0 for real, with a real background child that
+      // stays alive for the whole test (BP_SUBAGENT_META_WAIT is generous).
+      // Caller B then reads that slot's pid file through a `cat` shimmed to
+      // fail on exactly that one read — simulating the transient failure,
+      // never "the file is missing". On the buggy hook, B reads the empty
+      // pid, treats slot-0 as stale, deletes it and reclaims it for its OWN
+      // child — leaving two live children sharing a cap of one.
+      const f = await deferFixture(s)
+
+      const callA = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'aaaa00000000')],
+        {
+          cwd: f.repo,
+          env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
+        },
+      )
+      expect(callA.code, callA.output).toBe(0)
+
+      // A's reservation is live before B is let anywhere near it.
+      let ownerPid = ''
+      await vi.waitFor(
+        async () => {
+          const raw = await s.fs
+            .read('repo/subagent-defer/slot-0/pid')
+            .catch(() => '')
+          const p = raw.trim()
+          if (!p) throw new Error('caller A never recorded an owner pid for slot-0')
+          ownerPid = p
+        },
+        { timeout: 10_000, interval: 50 },
+      )
+      const running = async (pid: string): Promise<boolean> =>
+        (
+          await s.run('sh', ['-c', 'kill -0 "$1" 2>/dev/null && echo YES || echo NO', 'x', pid], {
+            cwd: f.repo,
+          })
+        ).stdout.includes('YES')
+      expect(await running(ownerPid), `A's slot-0 owner ${ownerPid} was never alive`).toBe(true)
+
+      // ONE shimmed `cat`, firing ONLY on this one read of this one file, so
+      // the failure this case injects is exactly the transient one BUG-153
+      // describes — never "the file doesn't exist", which #16 already covers.
+      const gate = s.workspace.path('cat-gate')
+      const shims = await s.shimDir('repo/shims')
+      await shims.add(
+        'cat',
+        `case "$*" in\n` +
+          `  *subagent-defer/slot-0/pid*)\n` +
+          `    if [ ! -e ${JSON.stringify(gate)} ]; then\n` +
+          `      : >${JSON.stringify(gate)}\n` +
+          `      exit 1\n` +
+          `    fi\n` +
+          `    ;;\n` +
+          `esac\n` +
+          `exec /bin/cat "$@"`,
+      )
+
+      const callB = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'bbbb00000000')],
+        {
+          cwd: f.repo,
+          env: {
+            ...f.env,
+            AGENT_FEED_LOG: f.log,
+            BP_SUBAGENT_META_WAIT: '10',
+            BP_SUBAGENT_DEFER_MAX: '1',
+            PATH: shims.path(),
+          },
+        },
+      )
+      expect(callB.code, callB.output).toBe(0)
+
+      // A's owner is STILL alive — a live slot's transient read failure must
+      // never look like "no owner" — so at most one child may be running
+      // against a cap of one.
+      const alive = await children(s, f.repo)
+      expect(alive.length, 'nothing was deferred at all, so this case proves nothing').toBeGreaterThan(0)
+      expect(
+        alive.length,
+        `a transient failure reading slot-0's LIVE owner pid let caller B reclaim it:\n${alive.join('\n')}`,
+      ).toBeLessThanOrEqual(1)
+      expect(await running(ownerPid), "A's original owner was killed off by B's reclaim").toBe(true)
+    })
+  })
+
   it('#17 BUG-133: a signalled child dies with its slot, and leaves no sleep behind', async () => {
     await scenario('sf-17', async (s) => {
       // The handler removed the slot on HUP/INT/TERM with no explicit exit, and

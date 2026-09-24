@@ -751,6 +751,20 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     const counted = mtsPatterns(mts)
     const discovered = shellPatterns(suites)
 
+    // BUG-147: dod_stage_bugtests also accepts a project's OWN JavaScript spec
+    // forms, but only on a root OTHER than the one tests/vitest.config.ts
+    // governs (TS_SPEC_EXTS vs. the project-only widening in dod-gate.mts) —
+    // a project's own declared root is run by the PROJECT's own test runner,
+    // never by this repo's config, so requiring suites.sh or
+    // tests/vitest.config.ts to also know these extensions would widen THIS
+    // repo's own harness for no reason. They are therefore excluded from the
+    // three-way compare below, and PINNED separately: `counted` must be
+    // exactly the TS set plus this exact widened set, so an extension added
+    // to the evidence filter for some other reason still fails loudly instead
+    // of silently joining the "project-only" pile.
+    const PROJECT_ONLY_EXTENSIONS = ['.spec.cjs', '.spec.js', '.spec.jsx', '.spec.mjs']
+    const tsGoverned = counted.filter((ext) => !PROJECT_ONLY_EXTENSIONS.includes(ext))
+
     // vitest's side is the `include` ARRAY specifically, not the whole file: a
     // glob sitting in some other option decides nothing about what runs. The
     // extension is whatever follows the last `*`, so `**/*.spec.ts` reduces to
@@ -771,14 +785,27 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     // these readers do not recognise, all three come back EMPTY and therefore
     // EQUAL, and the comparison below passes over nothing at all — which is the
     // exact failure #8 exists to name, one level up.
-    expect(counted, `${MTS} accepts no evidence pattern at all — the comparison is blind`).not.toEqual([])
+    expect(tsGoverned, `${MTS} accepts no TypeScript evidence pattern at all — the comparison is blind`).not.toEqual(
+      [],
+    )
     expect(discovered, 'scripts/lib/suites.sh discovers no runner pattern at all').not.toEqual([])
     expect(executed, 'tests/vitest.config.ts includes no glob at all').not.toEqual([])
 
+    // The other half of BUG-147's pin: `counted` is EXACTLY `tsGoverned` plus
+    // the known widened set — no more, no less. This is what would go red if
+    // the fix's widening were removed from dod-gate.mts.
+    expect(
+      counted,
+      'the evidence filter accepts something other than the TS set plus the known BUG-147 widening:\n' +
+        `  counted as evidence (${MTS}): ${JSON.stringify(counted)}\n` +
+        `  expected: TS-governed ${JSON.stringify(tsGoverned)} + project-only ${JSON.stringify(PROJECT_ONLY_EXTENSIONS)}`,
+    ).toEqual([...tsGoverned, ...PROJECT_ONLY_EXTENSIONS].sort())
+
     expect(
       { discovered, executed },
-      'The extension rule must be ONE set on all three sides.\n' +
-        `  counted as evidence (${MTS}): ${JSON.stringify(counted)}\n` +
+      'The extension rule must be ONE set on all three sides, for the root ' +
+        'tests/vitest.config.ts itself governs.\n' +
+        `  counted as evidence, TS-governed roots only (${MTS}): ${JSON.stringify(tsGoverned)}\n` +
         `  discovered (scripts/lib/suites.sh): ${JSON.stringify(discovered)}\n` +
         `  executed (tests/vitest.config.ts): ${JSON.stringify(executed)}\n` +
         'A file counted but not executed certifies a bug with a test that never ran.\n' +
@@ -787,7 +814,7 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
         'A pattern one side accepts and the others have never heard of is the same\n' +
         'drift in the WIDENING direction — which this case missed three times\n' +
         'before Codex measured it (TASK-047).',
-    ).toEqual({ discovered: counted, executed: counted })
+    ).toEqual({ discovered: tsGoverned, executed: tsGoverned })
   })
 
   it('#17b TASK-047: discovery ACCEPTS every counted extension and refuses an uncounted one', async () => {
@@ -937,6 +964,50 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
       expect(r.code, `a test under the declared backend/ root was not found:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#11c BUG-147: a project bug tested only in a JavaScript *.spec.js under a declared root passes', async () => {
+    await scenario('dod-gate-11c', async (s) => {
+      // The concrete case that filed BUG-147: storm2flow's frontend is
+      // JavaScript, so BUG-216's regression test is
+      // `frontend/src/configLoader.bug216.spec.js` — a real, running vitest
+      // spec whose title names the bug. Before this fix the stage only ever
+      // matched `.spec.ts`/`.spec.tsx` on ANY declared root, so a JS-only
+      // frontend could never satisfy it no matter how real the test was.
+      const f = await build(s, 'r11c', 'derived')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-216** | project bug | S3 | open | d |\n')
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: `frontend/src`\n')
+      await s.fs.write(
+        join(f.dir, 'frontend/src/configLoader.bug216.spec.js'),
+        "it('BUG-216: the frontend build stops depending on the api-url parameter', () => {})\n",
+      )
+      await commit(s, f, 'c.txt', 'BUG#216: a project fix tested in a JS spec')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(r.code, `a *.spec.js under a declared project root was not found:\n${r.output}`).toBe(0)
+    })
+  })
+
+  it('#11d BUG-147 GUARD: a *.test.js or a README naming the bug still does not count', async () => {
+    await scenario('dod-gate-11d', async (s) => {
+      // The negative half: widening WHICH EXTENSIONS count on a project's own
+      // root must not reopen TASK-047 #18's hole. A retired `.test.js` form
+      // and prose in a README must still fail there, same as the TypeScript
+      // forms already do (#18's own fixture).
+      const f = await build(s, 'r11d', 'derived')
+      await appendRow(s, f, 'docs/doing/BUGS.md', '| **BUG-217** | project bug | S3 | open | d |\n')
+      await s.fs.write(join(f.dir, 'project_config_paths.md'), '- BP_TEST_ROOTS: `frontend/src`\n')
+      await s.fs.write(join(f.dir, 'frontend/src/NOTES.md'), 'Fixed BUG-217 in the loader.\n')
+      await s.fs.write(join(f.dir, 'frontend/src/legacy.test.js'), "it('BUG-217: retired form', () => {})\n")
+      await commit(s, f, 'c.txt', 'BUG#217: a project fix with no counted test')
+
+      const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f))
+      expect(
+        r.code,
+        `a retired .test.js form or README prose counted as the regression test:\n${r.output}`,
+      ).not.toBe(0)
+      expect(r.output, 'it failed but did not name the bug').toContain('BUG-217')
     })
   })
 

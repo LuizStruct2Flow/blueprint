@@ -18,7 +18,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { mkdir, readdir, readFile, readlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, readlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -135,18 +135,54 @@ export async function dumpProcessTree(rootPids: number[], label: string): Promis
 /**
  * Where a dump lands. NEVER inside a scenario's own workspace — `dispose()`
  * (workspace.ts) removes it, and asserts the removal, regardless of whether
- * the scenario body failed. `BP_HARNESS_DUMP_DIR` overrides the default, and
- * MUST be set explicitly by a scenario that runs a NESTED harness (a
- * bootstrapped project's own vitest, as tests/bootstrap-gate does): the
- * nested process's own `REPO_ROOT` resolves inside the outer scenario's
- * workspace, which is exactly what gets removed once the outer `s.run` that
- * started it returns. Pointing the nested run at the OUTER repo's own
- * `tests/.timeout-dumps` (this module's `REPO_ROOT`, imported by the caller)
- * is what makes a nested hang's dump survive; see
- * tests/bootstrap-gate/bootstrap-gate.release.spec.ts.
+ * the scenario body failed. `BP_HARNESS_DUMP_DIR` overrides the default for
+ * an IN-PROCESS caller only (see tests/harness/harness.spec.ts "BUG-146"
+ * cases, which set it directly on `process.env`).
+ *
+ * It does NOT reach a NESTED harness (a bootstrapped project's own vitest,
+ * as tests/bootstrap-gate runs) — every `BP_*` name is stripped from that
+ * child's environment by `scripts/run-ts-suites.sh`'s `ts_scrubbed` before
+ * its vitest starts (BUG-146 round 2: passing `BP_HARNESS_DUMP_DIR` on the
+ * nested process's env looked like it worked, but the scrub that exists for
+ * BUG-046/047/066 unsets it on the way in, so the nested run always fell
+ * back to a directory inside the derived workspace that teardown deletes —
+ * nothing was ever captured for a nested hang). A nested run's dump is
+ * instead read off disk, from the derived project's OWN
+ * `tests/.timeout-dumps`, and copied into the outer repo's by `collectDumps`
+ * below, while the derived workspace still exists.
  */
 export function dumpDir(repoRoot: string): string {
   return process.env.BP_HARNESS_DUMP_DIR || join(repoRoot, 'tests', '.timeout-dumps')
+}
+
+/**
+ * Copy every file a NESTED harness run left in `fromDir` (a derived
+ * project's `tests/.timeout-dumps`, still inside the outer scenario's
+ * workspace) into `toDir` (the outer repo's own `tests/.timeout-dumps`,
+ * which survives teardown and is what CI uploads — BUG-146 round 2).
+ *
+ * Best-effort and silent about a `fromDir` that never existed — most gate
+ * runs never time out, so "nothing to collect" is the common case, not a
+ * failure. Any other read error propagates: a dump directory that exists
+ * but cannot be read is worth failing loudly over, not swallowing.
+ */
+export async function collectDumps(fromDir: string, toDir: string): Promise<string[]> {
+  let entries: string[]
+  try {
+    entries = await readdir(fromDir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw err
+  }
+  if (entries.length === 0) return []
+  await mkdir(toDir, { recursive: true })
+  const copied: string[] = []
+  for (const entry of entries) {
+    const dest = join(toDir, entry)
+    await cp(join(fromDir, entry), dest, { recursive: true })
+    copied.push(dest)
+  }
+  return copied
 }
 
 /** Write a dump to `dir`, one file per timeout, and return its path. */

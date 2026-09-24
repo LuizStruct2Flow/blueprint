@@ -3,7 +3,7 @@
  * pointer resolves to a real test title.
  *
  * TASK-062, goal (d) — Christian's half of the founder's compromise
- * (docs/waiting-acceptance/PLAN-TASK-062.md §5, "Founder decisions" #1): each wave-1 task
+ * (PLAN-TASK-062.md §5, "Founder decisions" #1): each wave-1 task
  * carries an `enforced by: tests/<suite> "<it title>"` pointer in the prose it
  * replaces, and a doc check asserts every pointer resolves to a real test
  * title. This is that check.

@@ -5,7 +5,7 @@
 // is no push-time contamination scan at all — `contamination_scan`
 // (scripts/lib/contamination.sh) runs only from `scripts/blueprint`'s a2bp
 // path. The ABSENCE of a push-time call site is the finding. The founder chose
-// the CI-only route (docs/waiting-acceptance/PLAN-TASK-062.md §"Founder decisions" #3,
+// the CI-only route (PLAN-TASK-062.md §"Founder decisions" #3,
 // 2026-09-22): "The existing checker scans the pushed diff, with no duplicated
 // patterns and no port. Contamination on main is caught before released
 // moves."

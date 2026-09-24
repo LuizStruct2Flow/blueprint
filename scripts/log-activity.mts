@@ -259,8 +259,9 @@ async function runDeferredChild(): Promise<never> {
 }
 
 function readSlotPid(slot: string): { pid: string; unknown: boolean } {
+  let raw: string
   try {
-    return { pid: readFileSync(join(slot, 'pid'), 'utf8').trim(), unknown: false }
+    raw = readFileSync(join(slot, 'pid'), 'utf8').trim()
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { pid: '', unknown: false }
     // BUG-153: a read failure on a slot that EXISTS must not read as "no
@@ -272,6 +273,14 @@ function readSlotPid(slot: string): { pid: string; unknown: boolean } {
     // every other one.
     return { pid: '', unknown: true }
   }
+  // BUG-153 round 2: the pid file EXISTS and the read succeeded, but the
+  // content is empty or not a pid — a caller can observe the file between
+  // its creation and the write of its content. That is still "owner
+  // unknown", not "no owner": only ENOENT (the file never existed) may
+  // report no owner. Anything else present-but-unparseable fails closed the
+  // same as a read error.
+  if (raw === '' || !Number.isInteger(Number(raw))) return { pid: raw, unknown: true }
+  return { pid: raw, unknown: false }
 }
 
 // defer_spawn — reserve a slot and hand it a detached child, atomically:

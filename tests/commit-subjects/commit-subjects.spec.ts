@@ -463,7 +463,10 @@ describe('TASK-022 — CI checks every commit of a push', () => {
       'tests/bug.spec.ts': "it('BUG-2: fixture')\n",
       ...extra,
     }
-    for (const lib of ['check-commit-subjects.sh', 'lib/commit-subject.sh', 'lib/dod-gate.sh', 'lib/pipeline.sh']) {
+    // TASK-067/BUG-147: lib/dod-gate.sh is now a sourced adapter that forwards
+    // to lib/dod-gate.mts — copy the target too, or it fails closed with
+    // "cannot find ... — run: blueprint pull scripts/lib/dod-gate.mts".
+    for (const lib of ['check-commit-subjects.sh', 'lib/commit-subject.sh', 'lib/dod-gate.sh', 'lib/dod-gate.mts', 'lib/pipeline.sh']) {
       await s.fs.copyIn(join(REPO_ROOT, 'scripts', lib), join('repo/scripts', lib))
     }
     for (const [rel, body] of Object.entries(files)) await s.fs.write(join('repo', rel), body)

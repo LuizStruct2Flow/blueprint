@@ -307,6 +307,24 @@ and turns the OLD path into a fixed two-line shim
 that keeps every caller working. Every whole-file migration ends this way;
 there is no smaller unit that also counts.
 
+**One narrow, file-specific ceiling on that rule: a sourced library a
+still-shell caller must keep SOURCING cannot use the exec shim** (BUG-147,
+`docs/doing/PLAN-BUG-147-dod-gate-port.md`, "Option C") — an exec shim
+replaces the process with `node`, which cannot hand shell functions back to a
+caller that sourced it. `scripts/lib/dod-gate.sh` is the one file this
+applies to today: it is sourced by `.githooks/pre-push-project` and by
+`.github/workflows/security.yml`, so its migration moved every policy branch
+into `scripts/lib/dod-gate.mts` and left a small, MECHANICALLY GENERATED
+sourced adapter behind — the same shell function names as before, each
+forwarding to the matching CLI subcommand. `scripts/shell-inventory-check.mts`
+recognises only this exact, file-specific shape: it parses the adapter's
+trailing `(function, subcommand)` forwarding pairs, RE-RENDERS the whole file
+from them, and requires byte equality against what is on disk — the same
+"trust the renderer, not the bytes" contract the ordinary two-line shim
+already uses. An executable always uses the ordinary shim; this sourced form
+is never a general escape hatch, and a second sourced library earns its own
+reviewed extension of the checker rather than broadening it by analogy.
+
 **Runtime: Node's own type stripping, no flag, no dependency.** `.mts` scripts
 run on an official Node build (`engines.node` in `tests/package.json`) with no
 `tsx`, `ts-node`, Bun or Deno — they must run before `npm ci` installs

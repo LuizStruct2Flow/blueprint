@@ -121,6 +121,12 @@ import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { skipVisibly } from '../helpers/project-config.js'
 
 const LIB = 'scripts/lib/dod-gate.sh'
+// TASK-067/BUG-147: LIB is now a mechanically generated SOURCED ADAPTER (see
+// its own header) that forwards to this .mts target. Every fixture that
+// copies LIB copies MTS alongside it, or the adapter fails closed with
+// "cannot find ... — run: blueprint pull scripts/lib/dod-gate.mts" instead
+// of running the stage it is asked for.
+const MTS = 'scripts/lib/dod-gate.mts'
 const SUBJECT_LIB = 'scripts/lib/commit-subject.sh'
 const HOOK = join(REPO_ROOT, '.githooks/pre-push-project')
 
@@ -158,6 +164,7 @@ async function git(s: Scenario, cwd: string, args: string[]) {
 async function build(s: Scenario, tag: string, kind: 'blueprint' | 'derived' = 'blueprint'): Promise<Fixture> {
   const dir = await s.workspace.dir(tag)
   await s.fs.copyIn(join(REPO_ROOT, LIB), join(dir, LIB))
+  await s.fs.copyIn(join(REPO_ROOT, MTS), join(dir, MTS))
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/state-dir.sh'), join(dir, 'scripts/lib/state-dir.sh'))
   // BUG-140: dod_stage_signal's roster check. No AGENT_ROSTER.md is written here,
   // so bp_roster_file finds nothing and the check degrades to a no-op — the same
@@ -726,15 +733,22 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
         .filter(Boolean)
         .sort()
 
-    const lib = await readFile(join(REPO_ROOT, LIB), 'utf8')
+    // TASK-067/BUG-147: the evidence set now lives in TypeScript, as the
+    // TS_SPEC_EXTS array in dod-gate.mts (the `-name '*.spec.ts'` shell form
+    // this case used to read is gone — see the port's commit body). One
+    // array literal, both extensions spelled out with their leading dot, so
+    // the same "complete pattern list, not something the reader has to
+    // re-derive" property survives the port.
+    const mtsPatterns = (text: string): string[] => {
+      const m = /TS_SPEC_EXTS\s*=\s*\[([^\]]*)\]/.exec(text)
+      return [...new Set([...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] ?? ''))].filter(Boolean).sort()
+    }
+
+    const mts = await readFile(join(REPO_ROOT, MTS), 'utf8')
     const config = await readFile(join(REPO_ROOT, 'tests/vitest.config.ts'), 'utf8')
     const suites = await readFile(join(REPO_ROOT, 'scripts/lib/suites.sh'), 'utf8')
 
-    // DEDUPED, because the lib names the extensions TWICE — once for the shallow
-    // top-level search and once for the recursive one (#18). Without this the
-    // comparison fails on multiplicity while all three sides agree, which is a
-    // guard reporting a defect it invented.
-    const counted = shellPatterns(lib)
+    const counted = mtsPatterns(mts)
     const discovered = shellPatterns(suites)
 
     // vitest's side is the `include` ARRAY specifically, not the whole file: a
@@ -757,14 +771,14 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     // these readers do not recognise, all three come back EMPTY and therefore
     // EQUAL, and the comparison below passes over nothing at all — which is the
     // exact failure #8 exists to name, one level up.
-    expect(counted, `${LIB} accepts no evidence pattern at all — the comparison is blind`).not.toEqual([])
+    expect(counted, `${MTS} accepts no evidence pattern at all — the comparison is blind`).not.toEqual([])
     expect(discovered, 'scripts/lib/suites.sh discovers no runner pattern at all').not.toEqual([])
     expect(executed, 'tests/vitest.config.ts includes no glob at all').not.toEqual([])
 
     expect(
       { discovered, executed },
       'The extension rule must be ONE set on all three sides.\n' +
-        `  counted as evidence (${LIB}): ${JSON.stringify(counted)}\n` +
+        `  counted as evidence (${MTS}): ${JSON.stringify(counted)}\n` +
         `  discovered (scripts/lib/suites.sh): ${JSON.stringify(discovered)}\n` +
         `  executed (tests/vitest.config.ts): ${JSON.stringify(executed)}\n` +
         'A file counted but not executed certifies a bug with a test that never ran.\n' +
@@ -872,6 +886,9 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
       // shipped tests/ and NOT docs/, which isolates the tests/ rule from #10d.
       const f = await derivedFix(s, 'r10b', 'scaffolding')
       await s.fs.copyIn(join(REPO_ROOT, SUBJECT_LIB), join(f.dir, 'scaffolding', SUBJECT_LIB))
+      // The adapter resolves its target via BP_CODE_ROOT, which this case
+      // points at scaffolding/ — so the .mts must live there too.
+      await s.fs.copyIn(join(REPO_ROOT, MTS), join(f.dir, 'scaffolding', MTS))
       await s.fs.write(join(f.dir, 'scaffolding', SHIPPED_SUITE), SHIPPED_TEXT)
 
       const r = await runStage(s, f, 'dod_stage_bugtests', rangeOf(f), {

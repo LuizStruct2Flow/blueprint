@@ -136,13 +136,11 @@ matches on Holder AND Task, but an agent rewrites the Task when it claims
 ACTIVE, so recovery never fires for the failure it was built for. Until it is
 fixed, after every watcher dispatch read the run log for `FAILED` yourself — a
 stranded `State=ACTIVE` is not recovered.
-| QA | Vijay (Kimi) — TASK-068 | — | Vitali (Claude), then Jesko (Codex) for an item Codex can verify |
-
-**TASK-062 runs task by task** from
-[`PLAN-TASK-062.md`](PLAN-TASK-062.md) §4, each sub-task promoted to its own
-`TASK-NNN` row when picked up. TASK-068 (TASK-062-01) skipped Jesko (Codex):
-fixing its live violation meant running `tests/dod-gate`, whose fixture git
-repos the Codex sandbox cannot build.
+**TASK-062 (the enforcement epic) has landed and waits for acceptance**, with
+its plan at
+[`../waiting-acceptance/PLAN-TASK-062.md`](../waiting-acceptance/PLAN-TASK-062.md).
+Every scheduled slice is on `main`; TASK-062-08 was relabelled judgement by the
+founder, and -10/-11 stay parked on their stated re-open triggers.
 
 **Two skips, both with reasons, both the rules working:**
 - **TASK-067 skipped Thomas (Kimi):** the provider was out of its 5-hour quota

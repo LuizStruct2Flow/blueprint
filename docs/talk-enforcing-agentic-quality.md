@@ -217,33 +217,33 @@ style: |
 
 ## Guardrails that execute, for teams of engineers and agents
 
-**Lessons from building one — and measuring it**
+**What I learned building one — and measuring it**
 
 ---
 
 # The claim
 
-> With several engineers and several agents working across your projects,
-> **your best practices have to exist as repeatable, enforced,
-> evolving controls in the repository.**
+> I believe that once several engineers and several agents work across your projects,
+> **your best practices have to live in the repository as controls:
+> repeatable, enforced, and evolving.**
 
 <br>
 
-Not in a wiki. Not in an onboarding deck. Not in three people's heads.
+Not in a wiki. Not in an onboarding deck. Not in the heads of three people.
 
-**This talk is the evidence, and the traps on the way.**
+**Let me show you the evidence — and the traps I fell into on the way.**
 
 ---
 
 # Where does the truth live?
 
-Pick your organisation. Where is the authoritative answer to *"how do we build software here"*?
+Think about your own organisation. Where is the answer to *"how do we build software here?"*
 
 - A wiki space, last edited 14 months ago
 - An onboarding deck
-- The three people who have been here longest
+- The three colleagues who have been here the longest
 
-**None of those can enforce anything.** They can only be *consulted* — by someone who already knows to look.
+**None of them can enforce anything.** You can only *consult* them — and only if you already know where to look.
 
 <br>
 
@@ -253,44 +253,45 @@ Pick your organisation. Where is the authoritative answer to *"how do we build s
 
 # What changes with agents
 
-An engineer who cannot find the rule asks a colleague.
+Be super-alert when you hear this one:
 
-An agent who cannot find the rule **produces confident, well-formed, non-compliant work** — fast, and at volume.
+> "The agent should know our rules. They are in the wiki."
 
-<br>
+An engineer who cannot find a rule asks a colleague.
+An agent who cannot find a rule **produces confident, well-formed, non-compliant work** — fast, and in big quantities.
 
-Multiply by *n* engineers and *m* agents, each with its own context. The gap between *what we agreed* and *what ships* stops being a documentation problem.
+Multiply this by *n* engineers and *m* agents, each with its own context. The gap between *what we agreed* and *what we ship* is no longer a documentation problem.
 
-**It becomes a control problem.**
+**It is a control problem.**
 
 ---
 
 # "But our projects are all different"
 
-They are not. Not at the level that matters.
+I hear this sentence in almost every organisation. And I don't buy it — not at the level that matters.
 
-Look across your projects. Most of them are one of a handful of recurring shapes:
+Take a look at your projects. Most of them are one of a handful of shapes:
 
 **headless microservice · backend-for-frontend · event-driven system · anti-corruption layer · back-office system**
 
 <br>
 
-What differs is **business rules, domain language, and detail.**
+What differs is **business rules, domain language, and details.**
 What does not differ is **the shape** — layering, transport, idempotency, observability, deployment, test strategy.
 
 ---
 
-# Which is what makes this possible
+# And this is what makes it possible
 
-> Treating every project as an exotic singleton means
-> **re-deciding the 80% that was never in question** —
-> and re-deciding it differently each time.
+> If you treat every project as an exotic singleton,
+> **you re-decide the 80% that was never in question** —
+> and you decide it differently every time.
 
 <br>
 
-The shared part is not a rounding error. **It is most of the work**, and it is the part where inconsistency costs you the most and buys you nothing.
+The shared part is not a rounding error. **It is most of the work.** It is also where inconsistency costs you the most and gives you nothing back.
 
-**That is the part worth encoding.**
+**This is the part worth encoding.**
 
 ---
 
@@ -310,21 +311,21 @@ I believed this. I ran it. **I was the reviewer.**
 
 <br>
 
-Then I stopped asking whether our rules were *good*, and started asking whether they were **enforced** — which turns out to be a measurable question.
+Then I stopped asking whether our rules were *good*, and started asking whether they were **enforced**. It turns out this is a question you can measure.
 
 ---
 
 # The method
 
-Two agents walked our two normative documents line by line. A third, on a **different provider**, audited the highest-consequence rules independently.
+Two agents went through our two normative documents, line by line. A third one, from a **different provider**, audited the rules with the highest consequences on its own.
 
 One question per rule:
 
-> **What mechanism enforces this, and can you make it fail?**
+> **Which mechanism enforces this — and can you make it fail?**
 
 <div class="stat">373</div>
 
-**audited rows today.** Every normative line in `CLAUDE.md` and `docs/DoD.md`, plus mechanism-only controls found in the refresh.
+**audited rows today.** Every normative line in `CLAUDE.md` and `docs/DoD.md`, plus controls that only existed as mechanisms, found in the refresh.
 
 <span class="small">The original audit had 309 rows. The accepted refresh added 64 newly written or mechanism-only rules; that is scope growth, not enforcement progress. Excluding 35 rows marked for deletion leaves the 338 live-rule denominator used from here on.</span>
 
@@ -338,23 +339,23 @@ One question per rule:
 
 <br>
 
-The enforcement epic moved **15 rules out of prose-only**. Real movement, and small enough to be honest about.
+The enforcement epic moved **15 rules out of prose-only**. This is real movement — and small enough that I want to be honest about it.
 
-The interesting result was among the rules that *did* have one.
+But the interesting part was among the rules that *did* have a mechanism.
 
 ---
 
-# The defect that reading cannot catch
+# The defect you cannot catch by reading
 
-**A check can pass because the thing it examines is _absent_ rather than _correct_.** It prints `PASSED`, always has, and will keep doing so after the code it guards is deleted.
+**A check can pass because the thing it examines is _absent_, not because it is _correct_.** It prints `PASSED`, it always did, and it will keep doing so after someone deletes the code it guards.
 
-Live in my repo when I looked:
+What I found in my own repository:
 
 - A gate that enforced nothing on macOS — one `sed` alternation in GNU-only syntax
 - An assertion that printed its own failure 28 times and **exited 0**
-- A coverage rule scoped to two directories **that have never existed here**
+- A coverage rule scoped to two directories **that never existed here**
 
-**Every one passed review. Repeatedly. One survived five rounds** — each reviewer read the shell and the TypeScript separately, and the defect lived in the seam.
+**All of them passed review. Many times. One survived five rounds** — every reviewer read the shell and the TypeScript separately, and the defect lived exactly in between.
 
 ---
 
@@ -367,22 +368,22 @@ Live in my repo when I looked:
 
 <br>
 
-**Complements, not substitutes.** Asking review to enforce compliance asks it to do the one thing it structurally cannot.
+**They complement each other. They don't replace each other.** If you ask review to enforce compliance, you ask it to do the one thing it structurally cannot do.
 
-<span class="small">This is not a story about weak reviewers. A reviewer sees a well-formed assertion. Only running it distinguishes one that can fail from one that cannot.</span>
+<span class="small">This is not a story about weak reviewers. A reviewer sees a well-formed assertion. Only running it tells you whether it can fail at all.</span>
 
 ---
 
-# I had this written down
+# I had written this down myself
 
 Line 215 of my own pitch deck. Written in good faith. Presented to real people:
 
 > "Everything below is **enforced by tooling**, not memos.
 > The rules live in code (hooks, scripts, gates) — not in slides."
 
-**The claim was itself a memo.**
+**The claim itself was a memo.**
 
-<span class="small">If that can happen inside a deck whose entire subject is enforcement, assume it is happening in yours.</span>
+<span class="small">If this can happen in a deck whose whole subject is enforcement, please assume it is happening in yours too.</span>
 
 ---
 
@@ -396,7 +397,7 @@ Line 215 of my own pitch deck. Written in good faith. Presented to real people:
 
 # The fleet is already mixed
 
-On this project, work is done by personas backed by five agents on five different plans, coordinated through a roster in the repo:
+On this project, the work is done by personas backed by five agents on five different plans. A roster in the repository coordinates them:
 
 | Backing agent | Plan |
 |---|---|
@@ -406,17 +407,17 @@ On this project, work is done by personas backed by five agents on five differen
 | Qwen (`qwen3-coder`) | local, on my own machine |
 | Gemini | free |
 
-That is not exotic — it is where most teams already are: **different engineers, different subscriptions, different agents, one codebase.**
+Nothing exotic here — most teams are already there: **different engineers, different subscriptions, different agents, one codebase.**
 
-<span class="small">The plan column is not trivia: a free tier runs out mid-review, a paid one hits its five-hour window mid-task, and a local model is unmetered but only worth simple work. <strong>The fleet composition changes during the working day</strong> — all three happened to me while preparing this.</span>
+<span class="small">The plan column is not trivia: a free tier runs out in the middle of a review, a paid one hits its five-hour window in the middle of a task, and a local model is unmetered but only good for simple work. <strong>The fleet changes during the working day</strong> — all three happened to me while I was preparing this talk.</span>
 
-**So ask the question that decides everything about a guardrail:** *which of them does it actually bind?*
+**So let me ask the question that decides everything about a guardrail:** *which of them does it actually bind?*
 
 ---
 
 # The layer decides the reach
 
-Same 338 live rules, one different question — and the baseline beside today.
+Same 338 live rules, one different question — with the baseline next to today.
 
 | Enforced by (`ENFORCED`) | Binds | Baseline | Today |
 |---|---|---:|---:|
@@ -433,21 +434,21 @@ Same 338 live rules, one different question — and the baseline beside today.
 
 # The anecdote that proves it
 
-Our "no chained shell commands" rule is enforced by a hook inside one agent's client. It is one of the few rules everybody believed was enforced.
+We have a rule: "no chained shell commands". A hook inside one agent's client enforces it. It was one of the few rules everybody believed was enforced.
 
-The **Codex** auditor reported:
+Then the **Codex** auditor reported:
 
 > "It does not govern Codex `exec_command` calls directly.
 > **I complied by splitting commands** — but this tool surface
 > is outside that hook."
 
-**An agent obeyed by discipline, in the session auditing whether rules are obeyed by discipline.**
+**An agent followed the rule by discipline — in the very session auditing whether our rules depend on discipline.**
 
 ---
 
-# So there is only one place to put a guardrail
+# So there is only one place for a guardrail
 
-Per-engineer setup drifts silently and privately.
+Per-engineer setup drifts, silently and privately.
 A setting in one agent's client binds one agent.
 Documentation binds nobody.
 
@@ -456,7 +457,7 @@ Documentation binds nobody.
 > The **repository** is the only place every engineer
 > and every agent has to go through.
 
-**Git hooks and CI are the only two layers that bind all of them.** Multi-agent work does not merely benefit from a shared blueprint — **it has nowhere else to put a rule.**
+**Git hooks and CI are the only two layers that bind all of them.** Multi-agent work does not simply benefit from a shared blueprint — **it has no other place to put a rule.**
 
 ---
 
@@ -464,25 +465,25 @@ Documentation binds nobody.
 
 # Part 3
 
-## Making a mixed fleet actually work
+## Making a mixed fleet work
 
 ---
 
 # One log. Every agent. `tail -F`
 
-Every agent — whatever provider backs it — appends to one feed, tagged with persona and backing agent.
+Every agent — no matter which provider backs it — writes to one feed, tagged with persona and backing agent.
 
 ```
 tail -F logs/agent-activity.log
 ```
 
-- You watch the work **as it happens**, not in a summary written by the thing that did it
-- A stalled or looping agent is obvious in seconds
-- Attribution is free: which persona, which provider, which action
+- You watch the work **while it happens**, not in a summary written by the one who did it
+- You see a stalled or looping agent within seconds
+- You get attribution for free: which persona, which provider, which action
 
-**Cheapest observability you will ever add, and it is on your own fleet.**
+**The cheapest observability you will ever add — and it is on your own fleet.**
 
-<span class="small"><code>-F</code>, not <code>-f</code> — follows by name, so it survives rotation.</span>
+<span class="small"><code>-F</code>, not <code>-f</code> — it follows the file by name, so it survives rotation.</span>
 
 ---
 
@@ -493,10 +494,12 @@ tail -F logs/agent-activity.log
   code    →   review + fix   →  review + fix  →  review + fix  →  converged
 ```
 
-**Two properties it stands on:**
+**It stands on two properties:**
 
-1. **The provider rotates.** A model's blind spots correlate with itself — a second pass by the same model re-reads with the same priors.
-2. **Every pass must _fix_, not just report.** An agent obliged to make the change cannot hide behind a vague finding.
+1. **The provider rotates.** A model's blind spots correlate with itself — a second pass by the same model reads with the same priors.
+2. **Every pass must _fix_, not only report.** An agent that has to make the change cannot hide behind a vague finding.
+
+It is the four-eyes principle, with eyes that really are different.
 
 ---
 
@@ -504,7 +507,7 @@ tail -F logs/agent-activity.log
 
 # Part 4
 
-## What actually goes in one
+## What goes into one
 
 ---
 
@@ -521,18 +524,18 @@ Every guardrail is something that runs and can **refuse**.
 
 <br>
 
-**If a rule cannot refuse anything, it is documentation. Label it as such.**
+**If a rule cannot refuse anything, it is documentation. Call it that.**
 
 ---
 
-# A lifecycle work moves through
+# A lifecycle the work moves through
 
 ```
 backlog/  →  doing/  →  waiting-acceptance/  →  done/
          promote     lands on main        owner accepts
 ```
 
-Four states, three owner-gated. **The folder is the status field** — no separate tracker to fall out of sync with the tree.
+Four states, three of them gated by the owner. **The folder is the status field** — there is no separate tracker that can get out of sync with the tree.
 
 Nothing reaches `done/` because an agent decided it was finished.
 
@@ -540,14 +543,14 @@ Nothing reaches `done/` because an agent decided it was finished.
 
 # An export boundary
 
-Two kinds of code live in a blueprint, with opposite rules:
+A blueprint holds two kinds of code, with opposite rules:
 
 - **Internal machinery** — bootstrapping, sync, the export logic itself. **No derived project ever runs it.**
 - **Scaffolding** — tests, config and controls that **travel** to every project.
 
-Conflating them is how project-specific logic ends up in generic files.
+When you mix them up, project-specific logic ends up in generic files.
 
-**Make the boundary a mechanism, not a judgement call per file.**
+**Make the boundary a mechanism, not a decision you take file by file.**
 
 ---
 
@@ -559,20 +562,20 @@ Capabilities flow **down** to every project. Improvements flow **up** as *reques
 
 The upstream command pushes a branch and opens a pull request. It writes into no working tree. **It lands nothing.**
 
-Someone with the whole blueprint in front of them decides whether one project's lesson is genuinely generic.
+Somebody with the whole blueprint in front of them decides whether one project's lesson is really generic.
 
 ---
 
 # Derived, not designed
 
 1. A project hits a real requirement — an incident, a customer ask, a bug nothing existing could have caught
-2. It builds the fix and captures the pattern
+2. The team builds the fix and captures the pattern
 3. Once the pattern survives production, the generic core travels up
 4. The next project inherits it as a **default**
 
 <br>
 
-**Do not write rules for problems you have not had yet.** You will encode guesses, and guesses are what rot.
+**Don't write rules for problems you did not have yet.** You will encode guesses, and guesses are what rots.
 
 ---
 
@@ -582,85 +585,85 @@ Someone with the whole blueprint in front of them decides whether one project's 
 
 ## Six traps
 
-**Each cost me real time. None need cost you any.**
+**Each of them cost me real time. None of them needs to cost you any.**
 
 ---
 
 # Trap 1 · Controls in a language you don't read
 
-Our gate and its ~45 suites were shell. Shell is not my stack.
+Our gate and its ~45 suites were written in shell. Shell is not my stack.
 
-So I stopped reading the controls and started reviewing **outcomes** (`PASSED`) instead of **mechanisms**.
+So I stopped reading the controls. I started reviewing **outcomes** (`PASSED`) instead of **mechanisms**.
 
 <div class="trap">
 <strong>Every defect on the Part 1 slides lived in code I had stopped reading.</strong>
 </div>
 
-**Do instead:** write controls in your team's primary language — not for elegance, because *you cannot own a control you cannot read.*
+**Do this instead:** write your controls in your team's primary language. Not for elegance — *you cannot own a control you cannot read.*
 
 ---
 
 # Trap 2 · Sync without a direction
 
-Our upstream command used to copy a file straight into the blueprint's tree. So **every derived project was a writer to the shared blueprint.**
+Our upstream command used to copy files directly into the blueprint's tree. This means **every derived project could write into the shared blueprint.**
 
-One project's paths and config fanned out to every other project on their next pull. Traceably, twice.
+One project's paths and config went out to every other project on their next pull. Traceably, twice.
 
 <div class="trap">
 My own deck sold this as a feature: <strong>"The flow is bidirectional."</strong>
 </div>
 
-**Do instead:** bidirectional was never the goal — **curated** was. Requests up, capabilities down, a human in between.
+**Do this instead:** bidirectional was never the goal — **curated** was. Requests go up, capabilities come down, and a human sits in between.
 
 ---
 
 # Trap 3 · Agents without a reader
 
-For a stretch I could not work on the blueprint or its derived projects, so I left the agents running mostly unattended. They did not stop working. They overcomplicated, and they developed their own language.
+For a while I could not work on the blueprint or its derived projects, so I let the agents run mostly unattended. They did not stop working. They overcomplicated things, and they developed their own language.
 
 <div class="trap">
-Reading the bug reports on my own project <strong>made me doubt my English.</strong>
+Reading the bug reports of my own project <strong>made me doubt my English.</strong>
 </div>
 
-Nothing was factually wrong. Every artefact was well-formed. **And the project had become foreign to the person accountable for it.**
+Nothing was factually wrong. Every artefact was well-formed. **But the project had become foreign to the person accountable for it — me.**
 
-**Do instead:** treat comprehensibility as load-bearing. An artefact its owner cannot read will not be reviewed.
+**Do this instead:** treat comprehensibility as load-bearing. An artefact its owner cannot read will not be reviewed.
 
 ---
 
 # Trap 4 · Lists you maintain by hand
 
-A control that checks *"everything in this list"* is blind to whatever is not in the list. Three separate incidents:
+A control that checks *"everything in this list"* is blind to everything that is not in the list. Three different incidents:
 
-- A test manifest that matched `*.sh` — the TypeScript suites it existed to govern were invisible to it
+- A test manifest that matched `*.sh` — so it could not see the TypeScript suites it was built to govern
 - A hand-kept list of what ships — `package-lock.json` travelled to every project without the four files it needs, and their CI died on the first push with `ENOENT … package.json`
-- A suite catalogue that ships while the suites it lists do not — every project inherited rows demanding files that could not exist there
+- A suite catalogue that ships while the suites it lists do not — every project inherited rows asking for files that could not exist there
 
-**Do instead:** derive the set from the filesystem. Then failing to enumerate something is not expressible.
+**Do this instead:** derive the set from the filesystem. Then forgetting to list something is simply not possible.
 
 ---
 
 # Trap 5 · Budgets that quietly decide coverage
 
-We had a 30-second ceiling on the pre-push gate. **It started making coverage decisions.**
+We had a 30-second ceiling on the pre-push gate. **And it started to make coverage decisions.**
 
-A suite guarding the exact door two incidents came through grew from 2.3 s to 6.0 s — and the cheapest way to satisfy the budget was to move it out of the gate. The gate still said *all checks passed*, just over less.
+A suite guarding the exact door two incidents came through grew from 2.3 s to 6.0 s. The cheapest way to meet the budget was to move it out of the gate. The gate still said *all checks passed* — it just checked less.
 
-**Do instead:** decide coverage on risk, never on the clock. When a suite is slow, fix the suite — one went **125 s → 37 s** with every assertion intact, once someone asked *why* instead of *where to put it*.
+**Do this instead:** decide coverage on risk, never on the clock. When a suite is slow, fix the suite. One went from **125 s → 37 s** with every assertion intact — as soon as someone asked *why* instead of *where to put it*.
 
 ---
 
 # Trap 6 · Assertions never proven to fail
 
-The trap that generates all the others.
+This is the trap behind all the others.
 
-**A test you have never watched go red is a hypothesis, not a control.**
+**A test you have never seen go red is a hypothesis, not a control.**
 
 <br>
 
-**Do instead:** mutate the mechanism, watch the test fail, record it. Every assertion, once.
+**Do this instead:** mutate the mechanism, watch the test fail, and write it down. Every assertion, once.
 
-> Adopt exactly one thing from this talk? Adopt this.
+> If you adopt only one thing from this talk, please adopt this one.
 > It is cheap, and it is the only defence against the whole Part 1 category.
 
 ---
@@ -675,21 +678,21 @@ The trap that generates all the others.
 
 # The method, transferable
 
-Runnable on your own projects this week, with no new tooling.
+You can run this on your own projects this week, without any new tooling.
 
 1. **Enumerate** every normative line in your standards docs. Count them.
-2. For each: **name the mechanism** — `file:line` — or write `NONE`.
-3. For each mechanism: **make it fail.** If you cannot, it is not a control.
-4. Record **who and what it binds** — one agent's own config, a git hook, or CI.
+2. For each one: **name the mechanism** — `file:line` — or write `NONE`.
+3. For each mechanism: **make it fail.** If you can't, it is not a control.
+4. Write down **who and what it binds** — one agent's own config, a git hook, or CI.
 5. Sort into: *mechanise* / *already fine* / *keep but stop claiming enforcement* / *delete as aspiration*.
 
-**Use two providers and make them converge.** Where they disagree, your truth is least certain.
+**Use two providers and let them converge.** Where they disagree, your truth is the least certain.
 
 ---
 
 # What the audit told me to do
 
-Every one of the 373 audited rows carries a verdict:
+Each of the 373 audited rows has a verdict:
 
 | Disposition | Audit | Today | |
 |---|---:|---:|---|
@@ -700,7 +703,7 @@ Every one of the 373 audited rows carries a verdict:
 
 <br>
 
-**202 rules get downgraded or deleted.** That is the deliverable, not a concession — a small honest protocol beats a large decorative one.
+**202 rules get downgraded or deleted.** This is the deliverable, not a concession — a small, honest protocol beats a large, decorative one.
 
 <span class="small">The middle column is the audit as accepted on 2026-09-17; the right is today. Only <strong>Mechanise</strong> is a queue — it shrinks as controls land, and it is the one number an outsider can hold me to.</span>
 
@@ -714,13 +717,13 @@ Every one of the 373 audited rows carries a verdict:
 
 <br>
 
-The development is visible in the CSV history:
+You can follow the development in the CSV history:
 
 **134 → 138 → 141 → 143 → 147 → 148 → 149**
 
-Low — and now a ratchet rather than a feeling. The epic's net movement so far is **+15**.
+Still low — but now it is a ratchet, not a feeling. The epic's net movement so far is **+15**.
 
-> **Knowing the number is the whole difference.**
+> **Knowing the number makes the whole difference.**
 > You cannot ratchet a number you have never measured.
 
 <span class="small">Denominator: 338 live rows; 35 <code>DELETED</code>/<code>DELETE-AS-ASPIRATION</code> rows are excluded. “Named mechanism” is the CSV's <code>ENFORCED != NONE</code>; reach is shown separately because those are different claims.</span>
@@ -739,11 +742,11 @@ Low — and now a ratchet rather than a feeling. The epic's net movement so far 
 
 A blueprint encodes **your** architecture, **your** Definition of Done, **your** security posture, **your** incidents.
 
-And it must be **derived** — grown from requirements you actually hit. Adopting someone else's wholesale hands you controls for problems you have never had, and none for the ones you have.
+And it has to be **derived** — grown from requirements you really hit. If you adopt someone else's blueprint wholesale, you get controls for problems you never had, and none for the ones you have.
 
 <br>
 
-Trap 1 again, one level up:
+It is Trap 1 again, one level higher:
 
 > **A blueprint you did not build is documentation.**
 > You will not read it, and you will not own it.
@@ -752,40 +755,42 @@ Trap 1 again, one level up:
 
 # Blueprint what your projects share
 
-Do not start with a grand standard. Start where you are about to solve the same problem twice.
+Don't start with a grand standard. Start where you are about to solve the same problem for the second time.
 
 - **A technology you are standardising on** — adopting Kafka? Blueprint the **outbox pattern**, consumer idempotency, DLQ handling, schema evolution
 - **Test harnesses** — fixtures, isolation, determinism
 - **UI libraries and kits** — components, tokens, accessibility defaults
 - **Agentic coding standards** — the guardrails themselves. **Especially this one.**
 
-**Each is a place the second project should not re-derive the first project's lessons.**
+**Each of them is a place where the second project should not re-learn the lessons of the first one.**
 
 ---
 
 # One blueprint does not scale
 
-I have **one**. That works because they are my projects and they follow my standards.
+I have **one**. It works because these are my projects, and they follow my standards.
 
-**At organisation scale, one blueprint becomes a monolith — then a monster.** Every team's exception has to live in it, it grows past what anyone can hold, and the controls that matter get buried under the ones that do not.
+**At organisation scale, one blueprint becomes a monolith — and then a monster.** Every team's exception has to live in it, it grows beyond what anyone can hold in their head, and the controls that matter get buried under the ones that don't.
 
-**You want several: specialised, composable, separately owned.**
+**You want several of them: specialised, composable, and owned separately.**
 
 - one per **archetype** — event-driven, backend-for-frontend, back-office
 - one per **adopted technology** — Kafka, your cloud, your UI kit
 - one for **agentic-coding standards**, which every project pulls
 
-<span class="small">My own numbers argue it: 338 live rules, 189 still prose-only — a single blueprint already straining at pet-project scale.</span>
+<span class="small">My own numbers show it: 338 live rules, 189 still prose-only — a single blueprint already struggling at pet-project scale.</span>
 
 ---
 
-# What I would ask you to take away
+# Summing up
 
-1. **Your projects are not singletons.** A handful of shapes covers most of them — that shared part is what you encode.
+1. **Your projects are not singletons.** A handful of shapes covers most of them — and this shared part is what you encode.
 2. **Review is a complement, not a control.** It cannot see a check that examines nothing.
 3. **The layer decides the reach.** One agent's config, a git hook, or CI — only the last two bind everybody.
-4. **Rotate the provider, and make each pass fix rather than report.** Where two providers disagree is where your code is misleading.
-5. **Measure what is enforced.** The number will be lower than you expect, and having it is the entire difference.
+4. **Rotate the provider, and let every pass fix instead of report.** Where two providers disagree, your code is misleading.
+5. **Measure what is enforced.** The number will be lower than you expect — and having it makes the whole difference.
+
+You cannot order guardrails like a pizza. You have to build them, one incident at a time — but it is worth it!
 
 ---
 
@@ -793,10 +798,10 @@ I have **one**. That works because they are my projects and they follow my stand
 
 # The one sentence
 
-## An agent will follow the rules you enforce,
+## An agent follows the rules you enforce,
 ## not the rules you write.
 
-**Put them in the repository, make them refuse things,
+**Put them in the repository, let them refuse things,
 and let your incidents grow them.**
 
 ---
@@ -808,4 +813,4 @@ and let your incidents grow them.**
 **Luiz Scheidegger**
 luiz@struct2flow.com
 
-<span class="small">Every enforcement number here is derived from the tracked CSV history:<br><code>git log -- docs/done/TASK-022-anchor-rules/TASK-022-rule-enforcement.csv</code></span>
+<span class="small">Every enforcement number here comes from the tracked CSV history:<br><code>git log -- docs/done/TASK-022-anchor-rules/TASK-022-rule-enforcement.csv</code></span>

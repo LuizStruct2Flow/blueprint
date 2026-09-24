@@ -1320,6 +1320,136 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
     })
   })
 
+  it('BUG-153 case 3: a failed pid-file write kills its child, so no live owner is orphaned', async () => {
+    await scenario('sf-153-3', async (s) => {
+      // Cases 1 and 2 close every way a REAL owner's pid can be misread as
+      // absent. This one is the write side: `mkdirSync(slot)` claims the
+      // slot on disk, a real detached child spawns, and only THEN can the
+      // `writeFileSync(slot/pid, …)` that records its owner fail (ENOSPC, an
+      // I/O error). The old hook swallowed that failure and kept the slot —
+      // no pid file, but a live child still running behind it. The NEXT
+      // caller's read is a genuine ENOENT (the file really is absent), which
+      // correctly reads as "no owner" and reclaims the slot out from under
+      // the live child: BUG-153's exact failure, through the write side
+      // instead of the read side.
+      //
+      // The write is made to fail deterministically, with no shim and no
+      // race: `deferDir` (repo/subagent-defer) is pre-created here, with
+      // ordinary permissions, before the hook ever runs — so the hook's own
+      // `mkdirSync(deferDir, {recursive:true})` is a no-op on it. Caller A
+      // then runs under `umask 0222`, which affects only what IT creates
+      // fresh: `slot-0`, made for the first time inside deferSpawn's loop,
+      // lands at mode 0555 (r-xr-xr-x — searchable and readable, never
+      // writable). `mkdirSync(slot)` itself only needs write on the PARENT
+      // (deferDir, left normal), so it still succeeds; the write that then
+      // fails is `writeFileSync(slot/pid, …)`, which needs write on slot
+      // itself. Asymmetric on purpose: a later reader can still `stat`/open
+      // slot-0 and get a real ENOENT on the missing pid file (mode 0555
+      // keeps read+search open), reproducing the exact ENOENT the bug
+      // report names — a symmetric "no permission at all" would instead
+      // surface as a read failure, which round 1 already fails closed on
+      // and would prove nothing about THIS path.
+      const f = await deferFixture(s)
+      await s.fs.mkdirp('repo/subagent-defer')
+      // Every fresh thing caller A's process creates lands under its
+      // restrictive umask — not just slot-0, which is the ONE fresh thing
+      // this case means to target. Two others are fresh too if left alone,
+      // and both are pre-created here with ordinary permissions to keep the
+      // umask scoped to the one write this case is actually about:
+      //
+      //  - `.lock`, the flock mutex `writeFileSync(lockPath, '', {flag:'a'})`
+      //    would otherwise create at mode 0444, so caller B's OWN handshake
+      //    would fail for a reason that has nothing to do with BUG-153.
+      //  - `logs/agent-activity.log`, the feed file itself: `feed_append`
+      //    creates it on first use, and under A's umask that first use also
+      //    lands at 0444. `feed_append` is explicitly best-effort (never
+      //    fails the hook), so a caller B whose OWN deferred child later
+      //    tries to append its OWN bookend to a read-only feed file loses
+      //    that line SILENTLY — not a reclaim hazard, but it would sink this
+      //    case's own "both bookends land" assertion for a reason that is
+      //    a fixture artifact, not the thing under test. (Found by instru-
+      //    menting feed_append's call site directly: exactly one append
+      //    landed — caller A's — and the feed file's mode read 0444.)
+      //
+      // `writeFileSync(…, {flag:'a'})` and `feed_append`'s own `>>` both only
+      // APPLY a mode on first creation; pre-creating either file here with
+      // the harness's own (unaffected-by-any-subshell-umask) fs means A's
+      // `umask 0222` never touches them.
+      await s.fs.write('repo/subagent-defer/.lock', '')
+      await s.fs.write('repo/logs/agent-activity.log', '')
+
+      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))
+      const callA = await s.run(
+        'sh',
+        ['-c', `umask 0222; printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, 'aaaa00000000')],
+        {
+          cwd: f.repo,
+          env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
+        },
+      )
+      expect(callA.code, `a hook must always exit 0\n${callA.output}`).toBe(0)
+
+      // The injection actually fired, and through the write path specifically
+      // — not "deferral never ran" (which would make every check below pass
+      // vacuously) and not "no flock(1)" (a different message, #18). With a
+      // fresh deferDir and a cap of 1, the ONLY way deferSpawn() can return
+      // false here — the precondition for this notice — is the write-failure
+      // branch: nothing pre-existing could make `mkdirSync(slot-0)` collide,
+      // so a false return has no other cause available to it in this setup.
+      expect(
+        callA.stderr,
+        'no "deferral failed" notice landed — the injected write failure never reached deferSpawn() at all',
+      ).toMatch(/no deferred slot free/i)
+
+      // THE FIX'S OWN CLAIM: no live, unrecorded owner is left running. On
+      // the buggy hook this would still show a live deferred child (the one
+      // `writeFileSync` failed to record) — the exact hazard BUG-153 names.
+      await vi.waitFor(
+        async () => {
+          const alive = await children(s, f.repo)
+          if (alive.length > 0) {
+            throw new Error(`a child whose pid write failed was left running, unrecorded:\n${alive.join('\n')}`)
+          }
+        },
+        { timeout: 10_000, interval: 100 },
+      )
+
+      // The hook still emits synchronously — a hook must never fail the
+      // tool call just because its OWN bookkeeping write failed.
+      await f.expectLine('→ dispatched', 15_000)
+
+      // A second, ordinary caller is not blocked by the mess A left behind:
+      // it gets a fresh slot-0 (the fix released it) and its own child ends
+      // up the only one alive — never two, which is what "B reclaimed a
+      // live slot" would look like.
+      const callB = await s.run(
+        'sh',
+        ['-c', `printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, 'bbbb00000000')],
+        {
+          cwd: f.repo,
+          env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
+        },
+      )
+      expect(callB.code, callB.output).toBe(0)
+      await vi.waitFor(
+        async () => {
+          const alive = await children(s, f.repo)
+          if (alive.length !== 1) {
+            throw new Error(`expected exactly B's one child, saw ${alive.length}:\n${alive.join('\n')}`)
+          }
+        },
+        { timeout: 10_000, interval: 100 },
+      )
+      await vi.waitFor(
+        async () => {
+          const n = await f.count('→ dispatched')
+          if (n !== 2) throw new Error(`${n} of 2 bookends have landed`)
+        },
+        { timeout: 40_000, interval: 250 },
+      )
+    })
+  })
+
   it('#17 BUG-133: a signalled child dies with its slot, and leaves no sleep behind', async () => {
     await scenario('sf-17', async (s) => {
       // The handler removed the slot on HUP/INT/TERM with no explicit exit, and

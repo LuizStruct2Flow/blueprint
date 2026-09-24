@@ -23,15 +23,15 @@ const ROSTER = `# Agent Roster
 | Back-End-2 | Andreas | Codex | frontier-3:medium |
 `
 
-async function fixture(s: Scenario, name: string, stub: string) {
+async function fixture(s: Scenario, name: string, stub: string | null) {
   const root = await s.fs.mkdirp(name)
   await s.fs.write(`${name}/AGENT_ROSTER.md`, ROSTER)
   const brief = await s.fs.write(`${name}/brief.md`, 'Return a short answer.\n')
   const shims = await s.shimDir(`${name}/shims`)
-  await shims.add('ollama', stub)
+  if (stub !== null) await shims.add('ollama', stub)
 
   const env = {
-    PATH: shims.path(),
+    PATH: stub === null ? await s.pathWithout(['ollama']) : shims.path(),
     BP_STATE_ROOT: root,
     AGENT_FEED_LOG: join(root, 'fixture-feed.log'),
   }
@@ -90,6 +90,24 @@ exit 23
       expect(r.stdout).toBe('model refused\n')
       expect(await s.fs.read(f.feed)).toContain('[Nils - Ollama] FAILED (exit 23)')
       expect(await s.fs.read(f.runLog)).toBe('model refused\n')
+    })
+  })
+
+  it('closes the feed lifecycle with the spawn error when Ollama is unavailable', async () => {
+    await scenario('junior-dispatch-spawn-failure', async (s) => {
+      const f = await fixture(s, 'repo', null)
+
+      const r = await f.run()
+      expect(r.code).not.toBe(0)
+      expect(r.stderr).toContain('junior-dispatch: spawn ollama ENOENT')
+
+      const feed = await s.fs.read(f.feed)
+      const lifecycle = feed
+        .split('\n')
+        .filter((line) => line.includes('[Nils - Ollama]'))
+      expect(lifecycle.at(0)).toContain('[Nils - Ollama] dispatched —')
+      expect(lifecycle.at(-1)).toContain('[Nils - Ollama] FAILED (spawn ollama ENOENT)')
+      expect(lifecycle.filter((line) => / (?:finished|FAILED) \(/.test(line))).toHaveLength(1)
     })
   })
 

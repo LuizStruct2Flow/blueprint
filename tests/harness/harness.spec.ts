@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest'
 import { appendFile, chmod, readFile, readdir, rename, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
+import { collectDumps } from './dump.js'
 import { RealStateCanary } from './canary.js'
 import { assertProcessEnvClean, fixtureEnv, FORBIDDEN_ENV } from './env.js'
 import { createWorkspace } from './workspace.js'
@@ -1569,6 +1570,43 @@ describe('harness — timeout evidence capture (BUG-146)', () => {
       } finally {
         delete process.env.BP_HARNESS_DUMP_DIR
       }
+    })
+  })
+
+  it('BUG-146: a nested run\'s dump survives into the outer dump dir via collectDumps, not an env var', async () => {
+    // BUG-146 round 2. `BP_HARNESS_DUMP_DIR` set on a NESTED process's env
+    // never reached it: scripts/run-ts-suites.sh's `ts_scrubbed` strips every
+    // `BP_*` name from that child's environment before its vitest starts
+    // (BUG-046/047/066), so a nested run always wrote its dump at its own
+    // workspace-local default regardless of what the outer scenario set —
+    // exactly the directory `dispose()` removes on teardown. Two of the three
+    // CI hangs BUG-146's row tracks were nested (374a8d9, c7c47f6), so this
+    // was the likely case and round 1 captured nothing for it.
+    //
+    // The fix reads the file the nested run actually wrote, off disk, and
+    // copies it out — no env var crosses the scrub boundary. Simulated here
+    // without a real nested vitest: a file dropped where a nested run's OWN
+    // dumpDir() default would put it (`<nested root>/tests/.timeout-dumps`)
+    // must appear in the outer dump dir after `collectDumps`.
+    await scenario('harness-bug146-nested-collect', async (s) => {
+      const nestedRoot = s.workspace.path('derived-proj')
+      const outerDumpDir = s.workspace.path('outer-repo/tests/.timeout-dumps')
+
+      await s.fs.write(
+        'derived-proj/tests/.timeout-dumps/waitOrDump-99999-123.txt',
+        '# process-tree dump: nested hang\npid=99999 ppid=1 stat=D wchan(ps)=io_schedule args=vitest\n',
+      )
+
+      const copied = await collectDumps(join(nestedRoot, 'tests', '.timeout-dumps'), outerDumpDir)
+
+      expect(copied).toHaveLength(1)
+      const survived = await readFile(join(outerDumpDir, 'waitOrDump-99999-123.txt'), 'utf8')
+      expect(survived).toMatch(/nested hang/)
+
+      // A gate run that never timed out leaves nothing to collect — asserted
+      // here, not skipped, because "no dump dir" and "an unreadable one" must
+      // not be conflated: collectDumps returns [] for the former.
+      expect(await collectDumps(s.workspace.path('derived-proj/tests/.no-such-dir'), outerDumpDir)).toEqual([])
     })
   })
 })

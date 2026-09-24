@@ -321,7 +321,27 @@ interface PlanEntry {
 // depth-limited (maxDepth=1) or unbounded recursive file walk, skipping
 // symlinks entirely — `find` without `-L` does not follow them, and
 // `-type f` on a symlink never matches (it tests the link's own type).
+//
+// BUG-147 differential (roots/symlinked-resolves): a DECLARED ROOT that is
+// itself a symlink must also never be entered. `find "$root" -type f ...`
+// with no `-H`/`-L` never dereferences a symlink given as its OWN starting
+// argument — physical mode applies there too, not only to symlinks met
+// during traversal — so `find linked-tests -type f` prints nothing even
+// though `linked-tests -> real-tests` and `real-tests/x.spec.ts` exists.
+// `readdirSync` has no such refusal: it follows the path it is given
+// regardless of whether that path is itself a symlink, so an unguarded walk
+// would search a symlinked root the old shell never searched — a real
+// content-search divergence measured directly, not the accepted CI
+// note-position exception. The old shell's `cd -P` containment check still
+// RESOLVES the same root for the outside/never/shipped comparisons: only
+// the file search itself must stay blind to it.
 function walkFiles(dir: string, maxDepth: number | undefined, exts: string[]): string[] {
+  try {
+    if (lstatSync(dir).isSymbolicLink()) return []
+  } catch {
+    // Unreadable/raced-away root — same as `find`'s own silent skip.
+    return []
+  }
   const out: string[] = []
   function walk(d: string, depth: number) {
     let entries: string[]
@@ -468,7 +488,12 @@ function stageBugtests(rangeList: string, notes: Notes): { rc: number; out: stri
     for (const entry of plan) {
       const maxDepth = entry.mode === 'shallow' ? 1 : undefined
       const exts = entry.tsGoverned ? TS_SPEC_EXTS : [...TS_SPEC_EXTS, ...PROJECT_ONLY_SPEC_EXTS]
-      const files = walkFiles(entry.rp, maxDepth, exts)
+      // BUG-147 differential: walk the DECLARED path (`entry.root`), not the
+      // realpath-resolved `entry.rp`. `entry.rp` has already dereferenced a
+      // symlinked root, which is exactly the string walkFiles' own top-level
+      // lstat guard needs to still see AS a symlink — see that function's
+      // header.
+      const files = walkFiles(entry.root, maxDepth, exts)
       if (files.some((f) => fileNamesBugInTitle(f, n))) {
         hit = true
         break

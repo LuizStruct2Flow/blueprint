@@ -20,7 +20,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     // TASK-047 — the evidence set and the run set are ONE SET. `scripts/lib/
-    // dod-gate.sh` counts a `*.spec.ts` / `*.spec.tsx` as a regression test, so
+    // dod-gate.mts` (TASK-067/BUG-147 port; scripts/lib/dod-gate.sh is now
+    // just the sourced adapter that forwards to it) counts a `*.spec.ts` /
+    // `*.spec.tsx` as a regression test on the root it itself governs, so
     // both must be executed here: a file the gate accepts but vitest never runs
     // is a green standing in for a test. `tests/dod-gate` #17 fails if these two
     // lists drift apart. `.tsx` costs nothing in this repo (it has no JSX) and

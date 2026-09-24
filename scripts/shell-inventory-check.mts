@@ -168,6 +168,127 @@ function isValidShim(root: string, path: string): boolean {
   return isTracked(root, target) && readFileOrUndefined(`${root}/${target}`) !== undefined
 }
 
+// --- the sourced-adapter migration form (BUG-147 / PLAN-BUG-147) -----------
+//
+// scripts/lib/dod-gate.sh cannot be an ordinary two-line exec shim: it is
+// SOURCED by two still-shell callers (.githooks/pre-push-project and the
+// security.yml workflow step), and a shim execs a child process, which
+// cannot hand shell functions back to a caller that sourced it. The plan's
+// Option C admits exactly one second migration shape for this one file: a
+// generated "sourced adapter" whose only variable content is the ordered
+// list of (shell function name, CLI subcommand) forwarding pairs at its
+// tail. Everything else — the header, the `_dg_call` helper body, the note
+// protocol — is FIXED text, re-rendered here rather than trusted from disk.
+//
+// This is deliberately file-specific (CLAUDE.md's TASK-067 ceiling, landed
+// with the port): a second sourced library earns its own reviewed extension
+// of this parser rather than a generic "any sourced adapter" rule this
+// checker has no independent authority to bless.
+const DOD_GATE_PATH = 'scripts/lib/dod-gate.sh'
+const DOD_GATE_TARGET = 'scripts/lib/dod-gate.mts'
+
+const DOD_GATE_HEADER = `#!/bin/sh
+# scripts/lib/dod-gate.sh — GENERATED sourced adapter. DO NOT HAND-EDIT.
+#
+# TASK-067 / BUG-147: the DoD gate's policy lives in scripts/lib/dod-gate.mts
+# now (docs/doing/PLAN-BUG-147-dod-gate-port.md, "Option C"). This file is the
+# small, mechanically re-renderable bridge that keeps both production callers
+# (.githooks/pre-push-project and .github/workflows/security.yml) byte-
+# identical: it defines the same shell function names the old shell library
+# did and forwards each call to the matching \`dod-gate.mts\` subcommand.
+#
+# scripts/shell-inventory-check.mts re-renders this exact file from the
+# (function, subcommand) pairs below and requires whole-file byte equality —
+# see CLAUDE.md "Shell to TypeScript, organically" for the ceiling this form
+# is admitted under. Regenerating it by hand risks drifting from that
+# renderer; treat the pairs as the source of truth.
+#
+# Sourced, not executed — same contract the old dod-gate.sh carried.
+
+_dg_bridge_mts="\${BP_CODE_ROOT:-.}/scripts/lib/dod-gate.mts"
+
+# _dg_call SUBCOMMAND [ARGS...] — invokes the CLI, replays any notes it wrote
+# to a private DOD_GATE_NOTE_DIR through the caller's own pipe_note (or prints
+# them as \`note: …\` when no pipe_note is defined), and returns the CLI's exit
+# status unchanged.
+_dg_call() {
+  if [ ! -f "$_dg_bridge_mts" ]; then
+    echo "cannot find $_dg_bridge_mts — run: blueprint pull scripts/lib/dod-gate.mts" >&2
+    return 2
+  fi
+  _dg_notedir="$(mktemp -d)" || { echo "internal error: cannot create a note directory" >&2; return 2; }
+  DOD_GATE_NOTE_DIR="$_dg_notedir" node "$_dg_bridge_mts" "$@"
+  _dg_rc=$?
+  if [ -f "$_dg_notedir/count" ]; then
+    _dg_count="$(cat "$_dg_notedir/count")"
+    _dg_i=1
+    while [ "$_dg_i" -le "$_dg_count" ]; do
+      if command -v pipe_note >/dev/null 2>&1; then
+        pipe_note "$(cat "$_dg_notedir/note.$_dg_i")"
+      else
+        printf 'note: %s\\n' "$(cat "$_dg_notedir/note.$_dg_i")"
+      fi
+      _dg_i=$((_dg_i + 1))
+    done
+  fi
+  rm -rf "$_dg_notedir"
+  return "$_dg_rc"
+}
+
+`
+
+interface DodGatePair {
+  fn: string
+  sub: string
+  hasArg: boolean
+}
+
+const DOD_GATE_PAIR_RE = /^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ _dg_call ([a-z][a-z0-9-]*)( "\$1")?; \}$/
+
+function renderDodGateAdapter(pairs: DodGatePair[]): string {
+  const lines = pairs.map((p) => `${p.fn}() { _dg_call ${p.sub}${p.hasArg ? ' "$1"' : ''}; }`)
+  return DOD_GATE_HEADER + lines.join('\n') + (lines.length > 0 ? '\n' : '')
+}
+
+// parseDodGatePairs — the tail of the file, ONE forwarding line per function,
+// each matching the exact generated shape. Anything else (an extra command,
+// a malformed name, prose, a blank line) fails to parse, which is refusal —
+// checkTrackedFile only accepts a bridge whose RE-RENDER matches byte for
+// byte, so a parse failure alone is already enough to reject it.
+function parseDodGatePairs(content: string): DodGatePair[] | undefined {
+  if (!content.startsWith(DOD_GATE_HEADER)) return undefined
+  const tail = content.slice(DOD_GATE_HEADER.length)
+  if (tail.length === 0) return []
+  if (!tail.endsWith('\n')) return undefined
+  const lines = tail.slice(0, -1).split('\n')
+  const pairs: DodGatePair[] = []
+  for (const line of lines) {
+    const m = DOD_GATE_PAIR_RE.exec(line)
+    if (!m) return undefined
+    const fn = m[1]
+    const sub = m[2]
+    if (fn === undefined || sub === undefined) return undefined
+    pairs.push({ fn, sub, hasArg: m[3] !== undefined })
+  }
+  return pairs
+}
+
+// isValidDodGateBridge — file-specific to DOD_GATE_PATH. Parses the tail into
+// ordered pairs, RE-RENDERS the whole file from them, and requires byte
+// equality against what is actually on disk — the same "trust the renderer,
+// not the bytes" shape isValidShim uses for an ordinary exec shim. The
+// target .mts must also be present and tracked (BUG-145's shape: a bridge
+// pointing at nothing is not a migration).
+function isValidDodGateBridge(root: string, path: string): boolean {
+  if (path !== DOD_GATE_PATH) return false
+  const content = readFileOrUndefined(`${root}/${path}`)
+  if (content === undefined) return false
+  const pairs = parseDodGatePairs(content)
+  if (pairs === undefined) return false
+  if (renderDodGateAdapter(pairs) !== content) return false
+  return isTracked(root, DOD_GATE_TARGET) && readFileOrUndefined(`${root}/${DOD_GATE_TARGET}`) !== undefined
+}
+
 // checkTamper — HEAD's json compared against BASE's. Every problem here is a
 // self-authorization attempt: HEAD claiming something about the inventory
 // that BASE, which the push cannot edit, does not back up.
@@ -215,10 +336,12 @@ function checkRemovedRows(root: string, base: Inventory, head: Inventory, files:
     if (file in head.legacy) continue // retained — checkTamper already judged it
     if (!files.has(file)) continue // gone entirely — a legitimate removal
     if (isValidShim(root, file)) continue // migrated — a legitimate removal
+    if (isValidDodGateBridge(root, file)) continue // migrated — the sourced-adapter form
     problems.push(
       `ROW-REMOVED-WITHOUT-MIGRATION: ${file}'s row was removed from scripts/shell-` +
         `inventory.json, but the file itself is neither gone nor the exact, tracked ` +
-        `shim. Remove a row only in the same commit that migrates or deletes its file.`,
+        `shim (or, for scripts/lib/dod-gate.sh only, the exact sourced adapter). Remove ` +
+        `a row only in the same commit that migrates or deletes its file.`,
     )
   }
   return problems
@@ -240,6 +363,7 @@ function checkTrackedFile(
     // itself the BASE, the shim has no row anywhere and would otherwise read
     // as new shell on every subsequent push.
     if (isValidShim(root, file)) return undefined
+    if (isValidDodGateBridge(root, file)) return undefined
     return (
       `NEW: ${file} is a shell file tracked in scripts/ or .githooks/ but BASE's ` +
       `scripts/shell-inventory.json covers it in neither list. New code is TypeScript ` +
@@ -249,10 +373,12 @@ function checkTrackedFile(
   }
   if (blobHash(root, file) === recorded) return undefined
   if (isValidShim(root, file)) return undefined
+  if (isValidDodGateBridge(root, file)) return undefined
   return (
     `CHANGED: ${file} no longer matches its BASE-recorded blob (${recorded}) and is ` +
-    `not the exact, tracked two-line shim. A legacy shell file is either unchanged or ` +
-    `migrated whole, behind a shim (PLAN-TASK-067 "the rule, as it will be written").`
+    `not the exact, tracked two-line shim (or, for scripts/lib/dod-gate.sh only, the ` +
+    `exact sourced adapter). A legacy shell file is either unchanged or migrated whole, ` +
+    `behind a shim or that adapter (PLAN-TASK-067 "the rule, as it will be written").`
   )
 }
 

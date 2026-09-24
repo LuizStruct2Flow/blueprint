@@ -20,7 +20,6 @@
     "scripts/lib/codex-session.sh": "505b192659e51cc58e00e1f5fee686bb1b47b5f2",
     "scripts/lib/commit-subject.sh": "678397afb7c3586cdbe5da90d893f760991cd9bf",
     "scripts/lib/contamination.sh": "6dd8c5fb89098f50dd5576fa0abeae6cdd84f24e",
-    "scripts/lib/dod-gate.sh": "a4993ba06735968bec85a9bde43ceb9a0c8891aa",
     "scripts/lib/feed.sh": "dbc8935104c867a98fa688c25c1ec85732c3b8fb",
     "scripts/lib/gate.sh": "4170a7250cf995a19e939026588063ab17b91dce",
     "scripts/lib/pipeline.sh": "7ff5feef0db9edff6b70c646ff3cf06537e77a3e",

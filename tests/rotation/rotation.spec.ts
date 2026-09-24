@@ -214,4 +214,14 @@ describe('TASK-065 rotation event log', () => {
     expect((await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-9'])).stdout).toBe('Jonathan\tKimi\tBack-End\n')
     expect((await runCli(dir, roster, ['next', 'Back-End-4 (junior)', '--item', 'TASK-10'])).stdout).toBe('Nils\tOllama\tBack-End-4 (junior)\n')
   })
+
+  it('pins every launcher run-log name to the watcher derivation', async () => {
+    const root = join(process.cwd(), '..')
+    const watcher = await readFile(join(root, 'scripts', 'signal-watch.mts'), 'utf8')
+    expect(watcher).toContain("state.replace(/^OVER_TO_/, '').toLowerCase()}-runs.log")
+    for (const provider of ['codex', 'kimi', 'gemini']) {
+      const launcher = await readFile(join(root, 'scripts', `start-${provider}-signal-watch.sh`), 'utf8')
+      expect(launcher).toContain(`RUN_LOG="$STATE_DIR/${provider}-runs.log"`)
+    }
+  })
 })

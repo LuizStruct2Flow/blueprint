@@ -139,42 +139,135 @@ const ROTATION = join(BP_CODE_ROOT, 'scripts/rotation.mts')
 // not milliseconds; bounding it would break dispatch, not protect it.
 const SHELL_LIB_TIMEOUT_MS = 5_000
 
-function stateDirFn(
+// TASK-065 (Codex re-review): replaces every BOUNDED spawnSync call in this
+// file (the dispatched wake command at the bottom stays spawnSync — it is
+// deliberately unbounded, see its own comment). spawnSync's `timeout` option
+// only ever signals the DIRECT child. `signal-set.sh` and the shell libs here
+// legitimately run further commands of their own, so a hang two levels down
+// is a GRANDCHILD, not the direct child — and killing only the direct child
+// leaves that grandchild running (verified on this host/Node build: a
+// `sleep & wait` grandchild survives a timed-out spawnSync untouched, still
+// holding whatever it holds, indefinitely — see the commit body for the
+// measurement). One mechanism fixes every call site: spawn the child
+// DETACHED, so it leads its own process group, and on timeout kill the WHOLE
+// GROUP (`kill(-pid)`) rather than just the child — a background grandchild
+// started without its own `setpgid` stays in that same group and dies with
+// it. `spawnSync` has no group-kill option (its `timeout`/`killSignal` only
+// ever target the child pid), so this uses async `spawn` plus its own
+// bounded wait instead — every caller in this file was already inside an
+// async function or reachable from top-level await.
+type StdioMode = 'ignore' | 'pipe' | 'inherit'
+
+interface BoundedSpawnResult {
+  readonly status: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly error?: Error
+}
+
+function spawnBounded(
+  command: string,
+  args: readonly string[],
+  options: { env?: NodeJS.ProcessEnv; stdio: readonly [StdioMode, StdioMode, StdioMode] },
+  timeoutMs: number,
+): Promise<BoundedSpawnResult> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(command, args, {
+        env: options.env,
+        stdio: [...options.stdio],
+        detached: true,
+      })
+    } catch (err) {
+      resolve({ status: null, signal: null, stdout: '', stderr: '', error: err instanceof Error ? err : new Error(String(err)) })
+      return
+    }
+
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    let timedOut = false
+
+    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+
+    const timer = setTimeout(() => {
+      if (settled) return
+      timedOut = true
+      // Negative pid = the whole process group (valid because `detached:
+      // true` made this child its own group leader). SIGKILL, not SIGTERM: a
+      // hung shell/child is exactly the case where a trap or a stuck syscall
+      // could no-op a termination request, and nothing on this bounded path
+      // needs a graceful shutdown.
+      try {
+        process.kill(-(child.pid as number), 'SIGKILL')
+      } catch {
+        // The group is already gone (child exited between the timer firing
+        // and this line) — nothing left to kill, not an error.
+      }
+    }, timeoutMs)
+
+    const finish = (status: number | null, signal: NodeJS.Signals | null, error?: Error): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      // exactOptionalPropertyTypes: the `error` key is only ADDED when there
+      // actually is one — never set to `undefined` on purpose, which is a
+      // distinct (and disallowed) shape from leaving it out.
+      const resolvedError = error ?? (timedOut ? new Error(`timed out after ${timeoutMs}ms`) : undefined)
+      resolve(resolvedError === undefined
+        ? { status, signal, stdout, stderr }
+        : { status, signal, stdout, stderr, error: resolvedError })
+    }
+
+    child.once('error', (err) => finish(null, null, err))
+    // 'close', not 'exit' — waits for the stdio streams to actually end, the
+    // same guarantee spawnSync's captured stdout/stderr always had. Reachable
+    // now because the group kill above closes every fd a grandchild held,
+    // instead of leaving the read end waiting on a pipe nothing will ever
+    // close.
+    child.once('close', (code, signal) => finish(code, signal))
+  })
+}
+
+async function stateDirFn(
   fn: string,
   args: readonly string[],
   envOverrides: Readonly<Record<string, string | undefined>> = {},
-): ShFnResult {
+): Promise<ShFnResult> {
   const env: NodeJS.ProcessEnv = { ...process.env }
   for (const [key, value] of Object.entries(envOverrides)) {
     if (value === undefined) delete env[key]
     else env[key] = value
   }
   const placeholders = args.map((_, i) => `"$${i + 2}"`).join(' ')
-  const r = spawnSync('sh', ['-c', `. "$1"; ${fn} ${placeholders}`, 'sh', STATE_DIR_LIB, ...args], {
-    env,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-    timeout: SHELL_LIB_TIMEOUT_MS,
-  })
+  const r = await spawnBounded(
+    'sh',
+    ['-c', `. "$1"; ${fn} ${placeholders}`, 'sh', STATE_DIR_LIB, ...args],
+    { env, stdio: ['ignore', 'pipe', 'inherit'] },
+    SHELL_LIB_TIMEOUT_MS,
+  )
   return { code: r.status ?? 1, stdout: (r.stdout ?? '').trim() }
 }
 
 // BP_STATE_ROOT is resolved ONCE, at startup — same contract as the shell
 // consumers (state-dir.sh's own docblock: "resolve once per script, at
 // initialisation").
-const bpStateRootResult = stateDirFn('bp_state_root', [], { BP_CODE_ROOT })
+const bpStateRootResult = await stateDirFn('bp_state_root', [], { BP_CODE_ROOT })
 if (bpStateRootResult.code !== 0) process.exit(9)
 const BP_STATE_ROOT = bpStateRootResult.stdout
 
-function agentStateDir(): string {
-  return stateDirFn('agent_state_dir', [], { BP_STATE_ROOT }).stdout
+async function agentStateDir(): Promise<string> {
+  return (await stateDirFn('agent_state_dir', [], { BP_STATE_ROOT })).stdout
 }
 
-function agentSignalFile(clearOverride: boolean): string {
-  return stateDirFn('agent_signal_file', [], {
+async function agentSignalFile(clearOverride: boolean): Promise<string> {
+  return (await stateDirFn('agent_signal_file', [], {
     BP_STATE_ROOT,
     ...(clearOverride ? { AGENT_SIGNAL_FILE: undefined } : {}),
-  }).stdout
+  })).stdout
 }
 
 // tee -a LOG_FILE: write the line to our own stdout AND append it to the
@@ -211,18 +304,18 @@ function runLogOffset(path: string): number | undefined {
 // poll cadence, so a hung recorder costs one tick, not the rest of the run.
 const ROTATION_RECORD_TIMEOUT_MS = 5_000
 
-function recordDispatchOutcome(holder: string, runLog: string, from: number | undefined): string | undefined {
+async function recordDispatchOutcome(holder: string, runLog: string, from: number | undefined): Promise<string | undefined> {
   const after = runLogOffset(runLog)
   if (from === undefined || after === undefined || after <= from) {
     teeLine(logFile, `[${isoNow()}] rotation outcome not recorded for ${holder}: ${runLog} is missing or did not grow`)
     return undefined
   }
-  const result = spawnSync(process.execPath, [ROTATION, 'record', holder, '--run-log', runLog, '--from', String(from)], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, AGENT_ROSTER_FILE: BP_STATE_ROOT },
-    timeout: ROTATION_RECORD_TIMEOUT_MS,
-  })
+  const result = await spawnBounded(
+    process.execPath,
+    [ROTATION, 'record', holder, '--run-log', runLog, '--from', String(from)],
+    { env: { ...process.env, AGENT_ROSTER_FILE: BP_STATE_ROOT }, stdio: ['ignore', 'pipe', 'pipe'] },
+    ROTATION_RECORD_TIMEOUT_MS,
+  )
   // A timed-out spawnSync reports status: null, signal: 'SIGTERM' and an
   // `error` with code ETIMEDOUT (verified against this Node's own
   // child_process — it is not merely documented behaviour). Checked before
@@ -251,10 +344,10 @@ function recordDispatchOutcome(holder: string, runLog: string, from: number | un
 // The capture stays here anyway because it is still the correct rule: an
 // explicit --file or an ambient AGENT_SIGNAL_FILE at startup is a pin.
 let signalFileExplicit = Boolean(process.env.AGENT_SIGNAL_FILE)
-let signalFile = process.env.AGENT_SIGNAL_FILE || agentSignalFile(false)
+let signalFile = process.env.AGENT_SIGNAL_FILE || (await agentSignalFile(false))
 let targetState = 'OVER_TO_CODEX'
 let pollSeconds = 2
-let logFile = `${agentStateDir()}/signal.log`
+let logFile = `${await agentStateDir()}/signal.log`
 let once = false
 let command: string[] = []
 
@@ -511,12 +604,12 @@ function stillStranded(dispatchedHolder: string, dispatchedState: string, dispat
   return state === dispatchedState || state === 'ACTIVE'
 }
 
-function recoverStrandedMic(
+async function recoverStrandedMic(
   dispatchedHolder: string,
   dispatchedState: string,
   dispatchMarker: number,
   outcome: string | undefined,
-): void {
+): Promise<void> {
   if (!stillStranded(dispatchedHolder, dispatchedState, dispatchMarker)) return
 
   // BP_STATE_ROOT, not dirname(signalFile): the roster lives at the project
@@ -527,7 +620,7 @@ function recoverStrandedMic(
   // BUG-144 caught live. BP_STATE_ROOT is the one mechanism every consumer
   // (agent-activity.sh, signal-set.sh) already resolves the roster from.
   const rosterRoot = BP_STATE_ROOT
-  const orchestrator = spawnSync(
+  const orchestrator = await spawnBounded(
     // roster.sh is `#!/usr/bin/env bash` and uses `${var// /_}` (BUG-144
     // round 3: dash's `sh` on this box throws "Bad substitution" on that
     // parameter expansion). state-dir.sh and watcher-lock.sh, sourced the
@@ -535,7 +628,8 @@ function recoverStrandedMic(
     // `sh` — this is the one lib here that actually needs bash.
     'bash',
     ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'bash', ROSTER_LIB, rosterRoot],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: SHELL_LIB_TIMEOUT_MS },
+    { stdio: ['ignore', 'pipe', 'inherit'] },
+    SHELL_LIB_TIMEOUT_MS,
   )
   const orchestratorName = (orchestrator.stdout ?? '').trim()
   // TASK-065: a timed-out spawnSync reports status: null and an `error` with
@@ -595,10 +689,11 @@ function recoverStrandedMic(
   // agree even when a caller's environment diverges (e.g. a test pins
   // BP_STATE_ROOT_CEILING for this process but not for the child). One
   // roster for one recovery, not two resolutions of one fact (A-09).
-  const result = spawnSync(
+  const result = await spawnBounded(
     'bash',
     [SIGNAL_SET, '--file', signalFile, '--holder', orchestratorName, '--state', 'OVER_TO_CLAUDE', '--task', task],
-    { stdio: 'inherit', env: { ...process.env, AGENT_ROSTER_FILE: rosterRoot }, timeout: SHELL_LIB_TIMEOUT_MS },
+    { env: { ...process.env, AGENT_ROSTER_FILE: rosterRoot }, stdio: ['inherit', 'inherit', 'inherit'] },
+    SHELL_LIB_TIMEOUT_MS,
   )
   // TASK-065: this is the actual mic-recovery write — signal-set.sh's own
   // atomic rename. A timed-out spawnSync never completed that rename (its
@@ -619,7 +714,7 @@ function recoverStrandedMic(
   }
 }
 
-function triggerIfNeeded(): boolean {
+async function triggerIfNeeded(): Promise<boolean> {
   const holder = readField(signalFile, 'Holder')
   const state = readField(signalFile, 'State')
   const task = readField(signalFile, 'Task')
@@ -650,7 +745,7 @@ function triggerIfNeeded(): boolean {
   // everything from this instant on, which is exactly what recovery needs
   // to ask "has anything new been dispatched since".
   const dispatchMarker = journalMarker()
-  const dispatchRunLog = join(agentStateDir(), providerRunLogName(targetState))
+  const dispatchRunLog = join(await agentStateDir(), providerRunLogName(targetState))
   const dispatchRunLogOffset = runLogOffset(dispatchRunLog)
 
   // Built as a FRESH env object for the dispatched child only — never
@@ -728,12 +823,12 @@ function triggerIfNeeded(): boolean {
   // below must run even if the recorder crashes outright.
   let outcome: string | undefined
   try {
-    outcome = recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
+    outcome = await recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
   } catch (err) {
     teeLine(logFile, `[${isoNow()}] rotation outcome recorder crashed for ${holder}: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, dispatchMarker, outcome)
+  if (process.env.AGENT_SIGNAL_RECOVERY !== '0') await recoverStrandedMic(holder, state, dispatchMarker, outcome)
 
   return true
 }
@@ -749,9 +844,9 @@ function triggerIfNeeded(): boolean {
 //
 // An EXPLICIT path (`--file`, or an ambient AGENT_SIGNAL_FILE at startup) is
 // never re-resolved — captured once, in signalFileExplicit, above.
-function refreshSignalFile(): void {
+async function refreshSignalFile(): Promise<void> {
   if (signalFileExplicit) return
-  const nowFile = agentSignalFile(true)
+  const nowFile = await agentSignalFile(true)
   if (!nowFile || nowFile === signalFile) return
   teeLine(logFile, `[${isoNow()}] signal path moved: ${signalFile} -> ${nowFile}`)
   signalFile = nowFile
@@ -802,11 +897,12 @@ async function claimLock(): Promise<void> {
   // (Homebrew's util-linux flock is not on PATH by default), and duplicating
   // that list here is exactly the two-copies-of-one-fact shape A-09 warns
   // against.
-  const flockCmd = spawnSync('sh', ['-c', `. "$1"; bp_flock_cmd`, 'sh', WATCHER_LOCK_LIB], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: SHELL_LIB_TIMEOUT_MS,
-  })
+  const flockCmd = await spawnBounded(
+    'sh',
+    ['-c', `. "$1"; bp_flock_cmd`, 'sh', WATCHER_LOCK_LIB],
+    { stdio: ['ignore', 'pipe', 'ignore'] },
+    SHELL_LIB_TIMEOUT_MS,
+  )
   const flock = (flockCmd.stdout ?? '').trim()
   // No flock resolvable on this host: bp_watch_hold's own contract is
   // "proceed unguarded" (`command -v flock >/dev/null 2>&1 || return 0`), not
@@ -818,10 +914,11 @@ async function claimLock(): Promise<void> {
   // re-typed, so the "beside the BATON, not the checkout" rule (the whole
   // correctness argument in watcher-lock.sh's docblock, and the exact defect
   // tests/watcher-liveness's mutant W1 encodes) has exactly one definition.
-  const lockPathResult = spawnSync(
+  const lockPathResult = await spawnBounded(
     'sh',
     ['-c', `. "$1"; bp_watch_lock_path "$2" "$3"`, 'sh', WATCHER_LOCK_LIB, dirname(signalFile), targetState],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: SHELL_LIB_TIMEOUT_MS },
+    { stdio: ['ignore', 'pipe', 'ignore'] },
+    SHELL_LIB_TIMEOUT_MS,
   )
   const lockPath = (lockPathResult.stdout ?? '').trim()
   if (lockPathResult.status !== 0 || lockPath === '') return
@@ -896,8 +993,8 @@ async function main(): Promise<void> {
   await claimLock()
 
   for (;;) {
-    refreshSignalFile()
-    if (existsSync(signalFile) && triggerIfNeeded() && once) {
+    await refreshSignalFile()
+    if (existsSync(signalFile) && (await triggerIfNeeded()) && once) {
       process.exit(0)
     }
 

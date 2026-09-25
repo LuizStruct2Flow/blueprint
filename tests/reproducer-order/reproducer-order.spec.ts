@@ -65,23 +65,32 @@
  * it is GREEN. This is docs/DoD.md §3.1's own evidence standard: "the
  * reproducer fails before the fix, and `git log` is the evidence."
  *
- * NON-VACUITY (case #12). The live case asserts the real declaration count
- * and the real reproducer-commit count both clear a floor, so this cannot
- * pass by finding nothing to check. Today's repo carries 119 `required`
- * rows and 47 reproducer-shaped commits on HEAD; the floors are set at
- * roughly a third of that so ordinary bug traffic cannot trip them.
+ * NON-VACUITY (cases #13/#15). The live case asserts the real declaration
+ * count and the real reproducer-commit count both clear a floor, so this
+ * cannot pass by finding nothing to check. The blueprint's repo carries 119
+ * `required` rows and 47 reproducer-shaped commits on HEAD; the floors are
+ * set at roughly a third of that so ordinary bug traffic cannot trip them.
+ * Those floors are the blueprint's OWN history size, so a derived project
+ * would fail them by construction — they are asserted only where
+ * `.blueprint-root` exists (BUG-157, case #15 pins both directions), with a
+ * visible skipNote elsewhere; the order check itself still runs everywhere.
  */
 
 import { describe, it, expect } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { FixtureRepo } from '../harness/fixture-repo.js'
 import { skipNote, skipVisibly } from '../helpers/project-config.js'
 
 const execFileP = promisify(execFile)
+const exists = (p: string): Promise<boolean> =>
+  access(p).then(
+    () => true,
+    () => false,
+  )
 
 /* ------------------------------------------------------------------ *
  * The declaration half — reads TASK-076's field, never re-derives it.
@@ -89,16 +98,23 @@ const execFileP = promisify(execFile)
 
 export type Declaration = { kind: 'required' } | { kind: 'not-applicable'; reason: string }
 
+/** The one spelling of a bug id. Rows pad to three digits (`**BUG-037**`),
+ *  commit subjects do not (`BUG#37:`, CLAUDE.md's convention) — both meet
+ *  here, so either side can key a lookup the other populates (BUG-157). */
+export const bugId = (digits: string): string =>
+  `BUG-${String(Number(digits)).padStart(3, '0')}`
+
 /** A row, not a mention — same anchor bug-numbers.spec.ts uses (BUG-071). */
-const ROW_START = /^\|\s*\*\*(BUG-\d+)\*\*/
+const ROW_START = /^\|\s*\*\*BUG-(\d+)\*\*/
 const REPRO_FIELD = /\*\*Reproducer: (required|not applicable(?: — ([^*]+))?)\.\*\*/
 
 /** null = a row exists but carries no Reproducer field (an unjudged row). */
 export function parseDeclarations(text: string): Map<string, Declaration | null> {
   const out = new Map<string, Declaration | null>()
   for (const line of text.split('\n')) {
-    const id = ROW_START.exec(line)?.[1]
-    if (!id) continue
+    const digits = ROW_START.exec(line)?.[1]
+    if (!digits) continue
+    const id = bugId(digits)
     const f = REPRO_FIELD.exec(line)
     if (!f) {
       out.set(id, null)
@@ -153,7 +169,7 @@ const BUG_PREFIX = /^BUG#(\d+):\s*(.*)$/
 export function classifySubject(subject: string): { bug: string; isReproducer: boolean } | null {
   const m = BUG_PREFIX.exec(subject)
   if (!m) return null
-  return { bug: `BUG-${m[1]}`, isReproducer: REPRODUCER_LEAD.test(m[2] ?? '') }
+  return { bug: bugId(m[1] ?? ''), isReproducer: REPRODUCER_LEAD.test(m[2] ?? '') }
 }
 
 export interface ClassifiedCommit {
@@ -247,15 +263,27 @@ const describeIssues = (issues: OrderIssue[]): string =>
 
 /** NON-VACUITY (the live case's floors), extracted from #13 so a fixture root
  *  can exercise it (BUG-157 #15). Takes counts, not a repo — the caller reads
- *  the populations; this only decides whether failing to find them proves
- *  nothing. `_rootDir`/`_where` are the seam #15 needs; today's behavior
- *  asserts unconditionally and ignores them. */
+ *  the populations; this decides whether failing to find them proves nothing.
+ *  BLUEPRINT-ONLY: the floors are a third of the blueprint's OWN counts (see
+ *  the file header), and a derived project ships this suite with its own,
+ *  smaller history — so they are asserted only where `.blueprint-root` exists
+ *  (BUG-013: that marker cannot reach a derived project, so its absence is
+ *  the honest signal). Elsewhere the skip is visible, never silent — a silent
+ *  skip reads as a pass (DoD §3.7) — and the order check itself still runs
+ *  everywhere; DoD §3.1 points at it. */
 export async function assertNonVacuityFloors(
-  _rootDir: string,
-  _where: string,
+  rootDir: string,
+  where: string,
   requiredCount: number,
   reproducerCommitCount: number,
 ): Promise<void> {
+  if (!(await exists(join(rootDir, '.blueprint-root')))) {
+    skipNote(
+      `${where} non-vacuity floors`,
+      'not the blueprint checkout — the floors are the blueprint’s own history size; the order check still runs',
+    )
+    return
+  }
   expect(
     requiredCount,
     'no `Reproducer: required.` row was found — this proves nothing',

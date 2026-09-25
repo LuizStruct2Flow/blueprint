@@ -166,10 +166,6 @@ if [ -z "$ORCHESTRATOR_NAME" ]; then
 fi
 
 # THE MODEL AND EFFORT, from the Model cell of the holder persona (TASK-059).
-# A Codex persona passes \`-m <slug> -c model_reasoning_effort=<effort>\`. A cell
-# that does not resolve REFUSES the dispatch, visibly: running the wrong model
-# quietly is the failure this exists to stop. A holder that is not a Codex
-# persona with a Model cell dispatches on the codex default model, and says so.
 set --
 REQUESTED_MODEL="" REQUESTED_EFFORT=""
 if command -v bp_roster_model_for_name >/dev/null 2>&1; then
@@ -177,73 +173,59 @@ if command -v bp_roster_model_for_name >/dev/null 2>&1; then
   case $? in
     0) case "$__m" in
          Codex*) REQUESTED_MODEL="$(printf "%s" "$__m" | cut -f2)"
-                 REQUESTED_EFFORT="$(printf "%s" "$__m" | cut -f3)"
-                 set -- -m "$REQUESTED_MODEL" -c "model_reasoning_effort=$REQUESTED_EFFORT" ;;
+                 REQUESTED_EFFORT="$(printf "%s" "$__m" | cut -f3)" ;;
          *) __m="[roster] \${AGENT_SIGNAL_HOLDER:-}: not a Codex persona" ;;
        esac ;;
-    1) printf "%s — dispatch refused\\n" "$__m" | tee -a "$RUN_LOG" >&2
+    1) printf "%s — dispatch refused\n" "$__m" | tee -a "$RUN_LOG" >&2
        feed_append "[$FEED_LABEL] dispatch refused: $__m"
        exit 8 ;;
   esac
-  [ "$#" -eq 0 ] && printf "%s — codex runs its configured default model\\n" "$__m" | tee -a "$RUN_LOG"
+  [ -n "$REQUESTED_MODEL" ] || printf "%s — codex runs its configured default model\n" "$__m" | tee -a "$RUN_LOG"
 fi
 
-# WHAT WAS ACTUALLY RUN (TASK-060). \`-m\`/\`-c model_reasoning_effort=\` above is
-# the REQUEST; Codex is free to fall back, and an operator config.toml can
-# override it at runtime, so the roster cell is not proof of what ran. The
-# Codex session file is the actual record, found by the THREAD ID the dispatch
-# itself announces on its own \`--json\` stream (\`thread.started\`), never by
-# guessing at a file — see scripts/lib/codex-session.sh for what is confirmed
-# and what is still pending a live dispatch. Logged once at dispatch time
-# (what was requested) and once more once the actual run is known (below,
-# after the dispatch finishes); the feed keeps the roster-resolved label
-# until then, exactly as before TASK-060.
 if [ -n "$REQUESTED_MODEL" ]; then
-  printf "[roster] requested model=%s effort=%s\\n" "$REQUESTED_MODEL" "$REQUESTED_EFFORT" | tee -a "$RUN_LOG"
+  printf "[roster] requested model=%s effort=%s\n" "$REQUESTED_MODEL" "$REQUESTED_EFFORT" | tee -a "$RUN_LOG"
 else
-  printf "[roster] requested model=<codex default>\\n" | tee -a "$RUN_LOG"
+  printf "[roster] requested model=<codex default>\n" | tee -a "$RUN_LOG"
 fi
-CODEX_HOME_DIR="\${CODEX_HOME:-$HOME/.codex}"  # a2bp-allow: Codex CLI's own CODEX_HOME default, not per-project state — the actual per-project state dir is STATE_DIR above, derived via scripts/lib/state-dir.sh
+CODEX_HOME_DIR="\${CODEX_HOME:-$HOME/.codex}"
 if [ -r "$ROOT/scripts/lib/codex-session.sh" ]; then
   . "$ROOT/scripts/lib/codex-session.sh"
 fi
-# A copy of codex exec raw --json stream, so the thread id can be read back
-# after the fact without disturbing the feed-filter pipe below. TASK-083:
-# lands under $TMPDIR (<repo>/.scratch/tmp, exported by the launcher below),
-# never /tmp. /dev/null on a failed mktemp: the tee then just discards, and
-# thread-id resolution degrades to "unknown" exactly like a missing lib —
-# never costs the dispatch.
-RAW_JSON="$(mktemp "$TMPDIR/bp-codex-raw.XXXXXX" 2>/dev/null)" || RAW_JSON="/dev/null"
+
+CODEX_RANKED="" RETRY_RANK="" RETRY_TOTAL=0
+if [ -n "$REQUESTED_MODEL" ] && command -v bp_roster_codex_models >/dev/null 2>&1; then
+  CODEX_RANKED="$(bp_roster_codex_models)"
+  RETRY_TOTAL="$(printf "%s\n" "$CODEX_RANKED" | grep -c .)"
+  RETRY_RANK="$(printf "%s\n" "$CODEX_RANKED" | cut -f1 | grep -nx -- "$REQUESTED_MODEL" | head -1 | cut -d: -f1)"
+  if [ -z "$RETRY_RANK" ]; then
+    printf "[roster] %s: resolved model %s is no longer on the Codex model list read moments later — dispatch refused (cache changed mid-resolution)\n" "\${AGENT_SIGNAL_HOLDER:-}" "$REQUESTED_MODEL" | tee -a "$RUN_LOG" >&2
+    feed_append "[$FEED_LABEL] dispatch refused: $REQUESTED_MODEL dropped off the Codex model list mid-resolution"
+    exit 8
+  fi
+fi
+
+REFUSED_FILE="$STATE_DIR/codex-refused-slugs.json"
+CACHE_SIG=""
+[ -r "$CODEX_HOME_DIR/models_cache.json" ] && CACHE_SIG="$(stat -c '%Y:%s' "$CODEX_HOME_DIR/models_cache.json" 2>/dev/null)"
+REFUSED_JSON="{}"
+if [ -n "$RETRY_RANK" ] && [ -n "$CACHE_SIG" ] && [ -r "$REFUSED_FILE" ] && command -v jq >/dev/null 2>&1; then
+  REFUSED_JSON="$(jq -c --arg sig "$CACHE_SIG" 'if (.cache_sig // "") == $sig then (.refused // {}) else {} end' "$REFUSED_FILE" 2>/dev/null)"
+  [ -n "$REFUSED_JSON" ] || REFUSED_JSON="{}"
+fi
 
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
 echo "  Task: $AGENT_SIGNAL_TASK" | tee -a "$RUN_LOG"
 feed_append "[$FEED_LABEL] dispatched — $AGENT_SIGNAL_TASK"
 
-# BUG-143, causes 2 and 3: \`--output-last-message\` is written by codex ONLY
-# when the process exits, so (2) a run that dies never touches it and a
-# PREVIOUS run's report survives looking current, and (3) an agent that
-# hands the mic back mid-run (before codex exits) leaves the Orchestrator
-# reading that same stale file seconds before the real report lands — seen
-# live twice in a row. Stamping an honest in-progress marker HERE, before
-# codex runs, makes both readings true instead of misleading: if codex dies,
-# the marker is what survives; if the mic flips early, the marker is what a
-# premature read sees, and it says plainly that this run has not reported
-# yet. A successful run overwrites the marker with its real last message via
-# --output-last-message, same as before.
-printf "[in-progress] codex exec dispatched %s — no report written yet\\n" "$now" >"$OUTPUT_LAST"
+printf "[in-progress] codex exec dispatched %s — no report written yet\n" "$now" >"$OUTPUT_LAST"
 
-# TASK-066: workspace-write deliberately excludes repository metadata, but a
-# dispatched agent must be able to create its own commit. Grant only the git
-# common directory, never the whole filesystem. \`--git-common-dir\` is vital
-# for linked worktrees: their \`$ROOT/.git\` is a file, while objects and refs
-# live in the common directory. Clear inherited git-location overrides first;
-# BUG-014 prohibits letting the watcher operate on an exported GIT_DIR.
 CODEX_GIT_DIR="$(
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
   git -C "$ROOT" rev-parse --git-common-dir
 )" || {
-  printf "[git] could not resolve the repository common directory — dispatch refused\\n" | tee -a "$RUN_LOG" >&2
+  printf "[git] could not resolve the repository common directory — dispatch refused\n" | tee -a "$RUN_LOG" >&2
   exit 7
 }
 case "$CODEX_GIT_DIR" in
@@ -251,57 +233,96 @@ case "$CODEX_GIT_DIR" in
   *) CODEX_GIT_DIR="$ROOT/$CODEX_GIT_DIR" ;;
 esac
 CODEX_GIT_DIR="$(cd -P "$CODEX_GIT_DIR" && pwd)" || {
-  printf "[git] repository common directory is not accessible — dispatch refused\\n" | tee -a "$RUN_LOG" >&2
+  printf "[git] repository common directory is not accessible — dispatch refused\n" | tee -a "$RUN_LOG" >&2
   exit 7
 }
 
-# BUG-143, cause 1: \`codex exec\` sits in a pipeline under dash (\`sh -c\`, no
-# PIPESTATUS, no \`set -o pipefail\`), so its exit status was lost — a run that
-# died still logged "codex exec finished". Same fix as the Kimi launcher
-# (TASK-063 cross-provider review): the command group writes \`$?\` to a status
-# file right after codex exits, before its stdout (feeding tee) reaches EOF,
-# so the file is always complete by the time the downstream stages finish.
 CODEX_STATUS_FILE="$(mktemp "$STATE_DIR/.codex-exit-status.XXXXXX" 2>/dev/null)" || CODEX_STATUS_FILE="$STATE_DIR/.codex-exit-status.$$"
-# TASK-083: sandbox_workspace_write.exclude_slash_tmp and
-# .exclude_tmpdir_env_var (both present in codex 0.154's binary) make the
-# sandbox itself refuse a write to /tmp regardless of TMPDIR — belt-and-
-# braces with the TMPDIR redirection above, not a replacement for it: TMPDIR
-# already points codex's own tooling at .scratch/tmp so it never asks for a
-# /tmp write in the first place, and these two flags refuse it if something
-# asks anyway. Verified with a real \`codex exec\` dispatch: a write to /tmp
-# is refused, a write under .scratch/tmp succeeds (TASK-083 handoff).
-# --json + codex-feed-filter.sh keeps the activity feed at one concise line per
-# action (codex prose, commands, file changes) instead of echoing every file
-# codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
-# --output-last-message still captures the final message for verdict reading.
-{
-  "$CODEX_BIN" exec --json "$@" \\
-    --cd "$ROOT" \\
-    --sandbox workspace-write \\
-    -c sandbox_workspace_write.exclude_slash_tmp=true \\
-    -c sandbox_workspace_write.exclude_tmpdir_env_var=true \\
-    --add-dir "$CODEX_GIT_DIR" \\
-    --skip-git-repo-check \\
-    --output-last-message "$OUTPUT_LAST" \\
-    "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \\
-    2>>"$RUN_LOG"
-  printf "%s" "$?" >"$CODEX_STATUS_FILE"
-} \\
-  | tee -a "$RAW_JSON" \\
-  | bash "$ROOT/scripts/codex-feed-filter.sh" \\
-  | while IFS= read -r __line || [ -n "$__line" ]; do
-      printf "%s\\n" "$__line" >>"$RUN_LOG"
-      [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
-    done
-CODEX_STATUS="$(cat "$CODEX_STATUS_FILE" 2>/dev/null)"
-rm -f "$CODEX_STATUS_FILE"
+RAW_JSON="$(mktemp "$TMPDIR/bp-codex-raw.XXXXXX" 2>/dev/null)" || RAW_JSON="/dev/null"
 
-# RESOLVE THE ACTUAL MODEL/EFFORT (TASK-060), from the thread id codex itself
-# announced on its own --json stream (RAW_JSON, captured above via tee) — an IDENTITY
-# lookup, never a guess. Any step that comes up empty (no thread.started seen,
-# no jq, no rollout matching that exact id, no turn_context inside it) reports
-# "unknown" with why, and the roster label already in FEED_LABEL is kept —
-# this never invents a model.
+# BUG-151: bounded dispatch loop, one attempt per iteration. The per-attempt
+# exit-status capture (BUG-143) runs on EVERY iteration, not just the last.
+i="$RETRY_RANK"
+[ -n "$i" ] || i=0
+CODEX_STATUS=1
+EXHAUSTED=0
+while :; do
+  if [ -n "$RETRY_RANK" ]; then
+    CUR="$(printf "%s\n" "$CODEX_RANKED" | sed -n "\${i}p")"
+    CUR_SLUG="$(printf "%s" "$CUR" | cut -f1)"
+    CUR_LEVELS="$(printf "%s" "$CUR" | cut -f2)"
+    CUR_EFFORT="$REQUESTED_EFFORT"
+    case " $CUR_LEVELS " in
+      *" $REQUESTED_EFFORT "*) ;;
+      *) CUR_EFFORT="$(printf "%s" "$CUR_LEVELS" | cut -d' ' -f1)" ;;
+    esac
+    if [ "$i" != "$RETRY_RANK" ]; then
+      printf "[roster] falling back to rank %s: %s effort=%s (previous rank refused)\n" "$i" "$CUR_SLUG" "$CUR_EFFORT" | tee -a "$RUN_LOG"
+      feed_append "[$FEED_LABEL] falling back to rank $i: '$CUR_SLUG' effort=$CUR_EFFORT — the previous rank was refused"
+    fi
+    set -- -m "$CUR_SLUG" -c "model_reasoning_effort=$CUR_EFFORT"
+    __remembered="$(printf "%s" "$REFUSED_JSON" | jq -r --arg s "$CUR_SLUG" '.[$s] // empty' 2>/dev/null)"
+    if [ -n "$__remembered" ]; then
+      printf "[roster] rank %s '%s' already refused by this account (remembered, cache unchanged) — skipping without dispatch\n" "$i" "$CUR_SLUG" | tee -a "$RUN_LOG"
+      printf "%s\n" "$__remembered" >>"$RUN_LOG"
+      feed_append "[$FEED_LABEL] rank $i: '$CUR_SLUG' remembered refused — skipping without dispatch"
+      CODEX_STATUS=1
+      if [ "$i" -ge "$RETRY_TOTAL" ]; then EXHAUSTED=1; break; fi
+      i=$((i + 1))
+      continue
+    fi
+  else
+    CUR_SLUG="" CUR_EFFORT=""
+    set --
+  fi
+  : >"$RAW_JSON" 2>/dev/null || true
+  {
+    "$CODEX_BIN" exec --json "$@" \\
+      --cd "$ROOT" \\
+      --sandbox workspace-write \\
+      -c sandbox_workspace_write.exclude_slash_tmp=true \\
+      -c sandbox_workspace_write.exclude_tmpdir_env_var=true \\
+      --add-dir "$CODEX_GIT_DIR" \\
+      --skip-git-repo-check \\
+      --output-last-message "$OUTPUT_LAST" \\
+      "prompt text $AGENT_SIGNAL_TASK $ORCHESTRATOR_NAME" \\
+      2>>"$RUN_LOG"
+    printf "%s" "$?" >"$CODEX_STATUS_FILE"
+  } \\
+    | tee -a "$RAW_JSON" \\
+    | bash "$ROOT/scripts/codex-feed-filter.sh" \\
+    | while IFS= read -r __line || [ -n "$__line" ]; do
+        printf "%s\n" "$__line" >>"$RUN_LOG"
+        [ -n "$__line" ] && feed_append "[$FEED_LABEL] $__line"
+      done
+  CODEX_STATUS="$(cat "$CODEX_STATUS_FILE" 2>/dev/null)"
+
+  [ "\${CODEX_STATUS:-1}" = "0" ] && break
+  [ -n "$RETRY_RANK" ] || break
+
+  REFUSAL_LINE="$(bash "$ROOT/scripts/codex-feed-filter.sh" <"$RAW_JSON" | grep -m1 '^⚠ ')"
+  case "$REFUSAL_LINE" in
+    *'"status":400'*'is not supported when using Codex'*) : ;;
+    *) break ;;
+  esac
+
+  if command -v jq >/dev/null 2>&1 && [ -n "$CACHE_SIG" ]; then
+    __prev="$(cat "$REFUSED_FILE" 2>/dev/null || printf "{}")"
+    printf "%s" "$__prev" | jq -c --arg sig "$CACHE_SIG" --arg slug "$CUR_SLUG" --arg msg "$REFUSAL_LINE" \\
+      '(if (.cache_sig // "") == $sig then (.refused // {}) else {} end) as $base | {cache_sig: $sig, refused: ($base + {($slug): $msg})}' \\
+      >"$REFUSED_FILE.tmp" 2>/dev/null && mv "$REFUSED_FILE.tmp" "$REFUSED_FILE"
+    REFUSED_JSON="$(jq -c '.refused // {}' "$REFUSED_FILE" 2>/dev/null)"
+    [ -n "$REFUSED_JSON" ] || REFUSED_JSON="{}"
+  fi
+
+  if [ "$i" -ge "$RETRY_TOTAL" ]; then EXHAUSTED=1; break; fi
+  i=$((i + 1))
+done
+rm -f "$CODEX_STATUS_FILE"
+if [ "$EXHAUSTED" = "1" ]; then
+  printf "[roster] every Codex model from rank %s through %s was refused or remembered-refused — dispatch exhausted\n" "$RETRY_RANK" "$RETRY_TOTAL" | tee -a "$RUN_LOG" >&2
+fi
+
 ACTUAL_MODEL="" ACTUAL_EFFORT="" __rollout="" __thread_id="" __reason="no thread.started event observed"
 if command -v bp_codex_thread_id_from_stream >/dev/null 2>&1; then
   __thread_id="$(bp_codex_thread_id_from_stream "$RAW_JSON" 2>/dev/null)"
@@ -321,13 +342,13 @@ if [ -n "$__rollout" ] && command -v bp_codex_model_effort >/dev/null 2>&1; then
 fi
 [ "$RAW_JSON" = "/dev/null" ] || rm -f "$RAW_JSON" 2>/dev/null
 if [ -n "$ACTUAL_MODEL" ]; then
-  printf "[roster] actual model=%s effort=%s (session %s)\\n" "$ACTUAL_MODEL" "$ACTUAL_EFFORT" "$__rollout" | tee -a "$RUN_LOG"
+  printf "[roster] actual model=%s effort=%s (session %s)\n" "$ACTUAL_MODEL" "$ACTUAL_EFFORT" "$__rollout" | tee -a "$RUN_LOG"
   if command -v bp_roster_label >/dev/null 2>&1; then
     __actual_label="$(bp_roster_label "$BP_STATE_ROOT" "\${AGENT_SIGNAL_HOLDER:-Codex}" "$ACTUAL_MODEL" "$ACTUAL_EFFORT" 2>/dev/null)"
     [ -n "$__actual_label" ] && FEED_LABEL="$__actual_label"
   fi
 else
-  printf "[roster] actual model: unknown (%s) — feed keeps the roster label\\n" "$__reason" | tee -a "$RUN_LOG" >&2
+  printf "[roster] actual model: unknown (%s) — feed keeps the roster label\n" "$__reason" | tee -a "$RUN_LOG" >&2
 fi
 
 end="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
@@ -335,8 +356,6 @@ if [ "\${CODEX_STATUS:-1}" = "0" ]; then
   echo "[$end] codex exec finished — see $OUTPUT_LAST for the last message" | tee -a "$RUN_LOG"
   feed_append "[$FEED_LABEL] finished — last message in $OUTPUT_LAST"
 else
-  # BUG-143: report distinctly rather than "finished" — and point at RUN_LOG,
-  # not OUTPUT_LAST, because a dead run left only the in-progress marker there.
   echo "[$end] codex exec FAILED (exit \${CODEX_STATUS:-unknown}) — see $RUN_LOG" | tee -a "$RUN_LOG"
   feed_append "[$FEED_LABEL] FAILED (exit \${CODEX_STATUS:-unknown}) — see $RUN_LOG"
 fi

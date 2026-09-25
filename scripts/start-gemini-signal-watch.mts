@@ -33,6 +33,7 @@ import { realpathSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findOnPath, findLatestUnderTree, isExecutable } from './lib/find-bin.mts'
+import { scratchTmpDir } from './lib/scratch-tmpdir.mts'
 
 // --- physical script root (A-09 / BUG-020, ported) ---
 const _bpRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
@@ -75,6 +76,11 @@ or point GEMINI_BIN at a gemini binary you trust, then re-run.`)
 // copy here is gone too: the poller derives signal.log from its own script root,
 // which is this same tree, so passing it was a second derivation that could only
 // ever disagree by being stale.
+
+// TASK-083: every dispatched agent's temporary files land under
+// <repo>/.scratch/tmp, never /tmp. Set here so the AGENT_WAKE_COMMAND child
+// (and the policy file wired in below) both see it.
+const TMPDIR = scratchTmpDir(ROOT)
 
 // Runs every time State = OVER_TO_GEMINI fires. AGENT_SIGNAL_TASK is the
 // current Task field, exported by the poller. We hand Gemini the radio-over
@@ -166,7 +172,7 @@ else
 fi
 `
 
-const env = { ...process.env, GEMINI_BIN, ROOT, AGENT_WAKE_COMMAND }
+const env = { ...process.env, GEMINI_BIN, ROOT, AGENT_WAKE_COMMAND, TMPDIR }
 const signalWatch = join(ROOT, 'scripts', 'signal-watch.mts')
 const child = spawn(process.execPath, [signalWatch, '--state', 'OVER_TO_GEMINI', ...process.argv.slice(2)], {
   stdio: 'inherit',

@@ -363,10 +363,11 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // watcher actually needs" rule applies here too.
       await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), join('work', 'scripts/lib/spawn-bounded.mts'))
       // TASK-083 — the ported start-codex-signal-watch.mts imports
-      // scripts/lib/find-bin.mts directly for its binary discovery; same
-      // "carry what the copied watcher actually needs" rule as the two
+      // scripts/lib/find-bin.mts and scripts/lib/scratch-tmpdir.mts directly;
+      // same "carry what the copied watcher actually needs" rule as the two
       // imports above.
       await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/find-bin.mts'), join('work', 'scripts/lib/find-bin.mts'))
+      await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/scratch-tmpdir.mts'), join('work', 'scripts/lib/scratch-tmpdir.mts'))
       await s.gitRepo('work')
 
       // BUG-019 — the watcher reads the LIVE baton (untracked, under the state

@@ -34,6 +34,7 @@ import { realpathSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findOnPath, isExecutable } from './lib/find-bin.mts'
+import { scratchTmpDir } from './lib/scratch-tmpdir.mts'
 
 // --- physical script root (A-09 / BUG-020, ported) ---
 const _bpRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
@@ -75,6 +76,12 @@ re-run.`)
 // The state dir is derived INSIDE the wake command (below), not here — see
 // start-codex-signal-watch.mts for why exporting a resolved path freezes it for
 // the watcher's whole life.
+
+// TASK-083: every dispatched agent's temporary files land under
+// <repo>/.scratch/tmp, never /tmp. Kimi 2.0 has no sandbox/path-deny option
+// (measured against `kimi --help`), so TMPDIR is the whole mechanism here —
+// most tools (mktemp, os.tmpdir()) read it before falling back to /tmp.
+const TMPDIR = scratchTmpDir(ROOT)
 
 // Runs every time State = OVER_TO_KIMI fires. AGENT_SIGNAL_TASK is the current
 // Task field, exported by the poller. We hand Kimi the radio-over preamble +
@@ -300,7 +307,7 @@ else
 fi
 `
 
-const env = { ...process.env, KIMI_BIN, ROOT, AGENT_WAKE_COMMAND }
+const env = { ...process.env, KIMI_BIN, ROOT, AGENT_WAKE_COMMAND, TMPDIR }
 const signalWatch = join(ROOT, 'scripts', 'signal-watch.mts')
 const child = spawn(process.execPath, [signalWatch, '--state', 'OVER_TO_KIMI', ...process.argv.slice(2)], {
   stdio: 'inherit',

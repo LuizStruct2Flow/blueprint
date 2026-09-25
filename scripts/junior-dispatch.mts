@@ -18,10 +18,15 @@ import { writeSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { scratchTmpDir } from './lib/scratch-tmpdir.mts'
 
 const codeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const rosterLib = join(codeRoot, 'scripts', 'lib', 'roster.sh')
 const feedLib = join(codeRoot, 'scripts', 'lib', 'feed.sh')
+// TASK-083: the locally hosted Ollama junior's temporary files land under
+// <repo>/.scratch/tmp, never /tmp — same rule, same mechanism (TMPDIR) as
+// the three provider launchers.
+const juniorTmpDir = scratchTmpDir(codeRoot)
 
 interface Options {
   persona: string
@@ -142,7 +147,7 @@ async function runOllama(model: string, brief: string): Promise<{ output: string
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn('ollama', ['run', '--nowordwrap', model], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: { ...process.env, TMPDIR: juniorTmpDir },
     })
     const chunks: string[] = []
     child.stdout.setEncoding('utf8')

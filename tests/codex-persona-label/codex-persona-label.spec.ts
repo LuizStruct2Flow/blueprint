@@ -340,6 +340,12 @@ describe('BUG-021 — Codex output carries the persona that produced it', () => 
       const source = await readFile(GEMINI_LAUNCHER, 'utf8')
       const wake = extractWakeCommand(source)
       expect(wake, 'could not extract Gemini dispatch body from its launcher').toBeDefined()
+      // TASK-083 — the real launcher generates this before building the wake
+      // body (writeFileSync in the .mts), so an extracted-and-replayed wake
+      // body needs it supplied the same way: `set -u` at the top of the body
+      // makes an unset $GEMINI_POLICY_FILE an unbound-variable error, not an
+      // empty --policy argument.
+      const policy = await s.fs.write('gemini-policy-fixture.toml', '')
 
       const r = await s.run('bash', ['-c', 'export AGENT_SIGNAL_HOLDER=Slava AGENT_SIGNAL_TASK="label this Gemini dispatch" AGENT_FEED_LOG="$2"; exec bash -c "$1"', 'x', wake!, feed], {
         cwd: s.workspace.root,
@@ -347,6 +353,7 @@ describe('BUG-021 — Codex output carries the persona that produced it', () => 
           ROOT: SUBJECT,
           GEMINI_BIN: gemini,
           AGENT_STATE_HOME: state,
+          GEMINI_POLICY_FILE: policy,
         },
       })
       expect(r.code, `Gemini dispatch body failed: ${r.output}`).toBe(0)

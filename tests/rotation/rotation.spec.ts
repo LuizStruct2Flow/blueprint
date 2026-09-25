@@ -215,6 +215,16 @@ describe('TASK-065 rotation event log', () => {
     })
   })
 
+  it('TASK-065: coverage shows unproven, not in, once a quota cooldown has expired', async () => {
+    await scenario('rotation-coverage-unproven', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      await s.fs.write('selector/rotation.log', JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona: 'Andreas', provider: 'Codex', class: 'quota', evidence: 'usage limit', source: 'run@0', until: '2020-01-01T00:00:00Z' }) + '\n')
+      const result = await runCli(s, dir, roster, ['coverage', 'Back-End'])
+      expect(result.stdout).toContain('Andreas\tCodex\tunproven')
+      expect(result.stdout).not.toContain('Andreas\tCodex\tin')
+    })
+  })
+
   it('reassigns an item whose provider went out and keeps juniors in their literal family', async () => {
     await scenario('rotation-reassign', async (s) => {
       const { dir, roster } = await selectorFixture(s)

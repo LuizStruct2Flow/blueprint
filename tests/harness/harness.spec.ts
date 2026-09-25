@@ -1679,4 +1679,87 @@ describe('harness — timeout evidence capture (BUG-146)', () => {
       expect(await collectDumps(s.workspace.path('derived-proj/tests/.no-such-dir'), outerDumpDir)).toEqual([])
     })
   })
+
+  it('BUG-146: an orphan reparented past the tracked-roots walk is still named — the ppid walk alone cannot see it, but the pipe/env-marker nets do', async () => {
+    // BUG-146's row, fifth and sixth CI occurrences (runs 36129880176,
+    // 36166194863): both real dumps read "nothing found under the tracked
+    // roots — every tracked process had already exited" while the wait they
+    // were captured for (the run's own `close` event) never resolved.
+    // `withDescendants` (dump.ts) walks `ppid` links down from the scenario's
+    // own tracked roots, and a process whose PARENT was killed is reparented
+    // to init/a subreaper the instant that happens — falling out of that walk
+    // however far it descends — while it can still hold the write end of a
+    // pipe the scenario's `child.on('close', ...)` is blocked on seeing EOF
+    // from. That is BUG-120's row's own leading hypothesis for the hang: an
+    // orphaned fetch, in its own process group, still holding the run's
+    // inherited stdout after cleanup's TERM raced past it.
+    //
+    // This reproduces the SHAPE without needing the real CLI at all: a child
+    // starts a grandchild in a NEW SESSION (`setsid`) that inherits the
+    // child's own stdout/stderr, lives a little past that (so the pipe-id
+    // capture at spawn time — process.ts's `capturePipeIds` — has the same
+    // window it would have against a real, seconds-long `run`), then exits.
+    // The grandchild survives, reparented, still holding the pipe.
+    await scenario('harness-bug146-orphan', async (s) => {
+      const dumpDirOverride = s.workspace.path('dumps')
+      process.env.BP_HARNESS_DUMP_DIR = dumpDirOverride
+      const markerFile = s.workspace.path('orphan-pid')
+      let orphanPid: number | undefined
+      try {
+        // The marker file lets this test find and kill the orphan afterwards
+        // — it is in a session/process group of its OWN (that is the whole
+        // point of `setsid`), so it is not reachable through `child`'s pgid
+        // and the harness's own teardown cannot reap it. `$$` is escaped
+        // (`\$\$`) so the OUTER bash passes it through literally; it is the
+        // INNER `sh` that expands its own pid.
+        const cmd =
+          `setsid sh -c "echo \\$\\$ > '${markerFile}'; exec sleep 30" & ` +
+          `sleep 0.3; exit 0`
+        const child = s.background('bash', ['-c', cmd], { cwd: s.workspace.root })
+
+        const done = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+          (resolve, reject) => {
+            child.on('error', reject)
+            child.on('close', (code, signal) => resolve({ code, signal }))
+          },
+        )
+
+        let caught: Error | undefined
+        try {
+          // Never resolves on its own: the orphan holds the pipe open well
+          // past any budget this test could wait out.
+          await s.waitOrDump(done, 3_000, 'BUG-146 orphan reproducer')
+        } catch (err) {
+          caught = err as Error
+        }
+        expect(caught?.message).toMatch(/timed out after 3000ms/)
+
+        const file = /process-tree dump: (.+\.txt)/.exec(caught?.message ?? '')?.[1]
+        expect(file, `no dump path in: ${caught?.message}`).toBeDefined()
+        const text = await readFile(file as string, 'utf8')
+
+        // THE ASSERTION THAT FAILS AGAINST THE PPID-WALK-ONLY dump.ts: that
+        // version reports "nothing found under the tracked roots" here —
+        // the child has already exited, and the orphan was never its
+        // descendant by the time the dump looks — exactly what the two real
+        // CI dumps show. The pipe/env-marker nets, searching every live
+        // process rather than walking parentage, name it instead.
+        expect(text, text).toMatch(/sleep 30/)
+      } finally {
+        delete process.env.BP_HARNESS_DUMP_DIR
+        try {
+          orphanPid = Number((await readFile(markerFile, 'utf8')).trim())
+        } catch {
+          // The marker was never written — nothing this test started to clean up.
+        }
+        if (orphanPid !== undefined && Number.isFinite(orphanPid)) {
+          try {
+            process.kill(orphanPid, 'SIGKILL')
+          } catch {
+            // Already gone.
+          }
+        }
+      }
+    })
+  })
 })

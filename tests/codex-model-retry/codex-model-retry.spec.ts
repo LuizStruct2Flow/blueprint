@@ -78,7 +78,15 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -m) slug="$2"; shift 2 ;;
     --output-last-message) outlast="$2"; shift 2 ;;
-    *) shift ;;
+    *)
+      # The prompt is always the FINAL positional argument codex exec
+      # receives, whatever flags preceded it — capture it verbatim so a
+      # test can prove the launcher sent the real radio-over prompt, not a
+      # placeholder standing in for it.
+      if [ $# -eq 1 ] && [ -n "\${PROMPT_LOG:-}" ]; then
+        printf '%s' "$1" >"$PROMPT_LOG"
+      fi
+      shift ;;
   esac
 done
 [ -n "\${CALL_LOG:-}" ] && printf 'call: %s\\n' "$slug" >>"$CALL_LOG"
@@ -203,6 +211,36 @@ async function runLog(f: Fixture): Promise<string> {
 }
 
 describe('BUG-151 — a refused Codex model falls back through the rest of the ranked list', () => {
+  it('the dispatched CLI receives the real radio-over coordination prompt, not a placeholder', async () => {
+    // Regression guard (Andreas/Codex code review of 77dbf4d, code-side
+    // FINDING): an editing mistake in that commit replaced the whole prompt
+    // string with the literal "prompt text $AGENT_SIGNAL_TASK
+    // $ORCHESTRATOR_NAME" — every dispatched Codex agent would have lost
+    // the baton rules, the required reads, the atomic hand-back instruction
+    // and the no-push constraint, while every existing suite (including
+    // this file's other three cases, which never inspect the prompt
+    // argument) stayed green. This asserts the actual argument content, not
+    // just that a dispatch succeeds.
+    await scenario('codex-retry-real-prompt', async (s) => {
+      const f = await buildFixture(s, 'proj')
+      const promptLog = s.workspace.path('prompt.log')
+      await runOnce(s, f, { PROMPT_LOG: promptLog })
+
+      const prompt = await readFile(promptLog, 'utf8').catch(() => '')
+      expect(prompt, 'codex exec never received a prompt argument at all').not.toBe('')
+      expect(prompt, `the prompt must not be a placeholder:\n${prompt}`).not.toMatch(/^prompt text /)
+      expect(prompt, `the prompt must carry the radio-over protocol name:\n${prompt}`).toMatch(
+        /radio-over coordination protocol/,
+      )
+      expect(prompt, `the prompt must carry the atomic hand-back instruction:\n${prompt}`).toMatch(
+        /hand the mic back by RUNNING scripts\/signal-set\.sh/,
+      )
+      expect(prompt, `the prompt must carry the no-push constraint:\n${prompt}`).toMatch(
+        /Do NOT run git push; only Claude pushes\./,
+      )
+    })
+  })
+
   it('a refused rank falls back to the next ranked model and completes', async () => {
     await scenario('codex-retry-fallback', async (s) => {
       const f = await buildFixture(s, 'proj')

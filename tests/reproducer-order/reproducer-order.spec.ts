@@ -245,6 +245,27 @@ export function checkOrder(
 const describeIssues = (issues: OrderIssue[]): string =>
   issues.map((i) => `${i.bug} at ${i.sha} (${i.subject}) — ${i.reason ?? ''}`).join('\n')
 
+/** NON-VACUITY (the live case's floors), extracted from #13 so a fixture root
+ *  can exercise it (BUG-157 #15). Takes counts, not a repo — the caller reads
+ *  the populations; this only decides whether failing to find them proves
+ *  nothing. `_rootDir`/`_where` are the seam #15 needs; today's behavior
+ *  asserts unconditionally and ignores them. */
+export async function assertNonVacuityFloors(
+  _rootDir: string,
+  _where: string,
+  requiredCount: number,
+  reproducerCommitCount: number,
+): Promise<void> {
+  expect(
+    requiredCount,
+    'no `Reproducer: required.` row was found — this proves nothing',
+  ).toBeGreaterThanOrEqual(50)
+  expect(
+    reproducerCommitCount,
+    'no reproducer-shaped commit was found in HEAD’s history — this proves nothing',
+  ).toBeGreaterThanOrEqual(30)
+}
+
 /* ------------------------------------------------------------------ *
  * The git layer — reads a repo's real history into ClassifiedCommit[].
  * Used by the fixture red/green case and by the live case; nothing in
@@ -468,6 +489,37 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
       expect(r.skipped).toEqual([])
       expect(r.checkedCount).toBe(0) // never even reaches a declaration lookup
     })
+
+    it('#14 BUG-157: an unpadded BUG#37: subject meets its padded **BUG-037** row — checked, not unjudged', () => {
+      // PR #82 (superseding PR #79) reports this from a young derived project:
+      // commit subjects are unpadded (BUG#37:, CLAUDE.md's convention) and rows
+      // are padded (**BUG-037**). If the two sides key the id differently, the
+      // fix commit finds no row and lands in unjudged — every bug numbered
+      // below 100, i.e. every bug a young project files first. Latent here
+      // only because every bug fixed since TASK-077 is ≥100.
+      const HEADER = '| # | Bug | Sev | Status | Detail |\n|---|---|---|---|---|\n'
+      const decl = parseDeclarations(
+        HEADER +
+          '| **BUG-037** | **Reproducer: required.** **s** | S2 | OPEN | — |\n' +
+          '| **BUG-151** | **Reproducer: required.** **s** | S2 | OPEN | — |\n',
+      )
+      const classified = (subject: string) => {
+        const c = classifySubject(subject)
+        return commit(c?.bug ?? null, subject, { isReproducer: c?.isReproducer ?? false })
+      }
+      const r = checkOrder(
+        [
+          classified('BUG#37: minimal reproducer (failing)'),
+          classified('BUG#37: the fix'),
+          classified('BUG#151: minimal reproducer (failing)'),
+          classified('BUG#151: the fix'),
+        ],
+        decl,
+      )
+      expect(r.unjudged, describeIssues(r.unjudged)).toEqual([])
+      expect(r.violations, describeIssues(r.violations)).toEqual([])
+      expect(r.checkedCount).toBe(2)
+    })
   })
 
   /* ================================================================ *
@@ -592,14 +644,11 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
 
     // NON-VACUITY: both populations this check draws from are real and
     // non-trivial. A renamed table or a broken classifier would show up as
-    // these floors going to zero, not as a quiet pass.
+    // these floors going to zero, not as a quiet pass. (Extracted into
+    // assertNonVacuityFloors so #15 can run it against a fixture root.)
     const requiredCount = [...declarations.values()].filter((d) => d?.kind === 'required').length
-    expect(requiredCount, 'no `Reproducer: required.` row was found — this proves nothing').toBeGreaterThanOrEqual(50)
     const reproducerCommitCount = history.filter((c) => c.isReproducer).length
-    expect(
-      reproducerCommitCount,
-      'no reproducer-shaped commit was found in HEAD’s history — this proves nothing',
-    ).toBeGreaterThanOrEqual(30)
+    await assertNonVacuityFloors(REPO_ROOT, ctx.task.name, requiredCount, reproducerCommitCount)
 
     const result = checkOrder(history, declarations)
     for (const s of result.skipped) {
@@ -608,5 +657,32 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
 
     expect(result.unjudged, describeIssues(result.unjudged)).toEqual([])
     expect(result.violations, describeIssues(result.violations)).toEqual([])
+  })
+
+  it('#15 BUG-157: the non-vacuity floors are the blueprint’s own size — a project without .blueprint-root must not be asserted against them', async () => {
+    // The ≥50 rows / ≥30 reproducer-commit floors are a third of the
+    // BLUEPRINT's own counts (see the file header); a fresh derived project
+    // fails them by construction, red on its first push. This runs the very
+    // assertion the live case uses against the smallest stand-ins for the
+    // two checkouts:
+    await scenario('reproducer-order-15', async (s) => {
+      // A young derived project — small tables, and no .blueprint-root
+      // marker (BUG-013: that file cannot reach a derived project, so its
+      // absence is the honest signal). The floors must NOT be asserted here;
+      // the order check itself still runs in such a checkout (#13's other
+      // half). Counts 2 and 1 are what a young project's first bug fix
+      // actually looks like.
+      const young = await s.fs.mkdirp('young-proj')
+      await expect(assertNonVacuityFloors(young, '#15 young derived project', 2, 1)).resolves.toBeUndefined()
+
+      // The blueprint checkout itself — the floors stand there, so the same
+      // small counts must still fail. This keeps #15 honest in both
+      // directions: it proves a gate, not a deletion.
+      const blueprint = await s.fs.mkdirp('blueprint-proj')
+      await s.fs.write('blueprint-proj/.blueprint-root', '# marker\n')
+      await expect(assertNonVacuityFloors(blueprint, '#15 blueprint', 2, 1)).rejects.toThrow(
+        /proves nothing/,
+      )
+    })
   })
 })

@@ -45,14 +45,19 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
+import { resolveConsumer } from '../helpers/shim.js'
+import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command.js'
 
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
-const LAUNCHER = join(SUBJECT, 'scripts', 'start-codex-signal-watch.sh')
+// TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET
+// (resolveConsumer follows the shim), same as tests/state-dir.
+const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
 
 /** A script's source with comments stripped — the static checks need the code. */
 async function code(path: string): Promise<string> {
   const raw = await readFile(path, 'utf8').catch(() => '')
-  return raw.replace(/^[ \t]*#.*$/gm, '')
+  const stripped = raw.replace(/^[ \t]*#.*$/gm, '')
+  return path.endsWith('.mts') ? unescapeTsShellText(stripped) : stripped
 }
 
 /**
@@ -61,7 +66,7 @@ async function code(path: string): Promise<string> {
  */
 async function extractWake(): Promise<string> {
   const src = await readFile(LAUNCHER, 'utf8')
-  const wake = src.match(/export AGENT_WAKE_COMMAND='\n([\s\S]*?)\n'\n\nexec /)?.[1]
+  const wake = extractWakeCommand(src)
   expect(wake, `could not extract the dispatch body from ${LAUNCHER}`).toBeDefined()
   return wake!
 }

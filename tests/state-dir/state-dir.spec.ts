@@ -362,6 +362,11 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // function like the two libs above, so the same "carry what the copied
       // watcher actually needs" rule applies here too.
       await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), join('work', 'scripts/lib/spawn-bounded.mts'))
+      // TASK-083 — the ported start-codex-signal-watch.mts imports
+      // scripts/lib/find-bin.mts directly for its binary discovery; same
+      // "carry what the copied watcher actually needs" rule as the two
+      // imports above.
+      await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/find-bin.mts'), join('work', 'scripts/lib/find-bin.mts'))
       await s.gitRepo('work')
 
       // BUG-019 — the watcher reads the LIVE baton (untracked, under the state
@@ -402,6 +407,27 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       await s.run('ln', ['-s', 'nested/hop2.sh', s.workspace.path('links', 'launch-via-symlink.sh')], {
         cwd: s.workspace.root,
       })
+      // BUG-144 commit 0, extended for the first real migration (TASK-083): a
+      // migrated shim's `exec node "$(dirname "$0")/NAME.mts"` never follows
+      // the symlink chain — bash's `dirname "$0"` reports the SYMLINK's own
+      // directory (`links/`), never the real file's. The old, unmigrated
+      // script survived this fixture by resolving its OWN physical root
+      // through a 40-hop readlink walk before doing anything else; the shim
+      // has no such walk, by design (CLAUDE.md "Shell to TypeScript" fixes
+      // its two lines byte-for-byte). So a migrated launcher's `.mts` sibling
+      // has to be reachable from wherever `dirname "$0"` actually lands — the
+      // same directory as the outermost symlink, not the real tree. This
+      // mirrors what a real out-of-tree install now needs post-migration:
+      // carry the `.mts` alongside the `.sh` (or symlink the whole
+      // directory), not just the one file.
+      const mtsTarget = shimTargetPath('scripts/start-codex-signal-watch.sh')
+      if (existsSync(join(REPO_ROOT, mtsTarget))) {
+        await s.run(
+          'ln',
+          ['-s', s.workspace.path('work', mtsTarget), s.workspace.path('links', 'start-codex-signal-watch.mts')],
+          { cwd: s.workspace.root },
+        )
+      }
 
       const decoy = await s.gitRepo('decoy')
       await s.fs.write(join('decoy', 'f.txt'), 'x\n')

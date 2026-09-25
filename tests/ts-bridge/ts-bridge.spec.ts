@@ -1036,6 +1036,67 @@ describe('TASK-083 — ts_scrubbed redirects a TMPDIR the launchers plant inside
       expect(r.stderr, r.output).toBe('')
     })
   })
+
+  // Elias (Codex), reviewing 3d81490: the traps in the redirect branch were
+  // set and cleared in ts_scrubbed's OWN shell — but ts_scrubbed is SOURCED,
+  // so that shell is the CALLER's, and a caller with its own INT/TERM/HUP
+  // trap would have it silently overwritten and then discarded. Every caller
+  // today happens to start a fresh shell with no trap of its own, so nothing
+  // observed it. The fix wraps the whole redirect branch in a subshell so its
+  // traps are structurally local; #13d below is the one behavioural case that
+  // survives that fix either way — a real SIGTERM still cleans up and still
+  // kills the run by that signal — while a case for "a caller's pre-existing
+  // trap survives" would need a black-box way to observe a shell's own trap
+  // table from outside it, which does not exist.
+  it('#13d a redirected command killed by SIGTERM leaves no /dev/shm dir behind, and the run ends by that signal', async () => {
+    await scenario('tsbridge-83d', async (s) => {
+      const dir = await scrubFixture(s, 'scrub-d')
+      await s.fs.write('scrub-d/.git', '')
+      const badTmp = await s.fs.mkdirp('scrub-d/scratch-tmp')
+      const seenPath = s.workspace.path('scrub-d-seen-tmpdir')
+      // Records the redirected TMPDIR to a FILE, not stdout: the assertion
+      // needs to read it well before the process closes, to know when it is
+      // safe to signal.
+      const probe = await s.fs.write(
+        'scrub-d-probe.sh',
+        `printf '%s\\n' "$TMPDIR" > ${JSON.stringify(seenPath)}\n` + `exec sleep 30\n`,
+      )
+      const driver = await s.fs.write(
+        'scrub-d-driver.sh',
+        `cd ${JSON.stringify(dir)}\n` + `. ./run-ts-suites.sh\n` + `ts_scrubbed sh ${JSON.stringify(probe)}\n`,
+      )
+
+      // background(), not run(): run() only resolves once the process has
+      // already exited, which is too late to send it a signal.
+      const child = s.background('sh', [driver], { cwd: dir, env: { TMPDIR: badTmp } })
+      const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+        child.on('close', (code, signal) => resolve({ code, signal }))
+      })
+
+      // Wait for the redirect to actually happen before signalling — a kill
+      // that lands before ts_scrubbed creates the /dev/shm dir would prove
+      // nothing about its cleanup.
+      await expect.poll(() => pathExists(seenPath), { timeout: 5000, interval: 20 }).toBe(true)
+      const seenTmp = (await readFile(seenPath, 'utf8')).trim()
+      expect(seenTmp, 'the probe never saw a redirected TMPDIR').not.toBe(badTmp)
+
+      // -pid, not pid: background() spawns detached (its own process group),
+      // exactly so a whole tree like this one — the driver shell, the
+      // redirect subshell, the exec'd probe — can be signalled together, the
+      // way an external SIGTERM (Ctrl-C, a CI cancellation) would reach all
+      // of them at once.
+      expect(child.pid, 'background() returned no pid').toBeTypeOf('number')
+      process.kill(-(child.pid as number), 'SIGTERM')
+
+      const result = await closed
+      expect(result.signal, `the run did not end BY the signal: ${JSON.stringify(result)}`).toBe('SIGTERM')
+
+      // Cleanup runs in the sibling subshell process ts_scrubbed's fix wraps
+      // the redirect in, which is free to still be finishing as the driver's
+      // own close event fires — poll rather than race it.
+      await expect.poll(() => pathExists(seenTmp), { timeout: 5000, interval: 20 }).toBe(false)
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

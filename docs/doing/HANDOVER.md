@@ -116,8 +116,10 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at 2026-09-25 ~10:40Z.** TASK-083 and TASK-085 landed (released at
-`88840f9`) and wait for acceptance. **Gemini is out of daily quota until
+**State at 2026-09-25 ~10:50Z.** TASK-083 landed (released at `88840f9`) and
+waits for acceptance. TASK-085 was accepted by the founder the same day.
+BUG-154's fix (`076fb23` reproducer, `6b09022` fix) is on local `main`, in
+Codex review before the push. **Gemini is out of daily quota until
 2026-09-26 10:12Z**, recorded by the watcher itself as `quota`, so plan review
 runs on Codex + Kimi until then. In flight: BUG-151 (Matthias, Claude)
 implementing the plan Codex and Kimi approved with changes, in the main

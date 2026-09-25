@@ -587,18 +587,39 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   //    covers it, and it would execute nowhere while looking exactly like a
   //    test. `bp_suite_runners` emits it with an empty suite field rather than
   //    dropping it, which is the only reason this is checkable at all.
+  //
+  //    BUG-039 — ONLY IN THE BLUEPRINT. Outside it, DoD §2 counts a regression
+  //    test only at the TOP LEVEL of tests/, because every subfolder is a
+  //    managed suite a pull replaces, and tests/dod-gate #14 skips its own "no
+  //    runner at the tests/ root" guard downstream for the same reason. There
+  //    the file is project-owned, and it does run: the blanket vitest run and
+  //    its `**/*.spec.ts` include reach it, which #4 and #5 hold for every
+  //    suite. Refusing it here left a derived project's fix able to satisfy §2
+  //    or this check, never both. It passes with a message naming it, not in
+  //    silence.
   // =========================================================================
+  // `.blueprint-root` is the same positive marker `drift` uses.
+  const inBlueprint = await exists(join(root, '.blueprint-root'))
   const toplevel = d.runners.filter((r) => r.suite === '' && r.path !== '').map((r) => r.path)
-  checks.push(
-    toplevel.length > 0
-      ? bad(
-          '#1',
-          `#1 runners sit directly in tests/ and belong to no suite: ${toplevel.join(' ')}\n` +
-            '        Move each into tests/<suite>/ — the gate, CI and the export\n' +
-            '        boundary all address suites by directory, so a file here runs nowhere.',
-        )
-      : ok('#1', '#1 every runner (*.sh or *.spec.ts) under tests/ belongs to a suite directory'),
-  )
+  if (toplevel.length === 0) {
+    checks.push(ok('#1', '#1 every runner (*.sh or *.spec.ts) under tests/ belongs to a suite directory'))
+  } else if (inBlueprint) {
+    checks.push(
+      bad(
+        '#1',
+        `#1 runners sit directly in tests/ and belong to no suite: ${toplevel.join(' ')}\n` +
+          '        Move each into tests/<suite>/ — the gate, CI and the export\n' +
+          '        boundary all address suites by directory, so a file here runs nowhere.',
+      ),
+    )
+  } else {
+    checks.push(
+      ok(
+        '#1',
+        `#1 runners directly in tests/ are this project's own regression tests (DoD §2), run by the blanket vitest run: ${toplevel.join(' ')}`,
+      ),
+    )
+  }
 
   // #1b — the compensating control for the helpers exemption in the derivation.
   // A helper is exempt from being a suite because it is sourced rather than
@@ -677,9 +698,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   // A `blueprint`-tier suite drives machinery that exists ONLY here. It is
   // export-ignore'd, so in a DERIVED project it is legitimately absent — and,
   // since the suite set is derived from disk, absent means it never appears in
-  // that project's derivation at all. `.blueprint-root` is the same positive
-  // marker `drift` uses.
-  const inBlueprint = await exists(join(root, '.blueprint-root'))
+  // that project's derivation at all. `inBlueprint` is read at #1.
 
   if (inBlueprint) {
     checks.push(...(await exportBoundary(root, run, d)))

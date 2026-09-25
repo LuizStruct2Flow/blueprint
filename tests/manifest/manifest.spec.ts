@@ -123,6 +123,27 @@ describe('BUG-005 — every runner on disk is invoked, and the export boundary b
     })
   })
 
+  it('BUG-039: a derived project may own a runner at the tests/ root, the only place DoD §2 counts; the blueprint still may not', async () => {
+    await scenario('manifest-bug-039', async (s) => {
+      const toplevel = (files: Map<string, string>) =>
+        files.set('tests/foo.spec.ts', 'export const foo = true\n')
+
+      // DERIVED: no .blueprint-root. DoD §2 counts only top-level titles here,
+      // so #1 must accept the file and say why rather than pass in silence.
+      const derived = await inspectFixture(s, 'derived', (files) => {
+        toplevel(files)
+        files.delete('.blueprint-root')
+      })
+      expect(red(derived)).toEqual([])
+      expect(derived.find((c) => c.id === '#1')?.message).toContain('tests/foo.spec.ts')
+
+      // BLUEPRINT: the guard is narrowed, not deleted.
+      const bp = await inspectFixture(s, 'bp', toplevel)
+      expect(red(bp)).toEqual(['#1'])
+      expect(why(bp, '#1')).toContain('tests/foo.spec.ts')
+    })
+  })
+
   it('#1b a shared helper no suite sources is dead code the helpers exemption would hide', async () => {
     await scenario('manifest-1b', async (s) => {
       // A helper is exempt from being a suite because it is SOURCED rather than

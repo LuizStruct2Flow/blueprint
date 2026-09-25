@@ -409,7 +409,7 @@ function coverage(args: readonly string[]): void {
     for (const row of rows) {
       const provider = availability(row.provider, state.providers)
       const persona = availability(row.persona, state.personas)
-      const current = provider.state === 'out' ? provider : persona
+      const current = provider.state === 'out' ? provider : (persona.state === 'out' ? persona : (provider.state === 'unproven' ? provider : persona))
       if (provider.state !== 'out' && persona.state !== 'out') availableProviders.add(row.provider)
       stdout(`  ${row.persona}\t${row.provider}\t${current.state}${current.reason === undefined ? '' : ` — ${current.reason}`}${current.source === undefined ? '' : ` [${current.source}]`}\n`)
     }

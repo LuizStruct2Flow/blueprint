@@ -46,6 +46,9 @@ export function findLatestUnderTree(root: string, name: string, pathSegment: str
     try {
       entries = readdirSync(dir)
     } catch {
+      // Unreadable or vanished mid-walk (a permissions dir, a symlink race) is
+      // the same "nothing found here" outcome `find`'s `2>/dev/null` gives —
+      // skip this branch rather than aborting the whole search.
       continue
     }
     for (const entry of entries) {
@@ -54,6 +57,8 @@ export function findLatestUnderTree(root: string, name: string, pathSegment: str
       try {
         info = statSync(full)
       } catch {
+        // A dangling symlink or a file removed between readdir and stat is
+        // not a candidate binary — skip it, same as the directory case above.
         continue
       }
       if (info.isDirectory()) {

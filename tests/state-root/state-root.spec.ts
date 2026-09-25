@@ -83,6 +83,7 @@ import { describe, it, expect } from 'vitest'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
 
 const LIB = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.sh')
 
@@ -303,7 +304,20 @@ async function consumersWithInitGuard(): Promise<{ missing: string[]; checked: s
   const missing: string[] = []
   const checked: string[] = []
   for (const n of names) {
-    const body = await readFile(join(dir, n), 'utf8')
+    // TASK-083 — the three provider launchers are now two-line shims with no
+    // state-API text of their own; the guard text lives in each one's `.mts`
+    // TARGET, still as literal shell inside its AGENT_WAKE_COMMAND template
+    // (this particular pattern needs no JS-escaping — it contains no `${`),
+    // so the same regex below still applies. NARROWLY scoped to those three:
+    // scripts/signal-watch.sh is ALSO a valid shim, but its `.mts` target is
+    // genuine TypeScript calling the same functions programmatically, not
+    // shell text — following it would ask a shell-syntax regex a TS question
+    // it cannot answer. Its own init-guard property is proven elsewhere
+    // (tests/state-dir, tests/codex-dispatch-status), not by this grep, so it
+    // stays read as the (guard-less) shim, same as before this file existed.
+    const isPortedLauncher = /^start-(codex|kimi|gemini)-signal-watch\.sh$/.test(n)
+    const resolved = isPortedLauncher ? resolveConsumer(REPO_ROOT, `scripts/${n}`) : undefined
+    const body = resolved !== undefined ? resolved.source : await readFile(join(dir, n), 'utf8')
     const stripped = body.replace(/^\s*#.*$/gm, '')
     if (!/\bagent_(state_dir|signal_file|signal_journal)\b/.test(stripped)) continue
     checked.push(n)

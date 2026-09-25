@@ -233,6 +233,50 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     })
   })
 
+  it('TASK-065: a recorder that hangs forever is timed out and the mic still recovers', async () => {
+    // Codex four-eyes finding: recordDispatchOutcome used to run rotation.mts
+    // with spawnSync and NO timeout. If the recorder (or anything it shells
+    // out to) hangs, that call never returns, so recoverStrandedMic — a few
+    // lines below it in triggerIfNeeded — is never reached. One hung recorder
+    // then silences mic recovery for every provider (the BUG-001 unbounded-
+    // wait class). The stub here overwrites the fixture's copy of
+    // rotation.mts with a script that never exits on its own, the simplest
+    // stand-in for "the recorder hung" that needs no knowledge of why
+    // rotation.mts itself might hang.
+    await scenario('mic-recovery-rotation-hang', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-rotation-hang')
+      const ORCHESTRATOR = await orchestratorOf(s, live.root)
+      expect(ORCHESTRATOR, 'the fixture roster must resolve an Orchestrator').not.toBe('')
+      const signalRel = 'mic-recovery-rotation-hang/logs/state/signal.md'
+      const signalPath = s.workspace.path(signalRel)
+      const runLogPath = s.workspace.path('state/kimi-runs.log')
+      const rotationPath = join(live.root, 'scripts', 'rotation.mts')
+      await s.fs.write(signalRel, '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n')
+      await s.fs.write('state/kimi-runs.log', '')
+      const stub = await s.fs.write('mic-recovery-rotation-hang/stub-wake', '#!/bin/sh\n' +
+        `printf 'kimi finished\\n' >> "${runLogPath}"\n` +
+        // Replace the fixture's rotation.mts with a script that keeps the
+        // event loop alive forever — the recorder's stand-in for "hung". A
+        // bare unresolved top-level-await promise does NOT hang node (it
+        // exits fast with "unsettled top-level await", verified directly);
+        // a live timer is what actually keeps the process running.
+        `printf 'setInterval(() => {}, 1000)\\n' > "${rotationPath}"\n`, { mode: 0o755 })
+      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      // Bounded well above the recorder's own timeout so a fix that bounds
+      // the recorder still has room to pass, and well below the 30s default
+      // so an unbounded hang (the bug) fails fast rather than after a full
+      // `until` timeout.
+      await until('the timeout is logged and the mic is recovered', async () => {
+        const holder = await readField(s, signalRel, 'Holder')
+        const state = await readField(s, signalRel, 'State')
+        const recovered = holder === ORCHESTRATOR && state === 'OVER_TO_CLAUDE'
+        const logged = (await s.fs.exists('state/signal.log')) && /rotation outcome recorder timed out after \d+ms/.test(await s.fs.read('state/signal.log'))
+        return recovered && logged
+      }, 15_000)
+      await w.stop()
+    })
+  })
+
   it('a stub wake command that exits without flipping the baton is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-1', async (s) => {
       const live = await liveRepo(s, 'mic-recovery-1')

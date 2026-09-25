@@ -336,6 +336,178 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     })
   })
 
+  // Is the OS pid still schedulable? Mirrors tests/harness/process.ts's own
+  // `groupAlive` oracle (kill(pid, 0), ESRCH means gone) but on a bare pid
+  // rather than a process GROUP — these two reproducers mark a single
+  // grandchild by its own pid, not by a group the watcher itself owns, so
+  // there is nothing to negate here.
+  function pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      // ESRCH means gone — the only fact this probe needs, and the one
+      // TypeScript's DOM-flavoured NodeJS.ErrnoException typing cannot see
+      // through a bare `catch` without an explicit cast; a returned `false`
+      // is the whole point of the probe, not a swallowed error path.
+      return false
+    }
+  }
+
+  it('TASK-065 (Codex re-review): signal-set.sh hanging via a REAL GRANDCHILD — not the last command bash tail-call-execs away — is fully killed, and the recovery write times out', async () => {
+    // The "signal-set.sh hanging" case above used a stub whose ENTIRE body was
+    // `sleep 100` — the last (and only) command bash runs from the script.
+    // Bash optimises exactly that shape away: when the last command in a
+    // script is a simple external command with nothing left to do, bash
+    // execve()s into it instead of forking, so `sleep` silently BECOMES the
+    // timed-out spawn's DIRECT child (same pid bash had) rather than a
+    // grandchild. Killing the direct child then trivially kills `sleep` too —
+    // which is why that case passed even before this fix, and why it never
+    // exercised the grandchild path recoverStrandedMic's SIGNAL_SET call
+    // actually has to survive in production, where signal-set.sh legitimately
+    // runs further commands of its own.
+    //
+    // This stub backgrounds `sleep` and then `wait`s for it — `wait` is a
+    // shell BUILTIN, never exec()able, so bash can never tail-call away and
+    // must stay alive as the direct child with `sleep` as a genuine
+    // grandchild in the same process group. Verified directly against this
+    // Node build (see the commit body): a timed-out spawnSync-shaped bound
+    // that kills only the direct child returns on schedule but leaves this
+    // exact grandchild running indefinitely — the defect this reproducer
+    // pins, RED on main.
+    await scenario('mic-recovery-signal-set-hang-grandchild', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-signal-set-hang-grandchild')
+      const signalRel = 'mic-recovery-signal-set-hang-grandchild/logs/state/signal.md'
+      const signalPath = s.workspace.path(signalRel)
+      const signalSetPath = join(live.root, 'scripts', 'signal-set.sh')
+      const markerRel = 'mic-recovery-signal-set-hang-grandchild/grandchild-pid'
+      const markerPath = s.workspace.path(markerRel)
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      const stub = await s.fs.write(
+        'mic-recovery-signal-set-hang-grandchild/stub-wake',
+        '#!/bin/sh\n' +
+          `printf '#!/bin/sh\\nsleep 100 &\\necho $! > \"${markerPath}\"\\nwait\\n' > "${signalSetPath}"\n` +
+          `chmod +x "${signalSetPath}"\n`,
+        { mode: 0o755 },
+      )
+      const w = startWatcher(
+        s,
+        'bash',
+        [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the grandchild has recorded its own pid', () => s.fs.exists(markerRel))
+      const grandchildPid = Number((await s.fs.read(markerRel)).trim())
+      expect(grandchildPid, 'the stub should have captured a real pid').toBeGreaterThan(0)
+      await until('the grandchild sleep is actually running', () => pidAlive(grandchildPid))
+
+      await until(
+        'the watcher logs that recovering the mic timed out',
+        () => /recovering the mic to .* timed out after \d+ms/.test(w.output()),
+        15_000,
+      )
+      w.assertStillRunning('a timed-out recovery must not hang the watcher itself')
+
+      // THE CORE ASSERTION (TASK-065): the grandchild must be gone too, not
+      // merely the direct child bash was. A bound that only kills the direct
+      // child leaves this pid alive forever (it sleeps for 100s); a bound
+      // that kills the whole process group reaps it within the same window
+      // the watcher's own timeout already proved.
+      await until(
+        'the leftover grandchild sleep is no longer running',
+        () => !pidAlive(grandchildPid),
+        5000,
+      )
+
+      const holder = await readField(s, signalRel, 'Holder')
+      const state = await readField(s, signalRel, 'State')
+      expect(
+        { holder, state },
+        'signal-set.sh never completed its atomic rename, so the mic must be left exactly where it was',
+      ).toEqual({ holder: 'Kimi', state: 'OVER_TO_KIMI' })
+
+      await w.stop()
+    })
+  })
+
+  it('TASK-065 (Codex re-review): roster resolution hanging via a REAL GRANDCHILD that holds the stdout PIPE open still times out, and nothing is left running', async () => {
+    // The second bounded probe on the recovery path, and the one that
+    // actually READS STDOUT through a pipe (`stdio: ['ignore', 'pipe',
+    // 'inherit']`) rather than inheriting it: recoverStrandedMic's own
+    // `bp_roster_name_for_role` lookup. Same shape as the signal-set.sh case
+    // above — the grandchild is backgrounded and `wait`ed for, never the
+    // shell's own tail-call-execed last command — but here the write end of
+    // the captured pipe is what a grandchild left open would matter for.
+    await scenario('mic-recovery-roster-hang', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-roster-hang')
+      const signalRel = 'mic-recovery-roster-hang/logs/state/signal.md'
+      const signalPath = s.workspace.path(signalRel)
+      const runLogPath = s.workspace.path('state/kimi-runs.log')
+      const rosterLibPath = join(live.root, 'scripts', 'lib', 'roster.sh')
+      const markerRel = 'mic-recovery-roster-hang/grandchild-pid'
+      const markerPath = s.workspace.path(markerRel)
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      await s.fs.write('state/kimi-runs.log', '')
+      // The wake command itself finishes fine (it is not what hangs); it
+      // overwrites the fixture's OWN copy of roster.sh with a single
+      // function whose body backgrounds `sleep` and `wait`s for it, so the
+      // recovery roster lookup that runs AFTER this stub exits is what hits
+      // the hang.
+      const stub = await s.fs.write(
+        'mic-recovery-roster-hang/stub-wake',
+        '#!/bin/sh\n' +
+          `printf 'kimi finished\\n' >> "${runLogPath}"\n` +
+          `cat > "${rosterLibPath}" <<'EOS'\n` +
+          'bp_roster_name_for_role() {\n' +
+          `  sleep 100 & echo $! > "${markerPath}"\n` +
+          '  wait\n' +
+          '}\n' +
+          'EOS\n',
+        { mode: 0o755 },
+      )
+      const w = startWatcher(
+        s,
+        'bash',
+        [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+
+      await until('the grandchild has recorded its own pid', () => s.fs.exists(markerRel))
+      const grandchildPid = Number((await s.fs.read(markerRel)).trim())
+      expect(grandchildPid, 'the stub should have captured a real pid').toBeGreaterThan(0)
+      await until('the grandchild sleep is actually running', () => pidAlive(grandchildPid))
+
+      await until(
+        'the watcher logs that resolving the Orchestrator timed out',
+        () => /resolving the Orchestrator timed out after \d+ms/.test(w.output()),
+        15_000,
+      )
+      w.assertStillRunning('a timed-out roster resolution must not hang the watcher itself')
+
+      await until(
+        'the leftover grandchild sleep is no longer running',
+        () => !pidAlive(grandchildPid),
+        5000,
+      )
+
+      const holder = await readField(s, signalRel, 'Holder')
+      const state = await readField(s, signalRel, 'State')
+      expect(
+        { holder, state },
+        'the roster could not be resolved, so the mic must be left exactly where the stub stranded it',
+      ).toEqual({ holder: 'Kimi', state: 'OVER_TO_KIMI' })
+
+      await w.stop()
+    })
+  })
+
   it('a stub wake command that exits without flipping the baton is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-1', async (s) => {
       const live = await liveRepo(s, 'mic-recovery-1')

@@ -27,18 +27,31 @@ const execFileAsync = promisify(execFile)
 interface ProcRow {
   pid: number
   ppid: number
+  /** Process group id — the group the killer group-signals. */
+  pgid: number
+  /** Session id — 1 when the kernel reparented this row to init/a subreaper,
+   * which is exactly the shape an orphan holding a pipe takes (BUG-146). */
+  sid: number
   stat: string
   wchan: string
   args: string
 }
 
-/** Parse `ps -eo pid,ppid,stat,wchan:32,args` output into rows. */
+/** Parse `ps -eo pid,ppid,pgid,sid,stat,wchan:32,args` output into rows. */
 function parsePs(output: string): ProcRow[] {
   const rows: ProcRow[] = []
   for (const line of output.trim().split('\n').slice(1)) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/.exec(line)
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/.exec(line)
     if (!m) continue
-    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), stat: m[3]!, wchan: m[4]!, args: m[5]! })
+    rows.push({
+      pid: Number(m[1]),
+      ppid: Number(m[2]),
+      pgid: Number(m[3]),
+      sid: Number(m[4]),
+      stat: m[5]!,
+      wchan: m[6]!,
+      args: m[7]!,
+    })
   }
   return rows
 }
@@ -92,6 +105,82 @@ async function listFds(pid: number): Promise<string[]> {
   }
 }
 
+interface PipeHolder {
+  pid: number
+  fd: string
+  pipeId: string
+  row: ProcRow | undefined
+}
+
+/**
+ * Every LIVE process (from `all`, a whole-machine `ps` snapshot) with an fd
+ * open on one of `pipeIds`, regardless of parentage.
+ *
+ * THE BLIND SPOT THIS CLOSES (BUG-146, fifth and sixth CI occurrences). The
+ * ppid-walk `withDescendants` above cannot see this: a process whose parent
+ * was killed is reparented to init or a subreaper and falls out of any walk
+ * rooted at the scenario's own tracked pids, even though it can still hold
+ * the write end of a pipe the scenario's `child.on('close', ...)` is waiting
+ * on to reach EOF. Searching every pid's fd table instead of walking parentage
+ * finds it regardless of where the kernel reparented it to.
+ *
+ * Linux-only (`/proc`), and best-effort within that: `readdir`/`readlink` on
+ * another process's fd table needs the OS to permit it (same-uid normally
+ * does; a hardened sandbox may not) — a pid this cannot read is skipped, not
+ * reported as clean. `pipeIds` is `process.ts`'s `trackedPipeIds()`, captured
+ * from each child's OWN fd view at spawn time (not the parent's — a
+ * socketpair's two ends carry two different ids, and only the child's is what
+ * a forked descendant inherits).
+ */
+async function findPipeHolders(all: ProcRow[], pipeIds: string[]): Promise<PipeHolder[]> {
+  if (pipeIds.length === 0) return []
+  const targets = new Set(pipeIds)
+  const hits: PipeHolder[] = []
+  for (const row of all) {
+    let entries: string[]
+    try {
+      entries = await readdir(`/proc/${row.pid}/fd`)
+    } catch {
+      continue
+    }
+    for (const fd of entries) {
+      const target = await readlink(`/proc/${row.pid}/fd/${fd}`).catch(() => undefined)
+      if (target !== undefined && targets.has(target)) {
+        hits.push({ pid: row.pid, fd, pipeId: target, row })
+      }
+    }
+  }
+  return hits
+}
+
+/**
+ * Every LIVE process whose `/proc/<pid>/environ` contains `marker` — the
+ * SECOND net (BUG-146), for when the pipe scan above cannot read a holder's
+ * fd table (permission) but can still read its environ, or simply as
+ * independent corroboration. `marker` is a scenario's own `escapeToken`,
+ * already carried in `AGENT_FEED_TAG`/`AGENT_PERSONA` on every fixture child
+ * (index.ts's `scenarioEnv`) and, like any environment variable, normally
+ * inherited across fork()/exec() by a reparented descendant too.
+ *
+ * `environ` is NUL-separated and may be binary; read as a `Buffer` and search
+ * it directly rather than decoding, which is also what makes a partial or
+ * invalid UTF-8 sequence in some other process's environment harmless here.
+ */
+async function findByEnvMarker(all: ProcRow[], marker: string): Promise<ProcRow[]> {
+  if (!marker) return []
+  const hits: ProcRow[] = []
+  for (const row of all) {
+    try {
+      const buf = await readFile(`/proc/${row.pid}/environ`)
+      if (buf.includes(marker)) hits.push(row)
+    } catch {
+      // Unreadable (exited between the ps snapshot and this read, or another
+      // user's process) — skip, do not report as clean.
+    }
+  }
+  return hits
+}
+
 /**
  * Render the process tree rooted at `rootPids` — a scenario's own tracked
  * process groups — as text: `ps`'s pid/ppid/state/wchan/args, plus
@@ -102,23 +191,40 @@ async function listFds(pid: number): Promise<string[]> {
  *
  * Never throws. A capture that fails must not mask the timeout it exists to
  * explain — the caller's original error is what propagates either way.
+ *
+ * `pipeIds` and `envMarker` are the two BUG-146 nets that do NOT depend on
+ * parentage, closing the blind spot `withDescendants` has by construction: a
+ * process reparented to init/a subreaper falls out of any ppid walk, however
+ * far it descends, while still holding the pipe this scenario's `close` wait
+ * is blocked on. Both are optional and both degrade to a stated "this net did
+ * not run" line rather than silence, so a dump that predates a caller passing
+ * them (or that runs where /proc is unavailable) still reads as a dump, not a
+ * clean bill of health.
  */
-export async function dumpProcessTree(rootPids: number[], label: string): Promise<string> {
+export async function dumpProcessTree(
+  rootPids: number[],
+  label: string,
+  pipeIds: string[] = [],
+  envMarker = '',
+): Promise<string> {
   const lines: string[] = [
     `# process-tree dump: ${label}`,
     `# generated: ${new Date().toISOString()}`,
     `# roots (this scenario's tracked process groups): ${rootPids.join(', ') || '(none)'}`,
     '',
   ]
+  let all: ProcRow[] = []
   try {
-    const { stdout } = await execFileAsync('ps', ['-eo', 'pid,ppid,stat,wchan:32,args'])
-    const all = parsePs(stdout)
+    const { stdout } = await execFileAsync('ps', ['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args'])
+    all = parsePs(stdout)
     const tree = rootPids.length > 0 ? withDescendants(all, rootPids) : []
     if (tree.length === 0) {
       lines.push('(nothing found under the tracked roots — every tracked process had already exited)')
     }
     for (const row of tree) {
-      lines.push(`pid=${row.pid} ppid=${row.ppid} stat=${row.stat} wchan(ps)=${row.wchan} args=${row.args}`)
+      lines.push(
+        `pid=${row.pid} ppid=${row.ppid} pgid=${row.pgid} sid=${row.sid} stat=${row.stat} wchan(ps)=${row.wchan} args=${row.args}`,
+      )
       lines.push(`  /proc/${row.pid}/wchan: ${await readProcFile(row.pid, 'wchan')}`)
       lines.push(`  /proc/${row.pid}/stack: ${await readProcFile(row.pid, 'stack')}`)
       const fds = await listFds(row.pid)
@@ -129,6 +235,55 @@ export async function dumpProcessTree(rootPids: number[], label: string): Promis
   } catch (err) {
     lines.push(`ps failed: ${(err as Error).message}`)
   }
+
+  // BUG-146, fifth/sixth occurrence: both real dumps found "nothing under the
+  // tracked roots" while the wait they were captured for never resolved —
+  // which needs a pipe held open by something the ppid walk above cannot see.
+  // These two nets search the WHOLE machine's live processes instead of
+  // walking parentage, so an orphan turns up regardless of who reparented it.
+  lines.push('')
+  lines.push(
+    `# pipe holders (BUG-146, parentage-independent): every live process with an fd on one of this scenario's own stdio pipes`,
+  )
+  if (pipeIds.length === 0) {
+    lines.push(
+      '(no pipe ids were supplied to this dump — either the caller predates this net, or /proc pipe-id capture at spawn time found nothing to capture)',
+    )
+  } else {
+    lines.push(`# searched pipe ids: ${pipeIds.join(', ')}`)
+    const holders = await findPipeHolders(all, pipeIds)
+    if (holders.length === 0) {
+      lines.push('(no live process holds an fd on any of them)')
+    } else {
+      for (const h of holders) {
+        const row = h.row
+        lines.push(
+          `pid=${h.pid} fd=${h.fd} -> ${h.pipeId}` +
+            (row
+              ? ` ppid=${row.ppid} pgid=${row.pgid} sid=${row.sid} stat=${row.stat} args=${row.args}`
+              : ' (not in the ps snapshot — exited between snapshot and scan)'),
+        )
+      }
+    }
+  }
+
+  lines.push('')
+  lines.push(
+    `# env-marker holders (BUG-146, second net): every live process whose /proc/<pid>/environ contains this scenario's escape token`,
+  )
+  if (!envMarker) {
+    lines.push('(no scenario env marker was supplied to this dump)')
+  } else {
+    const markerHits = await findByEnvMarker(all, envMarker)
+    if (markerHits.length === 0) {
+      lines.push('(no live process carries it)')
+    } else {
+      for (const row of markerHits) {
+        lines.push(`pid=${row.pid} ppid=${row.ppid} pgid=${row.pgid} sid=${row.sid} stat=${row.stat} args=${row.args}`)
+      }
+    }
+  }
+
   return lines.join('\n')
 }
 

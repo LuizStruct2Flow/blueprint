@@ -21,7 +21,48 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { readlink } from 'node:fs/promises'
 import { fixtureEnv } from './env.js'
+
+/**
+ * The kernel id (`pipe:[N]` or, on this Linux's libuv, `socket:[N]` — stdio
+ * pipes are backed by an AF_UNIX socketpair, not a POSIX pipe(2), measured
+ * directly rather than assumed) of `child`'s own fd `fdNum`, read from the
+ * CHILD's OWN /proc entry rather than the parent's.
+ *
+ * WHY THE CHILD'S OWN VIEW, NOT THE PARENT'S. A socketpair has two distinct
+ * endpoints with two distinct inode numbers — the parent's read side and the
+ * child's write side are NOT the same id. A grandchild that inherits fd 1
+ * across fork() inherits the CHILD's endpoint, so that is the id any later
+ * holder-scan (BUG-146: dump.ts's findPipeHolders) must search for. Reading
+ * the parent's own `_handle.fd` here would capture the wrong half of the
+ * pair — one no orphaned descendant could ever hold.
+ *
+ * Best-effort: /proc is Linux-only, and reading another process's fd table —
+ * even one's own child's — needs the OS to permit it (same-uid normally does;
+ * a hardened sandbox may not). Either way this returns undefined rather than
+ * throwing, which is the same degrade-gracefully contract the rest of this
+ * module and dump.ts already keep.
+ *
+ * RETRIED A FEW TIMES, measured rather than assumed necessary: on this
+ * project's own sandboxed dev host, reading a just-spawned child's own
+ * `/proc/<pid>/fd/N` fails EACCES immediately after `spawn()` returns and
+ * succeeds within one 20ms retry — a transient race in that host's fd
+ * virtualization, not a real permission boundary (the SAME read against an
+ * already-reparented, unrelated process succeeds on the first try, with no
+ * delay, on the same host). Five tries costs at most 100ms, once, at spawn
+ * time, and is silent when the first attempt already succeeds.
+ */
+async function childPipeId(pid: number, fdNum: number): Promise<string | undefined> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await readlink(`/proc/${pid}/fd/${fdNum}`)
+    } catch {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+  }
+  return undefined
+}
 
 /**
  * Is ANY process in group `pgid` still signalable by us?
@@ -153,6 +194,27 @@ export interface RunResult {
 export class ProcessRegistry {
   private readonly live = new Set<ChildProcess>()
   private readonly groups = new Set<number>()
+  /**
+   * Every stdio pipe id (BUG-146) this scenario's children have ever held,
+   * captured once at spawn and never removed — a dump reads this AFTER a
+   * child may already look exited in `ps`, so the id has to survive that.
+   */
+  private readonly pipeIds = new Set<string>()
+
+  /** Fire-and-forget capture of `child`'s stdout/stderr pipe ids (BUG-146).
+   * Not awaited by either caller: neither `run()`'s nor `startBackground()`'s
+   * contract should block on a /proc read that exists purely for a dump that
+   * may never happen, and the capture completes in well under the shortest
+   * `waitOrDump` bound any spec uses. */
+  private capturePipeIds(child: ChildProcess): void {
+    if (child.pid === undefined) return
+    const pid = child.pid
+    void (async () => {
+      const [out, err] = await Promise.all([childPipeId(pid, 1), childPipeId(pid, 2)])
+      if (out !== undefined) this.pipeIds.add(out)
+      if (err !== undefined) this.pipeIds.add(err)
+    })()
+  }
 
   /**
    * `escapeToken` is the scenario's own token. The registry does not use it
@@ -191,6 +253,7 @@ export class ProcessRegistry {
     })
     this.live.add(child)
     if (child.pid !== undefined) this.groups.add(child.pid)
+    this.capturePipeIds(child)
 
     let stdout = ''
     let stderr = ''
@@ -264,6 +327,7 @@ export class ProcessRegistry {
     })
     this.live.add(child)
     if (child.pid !== undefined) this.groups.add(child.pid)
+    this.capturePipeIds(child)
     return child
   }
 
@@ -291,6 +355,15 @@ export class ProcessRegistry {
    */
   trackedPids(): number[] {
     return [...this.groups]
+  }
+
+  /**
+   * Every stdio pipe id this scenario's children have ever held (BUG-146) —
+   * what `findPipeHolders` (dump.ts) searches for regardless of parentage, so
+   * a grandchild reparented past the ppid walk still turns up in a dump.
+   */
+  trackedPipeIds(): string[] {
+    return [...this.pipeIds]
   }
 
   /**

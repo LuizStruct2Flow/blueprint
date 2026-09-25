@@ -277,6 +277,65 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
     })
   })
 
+  it('TASK-065: signal-set.sh hanging on the recovery write times out, and the watcher never claims success', async () => {
+    // Codex four-eyes re-review, follow-up to the rotation-hang case above:
+    // recoverStrandedMic's own hand-back call to scripts/signal-set.sh ran
+    // with spawnSync and NO timeout — the same BUG-001 shape, one step later
+    // on the SAME recovery path. If signal-set.sh (or anything it shells out
+    // to) hangs, the watcher never returns to its poll loop and the mic
+    // stays stranded forever, silently — worse than a slow recovery, because
+    // nothing ever says recovery failed. The stub overwrites the fixture's
+    // own copy of signal-set.sh with a script that never exits, the same
+    // "hang" stand-in the rotation case uses, at the one remaining unbounded
+    // call on this path.
+    await scenario('mic-recovery-signal-set-hang', async (s) => {
+      const live = await liveRepo(s, 'mic-recovery-signal-set-hang')
+      const signalRel = 'mic-recovery-signal-set-hang/logs/state/signal.md'
+      const signalPath = s.workspace.path(signalRel)
+      const signalSetPath = join(live.root, 'scripts', 'signal-set.sh')
+      await s.fs.write(
+        signalRel,
+        '# Agent Signal\n\n| Field | Value |\n|---|---|\n| Holder | Kimi |\n| State | OVER_TO_KIMI |\n| Task | do the thing |\n',
+      )
+      const stub = await s.fs.write(
+        'mic-recovery-signal-set-hang/stub-wake',
+        '#!/bin/sh\n' +
+          // Replace the fixture's signal-set.sh with a script that never
+          // exits on its own — the hand-back call's stand-in for "hung".
+          // Leaves the baton untouched, so recovery triggers exactly like
+          // the "quota exhausted" case above.
+          `printf '#!/bin/sh\\nsleep 100\\n' > "${signalSetPath}"\n` +
+          `chmod +x "${signalSetPath}"\n`,
+        { mode: 0o755 },
+      )
+      const w = startWatcher(
+        s,
+        'bash',
+        [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub],
+        { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
+      )
+      // Bounded well above the recovery call's own timeout so a fix that
+      // bounds it still has room to pass, and well below the 30s default so
+      // an unbounded hang (the bug) fails fast rather than after a full
+      // `until` timeout.
+      await until(
+        'the watcher logs that recovering the mic timed out',
+        () => /recovering the mic to .* timed out after \d+ms/.test(w.output()),
+        15_000,
+      )
+      w.assertStillRunning('a timed-out recovery must not hang the watcher itself')
+
+      const holder = await readField(s, signalRel, 'Holder')
+      const state = await readField(s, signalRel, 'State')
+      expect(
+        { holder, state },
+        'signal-set.sh never completed its atomic rename, so the mic must be left exactly where it was — a timeout must never be read as a successful recovery',
+      ).toEqual({ holder: 'Kimi', state: 'OVER_TO_KIMI' })
+
+      await w.stop()
+    })
+  })
+
   it('a stub wake command that exits without flipping the baton is recovered: the mic returns to the Orchestrator', async () => {
     await scenario('mic-recovery-1', async (s) => {
       const live = await liveRepo(s, 'mic-recovery-1')

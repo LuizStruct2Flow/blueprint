@@ -98,7 +98,92 @@ ts_release_suites(){
 # declared hazard outside the prefixes; tests/ts-bridge #1c imports
 # UNPREFIXED_FORBIDDEN to pin that the two agree.
 ts_scrubbed(){
+  # TASK-083 — every dispatched agent's launcher now sets TMPDIR to a path
+  # under the repo it runs in (so mktemp/os.tmpdir() land in .scratch/ instead
+  # of the shared /tmp). tests/harness/workspace.ts refuses to create ANY
+  # scenario workspace while a project marker (.git and friends, BUG-110) sits
+  # above TMPDIR — correctly, that refusal is what stops a stray marker from
+  # silently becoming every fixture's "project root" — so an explicit,
+  # git-tree TMPDIR made every TS suite fail before it could run at all.
+  #
+  # This is the one place to fix it: ts_scrubbed is already the sole choke
+  # point both `npm test`/`test:watch` and CI's ts-tests step go through
+  # (BUG-117), so redirecting here reaches every caller without a second copy
+  # of the check, and it changes nothing about workspace.ts's own refusal
+  # (BUG-110 stays exactly as strict for anyone who calls it directly).
+  #
+  # ONLY TMPDIR changes, and ONLY FOR THIS INVOCATION: every other tool the
+  # agent runs still sees the repo-local TMPDIR TASK-083 set. No launcher and
+  # no ambient state is touched.
+  if [ -n "${TMPDIR:-}" ] && _ts_tmpdir_has_marker_above "$TMPDIR"; then
+    _ts_old_tmpdir=$TMPDIR
+    _ts_new_tmpdir=''
+    # /dev/shm is Linux tmpfs, not the shared /tmp BUG-121 fled — cleaned up
+    # below on every exit path, so nothing accumulates there either. It is
+    # absent on macOS (this script ships to every project), so a missing or
+    # unwritable /dev/shm falls back to simply UNSETTING TMPDIR: the harness
+    # then falls back to its own private base
+    # (tests/harness/workspace.ts workspaceBase), and any other tool this
+    # invocation starts falls back to the OS default via os.tmpdir().
+    if [ -d /dev/shm ] && [ -w /dev/shm ]; then
+      _ts_new_tmpdir=$(mktemp -d /dev/shm/bp-ts-suites.XXXXXX 2>/dev/null) || _ts_new_tmpdir=''
+    fi
+    if [ -n "$_ts_new_tmpdir" ]; then
+      chmod 700 "$_ts_new_tmpdir"
+      TMPDIR=$_ts_new_tmpdir
+      export TMPDIR
+    else
+      unset TMPDIR
+    fi
+    # NEVER SILENT: whichever branch fired, this run's TMPDIR differs from
+    # what the launcher set, and that is worth a line every time, not only
+    # when something goes wrong.
+    _ts_new_tmpdir_desc=${TMPDIR:-'(unset — falling back to the harness private base)'}
+    printf 'run-ts-suites: TMPDIR=%s sits inside a git tree, which the TS harness refuses (BUG-110); using TMPDIR=%s for this run instead (TASK-083 sets TMPDIR to a repo path for every dispatched agent).\n' \
+      "$_ts_old_tmpdir" "$_ts_new_tmpdir_desc" >&2
+    # A child runs here, not `exec`: `exec` would replace THIS shell, so the
+    # `rm -rf` below would never run and the redirected dir would leak on
+    # every invocation. Signals too — INT/TERM/HUP would otherwise kill this
+    # shell before cleanup, same leak, so they are trapped and cleaned up
+    # before being re-raised.
+    if [ -n "$_ts_new_tmpdir" ]; then
+      trap '_ts_tmpdir_sig_cleanup INT' INT
+      trap '_ts_tmpdir_sig_cleanup TERM' TERM
+      trap '_ts_tmpdir_sig_cleanup HUP' HUP
+      _ts_rc=0
+      ( _ts_scrub_env; exec "$@" ) || _ts_rc=$?
+      trap - INT TERM HUP
+      rm -rf "$_ts_new_tmpdir"
+      return "$_ts_rc"
+    fi
+  fi
   ( _ts_scrub_env; exec "$@" )
+}
+
+# _ts_tmpdir_sig_cleanup SIGNAL — remove this invocation's redirected TMPDIR,
+# restore the signal's default disposition, then re-raise it against this
+# shell, so an interrupted run still terminates the way the caller expects
+# (e.g. 130 for INT) instead of silently swallowing the signal.
+_ts_tmpdir_sig_cleanup(){
+  trap - INT TERM HUP
+  rm -rf "$_ts_new_tmpdir"
+  kill "-$1" "$$"
+}
+
+# _ts_tmpdir_has_marker_above DIR — true if DIR or any ancestor carries a
+# project marker. The same set tests/harness/workspace.ts's
+# refuseProjectMarkerAbove walks (BUG-110): a second, drifting copy of that
+# list would be exactly the hazard TASK-020/R1 removed elsewhere in this file.
+_ts_tmpdir_has_marker_above(){
+  _tthma_dir=$1
+  while :; do
+    for _tthma_marker in .git .blueprint-root .blueprint-source; do
+      [ -e "$_tthma_dir/$_tthma_marker" ] && return 0
+    done
+    _tthma_parent=$(dirname "$_tthma_dir")
+    [ "$_tthma_parent" = "$_tthma_dir" ] && return 1
+    _tthma_dir=$_tthma_parent
+  done
 }
 
 # _ts_scrub_env — the scrub itself, for a subshell that runs more than one

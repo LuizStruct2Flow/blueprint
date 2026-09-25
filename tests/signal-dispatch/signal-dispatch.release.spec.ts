@@ -198,10 +198,20 @@ async function dispatcher(s: Scenario, name: string): Promise<Dispatcher> {
     },
 
     async publish(holder, state, task) {
+      // BUG-159: this runs the REAL repo's signal-set.sh in place (never
+      // copied into the fixture), so it resolves the REAL, gitignored
+      // AGENT_ROSTER.md unless told otherwise (see #7's reproducer for the
+      // exact resolution chain: BP_CODE_ROOT from the script's own physical
+      // location, BP_STATE_ROOT walking up from there, never from this
+      // fixture's cwd). Fixture holders ('Jesko', 'Eto', ...) name nothing
+      // about a roster — point AGENT_ROSTER_FILE at a path that does not
+      // exist, the same degrade a fresh clone gets before its roster is
+      // copied in. Same pattern as tests/baton-durability and tests/wait-mic.
+      const noRoster = s.workspace.path(name, 'no-roster', 'AGENT_ROSTER.md')
       const r = await s.run(
         'bash',
         [SETTER, '--file', signal, '--holder', holder, '--state', state, '--task', task],
-        { cwd: s.workspace.root },
+        { cwd: s.workspace.root, env: { AGENT_ROSTER_FILE: noRoster } },
       )
       expect(r.code, `publishing the fixture baton failed: ${r.output}`).toBe(0)
     },

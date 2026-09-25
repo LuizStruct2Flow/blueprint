@@ -116,28 +116,40 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at 2026-09-25 ~11:10Z.** TASK-085 was accepted by the founder.
-BUG-154 is released at `bfe4984` and waits for acceptance. **Gemini is out of
-daily quota until 2026-09-26 10:12Z** (recorded by the watcher as `quota`), so
-plan review runs on Codex + Kimi until then. In flight:
-- **TASK-083 is REOPENED** (back in `doing/`): the launchers' `TMPDIR`
-  (`<repo>/.scratch/tmp`) sits under `.git`, which the harness refuses
-  (BUG-110), so a dispatched agent's plain suite run fails. Until the fix
-  lands, **brief every Codex/Kimi agent to run suites as
-  `TMPDIR=/dev/shm npm --prefix tests test -- <suite>`**. Philipp (Claude) is
-  fixing it in `scripts/run-ts-suites.sh`'s `ts_scrubbed`: when TMPDIR is
-  inside a git tree, redirect to a fresh `/dev/shm` dir (unset TMPDIR where
-  there is no `/dev/shm`), say so on stderr, run as a child so the dir is
-  removed on every exit. Uncommitted edits to `scripts/run-ts-suites.sh` and
-  `tests/ts-bridge` in the main checkout are his.
-- **BUG-151 is implemented** (Matthias, Claude): `bc6840c` plan+row, `3b47fe9`
-  reproducer (`tests/codex-model-retry`), `77dbf4d` fix, all on local `main`,
-  unpushed, in four-eyes review by Andreas (Codex). **After it is pushed,
-  restart the Codex watcher**, or dispatches keep the old launcher.
-- BUG-155 is scoped and queued behind TASK-081 (fix design in its row).
+**State at the 2026-09-25 cut (~11:45Z). Nothing is in flight: no agent is
+running, the mic is with the Orchestrator, the tree is clean.**
+- **Waiting for the founder's acceptance:** BUG-154 (released `bfe4984`),
+  BUG-151 and TASK-083 (released at `52e8e32`; the first CI attempt hit the
+  BUG-146 hang, the re-run was green). TASK-085 was accepted.
+- **The three watchers were restarted at ~11:25Z with `nohup`**, onto the
+  BUG-151 launcher, so they outlive the session. Check with
+  `pgrep -af scripts/signal-watch.mts` (three lines).
+- **Gemini is out of daily quota until 2026-09-26 10:12Z** (the watcher
+  recorded it as `quota`), so plan review runs on Codex + Kimi until then.
+- **Dispatched agents now run the suites with a plain `npm --prefix tests test`**
+  (TASK-083's `ts_scrubbed` redirect). Known limit: in the Codex sandbox
+  `tests/ts-bridge` #5 still fails (the sandbox will not exec a binary copied
+  into `/dev/shm`); judge a Codex run of that suite accordingly.
 
-Still open after those: TASK-081 slices 1-6, then BUG-152. BUG-146 waits for
-the next CI hang.
+**Next, in order:**
+1. **BUG-146 — read the dump.** The fifth #20d hang (run 36129880176) is the
+   first with an uploaded process-tree dump; the row names the artifact and
+   file. This is the evidence the row has waited for since 2026-09-21.
+2. **TASK-081 slices 1-6** (the `scripts/blueprint` port), then **BUG-152**.
+3. **BUG-155** after TASK-081 (fix design in its row).
+
+**The pre-push gate does not run the contamination push scan; only CI does.**
+It turned `main` red twice today (`4a2b7e2`, `5966207`), both times on BUG-155's
+misread of `${VAR:-$HOME/.codex}`. Until BUG-155 is fixed, run
+`node scripts/contamination-push-scan.mts --before origin/main --after HEAD`
+before pushing a change that names a home dotdir. Whether the gate should
+run it is a question for the founder, not yet asked.
+
+**Housekeeping, not urgent:** 32 agent worktrees under `.claude/worktrees/`.
+Their work mostly landed by cherry-pick (new SHAs), so git cannot say which are
+safe to delete; two are locked and two hold named branches (`bug147-proof`,
+`bug153-port`). Vitest's glob also picks up their stale spec copies when run
+from the repo root. Check each before removing.
 **Pass `watch-ci.sh` the SHA from `git rev-parse HEAD`**, never a typed one:
 a guessed SHA watches nothing.
 

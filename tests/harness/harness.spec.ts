@@ -15,7 +15,7 @@
  * negative cases operate on their own fixtures rather than on real state.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { appendFile, chmod, readFile, readdir, rename, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
@@ -1506,6 +1506,76 @@ describe('harness — process ownership', () => {
       // timeout, so a quick return is itself part of the assertion.
       expect(Date.now() - started).toBeLessThan(10_000)
     })
+  })
+})
+
+describe('harness — teardown survives an abandoned body (BUG-154)', () => {
+  // BUG-154: two real fixtures (tests/mic-recovery case mic-recovery-5,
+  // tests/baton-durability #6c) left a live signal-watch.mts process running
+  // for hours after their suite ended, still polling a workspace that no
+  // longer existed. `scenario()`'s teardown (tests/harness/index.ts) calls
+  // `registry.disposeAll()` only AFTER `await body(s)` settles — a `finally`
+  // in shape, but not in guarantee, because vitest does not cancel a test
+  // whose body outlives ITS OWN test-timeout. Read directly from
+  // @vitest/runner's `withTimeout` (node_modules/@vitest/runner/dist/
+  // chunk-artifact.js): on timeout it calls `reject_()` and moves the runner
+  // straight on to afterEach / onFinished, while `result.then(resolve, reject)`
+  // stays attached to the STILL-RUNNING body — the body keeps executing, but
+  // nothing in `scenario()` is left awaiting it, so the line that calls
+  // `disposeAll()` never runs. A process started before that point, and
+  // therefore already registered in the ProcessRegistry, is never reaped.
+  //
+  // Reproduced here without a real 320s wait or a nested vitest process: a
+  // scenario body that never resolves on its own, raced against a short
+  // timer and abandoned exactly the way the runner abandons a timed-out
+  // test's promise (the loser is never awaited again). The registry still
+  // has to reap what it tracked — check by pid/process group like
+  // `disposeAll` itself does, never by `pgrep` across the machine, because
+  // real watchers run on this host and must not be touched or counted.
+  let leakedPid: number | undefined
+
+  it('BUG-154: a scenario whose body outlives an abandoned await still starts its process (setup)', async () => {
+    const abandoned = scenario('bug154-abandoned-body', async (s) => {
+      const child = s.background('sh', ['-c', 'sleep 5'], { cwd: s.workspace.root })
+      leakedPid = child.pid
+      await new Promise<void>(() => {
+        // Never settles — the body is abandoned mid-flight, the same shape
+        // `withTimeout` leaves behind when its own timer fires first.
+      })
+    })
+    // Exactly what the runner does with a timed-out test's own promise:
+    // nothing ever awaits it again. The `catch` only silences an eventual
+    // unhandled-rejection warning; it is not part of the wait below.
+    abandoned.catch(() => {})
+    // R4: wait for the condition (the body has started and registered its
+    // process), not a fixed guess at how long workspace setup takes.
+    await vi.waitFor(
+      () => {
+        expect(leakedPid, 'the scenario must have started the process before it was abandoned').toBeDefined()
+      },
+      { timeout: 5_000, interval: 10 },
+    )
+  })
+
+  it('BUG-154: the process the previous case abandoned is not still running', () => {
+    // `runTest` awaits each test's onFinished hooks before starting the next
+    // test, so if the fix registers its reap there, it has already completed
+    // by the time this test body runs — no polling needed here.
+    expect(leakedPid).toBeDefined()
+    let alive = true
+    try {
+      process.kill(-(leakedPid as number), 0)
+    } catch {
+      // ESRCH means gone, which is the outcome under test; any other signal
+      // failure is reported as "not alive" too, same as groupAlive() in
+      // tests/harness/process.ts decides survivors.
+      alive = false
+    }
+    expect(
+      alive,
+      `pid ${leakedPid} (process group) is still alive — the scenario's ` +
+        `teardown never reaped it after its body was abandoned`,
+    ).toBe(false)
   })
 })
 

@@ -29,7 +29,7 @@
  *   })
  */
 
-import { afterEach, expect } from 'vitest'
+import { afterEach, expect, onTestFinished } from 'vitest'
 import type { ChildProcess } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, readdir, stat, symlink } from 'node:fs/promises'
@@ -249,6 +249,27 @@ export async function scenario(
   const canary = await RealStateCanary.capture(realStateTargets(REPO_ROOT))
   const escapeToken = RealStateCanary.escapeToken(label)
   const registry = new ProcessRegistry(workspace.root, escapeToken)
+
+  // BUG-154. vitest's own test-timeout does not cancel a test whose body
+  // outlives it: @vitest/runner's `withTimeout` (node_modules/@vitest/runner/
+  // dist/chunk-artifact.js) rejects the OUTER promise on its own timer and the
+  // runner moves straight on to afterEach/onFinished, while the body keeps
+  // running, unawaited, in the background. `registry.disposeAll()` below is
+  // chained onto `await body(s)` and is therefore unreachable on exactly that
+  // exit path — the shape that left a real `signal-watch.mts` running for
+  // hours from tests/mic-recovery's mic-recovery-5 and tests/baton-durability
+  // #6c, both observed still polling a workspace that no longer existed.
+  //
+  // `onTestFinished` is the one vitest hook that runs unconditionally — pass,
+  // fail, OR timeout — so registering the reap here, before `body` starts,
+  // makes it reachable on every exit path rather than only the ones where the
+  // scenario's own promise settles. This is "every tracked group is killed at
+  // scenario teardown whatever the outcome," not a per-test `finally`: a
+  // `finally` in this function would be chained onto the same promise that
+  // never settles on the abandoned-body path, which is the defect itself.
+  onTestFinished(async () => {
+    await registry.disposeAll()
+  })
 
   const home = await workspace.dir('home')
   const stateHome = await workspace.dir('state')

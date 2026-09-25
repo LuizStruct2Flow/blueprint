@@ -119,6 +119,13 @@ wrong on both halves (TASK-064):
   remove what it made and leaves litter the founder deletes by hand. That is what
   happened when a dispatcher fixture went to `mktemp -d` (2026-09-20).
 
+**Refused by the tools, not only stated here** (founder, 2026-09-25, after
+the rule was found broken by most of one session's agents):
+`.claude/settings.json` denies `Edit(//tmp/**)` (every Write and Edit into
+`/tmp`), Bash commands that name a `/tmp/` path, and `mktemp` without `-p`.
+It binds Claude Code only. Codex, Kimi and Gemini read no Claude settings, so
+for them the rule is still their brief.
+
 `.gitignore` already said so — *"Kept INSIDE the repo so the work is visible next
 to the code that prompted it, rather than hidden in a system temp dir"* — and
 this file contradicted it for long enough to send an agent the wrong way.

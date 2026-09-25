@@ -232,7 +232,14 @@
       "Bash(* --no-verify*)",
       "Bash(cat .env)",
       "Bash(cat *.env)",
-      "Bash(cat *.env.*)"
+      "Bash(cat *.env.*)",
+      "Edit(//tmp/**)",
+      "Bash(* /tmp/*)",
+      "Bash(*>/tmp/*)",
+      "Bash(mktemp)",
+      "Bash(mktemp -d)",
+      "Bash(mktemp -t *)",
+      "Bash(mktemp -d -t *)"
     ],
     "ask": [
       "Bash(git push --force*)",

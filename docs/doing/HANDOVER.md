@@ -116,16 +116,28 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at 2026-09-25 ~10:50Z.** TASK-083 landed (released at `88840f9`) and
-waits for acceptance. TASK-085 was accepted by the founder the same day.
-BUG-154's fix (`076fb23` reproducer, `6b09022` fix) is on local `main`, in
-Codex review before the push. **Gemini is out of daily quota until
-2026-09-26 10:12Z**, recorded by the watcher itself as `quota`, so plan review
-runs on Codex + Kimi until then. In flight: BUG-151 (Matthias, Claude)
-implementing the plan Codex and Kimi approved with changes, in the main
-checkout. BUG-154 (Vitali, Claude) in a worktree. BUG-155 is scoped and
-queued behind TASK-081 (fix design in its row). Still open after those:
-TASK-081 slices 1-6, then BUG-152. BUG-146 waits for the next CI hang.
+**State at 2026-09-25 ~11:10Z.** TASK-085 was accepted by the founder.
+BUG-154 is released at `bfe4984` and waits for acceptance. **Gemini is out of
+daily quota until 2026-09-26 10:12Z** (recorded by the watcher as `quota`), so
+plan review runs on Codex + Kimi until then. In flight:
+- **TASK-083 is REOPENED** (back in `doing/`): the launchers' `TMPDIR`
+  (`<repo>/.scratch/tmp`) sits under `.git`, which the harness refuses
+  (BUG-110), so a dispatched agent's plain suite run fails. Until the fix
+  lands, **brief every Codex/Kimi agent to run suites as
+  `TMPDIR=/dev/shm npm --prefix tests test -- <suite>`**. Philipp (Claude) is
+  fixing it in `scripts/run-ts-suites.sh`'s `ts_scrubbed`: when TMPDIR is
+  inside a git tree, redirect to a fresh `/dev/shm` dir (unset TMPDIR where
+  there is no `/dev/shm`), say so on stderr, run as a child so the dir is
+  removed on every exit. Uncommitted edits to `scripts/run-ts-suites.sh` and
+  `tests/ts-bridge` in the main checkout are his.
+- **BUG-151 is implemented** (Matthias, Claude): `bc6840c` plan+row, `3b47fe9`
+  reproducer (`tests/codex-model-retry`), `77dbf4d` fix, all on local `main`,
+  unpushed, in four-eyes review by Andreas (Codex). **After it is pushed,
+  restart the Codex watcher**, or dispatches keep the old launcher.
+- BUG-155 is scoped and queued behind TASK-081 (fix design in its row).
+
+Still open after those: TASK-081 slices 1-6, then BUG-152. BUG-146 waits for
+the next CI hang.
 **Pass `watch-ci.sh` the SHA from `git rev-parse HEAD`**, never a typed one:
 a guessed SHA watches nothing.
 

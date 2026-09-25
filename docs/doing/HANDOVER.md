@@ -116,11 +116,30 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-25 cut (~11:45Z). Nothing is in flight: no agent is
-running, the mic is with the Orchestrator, the tree is clean.**
+**State at the 2026-09-25 cut (~17:55Z). ONE agent is in flight: Philipp
+(Claude) on BUG-146, in his own worktree under `.claude/worktrees/`; collect
+his commits by cherry-pick. The mic is with the Orchestrator.**
 - **Waiting for the founder's acceptance:** BUG-154 (released `bfe4984`),
-  BUG-151 and TASK-083 (released at `52e8e32`; the first CI attempt hit the
-  BUG-146 hang, the re-run was green). TASK-085 was accepted.
+  BUG-151 and TASK-083 (released at `52e8e32`), and the four downstream bugs
+  filed from `a2bp` PRs this afternoon: BUG-156 [SEC] (released `686ca6c`),
+  BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and #79-#82 are
+  closed with pointers to the landed commits. TASK-085 was accepted.
+- **Downstream action owed, not done here:** storm2flow, linkedin-watcher-agent
+  and lyricscreator each need `blueprint pull`, then ONE full-history
+  `gitleaks detect --no-banner --redact` — BUG-156 made every project's secret
+  scan vacuous since bootstrap. Rotate anything found before investigating.
+  lyricscreator (bootstrapped today at `~/dev/struct2flow/lyricscreator`) also
+  has an uncommitted `.blueprint-source` remote fill-in and empty project config.
+- **Providers at the cut:** Codex hit its usage limit ~16:21Z, Kimi its 5-hour
+  limit ~17:31Z, Gemini is out until 2026-09-26 10:12Z. `rotation.mts
+  coverage` shows each. The founder waived four-eyes for BUG-159 ONLY (a second
+  Claude persona reviewed it). BUG-146's capture work has no waiver: it waits
+  for a Codex or Kimi review before push unless the founder extends it.
+- **BUG-146 is now the release blocker, not background.** #20d hung on 4 of the
+  last 5 CI runs today (against 4 hangs in the 4 days before); 52e8e32, where
+  TASK-083's TMPDIR redirect landed, was the first. Philipp is extending the
+  dump to find orphaned pipe holders and checking whether TASK-083 changed
+  #20d's conditions. Evidence so far is in the row.
 - **The three watchers were restarted at ~11:25Z with `nohup`**, onto the
   BUG-151 launcher, so they outlive the session. Check with
   `pgrep -af scripts/signal-watch.mts` (three lines).
@@ -132,9 +151,10 @@ running, the mic is with the Orchestrator, the tree is clean.**
   into `/dev/shm`); judge a Codex run of that suite accordingly.
 
 **Next, in order:**
-1. **BUG-146 — read the dump.** The fifth #20d hang (run 36129880176) is the
-   first with an uploaded process-tree dump; the row names the artifact and
-   file. This is the evidence the row has waited for since 2026-09-21.
+1. **BUG-146 — collect Philipp's capture work and get it reviewed.** Both
+   dumps read (fifth and sixth) show every tracked process exited while the
+   run's `close` never fired: something outside the ppid tree held the pipe.
+   The row has the hypothesis and the next step.
 2. **TASK-081 slices 1-6** (the `scripts/blueprint` port), then **BUG-152**.
 3. **BUG-155** after TASK-081 (fix design in its row).
 

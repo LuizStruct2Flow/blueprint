@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest'
 import { chmod, copyFile, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
 
 const LIB = join(REPO_ROOT, 'scripts/lib/placeholders.sh')
 
@@ -105,14 +106,23 @@ describe('BUG-008 — pull preserves executable bits during substitution', () =>
 
   it('#5 all executable placeholder-bearing managed files stay executable', async () => {
     await scenario('pull-exec-bit-5', async (s) => {
+      // TASK-083 — start-codex/-kimi/-gemini-signal-watch.sh are now two-line
+      // shims with no {{PROJECT_NAME}} text of their own; the placeholder
+      // lives in their `.mts` target's AGENT_WAKE_COMMAND body instead.
+      // resolveConsumer follows a migrated file's shim (same as
+      // tests/state-dir), so this list stays "every managed file this
+      // property should hold for" rather than silently going vacuous the
+      // moment a file on it is ported.
       const managed = [
         '.githooks/pre-push',
         'scripts/start-codex-signal-watch.sh',
+        'scripts/start-kimi-signal-watch.sh',
         'scripts/start-gemini-signal-watch.sh',
       ]
       let checked = 0
 
-      for (const rel of managed) {
+      for (const managedRel of managed) {
+        const rel = resolveConsumer(REPO_ROOT, managedRel)?.rel ?? managedRel
         const src = join(REPO_ROOT, rel)
         const srcStat = await stat(src).catch(() => undefined)
         if (!srcStat?.isFile()) continue

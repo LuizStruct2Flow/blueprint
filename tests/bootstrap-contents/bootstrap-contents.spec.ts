@@ -49,6 +49,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { relativeLinkTargets } from '../doc-links/doc-links.js'
+import { resolveConsumer } from '../helpers/shim.js'
 
 const PROJECT = 'test-proj'
 
@@ -389,6 +390,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
 
   it.each([
     'scripts/start-codex-signal-watch.sh',
+    'scripts/start-kimi-signal-watch.sh',
     'scripts/start-gemini-signal-watch.sh',
     'scripts/signal-watch.sh',
   ])('#6 A-09: %s has its placeholder substituted at bootstrap', async (rel) => {
@@ -403,8 +405,15 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
         true,
       )
 
-      const text = await readFile(join(derived, rel), 'utf8')
-      expect(text, 'omitted from new-project.sh TARGETS').not.toContain('{{PROJECT_NAME}}')
+      // TASK-083 — a migrated launcher's own text is a fixed two-line shim
+      // with no {{PROJECT_NAME}} of its own; the placeholder lives in its
+      // `.mts` TARGET's AGENT_WAKE_COMMAND body now. Checking the shim's own
+      // bytes here would pass vacuously (it never contained the placeholder),
+      // exactly the "no test asserted substitution" gap this case exists to
+      // close — resolveConsumer follows the shim, same as tests/state-dir.
+      const target = resolveConsumer(derived, rel)?.rel ?? rel
+      const text = await readFile(join(derived, target), 'utf8')
+      expect(text, 'omitted from new-project.sh substitution').not.toContain('{{PROJECT_NAME}}')
     })
   })
 

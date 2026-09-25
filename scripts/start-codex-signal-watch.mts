@@ -30,6 +30,7 @@ import { realpathSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findOnPath, findLatestUnderTree, isExecutable } from './lib/find-bin.mts'
+import { scratchTmpDir } from './lib/scratch-tmpdir.mts'
 
 // --- physical script root (A-09 / BUG-020, ported) ---
 const _bpRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
@@ -71,6 +72,15 @@ codex binary you trust, then re-run.`)
 // writing the old ones with nothing failing. Two derivations, one of them
 // stale, is the A-09 shape again; there is deliberately only one, and it
 // runs per dispatch.
+
+// TASK-083: every dispatched agent's temporary files land under
+// <repo>/.scratch/tmp, never /tmp (CLAUDE.md "Running commands" — most
+// agents broke that rule on 2026-09-24/25). TMPDIR is read by `mktemp`,
+// `os.tmpdir()` and most CLI tools before anything else, so setting it here
+// (unlike the state dir above) is safe to resolve once at launcher start: it
+// names a fixed repo-relative path, not a value that could go stale over a
+// multi-day watcher the way the state dir can.
+const TMPDIR = scratchTmpDir(ROOT)
 
 // The wake command runs every time `State = OVER_TO_CODEX` fires.
 // `AGENT_SIGNAL_TASK` is the current `Task` field, exported by
@@ -198,10 +208,12 @@ if [ -r "$ROOT/scripts/lib/codex-session.sh" ]; then
   . "$ROOT/scripts/lib/codex-session.sh"
 fi
 # A copy of codex exec raw --json stream, so the thread id can be read back
-# after the fact without disturbing the feed-filter pipe below. /dev/null on a
-# failed mktemp: the tee then just discards, and thread-id resolution degrades
-# to "unknown" exactly like a missing lib — never costs the dispatch.
-RAW_JSON="$(mktemp "\${TMPDIR:-/tmp}/bp-codex-raw.XXXXXX" 2>/dev/null)" || RAW_JSON="/dev/null"
+# after the fact without disturbing the feed-filter pipe below. TASK-083:
+# lands under $TMPDIR (<repo>/.scratch/tmp, exported by the launcher below),
+# never /tmp. /dev/null on a failed mktemp: the tee then just discards, and
+# thread-id resolution degrades to "unknown" exactly like a missing lib —
+# never costs the dispatch.
+RAW_JSON="$(mktemp "$TMPDIR/bp-codex-raw.XXXXXX" 2>/dev/null)" || RAW_JSON="/dev/null"
 
 now="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 echo "[$now] dispatching codex exec ..." | tee -a "$RUN_LOG"
@@ -250,6 +262,14 @@ CODEX_GIT_DIR="$(cd -P "$CODEX_GIT_DIR" && pwd)" || {
 # file right after codex exits, before its stdout (feeding tee) reaches EOF,
 # so the file is always complete by the time the downstream stages finish.
 CODEX_STATUS_FILE="$(mktemp "$STATE_DIR/.codex-exit-status.XXXXXX" 2>/dev/null)" || CODEX_STATUS_FILE="$STATE_DIR/.codex-exit-status.$$"
+# TASK-083: sandbox_workspace_write.exclude_slash_tmp and
+# .exclude_tmpdir_env_var (both present in codex 0.154's binary) make the
+# sandbox itself refuse a write to /tmp regardless of TMPDIR — belt-and-
+# braces with the TMPDIR redirection above, not a replacement for it: TMPDIR
+# already points codex's own tooling at .scratch/tmp so it never asks for a
+# /tmp write in the first place, and these two flags refuse it if something
+# asks anyway. Verified with a real \`codex exec\` dispatch: a write to /tmp
+# is refused, a write under .scratch/tmp succeeds (TASK-083 handoff).
 # --json + codex-feed-filter.sh keeps the activity feed at one concise line per
 # action (codex prose, commands, file changes) instead of echoing every file
 # codex reads. stderr → RUN_LOG raw; stdout JSON → filter → RUN_LOG concise.
@@ -258,6 +278,8 @@ CODEX_STATUS_FILE="$(mktemp "$STATE_DIR/.codex-exit-status.XXXXXX" 2>/dev/null)"
   "$CODEX_BIN" exec --json "$@" \\
     --cd "$ROOT" \\
     --sandbox workspace-write \\
+    -c sandbox_workspace_write.exclude_slash_tmp=true \\
+    -c sandbox_workspace_write.exclude_tmpdir_env_var=true \\
     --add-dir "$CODEX_GIT_DIR" \\
     --skip-git-repo-check \\
     --output-last-message "$OUTPUT_LAST" \\
@@ -320,7 +342,7 @@ else
 fi
 `
 
-const env = { ...process.env, CODEX_BIN, ROOT, AGENT_WAKE_COMMAND }
+const env = { ...process.env, CODEX_BIN, ROOT, AGENT_WAKE_COMMAND, TMPDIR }
 const signalWatch = join(ROOT, 'scripts', 'signal-watch.mts')
 const child = spawn(process.execPath, [signalWatch, ...process.argv.slice(2)], {
   stdio: 'inherit',

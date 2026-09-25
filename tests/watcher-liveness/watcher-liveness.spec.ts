@@ -197,10 +197,14 @@ async function liveRepo(s: Scenario, name = 'live') {
     await s.fs.copyIn(join(SUBJECT, watchMts), `${name}/${watchMts}`)
   }
   // The WHOLE lib dir, never named files — feed-fixture.ts records why.
+  // TASK-065 (round 3): signal-watch.mts now imports a sibling .mts lib
+  // (scripts/lib/spawn-bounded.mts) directly, not just the .sh libs it
+  // sources through shell functions — the filter has to carry both
+  // extensions or the copied-out watcher fails ERR_MODULE_NOT_FOUND.
   const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
     cwd: s.workspace.root,
   })
-  for (const n of libs.stdout.split('\n').filter((f) => f.endsWith('.sh'))) {
+  for (const n of libs.stdout.split('\n').filter((f) => f.endsWith('.sh') || f.endsWith('.mts'))) {
     await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', n), `${name}/scripts/lib/${n}`)
   }
   const stateDir = await s.fs.mkdirp(`${name}/logs/state`)

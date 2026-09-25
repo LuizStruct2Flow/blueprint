@@ -357,6 +357,11 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // already requires: BP_CODE_ROOT-relative paths only resolve when the
       // code root actually carries the tree it claims to.
       await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/roster.sh'), join('work', 'scripts/lib/roster.sh'))
+      // TASK-065 (round 3) — signal-watch.mts also imports a sibling .mts lib
+      // directly (scripts/lib/spawn-bounded.mts), not sourced through a shell
+      // function like the two libs above, so the same "carry what the copied
+      // watcher actually needs" rule applies here too.
+      await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), join('work', 'scripts/lib/spawn-bounded.mts'))
       await s.gitRepo('work')
 
       // BUG-019 — the watcher reads the LIVE baton (untracked, under the state

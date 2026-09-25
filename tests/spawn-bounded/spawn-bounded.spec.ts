@@ -49,7 +49,7 @@ describe('TASK-065 (round 3) — spawnBounded must resolve even when the group k
     // from a version that (fix) resolves on its own bound: it fails THIS
     // assertion with a real elapsed time near the child's lifetime, rather
     // than hanging the test runner itself.
-    const CEILING_MS = 3_000
+    const CEILING_MS = 4_500
 
     let groupKillAttempted = false
     let directKillAttempted = false

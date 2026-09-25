@@ -234,25 +234,110 @@ The two **meta-layers** below are what's new; the eight concerns underneath are 
 
 # The persona team — radio-over
 
-A configurable team of **named personas**, each backed by whichever agent you actually run — Claude Code, Codex, Kimi, Gemini, Copilot, Qwen. Defined in a **per-engineer `AGENT_ROSTER.md`** (gitignored, copied from the tracked [`AGENT_ROSTER.example.md`](../AGENT_ROSTER.example.md) on the `.env` model — your fleet is not your teammate's); coordinated via [`AGENTS.md`](../AGENTS.md) + the live baton `logs/state/signal.md` (protocol in [`AGENT_SIGNAL.md`](../AGENT_SIGNAL.md)).
+A configurable team of **named personas**, each backed by whichever agent you actually run (Claude Code, Codex, Kimi, Gemini, Copilot, Qwen) — one mic at a time, coordinated by a live baton.
 
-- **The roster is the single source of identity** — **role** is the key, name is data, so renaming a persona is editing one cell. Every reader resolves through one parser (`scripts/lib/roster.sh`); `--whoami` prints who a session thinks it is and which roster said so. Until BUG-010 the names were *literals inside the scripts*, so renaming did nothing and one fleet's names shipped to every project
-- **Each persona names a model tier, never a model version** — the roster's `Model` cell is `<tier>:<effort>` (`frontier`, `frontier-1`, …). Codex tiers index its own ranked list in `~/.codex/models_cache.json`; Claude and Kimi tiers index one roster line of aliases each (`fable, opus, sonnet, haiku` / `k3, k3-256k, …`) that the CLI resolves to the newest version. So a model release needs no edit. **Effort is the provider's vocabulary, not a shared scale** — Kimi has no `medium` at all — so each cell is validated against that provider's own list. Codex dispatch passes `-m` and the effort; every Claude persona gets a generated `.claude/agents/<name>.md` with `model:` and `effort:` on each session start; the feed labels lines `[Name - model - effort]`. A tier or effort that does not resolve is an error naming the persona — the dispatch is refused, never run on a default
-- **One mic at a time** — `Holder = <persona>`, `State` ∈ `IDLE` / `ACTIVE` / `OVER_TO_<NAME>`
-- **The live baton is untracked, and that is load-bearing** — it lives in `logs/state/signal.md`, not in a tracked file. Git *owns* tracked files in the working tree, so `switch` / `checkout` / `stash` / `rebase` rewrite them — including under a running dispatch, which silently left the dispatched agent with nothing to claim (BUG-019). Rare until a spell of branch-per-change made it routine, and the hazard outlives that: any `switch` under a live dispatch does it. One writer (`scripts/signal-set.sh`) publishes atomically, so no poller can sample a half-written baton. Hand-off history moved from `git log` to an append-only journal, which also captures flips that were never committed
-- **Persona names prevent same-backing collision** — two Claude Code sessions stay distinguishable (`OVER_TO_<A>` ≠ `OVER_TO_<B>`)
-- **Every item named to the founder carries a link and a plain line** — a bare ID is the agent's shorthand, not the founder's memory, so a decision request, a handoff or the baton's `Task` links the line that defines the item and says in one sentence what it does
-- **Read-only + out-of-scope work** allowed in parallel
-- **Reactivity:** `Monitor`-based mtime poll, ~2 s latency, zero token cost between events
-- **Codex / Gemini / Kimi dispatched by flipping the signal**, not by direct CLI call — one provider-agnostic polling engine, so a new provider is a ~115-line launcher rather than an engine
-- **Work is load-balanced across providers, not handed to whichever is convenient** — plan review goes to all three seeking consensus, and for everything else **the work picks the role while the rotation picks the provider within it**: a back-end task goes to the next back-end engineer in turn, never to another role because that role's turn is inconvenient. Load balancing never overrides competence. A provider at zero quota leaves the rotation until it returns, and a provider is routed only work it can verify: a sandbox that cannot run the suites proving an item means that item goes to the next persona in the role, with the reason recorded. **`node scripts/rotation.mts` is the mechanism, not a rule to remember** — `next`/`review` pick the author and the four-eyes reviewer, `record` classifies a dispatch's own refusal into an append-only per-checkout event log (`logs/state/rotation.log`) rather than predicting a limit, and `coverage` reports who is in, out, or unproven per role family. **Only orchestration and `push` are one provider's** (the founder-facing session) — every provider commits its own work, because the commit-msg hook already enforces the convention and withholding the verb would enforce nothing extra. The rule exists because convenience has a direction: the cheapest provider to reach is the one already running, so without it every dispatch lands there, the other subscriptions pay for nothing, and the cross-provider review has no second blind spot left to offer
-- **The rotation turns per work item, and the agent ends with it** — one item runs entirely on one provider, then that agent shuts down rather than being resumed into the next item. Measured: an agent resumed three times across slices of one item went 133k → 167k → 328k tokens for the same quality of answer, carrying a transcript irrelevant to each new slice. Bounded context is a cost control, and it is also a correctness one — a fresh brief cannot inherit a stale assumption
-- **One command per call, and it is *enforced*** — permission is granted per command *pattern*, so a compound string is matched as one unit: joining independent commands with `;` / `&&` turns one decision per command into one decision per blob, and defeats the `deny` list by the same mechanism. Chaining is for genuinely dependent commands only (a pipe qualifies by construction). **`scripts/no-chain-guard.sh` is a `PreToolUse` hook that blocks it** — the rule lived in prose for weeks while an agent broke it through an entire session believing it was complying, and the founder corrected it three times. A rule that must be remembered at the moment the author is busy is the wrong shape of fix; the same conclusion BUG-004, BUG-014 and BUG-020 each reached independently. Agent scratch lives in-project under `.scratch/`, which *removes* a directory permission rather than adding one
-- **Agent state lives *inside* the project**, under gitignored `logs/state/`, derived by one shared function every side sources. Deleting the project deletes its state — it used to live in `~/.<repo>`, so a project bootstrapped later at the same path inherited the previous one's records. The derivation runs *per dispatch*, not once at watcher start, because a resolved path baked into a long-running process is a stale twin that fails silently
-- **`HANDOVER.md`** lets a fresh prompt resume cold
-- **Live feed:** `scripts/agent-activity.sh --daemon` — every persona's mic moves *and* tool-by-tool work (orchestrator + subagents + Codex/Gemini/Kimi) stream in one tail; self-heals across restarts. **One resident process** tracking a byte offset per file — no follow-by-name tails, no inotify pressure (BUG-001). `--stop` / `--status` complete the lifecycle.
+- **The roster is the single source of identity** — role is the key, name is data; one parser resolves it everywhere
+- **A persona names a model tier, never a version** — a release needs no edit; an unresolved tier is refused, never defaulted
+- **The live baton is untracked, and that's load-bearing** — one writer, atomic, immune to `git switch`/`stash`/`rebase`
+- **Work is load-balanced across providers by role, not convenience** — the rotation turns per work item; only orchestration and `push` stay with the founder-facing session
+- **One command per call — enforced by a hook**, not remembered
+- **Agent state lives inside the project**, and one live feed shows every mic and every tool call
 
-> A **configurable team of AI engineers** on the same repo — without overwrites or duplicate work.
+> A configurable team of AI engineers on the same repo — without overwrites or duplicate work.
+
+<!--
+Roster & identity: per-engineer `AGENT_ROSTER.md` (gitignored, copied from
+tracked `AGENT_ROSTER.example.md` on the `.env` model — your fleet is not your
+teammate's); coordinated via `AGENTS.md` + the live baton `logs/state/signal.md`
+(protocol in `AGENT_SIGNAL.md`). Every reader resolves identity through one
+parser (`scripts/lib/roster.sh`); `--whoami` prints who a session thinks it is
+and which roster said so. Until BUG-010 the names were literals inside the
+scripts, so renaming did nothing and one fleet's names shipped to every
+project. Persona names also prevent same-backing collision: two Claude Code
+sessions stay distinguishable (`OVER_TO_<A>` != `OVER_TO_<B>`).
+
+Model tiers: the roster's `Model` cell is `<tier>:<effort>` (`frontier`,
+`frontier-1`, ...). Codex tiers index its own ranked list in
+`~/.codex/models_cache.json`; Claude and Kimi tiers index one roster line of
+aliases each (`fable, opus, sonnet, haiku` / `k3, k3-256k, ...`) that the CLI
+resolves to the newest version. Effort is the provider's vocabulary, not a
+shared scale — Kimi has no `medium` at all — so each cell is validated against
+that provider's own list. Codex dispatch passes `-m` and the effort; every
+Claude persona gets a generated `.claude/agents/<name>.md` with `model:` and
+`effort:` on each session start; the feed labels lines `[Name - model -
+effort]`. A tier or effort that does not resolve is an error naming the
+persona — the dispatch is refused, never run on a default.
+
+Mic & baton: `Holder = <persona>`, `State` in `IDLE` / `ACTIVE` /
+`OVER_TO_<NAME>`. The baton lives in `logs/state/signal.md`, not a tracked
+file — git owns tracked files in the working tree, so `switch` / `checkout` /
+`stash` / `rebase` rewrite them, including under a running dispatch, which
+silently left the dispatched agent with nothing to claim (BUG-019). Rare until
+a spell of branch-per-change made it routine, and the hazard outlives that: any
+`switch` under a live dispatch does it. One writer (`scripts/signal-set.sh`)
+publishes atomically, so no poller samples a half-written baton. Hand-off
+history moved from `git log` to an append-only journal, which also captures
+flips that were never committed. Every item named to the founder carries a
+link and a plain line — a bare ID is the agent's shorthand, not the founder's
+memory, so a decision request, a handoff or the baton's `Task` links the line
+that defines the item and says in one sentence what it does. Read-only +
+out-of-scope work is allowed in parallel. Reactivity: `Monitor`-based mtime
+poll, ~2s latency, zero token cost between events.
+
+Dispatch & load-balancing: Codex/Gemini/Kimi are dispatched by flipping the
+signal, not by direct CLI call — one provider-agnostic polling engine, so a
+new provider is a ~115-line launcher rather than an engine. Plan review goes
+to all three seeking consensus; for everything else the work picks the role
+while the rotation picks the provider within it: a back-end task goes to the
+next back-end engineer in turn, never to another role because that role's turn
+is inconvenient. Load balancing never overrides competence. A provider at zero
+quota leaves the rotation until it returns, and a provider is routed only work
+it can verify: a sandbox that cannot run the suites proving an item means that
+item goes to the next persona in the role, with the reason recorded.
+`node scripts/rotation.mts` is the mechanism, not a rule to remember —
+`next`/`review` pick the author and the four-eyes reviewer, `record`
+classifies a dispatch's own refusal into an append-only per-checkout event log
+(`logs/state/rotation.log`) rather than predicting a limit, and `coverage`
+reports who is in, out, or unproven per role family. Every provider commits
+its own work, because the commit-msg hook already enforces the convention and
+withholding the verb would enforce nothing extra. The rule exists because
+convenience has a direction: the cheapest provider to reach is the one already
+running, so without it every dispatch lands there, the other subscriptions pay
+for nothing, and the cross-provider review has no second blind spot left to
+offer. The rotation turns per work item, and the agent ends with it — one item
+runs entirely on one provider, then that agent shuts down rather than being
+resumed into the next item. Measured: an agent resumed three times across
+slices of one item went 133k -> 167k -> 328k tokens for the same quality of
+answer, carrying a transcript irrelevant to each new slice. Bounded context is
+a cost control, and it is also a correctness one — a fresh brief cannot
+inherit a stale assumption.
+
+One command per call: permission is granted per command pattern, so a
+compound string is matched as one unit — joining independent commands with
+`;` / `&&` turns one decision per command into one decision per blob, and
+defeats the `deny` list by the same mechanism. Chaining is for genuinely
+dependent commands only (a pipe qualifies by construction).
+`scripts/no-chain-guard.sh` is a `PreToolUse` hook that blocks it — the rule
+lived in prose for weeks while an agent broke it through an entire session
+believing it was complying, and the founder corrected it three times. A rule
+that must be remembered at the moment the author is busy is the wrong shape of
+fix; the same conclusion BUG-004, BUG-014 and BUG-020 each reached
+independently. Agent scratch lives in-project under `.scratch/`, which removes
+a directory permission rather than adding one.
+
+Agent state: lives inside the project, under gitignored `logs/state/`,
+derived by one shared function every side sources. Deleting the project
+deletes its state — it used to live in `~/.<repo>`, so a project bootstrapped
+later at the same path inherited the previous one's records. The derivation
+runs per dispatch, not once at watcher start, because a resolved path baked
+into a long-running process is a stale twin that fails silently.
+`HANDOVER.md` lets a fresh prompt resume cold. Live feed:
+`scripts/agent-activity.sh --daemon` — every persona's mic moves and
+tool-by-tool work (orchestrator + subagents + Codex/Gemini/Kimi) stream in one
+tail; self-heals across restarts. One resident process tracks a byte offset
+per file — no follow-by-name tails, no inotify pressure (BUG-001). `--stop` /
+`--status` complete the lifecycle.
+-->
 
 ---
 
@@ -282,108 +367,138 @@ The blueprint contains **only what has been proven in production** — that's wh
 
 # The blueprint — one repo, every project
 
-Every struct2flow project is **forked from a single blueprint**:
-all eight concerns below, plus the agent infra, live in one git repo.
+Every struct2flow project is **forked from a single blueprint** — all eight
+concerns, plus the agent infra, live in one git repo, synced by one CLI.
 
-- **Bootstrap** — `new-project.sh acme` copies the blueprint into a new project
-  directory, substitutes placeholders, and records the source SHA in `.blueprint-source`.
-- **Pull** — `blueprint drift` shows what's changed in the blueprint
-  since the project's last sync. `blueprint pull` brings the
-  improvements forward. Both read the blueprint **by its address**, fetched
-  fresh on every run — never from whatever a folder on the machine happens to
-  hold — and an unreachable blueprint is a loud exit 5, never a quiet "all clear".
-  Projects read **`released`**: the newest commit on which the blueprint's whole
-  CI passed, fast-forwarded by a CI job, so a broken `main` never fans out.
-  A project's own permission rules live in a pull-safe `.claude/settings.project.json`
-  that pull merges in, and the blueprint's ask/deny always win.
-  A project declares its CI; a check written for GitHub Actions skips out loud
-  on any other pipeline, never silently. Links to its own served pages resolve
-  through a declared web root, never through whatever the local disk holds.
-- **Push** — `blueprint a2bp <file>` apply-to-blueprint: when a generic
-  improvement lands in a project, it travels back to the blueprint
-  so *every other project* inherits it next time they pull. It also carries a
-  file the blueprint does not ship or does not have yet, marked **not shipped**
-  for the reviewer, and refuses secrets (by name and by `gitleaks`), `.git`
-  paths and project config before it contacts the remote.
-- **Guarded push** — the same multiplier that spreads a good rule spreads a
-  leaked one. So `a2bp` reverse-substitutes the project's name back to
-  `{{PROJECT_NAME}}` and **blocks** on host paths, foreign state dirs, and
-  any project name that survived. Suppressions are per-line and must carry a
-  justification. The blueprint's own CI runs the same checker over every
-  pushed diff's added lines, so `released` never advances over contamination
-  that reached `main` another way.
-- **A request, not a delivery — and we say exactly what that buys.** `a2bp`
-  pushes to `a2bp/<project>/<hash>`, never to `main`, and has no verb that
-  merges: it lands nothing, and a human merges the PR. It is *not* a wall
-  around the blueprint — filing needs push access, so in a same-owner setup an
-  agent could bypass the command. The discipline is what the tool does; making
-  it a boundary needs a separate credential or a fork. Claiming more than that
-  would be the kind of drift this deck exists to prevent.
+- **Pull** — `blueprint drift` / `blueprint pull` bring improvements forward,
+  always read from the blueprint's fetched, CI-green `released` commit
+- **Push** — `blueprint a2bp <file>` sends a generic improvement back so
+  every other project inherits it on its next pull
+- **Guarded** — `a2bp` scrubs project names, host paths and secrets before
+  it ever contacts the remote
+- **A request, not a delivery** — it lands nothing; a human still merges the PR
+- **One door for outside work** — the blueprint owner commits straight to
+  `main`; a pull request is what an *outside* contribution files
 
-- **One door for OUTSIDE work, and it is a pull request** — a derived project
-  reaches the blueprint only by filing one, which `blueprint a2bp` does. The
-  blueprint's own owner commits to `main` like anyone else: a PR is a request
-  made *of* someone, and a repo where the author and the reviewer are the same
-  person was gating that person against themselves. What protects `main` is the
-  pre-push gate and the fact that a back-propagation still needs a human to
-  merge it — not a ceremony the owner performs alone.
+> A rule tightened once in any project benefits every project. The blueprint
+> is the multiplier — which is exactly why the upstream door is the one that
+> has to be guarded. A multiplier you can push to directly is a multiplier
+> nobody reviews.
 
-> A rule tightened once in any project benefits every project. The blueprint is the multiplier.
-> Which is exactly why the upstream door is the one that has to be guarded.
-> A multiplier you can push to directly is a multiplier nobody reviews.
+<!--
+Bootstrap: `new-project.sh acme` copies the blueprint into a new project
+directory, substitutes placeholders, and records the source SHA in
+`.blueprint-source`.
+
+Pull, in detail: `blueprint drift` shows what's changed in the blueprint since
+the project's last sync; `blueprint pull` brings the improvements forward.
+Both read the blueprint by its address, fetched fresh on every run — never
+from whatever a folder on the machine happens to hold — and an unreachable
+blueprint is a loud exit 5, never a quiet "all clear". Projects read
+`released`: the newest commit on which the blueprint's whole CI passed,
+fast-forwarded by a CI job, so a broken `main` never fans out. A project's own
+permission rules live in a pull-safe `.claude/settings.project.json` that pull
+merges in, and the blueprint's ask/deny always win. A project declares its CI;
+a check written for GitHub Actions skips out loud on any other pipeline, never
+silently. Links to its own served pages resolve through a declared web root,
+never through whatever the local disk holds.
+
+Push, in detail: `blueprint a2bp <file>` apply-to-blueprint — when a generic
+improvement lands in a project, it travels back to the blueprint so every
+other project inherits it next time they pull. It also carries a file the
+blueprint does not ship or does not have yet, marked "not shipped" for the
+reviewer, and refuses secrets (by name and by `gitleaks`), `.git` paths and
+project config before it contacts the remote.
+
+Guarded push, in detail: the same multiplier that spreads a good rule spreads
+a leaked one. So `a2bp` reverse-substitutes the project's name back to
+`{{PROJECT_NAME}}` and blocks on host paths, foreign state dirs, and any
+project name that survived. Suppressions are per-line and must carry a
+justification. The blueprint's own CI runs the same checker over every pushed
+diff's added lines, so `released` never advances over contamination that
+reached `main` another way.
+
+A request, not a delivery — and we say exactly what that buys: `a2bp` pushes
+to `a2bp/<project>/<hash>`, never to `main`, and has no verb that merges — it
+lands nothing, and a human merges the PR. It is not a wall around the
+blueprint — filing needs push access, so in a same-owner setup an agent could
+bypass the command. The discipline is what the tool does; making it a
+boundary needs a separate credential or a fork. Claiming more than that would
+be the kind of drift this deck exists to prevent.
+
+One door for outside work, in detail: a derived project reaches the blueprint
+only by filing a pull request, which `blueprint a2bp` does. The blueprint's
+own owner commits to `main` like anyone else: a PR is a request made of
+someone, and a repo where the author and the reviewer are the same person was
+gating that person against themselves. What protects `main` is the pre-push
+gate and the fact that a back-propagation still needs a human to merge it —
+not a ceremony the owner performs alone.
+-->
 
 ---
 
 # Blueprint sync — the CLI
 
-A single `blueprint` command, four subcommands:
+One `blueprint` command, four subcommands — installed once per machine, and
+it names no checkout.
 
 ```
-blueprint drift            # what's drifted vs the blueprint's fetched tip + commits since bootstrap
-blueprint pull [FILE...]   # pull blueprint changes forward (interactive, founder approves)
-blueprint a2bp FILE [...]  # apply-to-blueprint: stage a generic improvement upstream
-blueprint files            # list the blueprint-managed files (single source of truth)
+blueprint drift            # what's drifted vs the blueprint's fetched tip
+blueprint pull [FILE...]   # pull blueprint changes forward (founder approves)
+blueprint a2bp FILE [...]  # apply-to-blueprint: stage an improvement upstream
+blueprint files            # list the blueprint-managed files
 ```
 
-**One command per machine, and it names no checkout.** `bash scripts/install-toolchain.sh`
-writes `blueprint`, which runs the CLI of the project you stand in — so moving the
-blueprint cannot break it, and it never overwrites a command it did not write.
+- **What's managed is derived, not listed** — whatever the blueprint's `git
+  archive` ships, minus the seeds a project owns; `.gitattributes` alone decides
+- **Not managed** — `project_config_*.md`, `README.md`, `.gitignore`,
+  `BUGS.md`, `HANDOVER.md`, all source code
+- **Sync creates, updates, and — carefully — retires**: a file is deleted only
+  when the project's copy is still byte-identical to what the blueprint shipped
+- **Drift is detected on every session start**, never assumed away — an
+  unreachable blueprint is a loud "unknown," not a quiet "in sync"
 
-**What's managed** — **whatever the blueprint ships, and nobody lists it.** The
-managed set is derived from the blueprint's `git archive`, minus the seeds a
-project owns, so bootstrap and pull deliver the same files by construction and
-`.gitattributes` alone decides (TASK-021). That is `CLAUDE.md`, `DoD.md`, every
-recipe doc, the agent scripts, the pre-push hook, `AGENT_SIGNAL.md` — **and the
-shipped `tests/` suites**, because a suite that guards managed machinery has to
-move forward with the machinery it guards. What maintains the blueprint itself —
-this deck, the brand, the a2bp implementer's playbook, `CLAUDE.blueprint.md` —
-does not ship.
+<!--
+Install mechanism: `bash scripts/install-toolchain.sh` writes `blueprint`,
+which runs the CLI of the project you stand in — so moving the blueprint
+cannot break it, and it never overwrites a command it did not write.
 
-**What's NOT managed** — `project_config_*.md` (templates seeded once
-at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so
-project rules reach every Claude Code session — agents on other providers read
-them by instruction), `README.md`, `.gitignore`, `BUGS.md`, `HANDOVER.md`, all
-source code.
+What's managed, in detail: the managed set is derived from the blueprint's
+`git archive`, minus the seeds a project owns, so bootstrap and pull deliver
+the same files by construction and `.gitattributes` alone decides (TASK-021).
+That is `CLAUDE.md`, `DoD.md`, every recipe doc, the agent scripts, the
+pre-push hook, `AGENT_SIGNAL.md` — and the shipped `tests/` suites, because a
+suite that guards managed machinery has to move forward with the machinery it
+guards. What maintains the blueprint itself — this deck, the brand, the a2bp
+implementer's playbook, `CLAUDE.blueprint.md` — does not ship.
 
-**Two things that only work together.** Sync creates and updates. The project alone cannot tell "the blueprint dropped
-this" from "we wrote this", so deletion reads the *blueprint's* history instead:
-a full pull offers to **retire** a file the blueprint once shipped and no longer
-does, only when the project's copy is byte-identical to a shipped version, and
-an edited copy stays (TASK-021). And a file can be **half-managed**:
-`BLUEPRINT:BEGIN`/`END` markers split `.githooks/pre-push-project` into a
-blueprint region the pull replaces and a project region it preserves
-byte-for-byte. Without that split, a suite arrives with nothing to invoke it —
-two things that are only a suite together (BUG-029). There is deliberately no
-third: a suite used to also need a row in a `tests/SUITES.md` catalogue, and a
-second description of a test is a copy that drifts.
+What's not managed, in detail: `project_config_*.md` are templates seeded
+once at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so
+project rules reach every Claude Code session — agents on other providers
+read them by instruction. Also not managed: `README.md`, `.gitignore`,
+`BUGS.md`, `HANDOVER.md`, all source code.
 
-A Claude Code `SessionStart` hook (`scripts/session-start.sh`) starts the
-activity feed and runs `blueprint drift` on every session start, and agents
-without Claude hooks run the same two steps by hand. Drift between blueprint
-and project is treated like drift between code and prod: **detected, not
-assumed away**. And a check that could not run says so: when the blueprint's
-address cannot be read, nothing is compared, and the agent must not report the
-project as in sync.
+Two things that only work together: sync creates and updates. The project
+alone cannot tell "the blueprint dropped this" from "we wrote this", so
+deletion reads the blueprint's history instead — a full pull offers to retire
+a file the blueprint once shipped and no longer does, only when the project's
+copy is byte-identical to a shipped version, and an edited copy stays
+(TASK-021). And a file can be half-managed: `BLUEPRINT:BEGIN`/`END` markers
+split `.githooks/pre-push-project` into a blueprint region the pull replaces
+and a project region it preserves byte-for-byte. Without that split, a suite
+arrives with nothing to invoke it — two things that are only a suite together
+(BUG-029). There is deliberately no third: a suite used to also need a row in
+a `tests/SUITES.md` catalogue, and a second description of a test is a copy
+that drifts.
+
+Session-start hook: a Claude Code `SessionStart` hook (`scripts/session-start.sh`)
+starts the activity feed and runs `blueprint drift` on every session start,
+and agents without Claude hooks run the same two steps by hand. Drift between
+blueprint and project is treated like drift between code and prod: detected,
+not assumed away. And a check that could not run says so: when the
+blueprint's address cannot be read, nothing is compared, and the agent must
+not report the project as in sync.
+-->
 
 ---
 
@@ -445,24 +560,51 @@ describing it can only ever drift.
 
 # 2 · Lifecycle — how a change actually travels
 
-Eight rules, each the gate to the next (`docs/DoD.md` §1b):
+Eight rules, each the gate to the next (`docs/DoD.md` §1b) — from a backlog
+item to `waiting-acceptance/`.
 
-1. **All work refers to a backlog item** — `TASK-`, `FEATURE-` or `BUG-`. No exceptions, including a defect found mid-session
-2. **The row lands in `doing/` with the first work commit** — no separate filing or promotion commit
-3. **Implement and commit — one item per commit.** `.githooks/commit-msg` rejects a subject that does not start with its item (`BUG#20:`), and CI re-checks every commit of a push, along with each item's row and each BUG's test
-4. **Major bugs, core-path changes and new features get a review by an agent of the OTHER provider** — Claude’s work reviewed by Codex, Codex’s by Claude, on named commits. A finding becomes work only if it is real and practical; a hypothetical is one "known limit" line
-5. **All gates green** — no bypass flags
-6. **Land it** — a maintainer pushes to `main`; an outside contribution is a pull request
-7. **Landing with CI green moves it to `waiting-acceptance/`** — batched into the next work commit, never ahead of the push
-8. **Artefacts always travel with their parent item** — the half that gets forgotten, because a row is one line and a folder is not
+- **Every change names its item** (`TASK-`/`FEATURE-`/`BUG-`, no exceptions),
+  lands in `doing/` with its first commit, and ships **one item per commit**
+- **A major bug, core-path change or new feature is reviewed by the OTHER
+  provider** — Claude's work by Codex and back, on named commits
+- **All gates green, no bypass flags** — a maintainer lands it; CI green
+  moves it to `waiting-acceptance/`
+- **Artefacts always travel with their parent item** — the half that gets
+  forgotten
 
-> The review is not a preference where it applies. Across two changes the
-> cross-provider reviewer raised **15 findings, every one real** — including two
-> guards that passed because they watched the wrong thing, which is the error an
-> author cannot see by definition.
+> Across two changes the cross-provider reviewer raised **15 findings, every
+> one real** — including two guards that passed because they watched the
+> wrong thing, the error an author cannot see by definition.
+>
+> The lifecycle answers **"what has been delivered?"** — not "what has been
+> merged?" Those are different questions.
 
-> The lifecycle answers **"what has been delivered?"** —
-> not "what has been merged?" Those are different questions.
+<!--
+The eight rules in full:
+1. All work refers to a backlog item — TASK-, FEATURE- or BUG-. No
+   exceptions, including a defect found mid-session.
+2. The row lands in `doing/` with the first work commit — no separate filing
+   or promotion commit.
+3. Implement and commit — one item per commit. `.githooks/commit-msg` rejects
+   a subject that does not start with its item (`BUG#20:`), and CI re-checks
+   every commit of a push, along with each item's row and each BUG's test.
+4. Major bugs, core-path changes and new features get a review by an agent of
+   the OTHER provider — Claude's work reviewed by Codex, Codex's by Claude, on
+   named commits. A finding becomes work only if it is real and practical; a
+   hypothetical is one "known limit" line.
+5. All gates green — no bypass flags.
+6. Land it — a maintainer pushes to `main`; an outside contribution is a pull
+   request.
+7. Landing with CI green moves it to `waiting-acceptance/` — batched into the
+   next work commit, never ahead of the push.
+8. Artefacts always travel with their parent item — the half that gets
+   forgotten, because a row is one line and a folder is not.
+
+The review is not a preference where it applies. Across two changes the
+cross-provider reviewer raised 15 findings, every one real — including two
+guards that passed because they watched the wrong thing, which is the error
+an author cannot see by definition.
+-->
 
 ---
 
@@ -505,47 +647,54 @@ the diff exists — what a future reader (or `git blame`) actually needs.
 
 # 3 · Quality — the pre-push gate
 
-The shared `.githooks/pre-push` hook **blocks the push** if any step fails:
+The shared `.githooks/pre-push` hook **blocks the push** if any step fails —
+same hook, every project, no "I'll skip it just this once."
 
-1. Build (e.g. `tsc` — catches missing imports)
-2. Lint (`--max-warnings` ratcheted; never loosen)
-3. **Prettier `--check`** — fails on any unformatted file
-4. Tests + **coverage gate** (project's threshold)
-5. Project-specific guards (placeholder, asset, release-notes…), after the
-   blueprint-managed stages, which end with a **ShellCheck** lint of the shipped
-   shell scripts and a **typecheck** of `tests/` (pinned `tsc`), each through
-   the same scrub and the same function as CI, and then the vitest batch
+- **Build → lint → format → test+coverage → project guards** — five stages;
+  a push touching only `.md` files runs the text-only subset instead
+- **Renders as a pipeline** — one line per stage, then `PASSED`/`FAILED`; a
+  gate that doesn't run prints nothing, which is why the banner is the signal
+- **Per-stage timings make cost arguable, not guessed** — the expensive
+  suites moved to a release tier that CI runs instead
+- **Fails closed by construction** — a stage exits non-zero and the runner
+  exits, never a status silently dropped
 
-Same hook, every project. No "I'll skip pre-push just this once."
+> The local gate blocks; CI only reports. Both halves, one view.
 
-**A push that changes only `.md` files is text-only**: the secret scan, the DoD
-checklist and the document suites run, and every code stage skips with the
-reason `text-only push`. One file that is not `.md` gives the full gate.
+<!--
+Stages in full: (1) Build, e.g. `tsc` — catches missing imports. (2) Lint,
+`--max-warnings` ratcheted, never loosened. (3) Prettier `--check` — fails on
+any unformatted file. (4) Tests + coverage gate (project's threshold).
+(5) Project-specific guards (placeholder, asset, release-notes...), after the
+blueprint-managed stages, which end with a ShellCheck lint of the shipped
+shell scripts and a typecheck of `tests/` (pinned `tsc`), each through the
+same scrub and the same function as CI, and then the vitest batch.
 
-**It renders as a pipeline**, one line per stage with its status and duration,
-then a `PASSED` / `FAILED` summary — a failing stage prints exactly what the tool
-said, a passing one stays quiet. That is not decoration:
+Text-only pushes: a push that changes only `.md` files runs the secret scan,
+the DoD checklist and the document suites, and every code stage skips with
+the reason `text-only push`. One file that is not `.md` gives the full gate.
 
-- **A gate that does not run prints nothing, which looks exactly like a gate that
-  passed.** `core.hooksPath` is repo-local config, so a fresh clone has no gate
-  at all — and it can be wiped underneath a live checkout, which happened here on
-  2026-08-02 and sent one push out completely ungated. With a banner, its absence
-  is the signal.
-- **Per-stage timings make cost arguable instead of guessed.** There is no
-  wall-clock ceiling — the old 30 s one started *deciding what was tested*, and
-  a 41-assertion contamination suite left the gate for growing by 3.7 s, and
-  nothing said so. Now the few expensive suites are **release tier**, named
+Why the pipeline rendering is not decoration:
+- A gate that does not run prints nothing, which looks exactly like a gate
+  that passed. `core.hooksPath` is repo-local config, so a fresh clone has no
+  gate at all — and it can be wiped underneath a live checkout, which happened
+  here on 2026-08-02 and sent one push out completely ungated. With a banner,
+  its absence is the signal.
+- Per-stage timings make cost arguable instead of guessed. There is no
+  wall-clock ceiling — the old 30s one started deciding what was tested, and a
+  41-assertion contamination suite left the gate for growing by 3.7s, and
+  nothing said so. Now the few expensive suites are release tier, named
   `*.release.spec.ts`: they run in CI, which gates the `released` branch every
   project pulls, and the gate prints each one it leaves to CI. A manifest the
-  gate **enforces** fails the push if CI stops running any suite or the gate
-  stops running any other.
-- **It fails closed by construction** — a stage exits non-zero and the runner
-  exits, rather than returning a status one of ~18 call sites could drop. Tested
-  against non-zero exits, signals, missing binaries and a missing scratch dir.
+  gate enforces fails the push if CI stops running any suite or the gate stops
+  running any other.
+- It fails closed by construction — a stage exits non-zero and the runner
+  exits, rather than returning a status one of ~18 call sites could drop.
+  Tested against non-zero exits, signals, missing binaries and a missing
+  scratch dir.
 
-After the push, the **server side** streams the required checks as they land.
-Both halves, one view — with the distinction kept sharp: the local gate *blocks*,
-CI only *reports*.
+After the push, the server side streams the required checks as they land.
+-->
 
 ---
 

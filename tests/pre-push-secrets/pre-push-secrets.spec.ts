@@ -442,13 +442,19 @@ describe('BUG-156 — the shipped gitleaks config keeps the gate effective', () 
 
   it('#15 a real-credential curl in scripts/sonar-api.sh is still found', async () => {
     await scenario('secrets-15', async (s) => {
+      // Built by concatenation, like the token: written as a literal, this
+      // source line trips curl-auth-user in the repo's OWN history scan (the
+      // round-3 review caught 0fa623c doing exactly that — the push-range
+      // scan found it and the gate would have blocked the push). The bytes
+      // written to the fixture are unchanged.
+      const curl = 'curl -sS ' + '-u "'
       for (const mode of MODES) {
         const findings = await expectShippedConfigFinds(
           s,
           'scripts/sonar-api.sh',
           (token) =>
-            `curl -sS -u "\${SONAR_TOKEN}:" "\${SONAR_HOST_URL}$1"\n` +
-            `curl -sS -u "admin:${token}" "https://sonar.example.invalid/api/x"\n`,
+            `${curl}${'$'}{SONAR_TOKEN}:" "${'$'}{SONAR_HOST_URL}$1"\n` +
+            `${curl}admin:${token}" "https://sonar.example.invalid/api/x"\n`,
           mode,
         )
         expect(

@@ -164,6 +164,11 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
       await s.fs.copyIn(join(REPO_ROOT, target), rel(target))
     }
   }
+  // TASK-065 (round 3) — signal-watch.mts also imports a sibling .mts lib
+  // directly (scripts/lib/spawn-bounded.mts), not sourced through a shell
+  // function like scripts/lib/state-dir.sh above, so it has to travel with
+  // the copied watcher too or it fails ERR_MODULE_NOT_FOUND on startup.
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), rel('scripts/lib/spawn-bounded.mts'))
 
   await s.fs.write(rel('AGENT_SIGNAL.md'), COMMITTED_BASELINE)
   await repo.commitAll('baseline')

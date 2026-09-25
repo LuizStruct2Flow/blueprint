@@ -1,25 +1,28 @@
 /**
  * tests/helpers/shim.ts — BUG-144 commit 0, imports switched in TASK-081
- * slice 0.
+ * slice 0, moved to a shipping module in the same slice's fix-before-push.
  *
  * The two-line shim `scripts/shell-inventory-check.mts` enforces for a
  * migrated file (TASK-067): `tests/state-dir` and `tests/watcher-liveness`
  * use it to tell a migrated consumer from a legacy one and read the right
  * file.
  *
- * IMPORTED, NOT DUPLICATED. `scripts/shell-inventory-check.mts` used to run
- * `process.exit(main())` unconditionally at module load with nothing
- * exported, so importing it here would have torn down the vitest process
- * rather than handed back a function — this file carried a byte-for-byte
- * copy of `shimStem`/`shimContent`/`shimTargetPath`/`isValidShim` instead.
- * TASK-081 slice 0 (PLAN-TASK-081-blueprint-port.md §2 rule 2, §8) gives that
- * file an entry-point guard and exports the same helpers, which is exactly
- * what this file and the port's own unit tests need from it, so the copy is
- * retired: one definition, imported here.
+ * IMPORTED, NOT DUPLICATED — FROM A FILE THAT SHIPS. TASK-081 slice 0 first
+ * imported `shimStem`/`shimContent`/`shimTargetPath`/`isValidShim` from
+ * `scripts/shell-inventory-check.mts` itself, once that file gained an
+ * entry-point guard and exported them. That typechecked here, in the
+ * blueprint, but `scripts/shell-inventory-check.mts` is `export-ignore`d
+ * (blueprint-only enforcement machinery, CLAUDE.md "Shell to TypeScript,
+ * organically") while this file ships to every derived project — so a fresh
+ * bootstrap never has the module this file imported, and its typecheck (and
+ * tests/bootstrap-gate's release check) went red. The helpers live in
+ * `scripts/lib/shim.mts` instead, which ships like any other `scripts/lib/`
+ * module; both this file and the checker import the one definition from
+ * there, and neither needs the other's shipping status.
  */
 
 import { readFileSync } from 'node:fs'
-import { shimStem, shimContent, shimTargetPath, isValidShim } from '../../scripts/shell-inventory-check.mts'
+import { shimStem, shimContent, shimTargetPath, isValidShim } from '../../scripts/lib/shim.mts'
 
 export { shimStem, shimContent, shimTargetPath, isValidShim }
 

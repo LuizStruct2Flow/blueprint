@@ -116,13 +116,16 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**Unpushed on 2026-09-25 morning, reviewed by Codex (Jesko) round by round:**
-TASK-065 slices 4-5, its recorder timeout and its watcher bounds, its
-rotation-suite isolation, and TASK-081 slice 0 with its shim-module fix. Codex's
-last check found the bounds kill only the direct child, so a grandchild holding
-the pipe still blocks `spawnSync`; the fix (end the whole process tree) is in
-flight. Push after that fix gets a CLEAN check. Gemini's two review attempts
-on the 24th died on 503 "high demand", recorded as `unknown`, not `quota`.
+**State at 2026-09-25 ~10:40Z.** TASK-083 and TASK-085 landed (released at
+`88840f9`) and wait for acceptance. **Gemini is out of daily quota until
+2026-09-26 10:12Z**, recorded by the watcher itself as `quota`, so plan review
+runs on Codex + Kimi until then. In flight: BUG-151 (Matthias, Claude)
+implementing the plan Codex and Kimi approved with changes, in the main
+checkout. BUG-154 (Vitali, Claude) in a worktree. BUG-155 is scoped and
+queued behind TASK-081 (fix design in its row). Still open after those:
+TASK-081 slices 1-6, then BUG-152. BUG-146 waits for the next CI hang.
+**Pass `watch-ci.sh` the SHA from `git rev-parse HEAD`**, never a typed one:
+a guessed SHA watches nothing.
 
 **The watchers and the feed do not survive a reboot.** The founder plans one to
 clear `/tmp`. Afterwards the next Claude session's start hook restarts the feed,
@@ -131,7 +134,10 @@ but the watchers must be restarted by hand, one per provider:
 and the same for `kimi` and `gemini`. Check with
 `pgrep -af scripts/signal-watch.mts`. A watcher left running from before a code
 change runs the old code: restart it after pulling watcher changes (that is why
-the mic stranded until the restart at 2026-09-24 19:12Z).
+the mic stranded until the restart at 2026-09-24 19:12Z). It bit again on
+2026-09-25: a Codex review ran under a watcher started before TASK-083's
+launcher port, saw `TMPDIR` unset, and reported a release blocker that the
+new launcher does not have. The watchers were restarted at ~10:05Z.
 
 **Another session writes to this checkout.** On 2026-09-22 storm2flow's
 Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147

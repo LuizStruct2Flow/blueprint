@@ -1,6 +1,11 @@
 # PLAN — BUG-151: a roster tier must not resolve to a model the provider refuses
 
-**Status:** design only. No implementation is part of this document.
+**Status:** implemented. Cross-provider plan review (Alexey/Codex,
+Slava/Kimi, §2.1) returned APPROVE WITH CHANGES on both sides, with no
+disagreement between the two reviews; every amendment is folded into the
+mechanism this document now describes, and into
+`scripts/start-codex-signal-watch.mts` and
+`tests/codex-model-retry/codex-model-retry.spec.ts` on disk.
 
 **Refreshed 2026-09-25 against two things that changed since the first
 draft.** (1) The founder said "Fix them all" for everything in
@@ -189,6 +194,93 @@ rejected — it re-creates the staleness problem this bug is about, just moved
 to a file nothing refreshes. The exhaustion path A needs already exists and
 is already wired, so the only new code is the bounded retry itself.
 
+## 2.1 Plan review (Alexey/Codex, Slava/Kimi) — APPROVE WITH CHANGES
+
+Both reviewers agreed on five amendments to §2's Option A, checked
+independently against the code. All five are folded into the mechanism
+below, which is what `scripts/start-codex-signal-watch.mts` now implements
+(the `AGENT_WAKE_COMMAND` block from "THE MODEL AND EFFORT" through the
+final status report):
+
+1. **Remembered refusals, invalidated on `models_cache.json` change.**
+   `classifyOutput` returns `ok` for any exit-0 dispatch with no memory of
+   what failed on the way there, so a successful rank+1 fallback erases the
+   fact that rank N was refused — the next dispatch re-pays the same ~3s
+   round trip, and with the measured within-session cache instability a
+   refused slug can hold a top rank for many dispatches in a row. Built as
+   `$STATE_DIR/codex-refused-slugs.json`, `{cache_sig, refused: {slug:
+   feedLine}}`, keyed to the Codex cache file's own `mtime:size`
+   (`stat -c '%Y:%s'`) so a cache refresh forgets every remembered refusal
+   rather than misapplying one to a different model. jq or the file missing
+   degrades to "no memory" — fail-open, the same policy the rest of this
+   file already uses for a missing lib. This is in scope, not deferred: it
+   is the mechanism that turns a repeated dead 3s round trip into one.
+2. **One ranked-list snapshot per dispatch, bounding the retries; loud
+   failure if the resolved slug is absent.** The bug row itself measured the
+   rank→slug mapping reshuffling WITHIN a session (`frontier-2` = `gpt-6-
+   luna`, then `gpt-6-sol`, then `gpt-5.6-sol`, minutes apart) — a retry that
+   re-reads `bp_roster_codex_models` per iteration could skip a rank, revisit
+   a refused one, or walk off a list that moved under it. `CODEX_RANKED` is
+   read ONCE, right after the roster's own resolution; the loop's bound is
+   this snapshot's length (`RETRY_TOTAL`), never a re-read. If the just-
+   resolved `REQUESTED_MODEL` is not even ON this snapshot (the roster's own
+   read and this one landed on two different cache instants), the dispatch
+   is refused loudly (exit 8, same code the file already uses for a refused
+   dispatch) rather than silently walking a list the resolved slug never
+   belonged to.
+3. **Fallback visible in the run log AND the feed; a deterministic effort
+   policy.** `FEED_LABEL` is resolved once pre-dispatch and corrected only
+   post-run, so mid-run it still attributes work to the model that was just
+   refused — relabelling mid-run was rejected as the fix; instead every
+   fallback and every skip gets its own `feed_append` line (visible under
+   whatever label is currently showing), plus a `[roster] falling back to
+   rank N: <slug> effort=<e>` line in `RUN_LOG`. Effort: the fallback slug
+   keeps the originally-requested effort if it supports it, else its own
+   FIRST listed supported level in the CLI cache's own order — never an
+   invented rank of our own, stated in one place so a silent effort change
+   is never a surprise.
+4. **Fake-CLI fidelity in the reproducer.** A live refusal was captured
+   2026-09-25 (`codex exec --json -m gpt-6-luna ...`) as a **STDOUT** `--json`
+   event `{"type":"error","message":"<escaped JSON string carrying
+   status:400 and the exact 'is not supported' text>"}` — never the
+   pre-filtered `⚠`-prefixed line `codex-feed-filter.sh` derives from it, and
+   never on stderr. `tests/codex-model-retry`'s `STUB_CODEX` reproduces that
+   exact wire shape, with `--output-last-message` left unwritten on refusal
+   (matching BUG-143: a dead run never touches it). Two cases the review
+   asked for beyond the happy-path retry: an UNRELATED failure (a capacity-
+   shaped message, not the 400 refusal shape) proves the loop never retries
+   on it — one dispatch attempt, reported FAILED exactly as before this fix
+   — and a remembered refusal (point 1) is proved to be skipped WITHOUT
+   reaching the CLI a second time, by counting stub invocations.
+5. **The all-refused case driven through the real launcher, not an extracted
+   wake body.** A bug in how the retry loop's own exit status reaches
+   `signal-watch.mts`'s `recordDispatchOutcome` (e.g. a loop that swallows
+   the final non-zero exit) would classify total exhaustion as `ok` — exit 0
+   maps to `ok` unconditionally in `rotation.mts:216` — and nothing that
+   runs the extracted `AGENT_WAKE_COMMAND` string in isolation would catch
+   that, because the seam under test is what happens AFTER the wake command
+   returns. `tests/codex-model-retry`'s exhaustion case runs the actual
+   launcher shim end to end (`bash start-codex-signal-watch.sh --poll 1
+   --once`, the same shape `tests/scratch-tmpdir-dispatch` already proves
+   TMPDIR with) and reads `logs/state/rotation.log` afterward for
+   `"class":"persona"` — proving the existing, UNMODIFIED classifier still
+   fires off the real run-log slice the retry loop produced.
+
+**BUG-143 preservation, stated explicitly per the review.** The retry loop
+wraps the exact block that carries BUG-143's exit-status fix
+(`CODEX_STATUS_FILE`, written immediately after every `codex exec` exits,
+inside the loop body — not just the last attempt) and the honest
+`--output-last-message` in-progress marker (stamped once, before the loop,
+unchanged). Every one of N attempts gets its own status-file write; the
+dash/pipefail-loss fix BUG-143 built is exercised on every iteration, not
+bypassed by looping around it.
+
+**No disagreement, nothing deferred.** Both reviewers reached the same five
+points independently and found no daylight between them; point 1 (remembered
+refusals) was flagged as the largest new mechanism and an efficiency
+property rather than a correctness one, but "the plan should decide
+explicitly, not leave it implicit" — decided here: in scope, built.
+
 ## 3. Cost: does this touch a legacy shell file?
 
 **No, on a re-read against what TASK-083 and TASK-065 already shipped —
@@ -216,37 +308,46 @@ reversing what the first draft of this plan said.**
   this bug. None of them needs `roster.sh` to grow, shrink, or change
   behaviour for BUG-151.
 
-**So the fix, concretely, touches one already-ported file plus tests:**
+**So the fix, concretely, touches one already-ported file plus tests —
+implemented, per the founder's "fix them all" for `docs/doing/`:**
 
-1. **Reproducer (red).** A new spec alongside
-   `tests/codex-dispatch-status/` and `tests/roster-models/`, using the same
-   harness both already use: `extractWakeCommand` /
-   `unescapeTsShellText` (`tests/helpers/wake-command.ts`) to pull the live
-   `AGENT_WAKE_COMMAND` string out of `start-codex-signal-watch.mts`, a fake
-   `CODEX_BIN` standing in for the CLI, and a fake `CODEX_HOME` pointing at a
-   small `models_cache.json` built the way `tests/roster-models` already
-   builds one. Two cases: (a) rank 0 refused (fake `codex` exits non-zero
-   with the `{"type":"error","status":400,...is not supported...}` shape on
-   that slug, succeeds on rank 1) proves the dispatch still completes and
-   `RUN_LOG` shows both the skipped rank and the one actually used; (b)
-   every rank refused proves the launcher fails loudly (bounded, no hang)
-   and that the *existing, unmodified* `persona` classification in
-   `rotation.mts:237` still fires on the final failure, via
-   `scripts/signal-watch.mts`'s existing generic record call — nothing new
-   to assert there beyond "it still works," since Option C needed no
-   change. Both are red today: the current launcher has no retry, so a
-   rank-0 refusal is a dead dispatch full stop.
-2. **Fix.** Add the bounded retry loop to `AGENT_WAKE_COMMAND` in
-   `scripts/start-codex-signal-watch.mts` (the block currently around
-   lines 169-204, where `bp_roster_model_for_name`'s result is turned into
-   `-m`/`-c model_reasoning_effort=`), as described in §2. One file, no
-   shell port.
-3. **Proof.** Both reproducer cases from step 1 go green; existing
-   `tests/codex-dispatch-status`, `tests/codex-persona-label`,
-   `tests/roster-models` and `tests/dispatch-identity` stay green
-   unmodified (the retry only wraps the existing dispatch, it does not
-   change how the wake command resolves identity, labels, or the
-   exit-status pattern BUG-143 fixed).
+1. **Reproducer (red before the fix, proven by reverting the launcher to
+   `HEAD` and re-running).** `tests/codex-model-retry/codex-model-retry.spec.ts`,
+   in the shape `tests/scratch-tmpdir-dispatch` already proves out — a real
+   git-shaped fixture and the ACTUAL launcher shim run end to end
+   (`bash start-codex-signal-watch.sh --poll 1 --once`), never an extracted
+   wake body in isolation (review point 5). `STUB_CODEX` reproduces the
+   live wire shape captured 2026-09-25 (review point 4). Four cases:
+   - a refused rank 1 (`m1`) and rank 2 (`m2`) both fall back, the dispatch
+     completes on rank 3 (`m3`), and `RUN_LOG` shows both fallback lines;
+   - an unrelated, capacity-shaped failure triggers exactly one dispatch
+     attempt, never a retry;
+   - every rank refused: the dispatch FAILS loudly (bounded — the run does
+     not hang) and `logs/state/rotation.log` shows `"class":"persona"`,
+     recorded by the pre-existing, unmodified classifier via
+     `signal-watch.mts`'s generic `recordDispatchOutcome`;
+   - a remembered refusal (same `models_cache.json`, same account) is
+     skipped on a SECOND dispatch without reaching the stub CLI at all,
+     proven by counting stub invocations.
+
+   All four were run against the unfixed `HEAD` version of
+   `start-codex-signal-watch.mts` first: three failed exactly as the bug
+   predicts (single dead dispatch, no fallback, no persisted refusal), and
+   the "unrelated failure" case passed unchanged in both versions — a
+   sanity check that it is not a tautology, since single-shot behaviour on
+   a non-refusal failure was never what this bug changes.
+2. **Fix.** The bounded retry loop, the ranked-list snapshot, the
+   remembered-refusal cache and the exhaustion report, all inside
+   `AGENT_WAKE_COMMAND` in `scripts/start-codex-signal-watch.mts` — the
+   block from "THE MODEL AND EFFORT" through the final status report. One
+   file, no shell port, as §2.1 details.
+3. **Proof.** All four reproducer cases go green against the fixed launcher;
+   the existing `tests/codex-dispatch-status`, `tests/codex-persona-label`,
+   `tests/codex-session`, `tests/roster-models`, `tests/dispatch-identity`
+   and `tests/scratch-tmpdir-dispatch` suites (56 tests across all seven
+   files) stay green unmodified — none of their fixtures carries a Codex
+   Model cell, so the retry path they never touched before still does not
+   touch them.
 
 **Not in scope for BUG-151, flagged for plan review rather than assumed:**
 paying down `scripts/lib/roster.sh`'s legacy-shell status generally. The

@@ -125,6 +125,20 @@ const ROSTER_LIB = join(BP_CODE_ROOT, 'scripts/lib/roster.sh')
 const SIGNAL_SET = join(BP_CODE_ROOT, 'scripts/signal-set.sh')
 const ROTATION = join(BP_CODE_ROOT, 'scripts/rotation.mts')
 
+// TASK-065 (Codex four-eyes re-review): the recorder above was the FIRST
+// spawnSync this file bounded, not the only one that needed it. Every other
+// child this file spawns on the recovery path — roster resolution, the
+// signal-set.sh handback itself — sat unbounded the same way, so a hang in
+// ANY of them silenced recoverStrandedMic for every provider, the identical
+// BUG-001 class. These are all local shell-function calls (source a lib,
+// print one value; no network, no external process of their own), so the
+// same 5s bound applies for the same reason — generous for what they
+// actually do, small next to the watcher's poll cadence. Excluded on
+// purpose: the DISPATCHED wake command itself (`command`/`wakeCommand`,
+// below) — that one runs the agent's real work and is meant to take minutes,
+// not milliseconds; bounding it would break dispatch, not protect it.
+const SHELL_LIB_TIMEOUT_MS = 5_000
+
 function stateDirFn(
   fn: string,
   args: readonly string[],
@@ -140,6 +154,7 @@ function stateDirFn(
     env,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
+    timeout: SHELL_LIB_TIMEOUT_MS,
   })
   return { code: r.status ?? 1, stdout: (r.stdout ?? '').trim() }
 }
@@ -520,9 +535,23 @@ function recoverStrandedMic(
     // `sh` — this is the one lib here that actually needs bash.
     'bash',
     ['-c', `. "$1"; bp_roster_name_for_role "$2" Orchestrator`, 'bash', ROSTER_LIB, rosterRoot],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: SHELL_LIB_TIMEOUT_MS },
   )
   const orchestratorName = (orchestrator.stdout ?? '').trim()
+  // TASK-065: a timed-out spawnSync reports status: null and an `error` with
+  // code ETIMEDOUT (same contract verified for the rotation recorder above) —
+  // called out with its own message so the log says WHY resolution failed,
+  // not just that it did. Falls through to the same fail-safe below either
+  // way: never crash the watcher over an unresolved label, leaving the mic
+  // where it is is still strictly better than a crashed poller watching
+  // nothing.
+  if (orchestrator.error) {
+    process.stderr.write(
+      `signal-watch: ${dispatchedHolder}'s dispatch ended without handing back the mic, ` +
+        `and resolving the Orchestrator timed out after ${SHELL_LIB_TIMEOUT_MS}ms — leaving the mic where it is.\n`,
+    )
+    return
+  }
   // bp_roster_name_for_role already explained why on its own stderr
   // (inherited above, via bp_roster_warn) — never crash the watcher over an
   // unresolved label; leaving the mic where it is is still strictly better
@@ -569,8 +598,20 @@ function recoverStrandedMic(
   const result = spawnSync(
     'bash',
     [SIGNAL_SET, '--file', signalFile, '--holder', orchestratorName, '--state', 'OVER_TO_CLAUDE', '--task', task],
-    { stdio: 'inherit', env: { ...process.env, AGENT_ROSTER_FILE: rosterRoot } },
+    { stdio: 'inherit', env: { ...process.env, AGENT_ROSTER_FILE: rosterRoot }, timeout: SHELL_LIB_TIMEOUT_MS },
   )
+  // TASK-065: this is the actual mic-recovery write — signal-set.sh's own
+  // atomic rename. A timed-out spawnSync never completed that rename (its
+  // `error` carries ETIMEDOUT, same contract as every other bounded call in
+  // this file), so the mic was NOT recovered; say so explicitly rather than
+  // folding it into the generic "failed" branch below, which must never read
+  // as success either way.
+  if (result.error) {
+    process.stderr.write(
+      `signal-watch: recovering the mic to ${orchestratorName} timed out after ${SHELL_LIB_TIMEOUT_MS}ms — the mic was NOT recovered.\n`,
+    )
+    return
+  }
   if (result.status !== 0) {
     process.stderr.write(
       `signal-watch: recovering the mic to ${orchestratorName} failed (exit ${result.status ?? 'null'}) — see above.\n`,
@@ -642,6 +683,12 @@ function triggerIfNeeded(): boolean {
   // by name, so it is called out here too.
   const wakeCommand = process.env.AGENT_WAKE_COMMAND || process.env.CODEX_WAKE_COMMAND || ''
 
+  // TASK-065: deliberately UNBOUNDED, unlike every spawnSync above. This is
+  // the dispatched agent's actual work (a CLI run that legitimately takes
+  // minutes), not a local shell-function probe — a timeout here would abort
+  // real dispatches, not protect recovery. recoverStrandedMic (called once
+  // this returns, below) is what stays bounded so a hang IN the dispatched
+  // work still can't silence recovery.
   if (command.length > 0) {
     spawnSync(command[0] as string, command.slice(1), { stdio: 'inherit', env: childEnv })
   } else if (wakeCommand !== '') {
@@ -758,6 +805,7 @@ async function claimLock(): Promise<void> {
   const flockCmd = spawnSync('sh', ['-c', `. "$1"; bp_flock_cmd`, 'sh', WATCHER_LOCK_LIB], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: SHELL_LIB_TIMEOUT_MS,
   })
   const flock = (flockCmd.stdout ?? '').trim()
   // No flock resolvable on this host: bp_watch_hold's own contract is
@@ -773,7 +821,7 @@ async function claimLock(): Promise<void> {
   const lockPathResult = spawnSync(
     'sh',
     ['-c', `. "$1"; bp_watch_lock_path "$2" "$3"`, 'sh', WATCHER_LOCK_LIB, dirname(signalFile), targetState],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: SHELL_LIB_TIMEOUT_MS },
   )
   const lockPath = (lockPathResult.stdout ?? '').trim()
   if (lockPathResult.status !== 0 || lockPath === '') return

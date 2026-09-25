@@ -5,7 +5,8 @@
  * Parallelism hazard: `serial-timing` for #9 and #10 only, and the timing is the
  * SUBJECT's, not the test's — see the R4 note below. Everything else is fully
  * contained: each case owns its fixture repo, its shim directory and its
- * workspace, and no real gitleaks is ever invoked.
+ * workspace. The A-03 cases use a shim; the BUG-156 cases below deliberately
+ * invoke the real scanner against the repository's shipped config.
  *
  * THE DEFECT. The hook ran `gitleaks protect --staged`. `--staged` scans the git
  * INDEX, and at pre-push time the index is empty — the commit has already been
@@ -77,6 +78,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const HOOK = join(REPO_ROOT, '.githooks/pre-push')
+const GITLEAKS_CONFIG = join(REPO_ROOT, '.gitleaks.toml')
 const ZERO = '0000000000000000000000000000000000000000'
 
 describe('A-03 — the secret gate scans the pushed commits, not the empty index', () => {
@@ -386,6 +388,59 @@ describe('A-03 — the secret gate scans the pushed commits, not the empty index
     })
   })
 })
+
+describe('BUG-156 — the shipped gitleaks config keeps the gate effective', () => {
+  it('#12 the gate command finds a synthetic token with the repository config', async () => {
+    await scenario('secrets-12', async (s) => {
+      await expectShippedConfigFinds(s, 'credentials.txt')
+    })
+  })
+
+  it('#13 the gate command finds a synthetic token in tracked .env.example', async () => {
+    await scenario('secrets-13', async (s) => {
+      await expectShippedConfigFinds(s, '.env.example')
+    })
+  })
+})
+
+async function expectShippedConfigFinds(s: Scenario, plantedPath: string): Promise<void> {
+  const repo = await s.gitRepo('repo')
+  await s.fs.copyIn(GITLEAKS_CONFIG, 'repo/.gitleaks.toml')
+  await s.fs.write('repo/README.md', 'base\n')
+  await repo.commitAll('base')
+
+  // Constructed at runtime so this source file never contains a token literal
+  // that the very scanner under test would flag in the blueprint's history.
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const suffix = Array.from({ length: 36 }, (_, i) => alphabet[(i * 17) % alphabet.length]).join('')
+  const syntheticToken = ['ghp', '_', suffix].join('')
+  await s.fs.write(`repo/${plantedPath}`, `token=${syntheticToken}\n`)
+  await repo.commitAll(`plant synthetic token in ${plantedPath}`)
+
+  const base = await repo.git(['rev-parse', 'HEAD~1'])
+  const head = await repo.git(['rev-parse', 'HEAD'])
+  expect(base.code, `git rev-parse HEAD~1 failed\n${base.output}`).toBe(0)
+  expect(head.code, `git rev-parse HEAD failed\n${head.output}`).toBe(0)
+
+  // Byte-for-byte the command used by `_st_gitleaks`; running from the fixture
+  // root makes gitleaks auto-discover the copied repository config just as the
+  // real pre-push gate and CI do.
+  const result = await s.run(
+    'gitleaks',
+    [
+      'detect',
+      '--redact',
+      '--no-banner',
+      `--log-opts=${base.stdout.trim()}..${head.stdout.trim()}`,
+    ],
+    { cwd: repo.dir },
+  )
+
+  expect(
+    result.code,
+    `the shipped config let a synthetic token in ${plantedPath} pass the gate command\n${result.output}`,
+  ).toBe(1)
+}
 
 // ---------------------------------------------------------------------------
 // The fixture: a repo with two commits, the real hook, and shims for every

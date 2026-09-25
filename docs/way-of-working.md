@@ -374,8 +374,8 @@ concerns, plus the agent infra, live in one git repo, synced by one CLI.
   always read from the blueprint's fetched, CI-green `released` commit
 - **Push** — `blueprint a2bp <file>` sends a generic improvement back so
   every other project inherits it on its next pull
-- **Guarded** — `a2bp` scrubs project names, host paths and secrets before
-  it ever contacts the remote
+- **Guarded** — `a2bp` reverse-substitutes the project's name, blocks on
+  host paths, and refuses secrets — all before it ever contacts the remote
 - **A request, not a delivery** — it lands nothing; a human still merges the PR
 - **One door for outside work** — the blueprint owner commits straight to
   `main`; a pull request is what an *outside* contribution files
@@ -443,8 +443,8 @@ One `blueprint` command, four subcommands — installed once per machine, and
 it names no checkout.
 
 ```
-blueprint drift            # what's drifted vs the blueprint's fetched tip
-blueprint pull [FILE...]   # pull blueprint changes forward (founder approves)
+blueprint drift            # what's drifted vs the blueprint's fetched tip + commits since bootstrap
+blueprint pull [FILE...]   # pull blueprint changes forward (interactive, founder approves)
 blueprint a2bp FILE [...]  # apply-to-blueprint: stage an improvement upstream
 blueprint files            # list the blueprint-managed files
 ```
@@ -674,7 +674,9 @@ Text-only pushes: a push that changes only `.md` files runs the secret scan,
 the DoD checklist and the document suites, and every code stage skips with
 the reason `text-only push`. One file that is not `.md` gives the full gate.
 
-Why the pipeline rendering is not decoration:
+It renders as a pipeline, one line per stage with its status and duration,
+then a `PASSED`/`FAILED` summary — a failing stage prints exactly what the
+tool said, a passing one stays quiet. That is not decoration:
 - A gate that does not run prints nothing, which looks exactly like a gate
   that passed. `core.hooksPath` is repo-local config, so a fresh clone has no
   gate at all — and it can be wiped underneath a live checkout, which happened

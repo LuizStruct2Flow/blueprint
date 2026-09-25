@@ -453,4 +453,49 @@ describe('the settle window dispatches a wrong-order edit ONCE, on the Task that
       expect(hits, 'expected exactly two dispatches').toEqual(['round-one', 'round-two'])
     })
   })
+
+  it('#7 BUG-159 REPRODUCER — publish must not depend on the OPERATOR\'s own AGENT_ROSTER.md', async () => {
+    await scenario('dispatch-7', async (s) => {
+      // `publish` (above) calls the REAL scripts/signal-set.sh with no
+      // AGENT_ROSTER_FILE override. signal-set.sh resolves the roster it
+      // validates --holder against from `${AGENT_ROSTER_FILE:-$BP_STATE_ROOT}`
+      // (scripts/signal-set.sh:121), and BP_STATE_ROOT comes from
+      // `bp_state_root()`, which walks up from BP_CODE_ROOT — the SCRIPT'S OWN
+      // physical location (BASH_SOURCE, BUG-019), never this fixture's cwd or
+      // BP_STATE_ROOT_CEILING (scripts/lib/state-dir.sh). SETTER here is
+      // `join(REPO_ROOT, 'scripts/signal-set.sh')`, run in place rather than
+      // copied into the fixture (contrast tests/baton-durability's `fixture()`,
+      // which copies its own signal-set.sh and so is self-contained), so
+      // BP_CODE_ROOT is the REAL checkout and BP_STATE_ROOT resolves to it
+      // too — this repo's own `.blueprint-root` terminates the walk at the
+      // first step. The roster read is therefore always THIS machine's real,
+      // gitignored AGENT_ROSTER.md.
+      //
+      // Every other case in this file publishes as 'Jesko' or 'Eto' and
+      // passes ONLY because those happen to be personas on THIS engineer's
+      // roster (AGENT_ROSTER.md is per-engineer — CLAUDE.md "AGENT_ROSTER.md").
+      // A freshly bootstrapped project's seeded roster, or any other fleet,
+      // does not name them, and scripts/lib/roster.sh's
+      // bp_roster_backing_for_name then finds no match, so signal-set.sh's own
+      // guard (scripts/signal-set.sh:122-124) dies with "--holder '<name>' is
+      // not a persona in <roster>". A roster that is simply ABSENT degrades to
+      // a skipped, always-passing check (signal-set.sh:126) — it is a PRESENT
+      // roster that doesn't name the holder that fails, which is exactly what
+      // a fresh clone or a different fleet has.
+      //
+      // A holder name guaranteed to be on nobody's roster reproduces this
+      // without depending on — or needing to fabricate — any specific real
+      // roster's contents: it fails today for the same reason a fresh
+      // project's seeded roster would reject 'Jesko'/'Eto'.
+      const d = await dispatcher(s, 'd7')
+      await d.publish('Bug159Reproducer', 'ACTIVE', 'reproducer task')
+
+      const signal = await s.fs.read('d7/state/AGENT_SIGNAL.md')
+      expect(
+        signal,
+        'the fixture holder was not published — signal-set.sh rejected it against ' +
+          'the REAL operator roster, which is BUG-159',
+      ).toContain('| Holder | Bug159Reproducer |')
+    })
+  })
 })

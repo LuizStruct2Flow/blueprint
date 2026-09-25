@@ -157,8 +157,9 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   }
   // BUG-144 — a migrated script's shim execs a sibling `.mts` (TASK-067).
   // Copy it too WHEN ONE EXISTS, so this out-of-tree fixture can still run
-  // it; same pattern as tests/watcher-liveness's liveRepo().
-  for (const script of ['scripts/signal-watch.sh']) {
+  // it; same pattern as tests/watcher-liveness's liveRepo(). TASK-083 added
+  // start-codex-signal-watch.sh to the migrated set.
+  for (const script of ['scripts/signal-watch.sh', 'scripts/start-codex-signal-watch.sh']) {
     const target = shimTargetPath(script)
     if (existsSync(join(REPO_ROOT, target))) {
       await s.fs.copyIn(join(REPO_ROOT, target), rel(target))
@@ -169,6 +170,9 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   // function like scripts/lib/state-dir.sh above, so it has to travel with
   // the copied watcher too or it fails ERR_MODULE_NOT_FOUND on startup.
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), rel('scripts/lib/spawn-bounded.mts'))
+  // TASK-083 — the ported start-codex-signal-watch.mts imports
+  // scripts/lib/find-bin.mts directly for its binary discovery.
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/find-bin.mts'), rel('scripts/lib/find-bin.mts'))
 
   await s.fs.write(rel('AGENT_SIGNAL.md'), COMMITTED_BASELINE)
   await repo.commitAll('baseline')

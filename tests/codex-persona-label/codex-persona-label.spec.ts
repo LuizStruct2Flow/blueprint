@@ -81,6 +81,8 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
+import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command.js'
 
 /**
  * The tree under test.
@@ -93,8 +95,10 @@ import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
  */
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
-const LAUNCHER = join(SUBJECT, 'scripts', 'start-codex-signal-watch.sh')
-const GEMINI_LAUNCHER = join(SUBJECT, 'scripts', 'start-gemini-signal-watch.sh')
+// TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET
+// (resolveConsumer follows the shim), same as tests/state-dir.
+const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
+const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.sh')?.rel ?? 'scripts/start-gemini-signal-watch.sh')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
@@ -111,7 +115,8 @@ const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
  */
 async function code(path: string): Promise<string> {
   const raw = await readFile(path, 'utf8').catch(() => '')
-  return raw.replace(/^[ \t]*#.*$/gm, '')
+  const stripped = raw.replace(/^[ \t]*#.*$/gm, '')
+  return path.endsWith('.mts') ? unescapeTsShellText(stripped) : stripped
 }
 
 /**
@@ -333,7 +338,7 @@ describe('BUG-021 — Codex output carries the persona that produced it', () => 
       await s.fs.write('gemini-state/AGENT_ROSTER.md', FIXTURE_ROSTER)
       const gemini = await s.fs.write('fake-gemini.sh', '#!/bin/sh\nprintf "gemini says hello\\n"\n', { mode: 0o755 })
       const source = await readFile(GEMINI_LAUNCHER, 'utf8')
-      const wake = source.match(/export AGENT_WAKE_COMMAND='\n([\s\S]*?)\n'\n\nexec /)?.[1]
+      const wake = extractWakeCommand(source)
       expect(wake, 'could not extract Gemini dispatch body from its launcher').toBeDefined()
 
       const r = await s.run('bash', ['-c', 'export AGENT_SIGNAL_HOLDER=Slava AGENT_SIGNAL_TASK="label this Gemini dispatch" AGENT_FEED_LOG="$2"; exec bash -c "$1"', 'x', wake!, feed], {

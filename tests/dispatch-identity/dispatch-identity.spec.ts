@@ -40,6 +40,8 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario } from '../harness/index.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
+import { resolveConsumer } from '../helpers/shim.js'
+import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command.js'
 
 /**
  * The tree under test. REPO_ROOT for an ordinary run; `BP_SPEC_ROOT` repoints
@@ -47,15 +49,20 @@ import { feedFixture } from '../helpers/feed-fixture.js'
  */
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
-const CODEX_LAUNCHER = join(SUBJECT, 'scripts', 'start-codex-signal-watch.sh')
-const GEMINI_LAUNCHER = join(SUBJECT, 'scripts', 'start-gemini-signal-watch.sh')
-const KIMI_LAUNCHER = join(SUBJECT, 'scripts', 'start-kimi-signal-watch.sh')
+// TASK-083 — a migrated launcher is a two-line shim; the static checks below
+// read its `.mts` TARGET (resolveConsumer follows the shim), same as
+// tests/state-dir. A not-yet-migrated launcher resolves to its own `.sh`
+// unchanged.
+const CODEX_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
+const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.sh')?.rel ?? 'scripts/start-gemini-signal-watch.sh')
+const KIMI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-kimi-signal-watch.sh')?.rel ?? 'scripts/start-kimi-signal-watch.sh')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 
 /** A script's source with comments stripped — the static checks need the code. */
 async function code(path: string): Promise<string> {
   const raw = await readFile(path, 'utf8').catch(() => '')
-  return raw.replace(/^[ \t]*#.*$/gm, '')
+  const stripped = raw.replace(/^[ \t]*#.*$/gm, '')
+  return path.endsWith('.mts') ? unescapeTsShellText(stripped) : stripped
 }
 
 /**
@@ -82,7 +89,7 @@ const FIXTURE_ROSTER = `# Roster
  */
 async function extractWake(launcherPath: string): Promise<string> {
   const src = await readFile(launcherPath, 'utf8')
-  const wake = src.match(/export AGENT_WAKE_COMMAND='\n([\s\S]*?)\n'\n\nexec /)?.[1]
+  const wake = extractWakeCommand(src)
   expect(wake, `could not extract the dispatch body from ${launcherPath}`).toBeDefined()
   return wake!
 }

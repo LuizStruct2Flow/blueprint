@@ -40,15 +40,19 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
+import { unescapeTsShellText } from '../helpers/wake-command.js'
 
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
-const LAUNCHER = join(SUBJECT, 'scripts', 'start-codex-signal-watch.sh')
+// TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET.
+const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
 const LIB = join(SUBJECT, 'scripts', 'lib', 'codex-session.sh')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
 async function code(path: string): Promise<string> {
   const raw = await readFile(path, 'utf8').catch(() => '')
-  return raw.replace(/^[ \t]*#.*$/gm, '')
+  const stripped = raw.replace(/^[ \t]*#.*$/gm, '')
+  return path.endsWith('.mts') ? unescapeTsShellText(stripped) : stripped
 }
 
 /** A rollout record, shaped like the real file: `session_meta` first, then one

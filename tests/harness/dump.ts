@@ -141,6 +141,8 @@ async function findPipeHolders(all: ProcRow[], pipeIds: string[]): Promise<PipeH
     try {
       entries = await readdir(`/proc/${row.pid}/fd`)
     } catch {
+      // The pid exited mid-scan, or the OS refuses its fd table: skip it,
+      // unreported — a dump must never throw on a best-effort net.
       continue
     }
     for (const fd of entries) {

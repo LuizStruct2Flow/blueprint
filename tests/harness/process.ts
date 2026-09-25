@@ -58,6 +58,8 @@ async function childPipeId(pid: number, fdNum: number): Promise<string | undefin
     try {
       return await readlink(`/proc/${pid}/fd/${fdNum}`)
     } catch {
+      // A transient EACCES right after spawn (see above): retry, and after the
+      // last try return undefined rather than throw — capture is best-effort.
       await new Promise((r) => setTimeout(r, 20))
     }
   }

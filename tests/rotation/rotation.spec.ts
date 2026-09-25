@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { spawn, spawnSync } from 'node:child_process'
+import { REPO_ROOT, scenario, type Scenario, type RunResult } from '../harness/index.js'
 
-const ROTATION_URL = pathToFileURL(join(process.cwd(), '..', 'scripts', 'rotation.mts')).href
+const ROTATION_SCRIPT = join(REPO_ROOT, 'scripts', 'rotation.mts')
+const ROTATION_URL = pathToFileURL(ROTATION_SCRIPT).href
 
 async function subject(): Promise<any> {
   return import(ROTATION_URL)
@@ -26,19 +26,16 @@ const FIXTURE_ROSTER = `## Members
 | Back-End-4 (junior) | Nils | Ollama | local |
 `
 
-async function runCli(stateDir: string, roster: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  const result = spawnSync(process.execPath, [new URL(ROTATION_URL).pathname, ...args], {
-    env: { ...process.env, AGENT_STATE_HOME: stateDir, AGENT_ROSTER_FILE: roster },
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+async function runCli(s: Scenario, stateDir: string, roster: string, args: string[]): Promise<RunResult> {
+  return s.run(process.execPath, [ROTATION_SCRIPT, ...args], {
+    cwd: stateDir,
+    env: { AGENT_STATE_HOME: stateDir, AGENT_ROSTER_FILE: roster },
   })
-  return { code: result.status ?? -1, stdout: result.stdout, stderr: result.stderr }
 }
 
-async function selectorFixture(): Promise<{ dir: string; roster: string }> {
-  const dir = await mkdtemp(join(tmpdir(), 'rotation-selector-'))
-  const roster = join(dir, 'roster.md')
-  await writeFile(roster, FIXTURE_ROSTER)
+async function selectorFixture(s: Scenario): Promise<{ dir: string; roster: string }> {
+  const dir = await s.fs.mkdirp('selector')
+  const roster = await s.fs.write('selector/roster.md', FIXTURE_ROSTER)
   return { dir, roster }
 }
 
@@ -115,108 +112,121 @@ describe('TASK-065 rotation event log', () => {
   })
 
   it('ignores a torn final record and reports a malformed complete record', async () => {
-    const { readEvents } = await subject()
-    const dir = await mkdtemp(join(tmpdir(), 'rotation-read-'))
-    const log = join(dir, 'rotation.log')
-    await writeFile(log, '{"ev":"retry","provider":"Codex","reason":"x"}\nnot-json\n{"ev":"retry"')
-    const errors: string[] = []
-    const events = readEvents(log, (line: string) => errors.push(line))
+    await scenario('rotation-read', async (s) => {
+      const { readEvents } = await subject()
+      const log = await s.fs.write(
+        'read/rotation.log',
+        '{"ev":"retry","provider":"Codex","reason":"x"}\nnot-json\n{"ev":"retry"',
+      )
+      const errors: string[] = []
+      const events = readEvents(log, (line: string) => errors.push(line))
 
-    expect(events).toHaveLength(1)
-    expect(errors).toEqual([expect.stringContaining('line 2')])
+      expect(events).toHaveLength(1)
+      expect(errors).toEqual([expect.stringContaining('line 2')])
+    })
   })
 
   it('appends twenty concurrent records as twenty intact JSON lines', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'rotation-append-'))
-    const output = join(dir, 'output.log')
-    await writeFile(output, '[2026-09-24T10:00:00Z] provider finished\n')
-    const script = new URL(ROTATION_URL)
-    await Promise.all(Array.from({ length: 20 }, (_, i) => new Promise<void>((resolve, reject) => {
-      const child = spawn(process.execPath, [script.pathname, 'record', `Persona-${i}`, '--output', output, '--exit', '0'], {
-        env: { ...process.env, AGENT_STATE_HOME: dir, AGENT_PROVIDER: `Provider-${i}` },
-        stdio: 'ignore',
-      })
-      child.on('error', reject)
-      child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`record exited ${code}`)))
-    })))
+    await scenario('rotation-append', async (s) => {
+      const dir = await s.fs.mkdirp('append')
+      const output = await s.fs.write('append/output.log', '[2026-09-24T10:00:00Z] provider finished\n')
+      await Promise.all(Array.from({ length: 20 }, (_, i) =>
+        s.run(process.execPath, [ROTATION_SCRIPT, 'record', `Persona-${i}`, '--output', output, '--exit', '0'], {
+          cwd: dir,
+          env: { AGENT_STATE_HOME: dir, AGENT_PROVIDER: `Provider-${i}` },
+        }),
+      ))
 
-    const lines = (await readFile(join(dir, 'rotation.log'), 'utf8')).trimEnd().split('\n')
-    expect(lines).toHaveLength(20)
-    expect(lines.map((line) => JSON.parse(line).persona).sort()).toEqual(
-      Array.from({ length: 20 }, (_, i) => `Persona-${i}`).sort(),
-    )
+      const lines = (await s.fs.read('append/rotation.log')).trimEnd().split('\n')
+      expect(lines).toHaveLength(20)
+      expect(lines.map((line) => JSON.parse(line).persona).sort()).toEqual(
+        Array.from({ length: 20 }, (_, i) => `Persona-${i}`).sort(),
+      )
+    })
   })
 
   it('rotates a family in roster order, wraps, and is idempotent for one item', async () => {
-    const { dir, roster } = await selectorFixture()
-    const first = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-1'])
-    const same = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-1'])
-    const second = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-2'])
-    const third = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-3'])
-    const wrapped = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-4'])
-    expect(first.code, first.stderr).toBe(0)
-    const events = (await readFile(join(dir, 'rotation.log'), 'utf8')).trim().split('\n')
-    expect(events).toHaveLength(4)
-    expect([first.stdout, same.stdout, second.stdout, third.stdout, wrapped.stdout]).toEqual([
-      'Matthias\tClaude Code\tBack-End\n',
-      'Matthias\tClaude Code\tBack-End\n',
-      'Andreas\tCodex\tBack-End\n',
-      'Jonathan\tKimi\tBack-End\n',
-      'Matthias\tClaude Code\tBack-End\n',
-    ])
+    await scenario('rotation-rotate', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      const first = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-1'])
+      const same = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-1'])
+      const second = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-2'])
+      const third = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-3'])
+      const wrapped = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-4'])
+      expect(first.code, first.stderr).toBe(0)
+      const events = (await readFile(join(dir, 'rotation.log'), 'utf8')).trim().split('\n')
+      expect(events).toHaveLength(4)
+      expect([first.stdout, same.stdout, second.stdout, third.stdout, wrapped.stdout]).toEqual([
+        'Matthias\tClaude Code\tBack-End\n',
+        'Matthias\tClaude Code\tBack-End\n',
+        'Andreas\tCodex\tBack-End\n',
+        'Jonathan\tKimi\tBack-End\n',
+        'Matthias\tClaude Code\tBack-End\n',
+      ])
+    })
   })
 
   it('keeps an item on its provider across families and excludes that provider from review', async () => {
-    const { dir, roster } = await selectorFixture()
-    await runCli(dir, roster, ['assign', 'Andreas', '--item', 'TASK-5', '--reason', 'founder chose Codex'])
-    expect((await runCli(dir, roster, ['next', 'QA', '--item', 'TASK-5'])).stdout).toBe('Jesko\tCodex\tQA\n')
-    expect((await runCli(dir, roster, ['review', 'QA', '--item', 'TASK-5'])).stdout).toBe('Vijay\tKimi\tQA\n')
+    await scenario('rotation-cross-family', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      await runCli(s, dir, roster, ['assign', 'Andreas', '--item', 'TASK-5', '--reason', 'founder chose Codex'])
+      expect((await runCli(s, dir, roster, ['next', 'QA', '--item', 'TASK-5'])).stdout).toBe('Jesko\tCodex\tQA\n')
+      expect((await runCli(s, dir, roster, ['review', 'QA', '--item', 'TASK-5'])).stdout).toBe('Vijay\tKimi\tQA\n')
+    })
   })
 
   it('skips an out provider with evidence, selects unproven as a probe, and records capability skips', async () => {
-    const { dir, roster } = await selectorFixture()
-    await writeFile(join(dir, 'rotation.log'),
-      JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona: 'Matthias', provider: 'Claude Code', class: 'quota', evidence: 'session limit', source: 'claude@0', until: '2099-01-01T00:00:00Z' }) + '\n' +
-      JSON.stringify({ ev: 'retry', at: '2026-09-24T10:01:00Z', provider: 'Codex', reason: 'credits purchased' }) + '\n',
-    )
-    const result = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-6', '--skip', 'Jonathan=cannot verify fixture'])
-    expect(result.stdout).toBe('Andreas\tCodex\tBack-End\n')
-    expect(result.stderr).toContain('session limit')
-    expect(result.stderr).toContain('dispatch is the probe')
-    expect(await readFile(join(dir, 'rotation.log'), 'utf8')).toContain('cannot verify fixture')
+    await scenario('rotation-skip', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      await s.fs.write('selector/rotation.log',
+        JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona: 'Matthias', provider: 'Claude Code', class: 'quota', evidence: 'session limit', source: 'claude@0', until: '2099-01-01T00:00:00Z' }) + '\n' +
+        JSON.stringify({ ev: 'retry', at: '2026-09-24T10:01:00Z', provider: 'Codex', reason: 'credits purchased' }) + '\n',
+      )
+      const result = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-6', '--skip', 'Jonathan=cannot verify fixture'])
+      expect(result.stdout).toBe('Andreas\tCodex\tBack-End\n')
+      expect(result.stderr).toContain('session limit')
+      expect(result.stderr).toContain('dispatch is the probe')
+      expect(await readFile(join(dir, 'rotation.log'), 'utf8')).toContain('cannot verify fixture')
+    })
   })
 
   it('never spills into another family when nobody in the requested family is eligible', async () => {
-    const { dir, roster } = await selectorFixture()
-    const refused = [['Matthias', 'Claude Code'], ['Andreas', 'Codex'], ['Jonathan', 'Kimi']]
-    await writeFile(join(dir, 'rotation.log'), refused.map(([persona, provider]) => JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona, provider, class: 'persona', evidence: `${persona} out`, source: 'fixture@0' })).join('\n') + '\n')
-    const result = await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-7'])
-    expect(result.code).toBe(3)
-    expect(result.stdout).toBe('')
-    expect(result.stderr).toContain('Back-End')
-    expect(result.stderr).not.toContain('Klaus')
+    await scenario('rotation-no-spill', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      const refused = [['Matthias', 'Claude Code'], ['Andreas', 'Codex'], ['Jonathan', 'Kimi']]
+      await s.fs.write('selector/rotation.log', refused.map(([persona, provider]) => JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona, provider, class: 'persona', evidence: `${persona} out`, source: 'fixture@0' })).join('\n') + '\n')
+      const result = await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-7'])
+      expect(result.code).toBe(3)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain('Back-End')
+      expect(result.stderr).not.toContain('Klaus')
+    })
   })
 
   it('reports single-provider coverage and refuses same-provider four-eyes', async () => {
-    const { dir, roster } = await selectorFixture()
-    await runCli(dir, roster, ['assign', 'Klaus', '--item', 'TASK-8', '--reason', 'PO work'])
-    const coverage = await runCli(dir, roster, ['coverage', 'PO'])
-    expect(coverage.stdout).toContain('no rotation')
-    const review = await runCli(dir, roster, ['review', 'PO', '--item', 'TASK-8'])
-    expect(review.code).toBe(4)
-    expect(review.stderr).toContain('waiver is the founder\'s')
+    await scenario('rotation-coverage', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      await runCli(s, dir, roster, ['assign', 'Klaus', '--item', 'TASK-8', '--reason', 'PO work'])
+      const coverage = await runCli(s, dir, roster, ['coverage', 'PO'])
+      expect(coverage.stdout).toContain('no rotation')
+      const review = await runCli(s, dir, roster, ['review', 'PO', '--item', 'TASK-8'])
+      expect(review.code).toBe(4)
+      expect(review.stderr).toContain('waiver is the founder\'s')
+    })
   })
 
   it('reassigns an item whose provider went out and keeps juniors in their literal family', async () => {
-    const { dir, roster } = await selectorFixture()
-    await runCli(dir, roster, ['assign', 'Andreas', '--item', 'TASK-9', '--reason', 'seed'])
-    await writeFile(join(dir, 'rotation.log'), (await readFile(join(dir, 'rotation.log'), 'utf8')) + JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona: 'Andreas', provider: 'Codex', class: 'quota', evidence: 'usage limit', source: 'run@0', until: '2099-01-01T00:00:00Z' }) + '\n')
-    expect((await runCli(dir, roster, ['next', 'Back-End', '--item', 'TASK-9'])).stdout).toBe('Jonathan\tKimi\tBack-End\n')
-    expect((await runCli(dir, roster, ['next', 'Back-End-4 (junior)', '--item', 'TASK-10'])).stdout).toBe('Nils\tOllama\tBack-End-4 (junior)\n')
+    await scenario('rotation-reassign', async (s) => {
+      const { dir, roster } = await selectorFixture(s)
+      await runCli(s, dir, roster, ['assign', 'Andreas', '--item', 'TASK-9', '--reason', 'seed'])
+      await s.fs.write('selector/rotation.log', (await readFile(join(dir, 'rotation.log'), 'utf8')) + JSON.stringify({ ev: 'outcome', at: '2026-09-24T10:00:00Z', persona: 'Andreas', provider: 'Codex', class: 'quota', evidence: 'usage limit', source: 'run@0', until: '2099-01-01T00:00:00Z' }) + '\n')
+      expect((await runCli(s, dir, roster, ['next', 'Back-End', '--item', 'TASK-9'])).stdout).toBe('Jonathan\tKimi\tBack-End\n')
+      expect((await runCli(s, dir, roster, ['next', 'Back-End-4 (junior)', '--item', 'TASK-10'])).stdout).toBe('Nils\tOllama\tBack-End-4 (junior)\n')
+    })
   })
 
   it('pins every launcher run-log name to the watcher derivation', async () => {
-    const root = join(process.cwd(), '..')
+    const root = REPO_ROOT
     const watcher = await readFile(join(root, 'scripts', 'signal-watch.mts'), 'utf8')
     expect(watcher).toContain("state.replace(/^OVER_TO_/, '').toLowerCase()}-runs.log")
     for (const provider of ['codex', 'kimi', 'gemini']) {

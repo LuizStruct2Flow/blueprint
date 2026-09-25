@@ -253,6 +253,12 @@ const ENV_KIND = {
   AGENT_PERSONA: 'opaque',
   AGENT_BACKING: 'opaque',
   AGENT_GATE_PROFILE: 'opaque',
+  // AGENT_PROVIDER — scripts/rotation.mts:258's override of the roster-derived
+  // provider label for a `record` call. Same kind as AGENT_PERSONA just above:
+  // a NAME, not a path, names nothing on disk and activates nothing else.
+  // tests/rotation's TASK-065 concurrent-append case sets a distinct one per
+  // spawned record so 20 concurrent writers can be told apart in the log.
+  AGENT_PROVIDER: 'opaque',
   // AGENT_CI_WATCH IS A BEHAVIOURAL SWITCH, NOT A LABEL, and 'inert' was wrong
   // for it in both directions. .githooks/pre-push:569 backgrounds
   // scripts/watch-ci.sh when "${AGENT_CI_WATCH:-1}" is 1 — so an INHERITED 1

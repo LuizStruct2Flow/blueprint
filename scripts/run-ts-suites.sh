@@ -146,24 +146,42 @@ ts_scrubbed(){
     # every invocation. Signals too — INT/TERM/HUP would otherwise kill this
     # shell before cleanup, same leak, so they are trapped and cleaned up
     # before being re-raised.
+    #
+    # THE TRAPS LIVE IN A SUBSHELL, NEVER IN THIS FUNCTION'S OWN SHELL.
+    # ts_scrubbed is sourced, so this function runs in the CALLER's shell —
+    # `trap ... SIGNAL` set here would overwrite whatever trap that caller had
+    # already installed for its own reasons, and the later `trap - INT TERM
+    # HUP` would then discard it for good. Every caller today happens to be a
+    # fresh shell with no trap of its own, which is exactly why this went
+    # unnoticed: a sourced library must not assume that. Wrapping the whole
+    # thing in `( … )` gives the traps their own, disposable shell — the
+    # caller's trap table is untouched no matter what this does.
     if [ -n "$_ts_new_tmpdir" ]; then
-      trap '_ts_tmpdir_sig_cleanup INT' INT
-      trap '_ts_tmpdir_sig_cleanup TERM' TERM
-      trap '_ts_tmpdir_sig_cleanup HUP' HUP
-      _ts_rc=0
-      ( _ts_scrub_env; exec "$@" ) || _ts_rc=$?
-      trap - INT TERM HUP
-      rm -rf "$_ts_new_tmpdir"
-      return "$_ts_rc"
+      (
+        trap '_ts_tmpdir_sig_cleanup INT' INT
+        trap '_ts_tmpdir_sig_cleanup TERM' TERM
+        trap '_ts_tmpdir_sig_cleanup HUP' HUP
+        _ts_rc=0
+        ( _ts_scrub_env; exec "$@" ) || _ts_rc=$?
+        trap - INT TERM HUP
+        rm -rf "$_ts_new_tmpdir"
+        exit "$_ts_rc"
+      )
+      return $?
     fi
   fi
   ( _ts_scrub_env; exec "$@" )
 }
 
 # _ts_tmpdir_sig_cleanup SIGNAL — remove this invocation's redirected TMPDIR,
-# restore the signal's default disposition, then re-raise it against this
-# shell, so an interrupted run still terminates the way the caller expects
-# (e.g. 130 for INT) instead of silently swallowing the signal.
+# restore the signal's default disposition, then re-raise it via `$$`. `$$` is
+# fixed at the top-level shell's pid for the lifetime of the process, even
+# from inside the subshell this runs in (measured: dash does not rebind it per
+# fork) — which is exactly the process a caller is watching, so re-raising
+# against it is what makes the caller's own process actually die BY THE
+# SIGNAL (not merely exit with a 128+n code), the way an interrupted run is
+# expected to.
+
 _ts_tmpdir_sig_cleanup(){
   trap - INT TERM HUP
   rm -rf "$_ts_new_tmpdir"

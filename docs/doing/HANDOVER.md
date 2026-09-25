@@ -116,17 +116,22 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**Evening of 2026-09-24, still unpushed and owed a non-Claude review:**
-TASK-065 slices 4-5 (`dcc066d`, `e07c961`, written by Claude after Andreas ran
-out mid-item) and TASK-081 slice 0 (`4c25b50`). Codex's quota returns at 00:32
-local on 2026-09-25; the brief is `.scratch/brief-review-065-081s0.md`, for
-Jesko. The founder chose to try Gemma (Gemini) first: two attempts, 21:48 and
-22:09, both died on Gemini 503 "high demand" (not quota), and the rotation
-correctly recorded them as `unknown`. Push only after a CLEAN review.
+**Unpushed on 2026-09-25 morning, reviewed by Codex (Jesko) round by round:**
+TASK-065 slices 4-5, its recorder timeout and its watcher bounds, its
+rotation-suite isolation, and TASK-081 slice 0 with its shim-module fix. Codex's
+last check found the bounds kill only the direct child, so a grandchild holding
+the pipe still blocks `spawnSync`; the fix (end the whole process tree) is in
+flight. Push after that fix gets a CLEAN check. Gemini's two review attempts
+on the 24th died on 503 "high demand", recorded as `unknown`, not `quota`.
 
-**The watchers were restarted on 2026-09-24 19:12Z** onto current code: until
-then they ran pre-BUG-150 code and stranded the mic on every provider failure.
-Since the restart the mic has come back on its own each time.
+**The watchers and the feed do not survive a reboot.** The founder plans one to
+clear `/tmp`. Afterwards the next Claude session's start hook restarts the feed,
+but the watchers must be restarted by hand, one per provider:
+`nohup scripts/start-codex-signal-watch.sh >> logs/start-codex-signal-watch.sh.log 2>&1 &`,
+and the same for `kimi` and `gemini`. Check with
+`pgrep -af scripts/signal-watch.mts`. A watcher left running from before a code
+change runs the old code: restart it after pulling watcher changes (that is why
+the mic stranded until the restart at 2026-09-24 19:12Z).
 
 **Another session writes to this checkout.** On 2026-09-22 storm2flow's
 Orchestrator (Sylvia, session `storm2flow-a0`) sent an agent to commit BUG-147

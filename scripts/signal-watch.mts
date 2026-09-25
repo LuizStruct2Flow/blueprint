@@ -186,6 +186,16 @@ function runLogOffset(path: string): number | undefined {
   }
 }
 
+// TASK-065 finding (Codex four-eyes review): the recorder used to run with no
+// bound at all, so a hang in rotation.mts (or anything it shells out to) sat
+// between us and recoverStrandedMic — silencing recovery for EVERY provider,
+// the BUG-001 class of unbounded wait. Recording is secondary to recovery and
+// must never gate it. 5s is generous for what rotation.mts actually does (a
+// few local file reads/writes on the run log and journal — no network, no
+// external process of its own) while staying well inside the watcher's own
+// poll cadence, so a hung recorder costs one tick, not the rest of the run.
+const ROTATION_RECORD_TIMEOUT_MS = 5_000
+
 function recordDispatchOutcome(holder: string, runLog: string, from: number | undefined): string | undefined {
   const after = runLogOffset(runLog)
   if (from === undefined || after === undefined || after <= from) {
@@ -196,7 +206,16 @@ function recordDispatchOutcome(holder: string, runLog: string, from: number | un
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, AGENT_ROSTER_FILE: BP_STATE_ROOT },
+    timeout: ROTATION_RECORD_TIMEOUT_MS,
   })
+  // A timed-out spawnSync reports status: null, signal: 'SIGTERM' and an
+  // `error` with code ETIMEDOUT (verified against this Node's own
+  // child_process — it is not merely documented behaviour). Checked before
+  // `status !== 0` because a killed process's status is null, not non-zero.
+  if (result.error) {
+    teeLine(logFile, `[${isoNow()}] rotation outcome recorder timed out after ${ROTATION_RECORD_TIMEOUT_MS}ms for ${holder}: ${result.error.message}`)
+    return undefined
+  }
   if (result.status !== 0) {
     const details = (result.stderr ?? '').trim().split('\n')
     const detail = details[details.length - 1] || `exit ${result.status ?? 'null'}`
@@ -655,7 +674,17 @@ function triggerIfNeeded(): boolean {
     spawnSync('bash', ['-c', wakeCommand], { stdio: 'inherit', env: childEnv })
   }
 
-  const outcome = recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
+  // Recording is secondary to recovery (TASK-065): spawnSync itself reports a
+  // timeout or a bad exec through `result`/`result.error` rather than
+  // throwing (recordDispatchOutcome handles both), but this try/catch is the
+  // backstop for anything that throws synchronously regardless — recovery
+  // below must run even if the recorder crashes outright.
+  let outcome: string | undefined
+  try {
+    outcome = recordDispatchOutcome(holder, dispatchRunLog, dispatchRunLogOffset)
+  } catch (err) {
+    teeLine(logFile, `[${isoNow()}] rotation outcome recorder crashed for ${holder}: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   if (process.env.AGENT_SIGNAL_RECOVERY !== '0') recoverStrandedMic(holder, state, dispatchMarker, outcome)
 

@@ -75,13 +75,18 @@
 import { describe, it, expect } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { FixtureRepo } from '../harness/fixture-repo.js'
 import { skipNote, skipVisibly } from '../helpers/project-config.js'
 
 const execFileP = promisify(execFile)
+const exists = (p: string): Promise<boolean> =>
+  access(p).then(
+    () => true,
+    () => false,
+  )
 
 /* ------------------------------------------------------------------ *
  * The declaration half — reads TASK-076's field, never re-derives it.
@@ -89,16 +94,21 @@ const execFileP = promisify(execFile)
 
 export type Declaration = { kind: 'required' } | { kind: 'not-applicable'; reason: string }
 
+/** The one spelling of a bug id: rows pad to three digits (`**BUG-037**`),
+ *  commit subjects do not (`BUG#37:`, per CLAUDE.md) — both meet here. BUG-038. */
+export const bugId = (digits: string): string => `BUG-${String(Number(digits)).padStart(3, '0')}`
+
 /** A row, not a mention — same anchor bug-numbers.spec.ts uses (BUG-071). */
-const ROW_START = /^\|\s*\*\*(BUG-\d+)\*\*/
+const ROW_START = /^\|\s*\*\*BUG-(\d+)\*\*/
 const REPRO_FIELD = /\*\*Reproducer: (required|not applicable(?: — ([^*]+))?)\.\*\*/
 
 /** null = a row exists but carries no Reproducer field (an unjudged row). */
 export function parseDeclarations(text: string): Map<string, Declaration | null> {
   const out = new Map<string, Declaration | null>()
   for (const line of text.split('\n')) {
-    const id = ROW_START.exec(line)?.[1]
-    if (!id) continue
+    const digits = ROW_START.exec(line)?.[1]
+    if (!digits) continue
+    const id = bugId(digits)
     const f = REPRO_FIELD.exec(line)
     if (!f) {
       out.set(id, null)
@@ -153,7 +163,7 @@ const BUG_PREFIX = /^BUG#(\d+):\s*(.*)$/
 export function classifySubject(subject: string): { bug: string; isReproducer: boolean } | null {
   const m = BUG_PREFIX.exec(subject)
   if (!m) return null
-  return { bug: `BUG-${m[1]}`, isReproducer: REPRODUCER_LEAD.test(m[2] ?? '') }
+  return { bug: bugId(m[1] ?? ''), isReproducer: REPRODUCER_LEAD.test(m[2] ?? '') }
 }
 
 export interface ClassifiedCommit {
@@ -468,6 +478,31 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
       expect(r.skipped).toEqual([])
       expect(r.checkedCount).toBe(0) // never even reaches a declaration lookup
     })
+
+    it('BUG-038: an unpadded BUG#37 subject meets its padded **BUG-037** row, and BUG#151 still meets **BUG-151**', () => {
+      const HEADER = '| # | Bug | Sev | Status | Detail |\n|---|---|---|---|---|\n'
+      const decl = parseDeclarations(
+        HEADER +
+          '| **BUG-037** | **Reproducer: required.** **s** | S2 | OPEN | — |\n' +
+          '| **BUG-151** | **Reproducer: required.** **s** | S2 | OPEN | — |\n',
+      )
+      const classified = (s: string) => {
+        const c = classifySubject(s)
+        return commit(c?.bug ?? null, s, { isReproducer: c?.isReproducer ?? false })
+      }
+      const r = checkOrder(
+        [
+          classified('BUG#37: minimal reproducer (failing)'),
+          classified('BUG#37: the fix'),
+          classified('BUG#151: minimal reproducer (failing)'),
+          classified('BUG#151: the fix'),
+        ],
+        decl,
+      )
+      expect(r.unjudged, describeIssues(r.unjudged)).toEqual([])
+      expect(r.violations, describeIssues(r.violations)).toEqual([])
+      expect(r.checkedCount).toBe(2)
+    })
   })
 
   /* ================================================================ *
@@ -592,14 +627,25 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
 
     // NON-VACUITY: both populations this check draws from are real and
     // non-trivial. A renamed table or a broken classifier would show up as
-    // these floors going to zero, not as a quiet pass.
-    const requiredCount = [...declarations.values()].filter((d) => d?.kind === 'required').length
-    expect(requiredCount, 'no `Reproducer: required.` row was found — this proves nothing').toBeGreaterThanOrEqual(50)
-    const reproducerCommitCount = history.filter((c) => c.isReproducer).length
-    expect(
-      reproducerCommitCount,
-      'no reproducer-shaped commit was found in HEAD’s history — this proves nothing',
-    ).toBeGreaterThanOrEqual(30)
+    // these floors going to zero, not as a quiet pass. BLUEPRINT-ONLY: the
+    // floors are a third of the blueprint's OWN counts (see header), and a
+    // derived project ships this suite with its own, smaller bug history —
+    // so they are asserted only where `.blueprint-root` exists. The order
+    // check below still runs everywhere; DoD §3.1 points at it.
+    if (await exists(join(REPO_ROOT, '.blueprint-root'))) {
+      const requiredCount = [...declarations.values()].filter((d) => d?.kind === 'required').length
+      expect(requiredCount, 'no `Reproducer: required.` row was found — this proves nothing').toBeGreaterThanOrEqual(50)
+      const reproducerCommitCount = history.filter((c) => c.isReproducer).length
+      expect(
+        reproducerCommitCount,
+        'no reproducer-shaped commit was found in HEAD’s history — this proves nothing',
+      ).toBeGreaterThanOrEqual(30)
+    } else {
+      skipNote(
+        `${ctx.task.name} non-vacuity floors`,
+        'not the blueprint checkout — the floors are the blueprint’s own bug counts; the order check still runs',
+      )
+    }
 
     const result = checkOrder(history, declarations)
     for (const s of result.skipped) {

@@ -945,6 +945,99 @@ describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed com
   })
 })
 
+describe('TASK-083 — ts_scrubbed redirects a TMPDIR the launchers plant inside a git tree (BUG-110)', () => {
+  // TASK-083 has every dispatched agent's launcher set TMPDIR to a path under
+  // the repo it runs in, so a plain `npm --prefix tests test` refused every
+  // scenario: tests/harness/workspace.ts (BUG-110) refuses any TMPDIR with a
+  // project marker (.git and friends) above it. ts_scrubbed is the one choke
+  // point both `npm test` and CI's ts-tests step already go through
+  // (BUG-117), so it is where the redirect belongs — nowhere else needs to
+  // know TASK-083's TMPDIR exists.
+  it('#13 a TMPDIR inside a git tree is redirected, and the declared suite still runs', async () => {
+    await scenario('tsbridge-83a', async (s) => {
+      const f = await fixture(s)
+      await f.npx(0)
+      // The same marker shape harness.spec.ts's own BUG-110 cases plant: an
+      // empty `.git` directly above the TMPDIR this case hands the bridge.
+      await s.fs.write('proj/.git', '')
+      const badTmp = await s.fs.mkdirp('proj/scratch-tmp')
+
+      const driver = await s.fs.write(
+        'run-bridge-83a.sh',
+        `cd ${JSON.stringify(f.dir)}\n` +
+          `PATH=${JSON.stringify(f.shimPath)}\n` +
+          `export PATH\n` +
+          `set -e\n` +
+          `. ./scripts/lib/pipeline.sh\n` +
+          `pipe_init 'ts-bridge fixture' >/dev/null 2>&1 || true\n` +
+          `. ./scripts/run-ts-suites.sh\n` +
+          `ts_suites_stage ${JSON.stringify(f.dir)}\n`,
+      )
+      const r = await s.run('sh', [driver], {
+        cwd: f.dir,
+        env: { TMPDIR: badTmp },
+        timeoutMs: 120_000,
+      })
+      // ts_suites_stage captures the redirect notice into its own temp log
+      // and only echoes that log back on a FAILING run (see the comment
+      // above ts_suites_stage's `>"$_ts_out" 2>&1`) — deliberately, so a
+      // green stage stays quiet. A passing run's only externally visible
+      // proof is that the declared suite ran at all: #13b/#13c below pin the
+      // notice's own wording directly against ts_scrubbed.
+      expect(r.code, r.output).toBe(0)
+      expect(
+        (await f.seenEnv()) !== null,
+        `the stub npx never ran — the declared suite did not run\n${r.output}`,
+      ).toBe(true)
+    })
+  })
+
+  it('#13b the redirect notice names the old and new TMPDIR and BUG-110/TASK-083, and the redirected dir is removed afterward on success and on a failing command', async () => {
+    await scenario('tsbridge-83b', async (s) => {
+      const dir = await scrubFixture(s, 'scrub-b')
+      await s.fs.write('scrub-b/.git', '')
+      const badTmp = await s.fs.mkdirp('scrub-b/scratch-tmp')
+
+      const ok = await runScrubbed(s, dir, badTmp, 'printf \'%s\\n\' "$TMPDIR"; mkdir -p "$TMPDIR/probe"')
+      expect(ok.code, ok.output).toBe(0)
+      // NEVER SILENT (the coordinator's #3): the notice names both the old
+      // (git-tree) value and the new one, and the two bugs behind it.
+      expect(ok.stderr, ok.output).toContain('BUG-110')
+      expect(ok.stderr, ok.output).toContain('TASK-083')
+      expect(ok.stderr, ok.output).toContain(badTmp)
+      const seenOk = ok.stdout.trim()
+      expect(ok.stderr, ok.output).toContain(seenOk)
+      expect(seenOk, ok.output).not.toBe(badTmp)
+      expect(await pathExists(seenOk), `the redirected dir ${seenOk} survived a successful run\n${ok.output}`).toBe(
+        false,
+      )
+
+      const failing = await runScrubbed(s, dir, badTmp, 'printf \'%s\\n\' "$TMPDIR"; exit 9')
+      expect(failing.code, failing.output).toBe(9)
+      const seenFail = failing.stdout.trim()
+      expect(seenFail, failing.output).not.toBe(badTmp)
+      expect(
+        await pathExists(seenFail),
+        `the redirected dir ${seenFail} survived a failing run\n${failing.output}`,
+      ).toBe(false)
+    })
+  })
+
+  it('#13c a TMPDIR outside any git tree is left exactly as is', async () => {
+    await scenario('tsbridge-83c', async (s) => {
+      const dir = await scrubFixture(s, 'scrub-c')
+      // No marker anywhere above a scenario workspace — that guarantee is
+      // BUG-121's, and this case relies on it rather than restating it.
+      const okTmp = await s.workspace.dir('scrub-c-tmp')
+
+      const r = await runScrubbed(s, dir, okTmp, 'printf \'%s\\n\' "$TMPDIR"')
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout.trim(), r.output).toBe(okTmp)
+      expect(r.stderr, r.output).toBe('')
+    })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // The fixture: a project the bridge will accept.
 //
@@ -1451,4 +1544,53 @@ async function lintFixture(
     },
     ...stageDrivers(s, name, repo.dir, `sh_lint_stage ${JSON.stringify(repo.dir)}`, path),
   }
+}
+
+// ---------------------------------------------------------------------------
+// TASK-083: a bare copy of the bridge, for probing ts_scrubbed's TMPDIR
+// redirect directly rather than through a whole stage.
+// ---------------------------------------------------------------------------
+
+/** A directory holding nothing but the bridge itself, for a case that calls `ts_scrubbed` directly. */
+async function scrubFixture(s: Scenario, name: string): Promise<string> {
+  const dir = await s.workspace.dir(name)
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/run-ts-suites.sh'), `${name}/run-ts-suites.sh`)
+  return dir
+}
+
+/**
+ * Source the bridge in `dir` and call `ts_scrubbed sh PROBE` with TMPDIR set
+ * to `tmpdir`, where PROBE is `cmd` written to its own file. stdout and
+ * stderr come back SEPARATELY (unlike the stage drivers elsewhere in this
+ * file), because #13b/#13c need to read what the child actually saw apart
+ * from the redirect notice ts_scrubbed prints.
+ *
+ * `cmd` is a FILE, not a `sh -c` argument: `cmd` reads `$TMPDIR`, and that
+ * name has to stay unexpanded until the probe actually runs — inside
+ * ts_scrubbed, after the redirect. Splicing `cmd` into `sh -c "..."` through
+ * JSON.stringify nests one double-quoted string inside another with no real
+ * quoting boundary between them, so the OUTER shell (the driver, before
+ * ts_scrubbed even starts) expands `$TMPDIR` early and bakes in the
+ * pre-redirect value — which is indistinguishable from the redirect simply
+ * not working. Caught by #13b: `mkdir -p "$TMPDIR/probe"` was written INSIDE
+ * the driver's own quoting, so it silently created a directory under the OLD
+ * TMPDIR while the recorded stdout matched it too — a passing case that would
+ * have proven nothing. A plain file has no such boundary to lose.
+ */
+async function runScrubbed(s: Scenario, dir: string, tmpdir: string, cmd: string) {
+  const name = dir.split('/').pop()
+  const probe = await s.fs.write(`${name}-probe.sh`, `${cmd}\n`)
+  const driver = await s.fs.write(
+    `${name}-scrubbed-driver.sh`,
+    `cd ${JSON.stringify(dir)}\n` + `. ./run-ts-suites.sh\n` + `ts_scrubbed sh ${JSON.stringify(probe)}\n`,
+  )
+  return s.run('sh', [driver], { cwd: dir, env: { TMPDIR: tmpdir }, timeoutMs: 60_000 })
+}
+
+/** Whether an ABSOLUTE path exists, unscoped — the redirected TMPDIR lives outside every scenario workspace by design (/dev/shm), so `s.fs` cannot see it. */
+async function pathExists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  )
 }

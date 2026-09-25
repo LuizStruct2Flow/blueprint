@@ -374,7 +374,19 @@ export async function scenario(
       try {
         return await Promise.race([promise, timeout])
       } catch (err) {
-        const text = await dumpProcessTree(registry.trackedPids(), label)
+        // BUG-146: the two parentage-independent nets. `trackedPipeIds()` is
+        // every stdio pipe id this scenario's own children have held since
+        // spawn (process.ts), which `findPipeHolders` (dump.ts) searches for
+        // across every live process, not only this scenario's own ppid tree
+        // — closing exactly the blind spot the fifth and sixth CI dumps hit,
+        // where a reparented orphan held the pipe `done` was waiting to see
+        // EOF from and neither dump found a trace of it.
+        const text = await dumpProcessTree(
+          registry.trackedPids(),
+          label,
+          registry.trackedPipeIds(),
+          escapeToken,
+        )
         const file = await writeDump(dumpDir(REPO_ROOT), label, text)
         const message = err instanceof Error ? err.message : String(err)
         throw new Error(`${message}\nprocess-tree dump: ${file}`)

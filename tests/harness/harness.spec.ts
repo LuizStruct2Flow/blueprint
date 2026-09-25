@@ -1615,7 +1615,7 @@ describe('harness — timeout evidence capture (BUG-146)', () => {
         const text = await readFile(file as string, 'utf8')
 
         expect(text).toMatch(/# process-tree dump: BUG-146 capture test/)
-        expect(text).toMatch(/pid=\d+ ppid=\d+ stat=\S+ wchan\(ps\)=\S+ args=.*sleep/)
+        expect(text).toMatch(/pid=\d+ ppid=\d+ pgid=\d+ sid=\d+ stat=\S+ wchan\(ps\)=\S+ args=.*sleep/)
         expect(text).toMatch(/\/proc\/\d+\/wchan:/)
         expect(text).toMatch(/\/proc\/\d+\/stack:/)
         expect(text).toMatch(/fds: \d+/)

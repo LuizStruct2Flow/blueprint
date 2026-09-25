@@ -45,12 +45,17 @@ paths = [
 # The two false-positive exceptions below are RULE-LEVEL allowlists, not
 # global [[allowlists]], and that is load-bearing too: measured on gitleaks
 # 8.30.1, a GLOBAL [[allowlists]] entry with condition = "AND" and both
-# paths and regexes skips the whole FILE when the path matches — the
-# regexes are silently dropped (a planted real token in
-# scripts/shell-inventory.json scanned to "no leaks found"; with an
-# impossible regex `a^` in place of the line shape it was still skipped).
-# The same structure under [[rules.allowlists]] honors the AND: the safe
-# line shape is suppressed, anything else in the file is reported.
+# paths and regexes skips the whole FILE when the path matches IN DIRECTORY
+# MODE (`gitleaks dir`, `--no-git`) — the regexes are silently dropped (a
+# planted real token in scripts/shell-inventory.json scanned to "no leaks
+# found", ~0 bytes read; with an impossible regex `a^` in place of the line
+# shape it was still skipped). Git-mode `detect`, which the pre-push gate
+# and CI run, honored the AND in the same measurement — but a config that
+# hides a file under one scan mode is not one to ship, and the header
+# above invites exactly that audit. The same structure under
+# [[rules.allowlists]] honors the AND in both modes: the safe line shape is
+# suppressed, anything else in the file is reported. Pinned by
+# tests/pre-push-secrets #14/#15, which run each planted file both ways.
 
 [[rules]]
 id = "generic-api-key"

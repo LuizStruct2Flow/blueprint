@@ -20,5 +20,19 @@
     "noEmit": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["**/*.ts"]
+  // BUG-037 — THE HARNESS TYPECHECKS WHAT THE HARNESS RUNS: the suites vitest
+  // runs (vitest.config.ts's own include) and vitest.config.ts, with every
+  // harness, helper and suite-local module reached BY IMPORT from them. It used
+  // to be `**/*.ts`, which also claimed a derived project's own tests under
+  // tests/ (`*.test.ts`, integration/) — those import src/ and the ROOT
+  // packages, which CI's ts-tests job never installs (it runs `npm ci` in
+  // tests/ only), so CI failed TS2307 while a host with root node_modules
+  // passed. The project's tests are typechecked by the project's own root
+  // tsconfig, with its own dependencies. A rule by the harness's naming
+  // convention, not by path, because the blueprint cannot know a project's
+  // paths. Measured when it changed: the blueprint tree kept all 100 files it
+  // compiled; a derived project dropped only its own src/ and *.test.ts.
+  // A harness module no spec imports drops out — it is dead code, which is
+  // the one thing this scope does not check.
+  "include": ["**/*.spec.ts", "**/*.spec.tsx", "vitest.config.ts"]
 }

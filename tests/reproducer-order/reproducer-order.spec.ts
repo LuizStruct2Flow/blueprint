@@ -75,13 +75,18 @@
 import { describe, it, expect } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { FixtureRepo } from '../harness/fixture-repo.js'
 import { skipNote, skipVisibly } from '../helpers/project-config.js'
 
 const execFileP = promisify(execFile)
+const exists = (p: string): Promise<boolean> =>
+  access(p).then(
+    () => true,
+    () => false,
+  )
 
 /* ------------------------------------------------------------------ *
  * The declaration half — reads TASK-076's field, never re-derives it.
@@ -592,14 +597,25 @@ describe('TASK-077 — reproducer commit precedes its declared fix, in git-log o
 
     // NON-VACUITY: both populations this check draws from are real and
     // non-trivial. A renamed table or a broken classifier would show up as
-    // these floors going to zero, not as a quiet pass.
-    const requiredCount = [...declarations.values()].filter((d) => d?.kind === 'required').length
-    expect(requiredCount, 'no `Reproducer: required.` row was found — this proves nothing').toBeGreaterThanOrEqual(50)
-    const reproducerCommitCount = history.filter((c) => c.isReproducer).length
-    expect(
-      reproducerCommitCount,
-      'no reproducer-shaped commit was found in HEAD’s history — this proves nothing',
-    ).toBeGreaterThanOrEqual(30)
+    // these floors going to zero, not as a quiet pass. BLUEPRINT-ONLY: the
+    // floors are a third of the blueprint's OWN counts (see header), and a
+    // derived project ships this suite with its own, smaller bug history —
+    // so they are asserted only where `.blueprint-root` exists. The order
+    // check below still runs everywhere; DoD §3.1 points at it.
+    if (await exists(join(REPO_ROOT, '.blueprint-root'))) {
+      const requiredCount = [...declarations.values()].filter((d) => d?.kind === 'required').length
+      expect(requiredCount, 'no `Reproducer: required.` row was found — this proves nothing').toBeGreaterThanOrEqual(50)
+      const reproducerCommitCount = history.filter((c) => c.isReproducer).length
+      expect(
+        reproducerCommitCount,
+        'no reproducer-shaped commit was found in HEAD’s history — this proves nothing',
+      ).toBeGreaterThanOrEqual(30)
+    } else {
+      skipNote(
+        `${ctx.task.name} non-vacuity floors`,
+        'not the blueprint checkout — the floors are the blueprint’s own bug counts; the order check still runs',
+      )
+    }
 
     const result = checkOrder(history, declarations)
     for (const s of result.skipped) {

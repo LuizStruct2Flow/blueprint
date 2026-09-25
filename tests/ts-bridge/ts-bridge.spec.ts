@@ -945,6 +945,56 @@ describe('TASK-031 — the gate and CI typecheck tests/ through one scrubbed com
   })
 })
 
+/**
+ * BUG-158 — the harness typecheck claimed whatever the PROJECT owns under
+ * tests/. The old `include` of every `**\/\*.ts` reached a derived project's
+ * own `*.test.ts` there, which imports src/ and the root packages; CI's
+ * ts-tests job installs tests/ only, so tsc failed TS2307 there while a host
+ * with root node_modules passed the local gate — green locally, red in CI on
+ * every push. These run this checkout's REAL tests/tsconfig.json in a fixture
+ * with no root node_modules: CI's condition, not the host's.
+ */
+describe('BUG-158 — the harness typecheck covers what the harness runs, not the project’s own tests', () => {
+  const SPEC = "import { helper } from '../helpers/helper.js'\nexport const n: number = helper\n"
+
+  it('#16 a project-owned *.test.ts under tests/ importing a package tests/node_modules lacks does not fail the typecheck', async () => {
+    await scenario('tsbridge-bug158', async (s) => {
+      const f = await typecheckFixture(s, {
+        tsc: 'real',
+        realConfig: {
+          'demo/demo.spec.ts': SPEC,
+          'helpers/helper.ts': 'export const helper: number = 1\n',
+          'foo.test.ts': "import { z } from 'bug158-not-installed-in-tests'\nexport const s = z\n",
+        },
+      })
+      const r = await f.runStage()
+      expect(
+        r.code,
+        describeRun('the harness typecheck failed on a project-owned test it does not run', r),
+      ).toBe(0)
+      expect(r.output).toContain(AFTER)
+    })
+  })
+
+  it('#17 a type error in a helper that only a spec imports still FAILS — the scope is not narrowed past what the harness runs', async () => {
+    // Guards against over-narrowing: passes on the pre-fix config (helper.ts is
+    // reached by `**/*.ts` directly) and must keep passing after the include is
+    // narrowed (helper.ts is then reached only by import from the spec).
+    await scenario('tsbridge-bug158b', async (s) => {
+      const f = await typecheckFixture(s, {
+        tsc: 'real',
+        realConfig: {
+          'demo/demo.spec.ts': SPEC,
+          'helpers/helper.ts': "export const helper: number = 'not a number'\n",
+        },
+      })
+      const r = await f.runStage()
+      expect(r.code, describeRun('a type error in a spec-imported helper passed', r)).not.toBe(0)
+      expect(r.output, describeRun("the stage failed without showing tsc's TS2322", r)).toContain('TS2322')
+    })
+  })
+})
+
 describe('TASK-083 — ts_scrubbed redirects a TMPDIR the launchers plant inside a git tree (BUG-110)', () => {
   // TASK-083 has every dispatched agent's launcher set TMPDIR to a path under
   // the repo it runs in, so a plain `npm --prefix tests test` refused every
@@ -1305,7 +1355,19 @@ interface TypecheckFixture {
 
 async function typecheckFixture(
   s: Scenario,
-  opts: { tsc: 'real' | 'stub' | 'none'; planted?: boolean; packageJson?: boolean; name?: string },
+  opts: {
+    tsc: 'real' | 'stub' | 'none'
+    planted?: boolean
+    packageJson?: boolean
+    name?: string
+    /**
+     * BUG-158: this checkout's REAL tests/tsconfig.json instead of the minimal
+     * one, plus these files under tests/. It declares `types: ["node"]`, so the
+     * pinned @types tree is linked in too, and nothing else: the fixture has no
+     * root node_modules, which is exactly CI's ts-tests job.
+     */
+    realConfig?: Record<string, string>
+  },
 ): Promise<TypecheckFixture> {
   const name = opts.name ?? 'tc'
   const dir = await s.workspace.dir(name)
@@ -1315,15 +1377,29 @@ async function typecheckFixture(
     await s.fs.copyIn(join(REPO_ROOT, lib), `${name}/${lib}`)
   }
   if (opts.packageJson !== false) await s.fs.write(`${name}/tests/package.json`, '{ "private": true }\n')
-  // Minimal on purpose: no `types: ["node"]`, so the fixture needs no @types tree.
-  await s.fs.write(
-    `${name}/tests/tsconfig.json`,
-    JSON.stringify({
-      compilerOptions: { target: 'ES2022', lib: ['ES2022'], strict: true, noEmit: true, types: [], skipLibCheck: true },
-      include: ['**/*.ts'],
-    }) + '\n',
-  )
-  await s.fs.write(`${name}/tests/clean.ts`, 'export const clean: number = 1\n')
+  if (opts.realConfig === undefined) {
+    // Minimal on purpose: no `types: ["node"]`, so the fixture needs no @types tree.
+    await s.fs.write(
+      `${name}/tests/tsconfig.json`,
+      JSON.stringify({
+        compilerOptions: { target: 'ES2022', lib: ['ES2022'], strict: true, noEmit: true, types: [], skipLibCheck: true },
+        include: ['**/*.ts'],
+      }) + '\n',
+    )
+    await s.fs.write(`${name}/tests/clean.ts`, 'export const clean: number = 1\n')
+  } else {
+    await s.fs.copyIn(join(REPO_ROOT, 'tests/tsconfig.json'), `${name}/tests/tsconfig.json`)
+    for (const [rel, body] of Object.entries(opts.realConfig)) await s.fs.write(`${name}/tests/${rel}`, body)
+    // The real config's `types: ["node"]` resolves @types/node (and vitest's
+    // own types, transitively) from here — linked, not copied, same as tsc.
+    await s.fs.mkdirp(`${name}/tests/node_modules`)
+    const types = await s.run(
+      'ln',
+      ['-s', join(REPO_ROOT, 'tests/node_modules/@types'), join(dir, 'tests/node_modules/@types')],
+      { cwd: dir },
+    )
+    expect(types.code, types.output).toBe(0)
+  }
   if (opts.planted) {
     await s.fs.write(`${name}/tests/planted.ts`, "export const planted: number = 'not a number'\n")
   }

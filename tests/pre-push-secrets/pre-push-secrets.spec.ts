@@ -401,12 +401,88 @@ describe('BUG-156 — the shipped gitleaks config keeps the gate effective', () 
       await expectShippedConfigFinds(s, '.env.example')
     })
   })
+
+  // #14/#15 — the four-eyes defeat (e421a7b). The two false-positive exceptions
+  // are RULE-LEVEL allowlists with condition = "AND". As GLOBAL [[allowlists]]
+  // the same entries skipped the whole file on path match alone IN DIRECTORY
+  // MODE (`gitleaks dir` / `--no-git`: 8.30.1 scanned ~0 bytes of both), while
+  // git-mode `detect` — the gate's and CI's command — honored the AND. Measured
+  // in the round-2 review: the same planted tree, 11105c7's config, `detect`
+  // found 4, `dir .` found 0. So each case runs BOTH modes: git mode pins the
+  // exception to one line shape (dropping the regexes or widening the paths
+  // fails it), dir mode pins that no mode skips the whole file (the global
+  // form fails it). Each plants a line that trips the SAME rule the exception
+  // is scoped to, next to the real safe shape: the planted line must be found
+  // and the safe line must not.
+  it('#14 a generic-api-key line in scripts/shell-inventory.json is still found', async () => {
+    await scenario('secrets-14', async (s) => {
+      const hex = '0123456789abcdef'
+      const blobId = Array.from({ length: 40 }, (_, i) => hex[(i * 7) % hex.length]).join('')
+      for (const mode of MODES) {
+        // The PAT prefix is stripped: with it, github-pat claims the line and
+        // generic-api-key — the rule the exception is scoped to — is never tested.
+        const findings = await expectShippedConfigFinds(
+          s,
+          'scripts/shell-inventory.json',
+          (token) =>
+            `{\n  "scripts/sonar-api.sh": "${blobId}",\n  "api_secret_key": "${token.slice('ghp_'.length)}"\n}\n`,
+          mode,
+        )
+        expect(
+          findings.map((f) => f.RuleID),
+          `${mode} mode: the planted key was not found by generic-api-key`,
+        ).toContain('generic-api-key')
+        expect(
+          findings.map((f) => f.StartLine),
+          `${mode} mode: the safe blob-id line is reported — the allowlist is gone`,
+        ).not.toContain(2)
+      }
+    })
+  })
+
+  it('#15 a real-credential curl in scripts/sonar-api.sh is still found', async () => {
+    await scenario('secrets-15', async (s) => {
+      for (const mode of MODES) {
+        const findings = await expectShippedConfigFinds(
+          s,
+          'scripts/sonar-api.sh',
+          (token) =>
+            `curl -sS -u "\${SONAR_TOKEN}:" "\${SONAR_HOST_URL}$1"\n` +
+            `curl -sS -u "admin:${token}" "https://sonar.example.invalid/api/x"\n`,
+          mode,
+        )
+        expect(
+          findings.map((f) => f.RuleID),
+          `${mode} mode: the planted credential was not found by curl-auth-user`,
+        ).toContain('curl-auth-user')
+        expect(
+          findings.map((f) => f.StartLine),
+          `${mode} mode: the safe env-var line is reported — the allowlist is gone`,
+        ).not.toContain(1)
+      }
+    })
+  })
 })
 
-async function expectShippedConfigFinds(s: Scenario, plantedPath: string): Promise<void> {
-  const repo = await s.gitRepo('repo')
-  await s.fs.copyIn(GITLEAKS_CONFIG, 'repo/.gitleaks.toml')
-  await s.fs.write('repo/README.md', 'base\n')
+/** `git`: the gate's `detect --log-opts=range`. `dir`: a working-tree audit, `gitleaks dir .`. */
+const MODES = ['git', 'dir'] as const
+type Mode = (typeof MODES)[number]
+
+interface Finding {
+  RuleID: string
+  StartLine: number
+}
+
+async function expectShippedConfigFinds(
+  s: Scenario,
+  plantedPath: string,
+  body: (token: string) => string = (token) => `token=${token}\n`,
+  mode: Mode = 'git',
+): Promise<Finding[]> {
+  const name = `repo-${mode}`
+  const repo = await s.gitRepo(name)
+  await s.fs.copyIn(GITLEAKS_CONFIG, `${name}/.gitleaks.toml`)
+  await s.fs.write(`${name}/README.md`, 'base\n')
   await repo.commitAll('base')
 
   // Constructed at runtime so this source file never contains a token literal
@@ -414,7 +490,7 @@ async function expectShippedConfigFinds(s: Scenario, plantedPath: string): Promi
   const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   const suffix = Array.from({ length: 36 }, (_, i) => alphabet[(i * 17) % alphabet.length]).join('')
   const syntheticToken = ['ghp', '_', suffix].join('')
-  await s.fs.write(`repo/${plantedPath}`, `token=${syntheticToken}\n`)
+  await s.fs.write(`${name}/${plantedPath}`, body(syntheticToken))
   await repo.commitAll(`plant synthetic token in ${plantedPath}`)
 
   const base = await repo.git(['rev-parse', 'HEAD~1'])
@@ -422,24 +498,27 @@ async function expectShippedConfigFinds(s: Scenario, plantedPath: string): Promi
   expect(base.code, `git rev-parse HEAD~1 failed\n${base.output}`).toBe(0)
   expect(head.code, `git rev-parse HEAD failed\n${head.output}`).toBe(0)
 
-  // Byte-for-byte the command used by `_st_gitleaks`; running from the fixture
-  // root makes gitleaks auto-discover the copied repository config just as the
-  // real pre-push gate and CI do.
+  // Git mode is byte-for-byte the command used by `_st_gitleaks`; dir mode is
+  // the working-tree audit the config's own header invites. Both add a JSON
+  // report so a case can say WHICH line was found, and both run from the
+  // fixture root so gitleaks auto-discovers the copied repository config just
+  // as the real pre-push gate and CI do.
+  const report = s.workspace.path(`gitleaks-report-${mode}.json`)
+  const target =
+    mode === 'git'
+      ? ['detect', `--log-opts=${base.stdout.trim()}..${head.stdout.trim()}`]
+      : ['dir', '.']
   const result = await s.run(
     'gitleaks',
-    [
-      'detect',
-      '--redact',
-      '--no-banner',
-      `--log-opts=${base.stdout.trim()}..${head.stdout.trim()}`,
-    ],
+    [...target, '--redact', '--no-banner', '--report-format=json', `--report-path=${report}`],
     { cwd: repo.dir },
   )
 
   expect(
     result.code,
-    `the shipped config let a synthetic token in ${plantedPath} pass the gate command\n${result.output}`,
+    `${mode} mode: the shipped config let a synthetic token in ${plantedPath} pass the gate command\n${result.output}`,
   ).toBe(1)
+  return JSON.parse(await readFile(report, 'utf8')) as Finding[]
 }
 
 // ---------------------------------------------------------------------------

@@ -207,7 +207,12 @@ fi
 
 REFUSED_FILE="$STATE_DIR/codex-refused-slugs.json"
 CACHE_SIG=""
-[ -r "$CODEX_HOME_DIR/models_cache.json" ] && CACHE_SIG="$(stat -c '%Y:%s' "$CODEX_HOME_DIR/models_cache.json" 2>/dev/null)"
+# cksum (POSIX, GNU and BSD alike) over the cache file's CONTENT — mtime:size
+# is neither: stat's flag differs GNU vs BSD (this launcher ships to macOS
+# projects), and a same-second, same-size rewrite of the cache is invisible
+# to a size+mtime signature, which would retain a stale refusal past the
+# refresh that was supposed to invalidate it.
+[ -r "$CODEX_HOME_DIR/models_cache.json" ] && CACHE_SIG="$(cksum "$CODEX_HOME_DIR/models_cache.json" 2>/dev/null | cut -d' ' -f1-2)"
 REFUSED_JSON="{}"
 if [ -n "$RETRY_RANK" ] && [ -n "$CACHE_SIG" ] && [ -r "$REFUSED_FILE" ] && command -v jq >/dev/null 2>&1; then
   REFUSED_JSON="$(jq -c --arg sig "$CACHE_SIG" 'if (.cache_sig // "") == $sig then (.refused // {}) else {} end' "$REFUSED_FILE" 2>/dev/null)"
@@ -285,7 +290,7 @@ while :; do
       --add-dir "$CODEX_GIT_DIR" \\
       --skip-git-repo-check \\
       --output-last-message "$OUTPUT_LAST" \\
-      "prompt text $AGENT_SIGNAL_TASK $ORCHESTRATOR_NAME" \\
+      "You are running in the {{PROJECT_NAME}} radio-over coordination protocol with Claude Code. The protocol is documented in AGENT_SIGNAL.md; the LIVE baton is at logs/state/signal.md and is written ONLY via scripts/signal-set.sh. Claude has just flipped the mic to you. Current Task field: $AGENT_SIGNAL_TASK. Read AGENT_SIGNAL.md and any docs/doing/*.md it references, do the work, then hand the mic back by RUNNING scripts/signal-set.sh with --holder set to $ORCHESTRATOR_NAME, --state set to OVER_TO_CLAUDE, and --task set to a one-line summary of what you did (use --state ACTIVE instead if you finished the whole thread). Do NOT hand-edit any baton file: one writer publishes it atomically, and a half-written baton has caused real mis-dispatches. You may run git add and git commit for your work if appropriate. Do NOT run git push; only Claude pushes." \\
       2>>"$RUN_LOG"
     printf "%s" "$?" >"$CODEX_STATUS_FILE"
   } \\
@@ -308,9 +313,16 @@ while :; do
 
   if command -v jq >/dev/null 2>&1 && [ -n "$CACHE_SIG" ]; then
     __prev="$(cat "$REFUSED_FILE" 2>/dev/null || printf "{}")"
+    # A fixed "$REFUSED_FILE.tmp" is shared by every concurrent dispatch, so
+    # two writers racing could clobber or move each other's half-written
+    # file. mktemp gives each writer its own name IN THE SAME DIRECTORY (so
+    # the mv below is still an atomic rename, same filesystem), and the
+    # PID-suffixed fallback keeps that uniqueness even without mktemp.
+    __tmp="$(mktemp "$STATE_DIR/.codex-refused-slugs.XXXXXX" 2>/dev/null)" || __tmp="$STATE_DIR/.codex-refused-slugs.$$"
     printf "%s" "$__prev" | jq -c --arg sig "$CACHE_SIG" --arg slug "$CUR_SLUG" --arg msg "$REFUSAL_LINE" \\
       '(if (.cache_sig // "") == $sig then (.refused // {}) else {} end) as $base | {cache_sig: $sig, refused: ($base + {($slug): $msg})}' \\
-      >"$REFUSED_FILE.tmp" 2>/dev/null && mv "$REFUSED_FILE.tmp" "$REFUSED_FILE"
+      >"$__tmp" 2>/dev/null && mv "$__tmp" "$REFUSED_FILE"
+    rm -f "$__tmp" 2>/dev/null
     REFUSED_JSON="$(jq -c '.refused // {}' "$REFUSED_FILE" 2>/dev/null)"
     [ -n "$REFUSED_JSON" ] || REFUSED_JSON="{}"
   fi

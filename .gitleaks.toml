@@ -42,7 +42,19 @@ paths = [
   '''(^|/)(\.env|\.env\.local|\.env\.[^/]+\.local)$''',
 ]
 
-[[allowlists]]
+# The two false-positive exceptions below are RULE-LEVEL allowlists, not
+# global [[allowlists]], and that is load-bearing too: measured on gitleaks
+# 8.30.1, a GLOBAL [[allowlists]] entry with condition = "AND" and both
+# paths and regexes skips the whole FILE when the path matches — the
+# regexes are silently dropped (a planted real token in
+# scripts/shell-inventory.json scanned to "no leaks found"; with an
+# impossible regex `a^` in place of the line shape it was still skipped).
+# The same structure under [[rules.allowlists]] honors the AND: the safe
+# line shape is suppressed, anything else in the file is reported.
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
 description = "Git object IDs recorded by the generated legacy-shell inventory"
 condition = "AND"
 regexTarget = "line"
@@ -55,7 +67,9 @@ regexes = [
   '''^[[:space:]]+"[^"]+": "[0-9a-f]{40}",?$''',
 ]
 
-[[allowlists]]
+[[rules]]
+id = "curl-auth-user"
+[[rules.allowlists]]
 description = "SonarQube curl reads its credential from the environment"
 condition = "AND"
 regexTarget = "line"

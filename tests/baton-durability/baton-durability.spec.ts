@@ -171,8 +171,9 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   // the copied watcher too or it fails ERR_MODULE_NOT_FOUND on startup.
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), rel('scripts/lib/spawn-bounded.mts'))
   // TASK-083 — the ported start-codex-signal-watch.mts imports
-  // scripts/lib/find-bin.mts directly for its binary discovery.
+  // scripts/lib/find-bin.mts and scripts/lib/scratch-tmpdir.mts directly.
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/find-bin.mts'), rel('scripts/lib/find-bin.mts'))
+  await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/scratch-tmpdir.mts'), rel('scripts/lib/scratch-tmpdir.mts'))
 
   await s.fs.write(rel('AGENT_SIGNAL.md'), COMMITTED_BASELINE)
   await repo.commitAll('baseline')

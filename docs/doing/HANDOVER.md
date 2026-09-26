@@ -116,47 +116,95 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-25 cut (~17:55Z). ONE agent is in flight: Philipp
-(Claude) on BUG-146, in his own worktree under `.claude/worktrees/`; collect
-his commits by cherry-pick. The mic is with the Orchestrator.**
+**State at the 2026-09-26 cut (~21:50Z). PAUSED by the founder for the
+night; nothing is running. The mic is with the Orchestrator. Resume TASK-081
+slice 3 first.**
+
+**TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
+Matthias (Claude) per slice, a fresh agent each; Codex reviews the whole port
+before slice 5 lands (the row requires it, no waiver applies).
+- **Worktree:** `.scratch/task081-port`, branch `task081-port` (local only,
+  never pushed). `tests/node_modules` is installed there. It was moved from
+  `.claude/worktrees/` on 2026-09-26: a workspace belongs in `.scratch/`.
+  Its own inner `.scratch/` holds the slice agents' throwaway scripts
+  (`blueprint.orig`, `run-*.sh`, probes); none is needed, clean it on resume.
+- **Committed on the branch:** `9d672e8` slice 1 (skeleton: dispatch, help,
+  files, errexit context, 127/126, lib bridge, signal machinery; 8
+  differential rows), `1061dbb` slice 2 (`drift` complete: config, P1 fetch
+  with the BUG-120 GO token, history, staleness, managed set, markers, P3
+  prospective, P4 settings; 29/29 blueprint-port, full suite 1252 green; P1
+  and P3 mutants caught). Slice 2's stated gap: not every drift matrix row has
+  a differential row (named in the release spec's doc comment).
+- **Slice 3 (`pull`) — UNCOMMITTED in the worktree, `scripts/blueprint.mts`
+  only, typechecks clean.** Written: `shieldedWrite` (P2; each step its own
+  `sh -c 'trap "" INT TERM; exec "$@"'` child, inside `shield()`), `pullFile`,
+  `bpCliLibs` with shim-follow (§7), `bpRetire`, `cmdPull` (selection,
+  closure, prompts, bootstrap_sha, retirement, exits 7/4/0), `headLines`,
+  test-only `_setBlueprintRootForTests`, dispatch wired. **Not yet done:**
+  (1) any test — unit cases for `bpCliLibs` shim-follow (unit ONLY: the shell
+  has no `.mts` notion, so a differential row would legitimately disagree),
+  `shieldedWrite` happy and failure paths, `headLines`; pull differential rows
+  (nothing to pull, full `--yes`, partial named file, non-TTY without --yes →
+  7, refused markers → 4, `pull scripts/blueprint` with a shell CLI), reusing
+  the release spec's `seedBlueprintRepo`/`seedRegisteredProject`/`dateShimEnv`;
+  interactive prompts need `withCttyNoStdin` from `tests/pull-behaviour` on
+  BOTH sides; (2) the six suites under a working-tree-only shim
+  (`pull-behaviour`, `pull-exec-bit`, `marker-merge`, `sync-by-address`
+  #9-#23c, `managed-references`, `suite-sync`) — every suite calls
+  `scripts/blueprint` directly, so installing the uncommitted shim is enough;
+  restore with `git checkout -- scripts/blueprint` before any commit; (3) P2
+  mutants (rename before chmod, no shield, `cp` without `-p`), expected
+  catchers `sync-by-address` #23/#23b/#23c.
+- **Traps the slice agents found, so nobody re-derives them:** a unit test
+  that calls `recordSignal` without `installSignals(handler, stubKill)` first
+  kills its own vitest worker; differential children get no `PWD`, so use
+  `runOld`/`runNew` (they pass `PWD: cwd`); two fixture dirs never byte-match
+  because the report prints the path, so run OLD then NEW on one directory and
+  reset between; pin timestamps with a `date` shim; commit new test files
+  BEFORE the full suite (`manifest` #2b reads `git archive HEAD`); the
+  `sync-by-address` seams match each shielded step's own argv, so do not fold
+  the steps into one subshell; `cmd_pull`'s trailing `if`/`if` returns 0 when
+  neither fires, so `cmdPull`'s final `return 0` is right.
+- **Machine noise:** the founder hears the fans during full-suite runs (~1,250
+  tests across 32 cores). Brief every agent to iterate on named suites and run
+  the full suite only before its final commit.
+
 - **Waiting for the founder's acceptance:** BUG-154 (released `bfe4984`),
-  BUG-151 and TASK-083 (released at `52e8e32`), and the four downstream bugs
-  filed from `a2bp` PRs this afternoon: BUG-156 [SEC] (released `686ca6c`),
-  BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and #79-#82 are
-  closed with pointers to the landed commits. TASK-085 was accepted.
+  BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
+  `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
+  #79-#82 are closed with pointers to the landed commits.
 - **Downstream action owed, not done here:** storm2flow, linkedin-watcher-agent
   and lyricscreator each need `blueprint pull`, then ONE full-history
-  `gitleaks detect --no-banner --redact` — BUG-156 made every project's secret
-  scan vacuous since bootstrap. Rotate anything found before investigating.
-  lyricscreator (bootstrapped today at `~/dev/struct2flow/lyricscreator`) also
-  has an uncommitted `.blueprint-source` remote fill-in and empty project config.
-- **Providers at the cut:** Codex hit its usage limit ~16:21Z, Kimi its 5-hour
-  limit ~17:31Z, Gemini is out until 2026-09-26 10:12Z. `rotation.mts
-  coverage` shows each. The founder waived four-eyes for BUG-159 ONLY (a second
-  Claude persona reviewed it). BUG-146's capture work has no waiver: it waits
-  for a Codex or Kimi review before push unless the founder extends it.
-- **BUG-146 is now the release blocker, not background.** #20d hung on 4 of the
-  last 5 CI runs today (against 4 hangs in the 4 days before); 52e8e32, where
-  TASK-083's TMPDIR redirect landed, was the first. Philipp is extending the
-  dump to find orphaned pipe holders and checking whether TASK-083 changed
-  #20d's conditions. Evidence so far is in the row.
-- **The three watchers were restarted at ~11:25Z with `nohup`**, onto the
-  BUG-151 launcher, so they outlive the session. Check with
-  `pgrep -af scripts/signal-watch.mts` (three lines).
-- **Gemini is out of daily quota until 2026-09-26 10:12Z** (the watcher
-  recorded it as `quota`), so plan review runs on Codex + Kimi until then.
-- **Dispatched agents now run the suites with a plain `npm --prefix tests test`**
+  `gitleaks detect --no-banner --redact`. The gate and CI scan only pushed
+  commits, and BUG-156 made every scan vacuous since bootstrap, so nothing
+  else will ever look at that history. Rotate anything found before
+  investigating. lyricscreator also has an uncommitted `.blueprint-source`
+  remote fill-in and empty project config.
+- **BUG-146:** the capture that names an orphaned pipe holder is released
+  (`6ec8315`, reviewed under the founder's waiver). The founder's call: wait
+  for the next #20d hang to name the survivor, then fix what it shows; no
+  speculative change. Philipp's frequency finding (suite growth 61 → 73 spec
+  files under `fileParallelism` plus the nested `bootstrap-gate` run, not
+  TASK-083) is in the row, unproven.
+- **Providers:** Codex and Kimi were "unproven" on the morning of 2026-09-26
+  (quota likely reset, not yet exercised); Gemini back after 10:12Z. `node
+  scripts/rotation.mts coverage` shows the live state.
+- **The three watchers run with `nohup`.** Check with
+  `pgrep -af scripts/signal-watch.mts` (three lines). One activity-feed
+  supervisor runs per project checkout (four), which is expected.
+- **Dispatched agents run the suites with a plain `npm --prefix tests test`**
   (TASK-083's `ts_scrubbed` redirect). Known limit: in the Codex sandbox
-  `tests/ts-bridge` #5 still fails (the sandbox will not exec a binary copied
-  into `/dev/shm`); judge a Codex run of that suite accordingly.
+  `tests/ts-bridge` #5 still fails; judge a Codex run of that suite
+  accordingly.
 
 **Next, in order:**
-1. **BUG-146 — collect Philipp's capture work and get it reviewed.** Both
-   dumps read (fifth and sixth) show every tracked process exited while the
-   run's `close` never fired: something outside the ppid tree held the pipe.
-   The row has the hypothesis and the next step.
-2. **TASK-081 slices 1-6** (the `scripts/blueprint` port), then **BUG-152**.
-3. **BUG-155** after TASK-081 (fix design in its row).
+1. **TASK-081 slice 3** — a fresh Matthias, briefed from the section above:
+   tests, the six-suite shim run, P2 mutants, commit on `task081-port`.
+2. **Slice 4** (`a2bp` + `prs`), then the **Codex review** of the whole
+   branch, then **slices 5 and 6** on `main` (plan §8; slice 5b is dropped).
+3. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
+   `contamination.sh`, then its fix).
+4. **BUG-146** on the next #20d hang.
 
 **The pre-push gate does not run the contamination push scan; only CI does.**
 It turned `main` red twice today (`4a2b7e2`, `5966207`), both times on BUG-155's

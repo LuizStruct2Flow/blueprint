@@ -636,3 +636,258 @@ describe('blueprint-port differential — pull', () => {
     })
   })
 })
+
+/**
+ * blueprint-port differential — a2bp / prs (TASK-081 slice 4, plan §8 row 4).
+ *
+ * A representative slice of plan §5's a2bp/prs rows: dry-run, no-derived-
+ * project, missing-lib, contamination refusal, gitleaks unavailable, gh
+ * unavailable, filed (exit 3, via a `gh` shim — no real network), and prs
+ * (empty / a listing / gh query failure). `a2bp` WRITES A REAL BRANCH to its
+ * (local, filesystem) remote when it gets that far, so every row that reaches
+ * that point builds its OWN blueprint remote per side, like the pull
+ * describe's full/partial rows above — reusing one remote across OLD and NEW
+ * would make the second run see the first run's already-pushed branch.
+ */
+/** Normalises everything two INDEPENDENT scenario fixtures can never agree
+ * on byte-for-byte: each side's own absolute workspace path (down to the
+ * shared "proj"/"bp" leaf), the scratch clone's random mktemp suffix, commit
+ * SHAs (content differs a hair between the two builds — the request commit
+ * embeds the base's own committer date, which is fine to differ; the actual
+ * TREE content is identical) and the request branch's content-derived key. */
+function scrubA2bp(out: string): string {
+  return out
+    .replace(/\/[^ \n]*-side\/(proj|bp)\b/g, '<$1>')
+    .replace(/\/[^ \n]*\/a2bp\.[^/ \n]+/g, '<scratch>')
+    .replace(/\b[0-9a-f]{40}\b/g, '<sha>')
+    .replace(/a2bp\/proj\/[0-9a-f]+/g, 'a2bp/proj/<key>')
+}
+
+describe('blueprint-port differential — a2bp / prs', () => {
+  // SAME leaf name ("proj") under a per-side parent, like the "pull
+  // scripts/blueprint" row above — a2bp's own output prints the project's
+  // basename (`(name: <basename>)`), so an "old"/"new" leaf mismatch would
+  // make that difference the thing this row is trying to rule out.
+  async function a2bpProject(s: Scenario, tag: string, claudeText = '# CLAUDE\nfixture\nan improvement worth requesting\n') {
+    const bp = await s.workspace.dir(`${tag}-side`, 'bp')
+    const sha = await seedBlueprintRepo(s, bp)
+    const proj = await s.workspace.dir(`${tag}-side`, 'proj')
+    await seedRegisteredProject(s, proj, bp, sha)
+    // seedRegisteredProject seeds no CLAUDE.md of its own — a2bp needs a
+    // project file that DIFFERS from the blueprint's copy, or every row
+    // would exercise "nothing to request" (BP_RC_NOTHING) instead of the
+    // path it means to prove.
+    {
+      await writeFile(join(proj, 'CLAUDE.md'), claudeText, 'utf8')
+      await commitAll(s, proj, 'edit')
+    }
+    return { bp, proj }
+  }
+
+  /** A symlink farm of every executable on PATH EXCEPT `name`, deterministic
+   * on any host (a2bp-e2e's own technique — a shim is useless here, since
+   * `command -v` finds it; the binary must be genuinely absent). */
+  async function pathWithout(s: Scenario, name: string, tag: string): Promise<string> {
+    const dir = await s.workspace.dir(`${tag}-nobin`)
+    const farm = await s.run(
+      'sh',
+      [
+        '-c',
+        'printf %s "$1" | tr : "\\n" | while IFS= read -r d; do\n' +
+          '  [ -d "$d" ] || continue\n' +
+          '  for exe in "$d"/*; do\n' +
+          '    [ -f "$exe" ] || continue\n' +
+          '    [ -x "$exe" ] || continue\n' +
+          '    n="${exe##*/}"\n' +
+          '    [ "$n" = "$2" ] && continue\n' +
+          '    [ -e "$3/$n" ] || ln -s "$exe" "$3/$n" 2>/dev/null\n' +
+          '  done\n' +
+          'done\n' +
+          'exit 0',
+        '_',
+        process.env.PATH ?? '',
+        name,
+        dir,
+      ],
+      { cwd: s.workspace.root },
+    )
+    expect(farm.code, farm.output).toBe(0)
+    return dir
+  }
+
+  it('dry-run — files, base and diff --stat, nothing pushed', async () => {
+    await scenario('blueprint-port-a2bp-dry-run', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-dry')
+      const newSide = await a2bpProject(s, 'new-dry')
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', '--dry-run', 'CLAUDE.md'])
+      const newResult = await runNew(s, newSide.proj, ['a2bp', '--dry-run', 'CLAUDE.md'])
+      expect(oldResult.code, oldResult.output).toBe(0)
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.stdout).toContain('--dry-run: nothing pushed')
+    })
+  })
+
+  it('no files given — usage refusal, no remote contact', async () => {
+    await scenario('blueprint-port-a2bp-no-files', async (s) => {
+      const dir = await s.workspace.dir('cwd')
+      const [oldResult, newResult] = await Promise.all([
+        s.run('bash', [SHELL_CLI, 'a2bp'], { cwd: dir }),
+        s.run(process.execPath, [PORTED_CLI, 'a2bp'], { cwd: dir }),
+      ])
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(1)
+      expect(oldResult.stderr).toContain('usage: blueprint a2bp')
+    })
+  })
+
+  it('not a derived project — no .blueprint-source here', async () => {
+    await scenario('blueprint-port-a2bp-not-a-project', async (s) => {
+      const dir = await s.workspace.dir('cwd')
+      await seedCliOnly(s, dir)
+      await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+      const oldResult = await runOld(s, dir, ['a2bp', 'CLAUDE.md'])
+      const newResult = await runNew(s, dir, ['a2bp', 'CLAUDE.md'])
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(4)
+    })
+  })
+
+  it('a required lib is missing — dies with the exact scripts/lib/<name> message', async () => {
+    await scenario('blueprint-port-a2bp-missing-lib', async (s) => {
+      const root = await s.workspace.dir('missinglib')
+      await mkdir(join(root, 'scripts/lib'), { recursive: true })
+      await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
+      await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
+      await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
+      const { readdir } = await import('node:fs/promises')
+      for (const name of await readdir(join(REPO_ROOT, 'scripts/lib'))) {
+        if (name === 'request-build.sh') continue
+        await copyFile(join(REPO_ROOT, 'scripts/lib', name), join(root, 'scripts/lib', name))
+      }
+      await writeFile(
+        join(root, '.blueprint-source'),
+        'config_version   = 2\nblueprint_remote = /nonexistent\nblueprint_branch = main\nbootstrap_sha    = 0000000000000000000000000000000000000000\nbootstrap_date   = 2026-01-01\n',
+        'utf8',
+      )
+      const oldResult = await runOld(s, root, ['a2bp', 'CLAUDE.md'])
+      const newResult = await runNew(s, root, ['a2bp', 'CLAUDE.md'])
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(1)
+      expect(oldResult.stderr).toContain('scripts/lib/request-build.sh is missing')
+    })
+  })
+
+  it('contamination BLOCK — a host path in the file: nothing filed (exit 4)', async () => {
+    await scenario('blueprint-port-a2bp-contamination', async (s) => {
+      const text = '# CLAUDE\nfixture\nsecret path /home/someuser/private/config\n'
+      const oldSide = await a2bpProject(s, 'old-contam', text)
+      const newSide = await a2bpProject(s, 'new-contam', text)
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'])
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'])
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stdout).toContain('host home path')
+      expect(oldResult.stdout).toContain('blocked — nothing filed')
+    })
+  })
+
+  it('gitleaks unavailable — the secret scan refuses (BUG-127), exit 4', async () => {
+    await scenario('blueprint-port-a2bp-no-gitleaks', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-nogl')
+      const newSide = await a2bpProject(s, 'new-nogl')
+      const oldPath = await pathWithout(s, 'gitleaks', 'old-nogl')
+      const newPath = await pathWithout(s, 'gitleaks', 'new-nogl')
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stderr).toContain('gitleaks is not installed')
+    })
+  })
+
+  it('gh unavailable — pushed but no PR opened (BUG-011), exit 5', async () => {
+    await scenario('blueprint-port-a2bp-no-gh', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-nogh')
+      const newSide = await a2bpProject(s, 'new-nogh')
+      const oldPath = await pathWithout(s, 'gh', 'old-nogh')
+      const newPath = await pathWithout(s, 'gh', 'new-nogh')
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(5)
+      expect(oldResult.stdout).toContain('gh is not installed')
+    })
+  })
+
+  it('filed — pushed and a PR opened via a gh shim: exit 3 (BUG-011 happy path)', async () => {
+    await scenario('blueprint-port-a2bp-filed', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-filed')
+      const newSide = await a2bpProject(s, 'new-filed')
+      const oldGh = await s.shimDir('old-filed-gh')
+      await oldGh.add(
+        'gh',
+        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/1" ;;\n  *) exit 1 ;;\nesac\n',
+      )
+      const newGh = await s.shimDir('new-filed-gh')
+      await newGh.add(
+        'gh',
+        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/1" ;;\n  *) exit 1 ;;\nesac\n',
+      )
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldGh.path() })
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newGh.path() })
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(3)
+      expect(oldResult.stdout).toContain('✓ request filed: https://github.com/example/repo/pull/1')
+    })
+  })
+
+  it('prs — empty, a listing, and a gh query failure', async () => {
+    await scenario('blueprint-port-prs', async (s) => {
+      const bp = await s.workspace.dir('prs-bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('prs-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+
+      const emptyGh = await s.shimDir('prs-empty-gh')
+      await emptyGh.add('gh', 'case "$1 $2" in\n  "pr list") echo "" ;;\n  *) exit 1 ;;\nesac\n')
+      const emptyOld = await runOld(s, proj, ['prs'], { PATH: emptyGh.path() })
+      const emptyNew = await runNew(s, proj, ['prs'], { PATH: emptyGh.path() })
+      expectIdentical(emptyOld, emptyNew)
+      expect(emptyOld.code).toBe(0)
+      expect(emptyOld.stdout).toContain('No open a2bp requests.')
+
+      const listingGh = await s.shimDir('prs-listing-gh')
+      await listingGh.add(
+        'gh',
+        'case "$1 $2" in\n' +
+          '  "pr list") printf \'42\\ta2bp/proj-a/deadbeef\\t2026-01-02T03:04:05Z\\tfalse\\thttps://github.com/example/repo/pull/42\\n\' ;;\n' +
+          '  *) exit 1 ;;\n' +
+          'esac\n',
+      )
+      const listingOld = await runOld(s, proj, ['prs'], { PATH: listingGh.path() })
+      const listingNew = await runNew(s, proj, ['prs'], { PATH: listingGh.path() })
+      expectIdentical(listingOld, listingNew)
+      expect(listingOld.code).toBe(0)
+      expect(listingOld.stdout).toContain('#42')
+      expect(listingOld.stdout).toContain('proj-a')
+
+      const failGh = await s.shimDir('prs-fail-gh')
+      await failGh.add('gh', 'exit 1\n')
+      const failOld = await runOld(s, proj, ['prs'], { PATH: failGh.path() })
+      const failNew = await runNew(s, proj, ['prs'], { PATH: failGh.path() })
+      expectIdentical(failOld, failNew)
+      expect(failOld.code).toBe(1)
+      expect(failOld.stdout).toContain('INCOMPLETE, not empty')
+    })
+  })
+})

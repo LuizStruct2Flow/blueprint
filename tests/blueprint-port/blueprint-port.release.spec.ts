@@ -5,13 +5,12 @@
  * subcommand family, as each slice lands. Deleted once the founder accepts
  * TASK-081 (plan §5) — its results live in the port commit body instead.
  *
- * SLICE 1 covers exactly what the skeleton runs: dispatch (no args, `help`,
- * `--help`, `-h`, an unknown subcommand, `push`) and `files` for the two
- * paths that need no network (standing in "the blueprint" itself, and the
- * BLUEPRINT_ROOT override of that same root). `files` in a REGISTERED
- * derived project needs the fetch machinery (P1), which is slice 2's — the
- * skeleton's cmd_files refuses that path loudly rather than faking it, so
- * there is no row for it here yet.
+ * SLICE 1 covers dispatch (no args, `help`, `--help`, `-h`, an unknown
+ * subcommand, `push`) and `files` for the two paths that need no network
+ * (standing in "the blueprint" itself, and the BLUEPRINT_ROOT override of
+ * that same root). `files` in a REGISTERED derived project needs the fetch
+ * machinery (P1), added in slice 2 — its own row is below, alongside drift
+ * and pull.
  *
  * Release tier: it shells out to real `git`/`bash`/`node` against fixture
  * repositories, which is slower than the suite's usual unit tests — the same
@@ -167,6 +166,24 @@ describe('blueprint-port differential — files', () => {
       expectIdentical(oldResult, newResult)
       expect(oldResult.stdout).toContain('ONLY-IN-OVERRIDE.md')
       expect(oldResult.stdout).not.toContain('CLAUDE.md')
+    })
+  })
+
+  // The third matrix row this describe's own header comment once called
+  // "no row for it here yet" — cmd_files' network-fetch path (read_blueprint_
+  // source → the address-mode managed set), added in slice 2. Reuses the
+  // same registered-project fixture the drift/pull describes below build,
+  // hoisted here by function declaration.
+  it('in a registered derived project (read_blueprint_source, the address path)', async () => {
+    await scenario('blueprint-port-files-registered', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      const [oldResult, newResult] = await Promise.all([runOld(s, proj, ['files']), runNew(s, proj, ['files'])])
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('CLAUDE.md')
+      expect(oldResult.stdout).toContain('docs/DoD.md')
     })
   })
 })

@@ -116,58 +116,55 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-26 cut (~21:50Z). PAUSED by the founder for the
-night; nothing is running. The mic is with the Orchestrator. Resume TASK-081
-slice 3 first.**
+**State at the 2026-09-27 cut. ONE agent is in flight: Matthias (Claude) on
+TASK-081 slice 4 (`a2bp` + `prs`) in `.scratch/task081-port`. The mic is with
+the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
 
 **TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
 Matthias (Claude) per slice, a fresh agent each; Codex reviews the whole port
 before slice 5 lands (the row requires it, no waiver applies).
 - **Worktree:** `.scratch/task081-port`, branch `task081-port` (local only,
-  never pushed). `tests/node_modules` is installed there. It was moved from
-  `.claude/worktrees/` on 2026-09-26: a workspace belongs in `.scratch/`.
-  Its own inner `.scratch/` holds the slice agents' throwaway scripts
-  (`blueprint.orig`, `run-*.sh`, probes); none is needed, clean it on resume.
-- **Committed on the branch:** `9d672e8` slice 1 (skeleton: dispatch, help,
-  files, errexit context, 127/126, lib bridge, signal machinery; 8
-  differential rows), `1061dbb` slice 2 (`drift` complete: config, P1 fetch
-  with the BUG-120 GO token, history, staleness, managed set, markers, P3
-  prospective, P4 settings; 29/29 blueprint-port, full suite 1252 green; P1
-  and P3 mutants caught). Slice 2's stated gap: not every drift matrix row has
-  a differential row (named in the release spec's doc comment).
-- **Slice 3 (`pull`) — UNCOMMITTED in the worktree, `scripts/blueprint.mts`
-  only, typechecks clean.** Written: `shieldedWrite` (P2; each step its own
-  `sh -c 'trap "" INT TERM; exec "$@"'` child, inside `shield()`), `pullFile`,
-  `bpCliLibs` with shim-follow (§7), `bpRetire`, `cmdPull` (selection,
-  closure, prompts, bootstrap_sha, retirement, exits 7/4/0), `headLines`,
-  test-only `_setBlueprintRootForTests`, dispatch wired. **Not yet done:**
-  (1) any test — unit cases for `bpCliLibs` shim-follow (unit ONLY: the shell
-  has no `.mts` notion, so a differential row would legitimately disagree),
-  `shieldedWrite` happy and failure paths, `headLines`; pull differential rows
-  (nothing to pull, full `--yes`, partial named file, non-TTY without --yes →
-  7, refused markers → 4, `pull scripts/blueprint` with a shell CLI), reusing
-  the release spec's `seedBlueprintRepo`/`seedRegisteredProject`/`dateShimEnv`;
-  interactive prompts need `withCttyNoStdin` from `tests/pull-behaviour` on
-  BOTH sides; (2) the six suites under a working-tree-only shim
-  (`pull-behaviour`, `pull-exec-bit`, `marker-merge`, `sync-by-address`
-  #9-#23c, `managed-references`, `suite-sync`) — every suite calls
-  `scripts/blueprint` directly, so installing the uncommitted shim is enough;
-  restore with `git checkout -- scripts/blueprint` before any commit; (3) P2
-  mutants (rename before chmod, no shield, `cp` without `-p`), expected
-  catchers `sync-by-address` #23/#23b/#23c.
+  never pushed). `tests/node_modules` is installed there. Its inner
+  `.scratch/` still holds `blueprint.orig`, `tmp/`, `smoke1/` from slice 1-2
+  agents: `rm -rf` on them was refused by the permission rules, so they wait
+  for the founder or the worktree's removal after the port lands.
+- **Committed on the branch:** `9d672e8` slice 1 (skeleton; 8 differential
+  rows), `1061dbb` slice 2 (`drift` complete; P1 and P3 mutants caught; gap:
+  not every drift matrix row has a differential row, named in the release
+  spec's doc comment), `951f80a` slice 3 (`pull` complete: 20 unit tests, 6
+  pull differential rows, `tests/helpers/tty.ts` factored out of
+  pull-behaviour; P2 mutants caught exactly by `sync-by-address` #23/#23b/#23c;
+  under the working-tree shim `pull-behaviour`, `pull-exec-bit`,
+  `managed-references`, `suite-sync` green).
+- **Slice 5 MUST handle, found by slice 3:**
+  (1) `marker-merge` BUG-112 #4 goes red under the shim: its sanity guard
+  `expect(cli).toContain('BLUEPRINT:BEGIN')` reads the file `resolveConsumer`
+  follows, and the `.mts` never spells that token whole (it splits it on
+  purpose to avoid self-detection). The behaviour the case tests still holds;
+  the guard needs updating when the shim really lands.
+  (2) `sync-by-address` #20e stays red under the shim until slice 5 replaces
+  it, as plan §3 P1 schedules.
+  (3) Add to plan §6 as a named deviation: `pull` naming either
+  `scripts/blueprint` or `scripts/blueprint.mts` brings both (plan §7), so a
+  `pull scripts/blueprint` differential cannot be byte-identical while the
+  `.mts` exists; the row asserts the one-line divergence explicitly.
+  (4) For the Codex review to judge: `bpRetire` and `bpCliLibs` sort in JS,
+  where plan §2 rule 3 keeps `sort` as an external tool. Equivalent for this
+  repo's ASCII paths, and no seam or row covers it.
 - **Traps the slice agents found, so nobody re-derives them:** a unit test
   that calls `recordSignal` without `installSignals(handler, stubKill)` first
   kills its own vitest worker; differential children get no `PWD`, so use
-  `runOld`/`runNew` (they pass `PWD: cwd`); two fixture dirs never byte-match
+  `runOld`/`runNew` (they pass `PWD: cwd`), and pass `env` to
+  `withCttyNoStdin` for the same reason; two fixture dirs never byte-match
   because the report prints the path, so run OLD then NEW on one directory and
-  reset between; pin timestamps with a `date` shim; commit new test files
-  BEFORE the full suite (`manifest` #2b reads `git archive HEAD`); the
-  `sync-by-address` seams match each shielded step's own argv, so do not fold
-  the steps into one subshell; `cmd_pull`'s trailing `if`/`if` returns 0 when
-  neither fires, so `cmdPull`'s final `return 0` is right.
-- **Machine noise:** the founder hears the fans during full-suite runs (~1,250
+  reset between; pin timestamps with a `date` shim; pull's `diff -u` preview
+  needs `normalizeDiffHeaders`; commit new test files BEFORE the full suite
+  (`manifest` #2b reads `git archive HEAD`); the `sync-by-address` seams match
+  each shielded step's own argv, so do not fold the steps into one subshell; a
+  bindingless `catch {}` needs a comment saying why (forbidden-idiom).
+- **Machine noise:** the founder hears the fans during full-suite runs (~1,270
   tests across 32 cores). Brief every agent to iterate on named suites and run
-  the full suite only before its final commit.
+  the full suite at most twice.
 
 - **Waiting for the founder's acceptance:** BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
@@ -198,10 +195,12 @@ before slice 5 lands (the row requires it, no waiver applies).
   accordingly.
 
 **Next, in order:**
-1. **TASK-081 slice 3** — a fresh Matthias, briefed from the section above:
-   tests, the six-suite shim run, P2 mutants, commit on `task081-port`.
-2. **Slice 4** (`a2bp` + `prs`), then the **Codex review** of the whole
-   branch, then **slices 5 and 6** on `main` (plan §8; slice 5b is dropped).
+1. **TASK-081 slice 4** (in flight), then the **Codex review** of the whole
+   branch, then **slices 5 and 6** on `main` (plan §8; slice 5b is dropped),
+   carrying the four slice-5 items above.
+2. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
+   `CLAUDE.md` → `AGENTS.md` consolidation, plan first, reviewed by all three
+   providers before any file moves.
 3. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
    `contamination.sh`, then its fix).
 4. **BUG-146** on the next #20d hang.

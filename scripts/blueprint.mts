@@ -123,6 +123,14 @@ export const C_BOLD = colour('1')
 export const C_DIM = colour('2')
 export const C_RESET = colour('0')
 
+class ExitStatusError extends Error {
+  readonly status: number
+  constructor(status: number) {
+    super(`exit ${status}`)
+    this.status = status
+  }
+}
+
 // --- die ------------------------------------------------------------------
 // `echo "${C_RED}error:${C_RESET} $*" >&2; exit 1`, verbatim — plus, since
 // SLICE 2, the cleanup bash's EXIT trap would have run first (`_bp_sync_
@@ -133,7 +141,7 @@ export const C_RESET = colour('0')
 export async function die(message: string): Promise<never> {
   process.stderr.write(`${C_RED}error:${C_RESET} ${message}\n`)
   await bpSyncCleanup()
-  return process.exit(1)
+  throw new ExitStatusError(1)
 }
 
 // --- TEMPLATE_FILES, verbatim from scripts/blueprint:104-124 ---------------
@@ -581,7 +589,7 @@ async function managedDie(reason: string): Promise<never> {
   process.stderr.write(`${C_DIM}  Refusing to continue. Carrying on would sync ZERO files while reporting${C_RESET}\n`)
   process.stderr.write(`${C_DIM}  success — a project would read '✓ everything matches' and be wrong.${C_RESET}\n`)
   await bpSyncCleanup()
-  return process.exit(1)
+  throw new ExitStatusError(1)
 }
 
 export async function bpManagedFiles(blueprintRoot: string): Promise<string[]> {
@@ -643,6 +651,7 @@ export async function cmdFiles(): Promise<void> {
     // .blueprint-source and every relative path read_blueprint_source touches
     // are read relative to that root.
     process.chdir(root)
+    process.env.PWD = root
     const src = await readBlueprintSource()
     printFilesReport(src.managed)
     return
@@ -795,7 +804,7 @@ async function bpFetchFail(reason: string): Promise<never> {
   process.stderr.write('  Offline? Compare against a local checkout explicitly:\n')
   process.stderr.write('    BLUEPRINT_ROOT=<path to a blueprint checkout> blueprint drift\n')
   await bpSyncCleanup()
-  return process.exit(5)
+  throw new ExitStatusError(5)
 }
 
 async function bpFetchDamaged(): Promise<never> {
@@ -879,14 +888,14 @@ async function bpFetchBlueprint(): Promise<void> {
     process.stderr.write('  Fetch it once from a local blueprint checkout:\n')
     process.stderr.write(`    BLUEPRINT_ROOT=<path to a blueprint checkout> blueprint pull${missingStr}\n`)
     await bpSyncCleanup()
-    process.exit(1)
+    throw new ExitStatusError(1)
   }
 
   const cfg = await bpConfigLoad('.blueprint-source')
   if (!cfg) {
     process.stderr.write('  Or compare against a local checkout: export BLUEPRINT_ROOT=<path to a blueprint checkout>\n')
     await bpSyncCleanup()
-    process.exit(4)
+    throw new ExitStatusError(4)
   }
   SYNC.remote = cfg.remote
   SYNC.branch = cfg.readBranch
@@ -1808,8 +1817,8 @@ export async function shieldedWrite(src: string, dest: string, modeFrom?: string
     const step = (cmd: string, args: readonly string[], opts: RunOptions = {}): Promise<RunResult> =>
       unchecked(() => run('sh', ['-c', 'trap "" INT TERM; exec "$@"', 'bp-shield', cmd, ...args], opts))
 
-    await step('rm', ['-f', tmp], { stdout: 'ignore', stderr: 'ignore' })
-    let ok = true
+    const rmR = await step('rm', ['-f', tmp], { stdout: 'ignore', stderr: 'ignore' })
+    let ok = rmR.status === 0
     if (existsSync(dest)) {
       const cpR = await step('cp', ['-p', dest, tmp], { stdout: 'ignore', stderr: 'ignore' })
       ok = cpR.status === 0
@@ -1907,8 +1916,16 @@ export async function bpCliLibs(): Promise<string[]> {
       // — nothing more to add; the shim's own needs (none) stand.
     }
   }
+  const sortedR = await unchecked(() =>
+    run('sort', ['-u'], {
+      env: { ...process.env, LC_ALL: 'C' },
+      stdin: names.size > 0 ? `${[...names].join('\n')}\n` : '',
+      stdout: 'capture',
+      stderr: 'ignore',
+    }),
+  )
   const out: string[] = []
-  for (const name of [...names].sort()) {
+  for (const name of nonEmptyLines(sortedR.stdout)) {
     if (existsSync(bpBlueprintPath(`scripts/lib/${name}`))) out.push(`scripts/lib/${name}`)
   }
   return out
@@ -1931,8 +1948,19 @@ export async function bpRetire(autoYes: boolean): Promise<boolean> {
       if (archR.status !== 0) return die('could not list the blueprint archive to look for retired files')
       const listR = await unchecked(() => run('tar', ['-tf', tarf], { stdout: 'capture', stderr: 'ignore' }))
       if (listR.status !== 0) return die('could not list the blueprint archive to look for retired files')
-      const curLines = [...new Set(listR.stdout.split('\n').filter((l) => l !== '' && !l.endsWith('/')))].sort()
-      writeFileSync(cur, curLines.length > 0 ? `${curLines.join('\n')}\n` : '')
+      const curInput = listR.stdout
+        .split('\n')
+        .filter((l) => l !== '' && !l.endsWith('/'))
+        .join('\n')
+      const sortCurR = await unchecked(() =>
+        run('sort', ['-u'], {
+          env: { ...process.env, LC_ALL: 'C' },
+          stdin: curInput ? `${curInput}\n` : '',
+          stdout: { file: cur },
+          stderr: 'ignore',
+        }),
+      )
+      if (sortCurR.status !== 0) return die('could not list the blueprint archive to look for retired files')
     } finally {
       await unchecked(() => run('rm', ['-f', tarf], { stdout: 'ignore', stderr: 'ignore' }))
     }
@@ -1944,8 +1972,16 @@ export async function bpRetire(autoYes: boolean): Promise<boolean> {
       }),
     )
     if (histR.status !== 0) return die('could not read the blueprint history to look for retired files')
-    const histLines = [...new Set(histR.stdout.split('\n').filter((l) => l !== ''))].sort()
-    writeFileSync(hist, histLines.length > 0 ? `${histLines.join('\n')}\n` : '')
+    const histInput = histR.stdout.split('\n').filter((l) => l !== '').join('\n')
+    const sortHistR = await unchecked(() =>
+      run('sort', ['-u'], {
+        env: { ...process.env, LC_ALL: 'C' },
+        stdin: histInput ? `${histInput}\n` : '',
+        stdout: { file: hist },
+        stderr: 'ignore',
+      }),
+    )
+    if (sortHistR.status !== 0) return die('could not read the blueprint history to look for retired files')
 
     const commR = await unchecked(() =>
       run('comm', ['-23', hist, cur], { env: { ...process.env, LC_ALL: 'C' }, stdout: 'capture', stderr: 'ignore' }),
@@ -2589,7 +2625,7 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
       reqLib('bp_file_fetch_base "$1" "$2" "$3"', [scratch, cfg.remote, cfg.branch]),
     )
     if (baseR.status !== 0) return codes.failed
-    const base = baseR.stdout
+    let base = baseR.stdout
     process.stdout.write(`  base:     ${base}\n\n`)
 
     const managedList = await a2bpManagedList(bare, base, scratch)
@@ -2662,7 +2698,7 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
           await run('cp', [join(root, path), staged])
         } catch (e) {
           await cleanup()
-          if (e instanceof CommandFailedError) process.exit(e.result.status)
+          if (e instanceof CommandFailedError) throw new ExitStatusError(e.result.status)
           throw e
         }
       }
@@ -2759,6 +2795,7 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
       const base2R = await unchecked(() => reqLib('bp_file_fetch_base "$1" "$2" "$3"', [scratch, cfg.remote, cfg.branch]))
       if (base2R.status !== 0) return codes.failed
       const base2 = base2R.stdout
+      base = base2
       const validateBase2R = await unchecked(() => reqLib('bp_build_validate_base "$1" "$2" "${@:3}"', [bare, base2, ...paths]))
       if (validateBase2R.status !== 0) return codes.blocked
 
@@ -2792,7 +2829,7 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
         ])
       } catch (e) {
         await cleanup()
-        if (e instanceof CommandFailedError) process.exit(e.result.status)
+        if (e instanceof CommandFailedError) throw new ExitStatusError(e.result.status)
         throw e
       }
       key = key2R.stdout
@@ -2998,9 +3035,21 @@ if (isEntryPoint) {
   // where bash's EXIT/INT/TERM traps would (plan §3 P1).
   installSignals(bpSyncCleanup)
   main(process.argv.slice(2))
-    .then((code) => process.exit(code))
-    .catch((err: unknown) => {
+    .then(async (code) => {
+      await bpSyncCleanup()
+      process.exitCode = code
+    })
+    .catch(async (err: unknown) => {
+      await bpSyncCleanup()
+      if (err instanceof ExitStatusError) {
+        process.exitCode = err.status
+        return
+      }
+      if (err instanceof CommandFailedError) {
+        process.exitCode = err.result.status
+        return
+      }
       process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
-      process.exit(1)
+      process.exitCode = 1
     })
 }

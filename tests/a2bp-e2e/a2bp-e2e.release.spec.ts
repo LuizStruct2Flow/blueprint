@@ -546,6 +546,64 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
     })
   })
 
+  it('#12b BUG-108: the blueprint moving a SECOND time refuses rather than rebuilding again', async () => {
+    await scenario('a2bp-e2e-12b', async (s) => {
+      // Same race as #12, except the shim never gates itself on a stamp: it
+      // advances main after EVERY fetch, including the one the rebuild itself
+      // triggers. Plan §3 P5: "the two-pass rebuild keeps its 'once': a second
+      // move fails with 5" — a defect that loops until the remote is quiet
+      // would spin here, so this asserts the loop never happens: exactly one
+      // rebuild, then FAILED (5), never PENDING/OK, and nothing pushed.
+      const e = await setup(s)
+
+      const which = await s.run('sh', ['-c', 'command -v git'], {
+        cwd: s.workspace.root,
+        env: { PATH: e.noGhPath },
+      })
+      expect(which.code, 'could not resolve git on the gh-free PATH').toBe(0)
+      const realGit = which.stdout.trim()
+
+      const shims = await s.shimDir('git-race-twice')
+      await shims.add(
+        'git',
+        [
+          `fetching=0`,
+          `for a in "$@"; do`,
+          `  [ "$a" = fetch ] && fetching=1`,
+          `done`,
+          `"${realGit}" "$@"`,
+          `rc=$?`,
+          // No stamp guard — every fetch advances main, so the first
+          // re-check's OWN fetch (triggered by its rebuild) sees main move
+          // again, and a correct implementation must stop there.
+          `if [ "$fetching" = 1 ]; then`,
+          `  t=$("${realGit}" -C "${e.remote}" rev-parse 'main^{tree}')`,
+          `  c=$("${realGit}" -C "${e.remote}" -c user.email=e@l -c user.name=E \\`,
+          `        -c commit.gpgsign=false commit-tree "$t" -p main -m 'the blueprint moved again')`,
+          `  "${realGit}" -C "${e.remote}" update-ref refs/heads/main "$c"`,
+          `fi`,
+          `exit $rc`,
+        ].join('\n'),
+      )
+
+      const before = await e.sha('main')
+      const r = await s.run(CLI, ['a2bp', 'docs/DoD.md'], {
+        cwd: e.proj,
+        env: { PATH: `${shims.dir}:${e.noGhPath}` },
+      })
+      const after = await e.sha('main')
+
+      expect(after, 'the fixture never moved main — this case would be vacuous').not.toBe(before)
+      expect(r.code, `a repeatedly-moving blueprint was not refused with FAILED\n${r.output}`).toBe(
+        RC.FAILED,
+      )
+      expect(r.output, 'the second move was not reported').toContain('The blueprint moved again')
+
+      const refs = await e.requestRefs()
+      expect(refs, 'a request branch was pushed despite the second move being refused').toHaveLength(0)
+    })
+  })
+
   // ===========================================================================
   // TASK-037 — files the blueprint does not ship
   //

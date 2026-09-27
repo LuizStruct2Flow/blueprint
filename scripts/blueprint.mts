@@ -1750,7 +1750,11 @@ export async function cmdDrift(): Promise<number> {
     }
     const driftOut = await mktemp()
     try {
-      const prospective = await bpProspectiveFor(f, driftOut)
+      // Plan §2 rule 4 — the shell calls bp_prospective_for only as an `if`
+      // condition, so an inner cp/jq/diff/merge failure inside it must not
+      // abort drift; it must continue and the function returns its own
+      // last-command status, as bash's disabled errexit does here.
+      const prospective = await unchecked(() => bpProspectiveFor(f, driftOut))
       if (prospective.mode === 'refuse') {
         refused.push(`${f} — ${prospective.why}`)
       } else {
@@ -2120,7 +2124,8 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
         // BUG-113 — drift's predicate exactly (bp_prospective_for's mode is
         // the one answer): a refused file is selected too, so its refusal is
         // reported rather than silently left out.
-        const p = await bpProspectiveFor(f, selOut)
+        // Plan §2 rule 4 — same disabled-errexit dynamic extent as drift's call.
+        const p = await unchecked(() => bpProspectiveFor(f, selOut))
         if (p.mode === 'refuse') {
           files.push(f)
         } else {
@@ -2195,7 +2200,8 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     try {
       // BUG-113 — ONE prospective result per file, used for the same-check,
       // the preview AND the write.
-      const p = await bpProspectiveFor(f, pullOut)
+      // Plan §2 rule 4 — same disabled-errexit dynamic extent as drift's call.
+      const p = await unchecked(() => bpProspectiveFor(f, pullOut))
       const fExists = existsSync(f)
       if (p.mode !== 'refuse' && fExists) {
         const diffR = await unchecked(() => run('diff', ['-q', pullOut, f], { stdout: 'ignore', stderr: 'ignore' }))
@@ -2338,7 +2344,29 @@ const A2BP_LIB_NAMES: readonly string[] = [
 
 function a2bpLibPaths(): string[] {
   const dir = libDir()
-  return ['placeholders.sh', ...A2BP_LIB_NAMES].map((n) => join(dir, n))
+  return A2BP_LIB_NAMES.map((n) => join(dir, n))
+}
+
+// placeholders.sh is NOT one of the six `[ -r … ] || die` libs cmd_a2bp
+// requires (scripts/blueprint:1819-1823) — the real CLI sources it once, at
+// TOP LEVEL, before any subcommand dispatches (:55-62), with its own
+// point-of-use fallback when the file is missing:
+//   bp_substitute_stream()   { die "…placeholders.sh is missing…"; }
+//   bp_substitute_in_place() { die "…placeholders.sh is missing…"; }
+// A bridge subprocess starts fresh each call and has neither that source nor
+// the CLI's own `die` function, so reproducing the CLI's behaviour (not
+// bash's raw "command not found") means inlining the fallback's effect
+// (die's `echo … >&2; exit 1`) directly, guarded exactly as the CLI guards
+// it — never blindly sourcing placeholders.sh like one of the six required
+// libs, which would leave a missing file failing as bash's own "No such
+// file", then 127 on the first call to a function that never got defined.
+function placeholdersFallbackSnippet(argIndex: number): string {
+  const msg = 'scripts/lib/placeholders.sh is missing — cannot substitute safely'
+  const die = `printf '%s\\n' "${C_RED}error:${C_RESET} ${msg}" >&2; exit 1`
+  return (
+    `if [ -r "$${argIndex}" ]; then . "$${argIndex}"; else ` +
+    `bp_substitute_stream() { ${die}; }; bp_substitute_in_place() { ${die}; }; fi`
+  )
 }
 
 async function reqLib(
@@ -2346,7 +2374,17 @@ async function reqLib(
   args: readonly string[] = [],
   opts: Omit<RunOptions, 'stdout' | 'stdin'> = {},
 ): Promise<{ readonly stdout: string; readonly status: number }> {
-  return bashLibs(a2bpLibPaths(), snippet, args, opts)
+  const placeholders = join(libDir(), 'placeholders.sh')
+  const libs = a2bpLibPaths()
+  const n = libs.length
+  const preamble =
+    `${placeholdersFallbackSnippet(1)}; ` + libs.map((_, i) => `. "$${i + 2}"`).join('; ')
+  const r = await run(
+    'bash',
+    ['-c', `${preamble}; shift ${n + 1}; ${snippet}`, '_', placeholders, ...libs, ...args],
+    { ...opts, stdout: 'capture', stderr: opts.stderr ?? 'inherit' },
+  )
+  return { stdout: stripTrailingNewlines(r.stdout), status: r.status }
 }
 
 function nonEmptyLines(s: string): string[] {
@@ -2401,119 +2439,67 @@ function splitFindingLine(line: string): { readonly ln: string; readonly kind: s
   return { ln: parts[0] ?? '', kind: parts[1] ?? '', reason: parts[2] ?? '', text: parts.slice(3).join('|') }
 }
 
-// bp_file_pr_body (scripts/lib/request-file.sh:141) — pure text formatting,
-// reimplemented directly for the same reason as isManaged above.
-function bpFilePrBody(
+// bp_file_pr_body, bp_file_remote_tip, bp_file_push, bp_file_existing_pr and
+// the `gh pr create` call (scripts/lib/request-file.sh:54-163,
+// scripts/blueprint:2117-2119) are ALL bridged into the same shell functions
+// rather than reimplemented, per plan §4 ("libs stay shell") — the orchestrator's
+// decision on review: a hand-copied `GIT_TRANSPORT_UNSET`/message duplicate
+// can drift from `request.sh`'s own `bp_request_transport_env` and this
+// file's own text, in a way no differential row that only checks output
+// would catch until the two disagree.
+
+// bp_file_pr_body PROJECT BASE REMOTE BRANCH UNSHIPPED SPEC...
+// (scripts/lib/request-file.sh:141) — UNSHIPPED is newline-delimited, exactly
+// as the shell's `cmd_a2bp` builds it.
+async function bpFilePrBody(
   project: string,
   base: string,
+  remote: string,
   branch: string,
-  isUnshipped: (path: string) => boolean,
-  specPaths: readonly string[],
-): string {
-  const out: string[] = []
-  out.push(`A back-propagation **request** from \`${project}\`.\n\n`)
-  out.push('This is a feature REQUEST, not a feature implementation. It says an\n')
-  out.push('improvement proved itself downstream; how it lands in the blueprint —\n')
-  out.push("merged as-is, adapted, or rewritten — is the blueprint owner's call,\n")
-  out.push('as is which ripples (deck, recipe docs, README) travel with it.\n\n')
-  out.push(`**Base:** \`${base}\` on \`${branch}\`\n\n`)
-  out.push('If the base has moved since, review the diff against that commit rather\n')
-  out.push('than against the current tip.\n\n')
-  out.push('**Files:**\n\n')
-  for (const path of specPaths) {
-    out.push(
-      isUnshipped(path)
-        ? `- \`${path}\` (**not shipped**: not managed, so no existing project receives it)\n`
-        : `- \`${path}\`\n`,
-    )
-  }
-  out.push('\n---\n_Filed by `blueprint a2bp`. The contamination guard ran on the project\n')
-  out.push('side; it is heuristic and advisory, so review the diff on its merits._\n')
-  return out.join('')
+  unshippedPaths: readonly string[],
+  specs: readonly string[],
+): Promise<string> {
+  const r = await reqLib('bp_file_pr_body "$1" "$2" "$3" "$4" "$5" "${@:6}"', [
+    project,
+    base,
+    remote,
+    branch,
+    // scripts/blueprint:1911-1917 builds this with a TRAILING newline after
+    // EVERY entry (`unshipped="${unshipped}${path}"$'\n'`), which is what
+    // lets its own `case $'\n'"$unshipped" in *$'\n'"$path"$'\n'*)` match the
+    // last entry too — `.join('\n')` alone drops that trailing newline.
+    unshippedPaths.map((p) => `${p}\n`).join(''),
+    ...specs,
+  ])
+  return r.stdout
 }
 
-// bp_file_remote_tip / bp_file_push / bp_file_existing_pr
-// (scripts/lib/request-file.sh:54-130) — env-scrubbed `git`/`gh` one-liners,
-// reproduced directly rather than bridged (same rationale as isManaged above).
+// bp_file_remote_tip REMOTE BRANCH (scripts/lib/request-file.sh:54).
 async function bpFileRemoteTip(remote: string, branch: string): Promise<string> {
-  const r = await unchecked(() =>
-    run('env', [...GIT_TRANSPORT_UNSET, 'git', 'ls-remote', remote, `refs/heads/${branch}`], {
-      stdout: 'capture',
-      stderr: 'ignore',
-    }),
-  )
-  const first = r.stdout.split('\n')[0] ?? ''
-  return first.trim().split(/\s+/)[0] ?? ''
+  const r = await unchecked(() => reqLib('bp_file_remote_tip "$1" "$2"', [remote, branch]))
+  return r.stdout
 }
 
+// bp_file_push BARE REMOTE REF COMMIT (scripts/lib/request-file.sh:76-104) —
+// its own stderr messages (adopting / rejected / push failed) are the
+// shell's, inherited by reqLib's default, never duplicated here.
 async function bpFilePush(bare: string, remote: string, ref: string, commit: string): Promise<boolean> {
-  const lsR = await unchecked(() =>
-    run('env', [...GIT_TRANSPORT_UNSET, 'git', '-C', bare, 'ls-remote', remote, `refs/heads/${ref}`], {
-      stdout: 'capture',
-      stderr: 'ignore',
-    }),
-  )
-  const first = lsR.stdout.split('\n')[0] ?? ''
-  const existing = first.trim().split(/\s+/)[0] ?? ''
-  if (existing) {
-    if (existing === commit) {
-      process.stderr.write('  branch already present with the identical commit — adopting it\n')
-      return true
-    }
-    process.stderr.write('The request branch already exists on the remote with a DIFFERENT tip.\n')
-    process.stderr.write(`  branch: ${ref}\n`)
-    process.stderr.write(`  remote: ${existing}\n`)
-    process.stderr.write(`  local:  ${commit}\n`)
-    process.stderr.write('Refusing to force-push. Someone may already be reviewing that request.\n')
-    return false
-  }
-  const pushR = await unchecked(() =>
-    run(
-      'env',
-      [...GIT_TRANSPORT_UNSET, 'git', '-C', bare, 'push', '-q', remote, `refs/heads/${ref}:refs/heads/${ref}`],
-      { stdout: 'ignore', stderr: 'ignore' },
-    ),
-  )
-  if (pushR.status !== 0) {
-    process.stderr.write(`push of ${ref} to ${remote} was rejected\n`)
-    return false
-  }
-  return true
+  const r = await reqLib('bp_file_push "$1" "$2" "$3" "$4"', [bare, remote, ref, commit])
+  return r.status === 0
 }
 
+// bp_file_existing_pr SLUG REF (scripts/lib/request-file.sh:118-130) — its own
+// `command -v gh` guard stands; `existing=$(...) || true` in the shell ignores
+// the status, so this bridge does too.
 async function bpFileExistingPr(slug: string, ref: string): Promise<string> {
-  if (!commandExists('gh')) return ''
-  const r = await unchecked(() =>
-    run(
-      'env',
-      [
-        ...GIT_TRANSPORT_UNSET,
-        'gh',
-        'pr',
-        'list',
-        '--repo',
-        slug,
-        '--head',
-        ref,
-        '--state',
-        'all',
-        '--json',
-        'state,url',
-        '--jq',
-        '.[0] // empty | "\\(.state)\\t\\(.url)"',
-      ],
-      { stdout: 'capture', stderr: 'ignore' },
-    ),
-  )
-  // `existing=$(bp_file_existing_pr ...)` — a command substitution strips
-  // ALL trailing newlines, however the underlying function's own stdout
-  // ended.
-  return stripTrailingNewlines(r.stdout)
+  const r = await unchecked(() => reqLib('bp_file_existing_pr "$1" "$2"', [slug, ref]))
+  return r.stdout
 }
 
-// `gh pr create ... 2>&1` — merged inside a bridged bash so stdout and
-// stderr interleave the way a real `2>&1` redirect would, rather than being
-// two separately-captured streams concatenated in an arbitrary order.
+// `bp_request_transport_env gh pr create … 2>&1` (scripts/blueprint:2118) —
+// merged inside the bridged bash so stdout and stderr interleave the way a
+// real `2>&1` redirect would, and the env-scrub is request.sh's own
+// `bp_request_transport_env`, not a hand-copied unset list.
 async function ghPrCreate(
   slug: string,
   branch: string,
@@ -2521,22 +2507,11 @@ async function ghPrCreate(
   title: string,
   body: string,
 ): Promise<{ readonly stdout: string; readonly status: number }> {
-  const unsetArgs = GIT_TRANSPORT_UNSET.map((a) => `"${a}"`).join(' ')
-  const r = await run(
-    'bash',
-    [
-      '-c',
-      `env ${unsetArgs} gh pr create --repo "$1" --base "$2" --head "$3" --title "$4" --body "$5" 2>&1`,
-      '_',
-      slug,
-      branch,
-      ref,
-      title,
-      body,
-    ],
-    { stdout: 'capture', stderr: 'ignore' },
+  return reqLib(
+    'bp_request_transport_env gh pr create --repo "$1" --base "$2" --head "$3" --title "$4" --body "$5" 2>&1',
+    [slug, branch, ref, title, body],
+    { stderr: 'ignore' },
   )
-  return { stdout: stripTrailingNewlines(r.stdout), status: r.status }
 }
 
 // _a2bp_managed_list — `bp_request_hermetic git archive` + `tar -tf` + the
@@ -2668,7 +2643,17 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
 
       const flatName = path.replace(/\//g, '_')
       const basecopy = join(scratch, `base.${flatName}`)
-      await unchecked(() => reqLib('bp_file_base_content "$1" "$2" "$3" "$4"', [bare, base, path, basecopy]))
+      // Bare in the shell (scripts/blueprint:1944) under `set -e`, not a
+      // condition — a failing `git show` there aborts the whole run with its
+      // own status. Not wrapped in unchecked(): the ambient errexit-on
+      // context makes reqLib() throw on failure, same as bash's -e here.
+      try {
+        await reqLib('bp_file_base_content "$1" "$2" "$3" "$4"', [bare, base, path, basecopy])
+      } catch (e) {
+        await cleanup()
+        if (e instanceof CommandFailedError) throw new ExitStatusError(e.result.status)
+        throw e
+      }
 
       const staged = join(scratch, `staged.${flatName}`)
       if (await bpShouldSubstitute(path)) {
@@ -2764,9 +2749,18 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
     process.stdout.write(`  branch:   ${ref}\n`)
     process.stdout.write(`  commit:   ${commit}\n`)
     process.stdout.write(`  files:    ${kept.length}\n\n`)
-    const diffR = await unchecked(() =>
-      reqLib('bp_request_hermetic git -C "$1" --no-pager diff --stat "$2" "$3"', [bare, base, commit]),
-    )
+    // Bare pipeline in the shell (scripts/blueprint:2025) under `set -e
+    // -o pipefail`, not a condition — a failing `git diff --stat` there
+    // aborts the whole run. Not wrapped in unchecked() for the same reason
+    // as bp_file_base_content above.
+    let diffR: { readonly stdout: string; readonly status: number }
+    try {
+      diffR = await reqLib('bp_request_hermetic git -C "$1" --no-pager diff --stat "$2" "$3"', [bare, base, commit])
+    } catch (e) {
+      await cleanup()
+      if (e instanceof CommandFailedError) throw new ExitStatusError(e.result.status)
+      throw e
+    }
     process.stdout.write(
       diffR.stdout
         .split('\n')
@@ -2878,7 +2872,7 @@ async function cmdA2bp(args: readonly string[]): Promise<number> {
       return codes.pending
     }
 
-    const bodyText = bpFilePrBody(projName, base, cfg.branch, isUnshipped, kept.map(pathOf))
+    const bodyText = await bpFilePrBody(projName, base, cfg.remote, cfg.branch, unshippedPaths, kept)
     const createR = await unchecked(() => ghPrCreate(slug, cfg.branch, ref, `a2bp: ${kept.length} file(s) from ${projName}`, bodyText))
     if (createR.status !== 0) {
       process.stdout.write(`${C_YELLOW}The branch is pushed, but opening the PR failed:${C_RESET}\n`)

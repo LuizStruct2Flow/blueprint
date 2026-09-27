@@ -67,6 +67,7 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
+import { withCttyNoStdin } from '../helpers/tty.js'
 
 const CLI = join(REPO_ROOT, 'scripts/blueprint')
 
@@ -151,31 +152,10 @@ async function shaOf(proj: string): Promise<string> {
   return (line ?? '').split('=').slice(1).join('=').trim()
 }
 
-/**
- * Run a command WITH a controlling terminal and a NON-interactive stdin.
- *
- * This is BUG-054's fix. util-linux takes `-qec CMD FILE`; BSD/macOS takes
- * `-q FILE CMD ...`. Which one is present is probed rather than assumed, and a
- * host with neither FAILS rather than skipping — R7, and a skip here is how the
- * case reported green for two fixes in a row.
- *
- * The inner `</dev/null` is the whole point: without it the child inherits the
- * pty as stdin, `[ -t 0 ]` is true, and this exercises the interactive path.
- */
-async function withCttyNoStdin(s: Scenario, cwd: string, command: string) {
-  const utilLinux = await s.run('script', ['-qec', 'true', '/dev/null'], { cwd })
-  const args =
-    utilLinux.code === 0
-      ? ['-qec', command, '/dev/null']
-      : ['-q', '/dev/null', '/bin/sh', '-c', command]
-  const r = await s.run('script', args, { cwd })
-  expect(
-    r.output,
-    'neither `script` calling convention worked, so no case here supplied a ' +
-      'controlling terminal — which is BUG-054 exactly, not a reason to skip',
-  ).not.toMatch(/script: (invalid|unrecognized) option|usage: script/i)
-  return r
-}
+// withCttyNoStdin (BUG-054's fix: a controlling terminal, non-interactive
+// stdin) now lives in tests/helpers/tty.ts, shared with TASK-081's
+// differential harness (tests/blueprint-port), which drives the same
+// interactive-prompt path on both the shell CLI and the ported one.
 
 describe('BUG-016 / BUG-018 — pull records only what it synced, and survives having no TTY', () => {
   it('#1 with no TTY: no device error, an actionable message, and a NON-ZERO exit', async () => {

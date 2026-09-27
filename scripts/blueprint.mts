@@ -1188,18 +1188,49 @@ export async function markerAwareMerge(bpFile: string, projFile: string, outFile
   const projEnd = await grepCount(BP_MARKER_END_ERE, projFile)
   if (bpBegin !== bpEnd || projBegin !== projEnd || bpBegin !== projBegin) return false
 
-  await run(
+  // Bare, matching the shell: the awk call is `marker_aware_merge`'s own LAST
+  // statement, so ITS exit status is the function's return value — the
+  // caller's `&& marker_aware_merge …` reads a failing awk as the function
+  // itself failing (falls back to backup-copy) exactly like a real
+  // structural mismatch. Returning `true` unconditionally here (as this once
+  // did) reported a successful merge from a BROKEN one: the caller took the
+  // 'merge' branch over whatever partial or empty bytes a failed awk left in
+  // `outFile`, never falling back — reproduced by
+  // blueprint-port-f1-pull-awk before this fix, fixed by reading the status.
+  const r = await run(
     'awk',
     ['-v', `bp_file=${bpFile}`, '-v', `rb=${BP_MARKER_BEGIN_ERE}`, '-v', `re=${BP_MARKER_END_ERE}`, MARKER_MERGE_AWK, projFile],
     { stdout: { file: outFile }, stderr: 'ignore' },
   )
-  return true
+  return r.status === 0
 }
 
 // --- placeholder substitution bridge (scripts/lib/placeholders.sh) ---------
 async function bpShouldSubstitute(f: string): Promise<boolean> {
   const lib = join(libDir(), 'placeholders.sh')
-  const r = await unchecked(() => bashLib(lib, 'bp_should_substitute "$2"', [f], { stderr: 'ignore' }))
+  // Neither shell call site (`_should_substitute` at scripts/blueprint:314,
+  // :1947) redirects this function's stderr — a MISSING placeholders.sh
+  // leaves `bp_should_substitute` undefined, and bash's own "command not
+  // found" line for it reaches the CLI's real stderr, once per file
+  // processed. `stderr: 'ignore'` (this call's own earlier choice) swallowed
+  // that diagnostic entirely rather than merely losing its exact wording
+  // (which a bridged `bash -c` can never reproduce byte-for-byte — it
+  // reports "bash: line 1: …", never "scripts/blueprint: line 287: …", since
+  // it is a different bash process running an inline -c script, not the
+  // CLI's own interpreter). Silence was the wrong choice: CLAUDE.md's "no
+  // silent swallowing" rule, and blueprint-port's finding-3 row.
+  //
+  // The source itself is GUARDED (`[ -r "$1" ]`), exactly as the CLI's own
+  // top-level source is (scripts/blueprint:55-58) — `bashLib`'s own
+  // unconditional `. "$1"; …` preamble would have bash print ITS OWN
+  // "No such file or directory" for the missing lib first, a line the real
+  // CLI never emits because it checks readability before ever sourcing.
+  const r = await unchecked(() =>
+    run('bash', ['-c', 'if [ -r "$1" ]; then . "$1"; fi; bp_should_substitute "$2"', '_', lib, f], {
+      stdout: 'ignore',
+      stderr: 'inherit',
+    }),
+  )
   return r.status === 0
 }
 
@@ -1237,6 +1268,20 @@ export interface Prospective {
   readonly mode: ProspectiveMode
   readonly why: string
   readonly detail: string
+  // The shell's `bp_prospective_pull`/`bp_prospective_for` is a bash FUNCTION
+  // whose own return status is its LAST command's exit status — for
+  // 'refuse' that is an explicit `return 1`, for 'merge' it is the always-
+  // succeeding `BP_PP_MODE=merge` assignment (0), and for every cp-writing
+  // branch ('new', 'copy', 'backup-copy') it is THAT `cp`'s own exit status.
+  // Every one of the three call sites (drift :1394, selection :1572, the
+  // same-check at :1639) decides on THIS status, never on BP_PP_MODE alone —
+  // `if ! bp_prospective_for …`. `ok` is that status, exposed as a field
+  // because the type has no bash-style "last command" to fall back on.
+  // Missing this field entirely (an earlier port revision) made a cp failure
+  // invisible: mode stayed whatever branch was taken, and every caller read
+  // `mode === 'refuse'` — silently treating a broken write as a success.
+  // Reproduced by blueprint-port-f1-drift-cp before this fix.
+  readonly ok: boolean
 }
 
 export async function bpProspectivePull(bp: string, proj: string, out: string): Promise<Prospective> {
@@ -1245,43 +1290,46 @@ export async function bpProspectivePull(bp: string, proj: string, out: string): 
   const ps = projExists ? await bpMarkerStructure(proj) : ''
 
   if (bs.startsWith('bad')) {
-    return { mode: 'refuse', why: `the blueprint copy's markers are invalid — ${bs.slice(4)}`, detail: '' }
+    return { mode: 'refuse', why: `the blueprint copy's markers are invalid — ${bs.slice(4)}`, detail: '', ok: false }
   }
   if (ps.startsWith('bad')) {
     return {
       mode: 'refuse',
       why: `this project's markers are invalid — ${ps.slice(4)} (fix them by hand, then pull again)`,
       detail: '',
+      ok: false,
     }
   }
   if (!projExists) {
-    await run('cp', [bp, out])
-    return { mode: 'new', why: '', detail: '' }
+    const r = await run('cp', [bp, out])
+    return { mode: 'new', why: '', detail: '', ok: r.status === 0 }
   }
   if (bs === 'none' && ps === 'none') {
-    await run('cp', [bp, out])
-    return { mode: 'copy', why: '', detail: '' }
+    const r = await run('cp', [bp, out])
+    return { mode: 'copy', why: '', detail: '', ok: r.status === 0 }
   }
   if (bs === 'none' && ps.startsWith('ok')) {
     return {
       mode: 'refuse',
       why: 'this project has markers but the blueprint copy has none — a pull would strip them',
       detail: '',
+      ok: false,
     }
   }
   if (bs.startsWith('ok') && ps === 'none') {
-    await run('cp', [bp, out])
-    return { mode: 'backup-copy', why: "blueprint uses markers, project doesn't", detail: '' }
+    const r = await run('cp', [bp, out])
+    return { mode: 'backup-copy', why: "blueprint uses markers, project doesn't", detail: '', ok: r.status === 0 }
   }
   // Only ok:ok combinations remain — bad and none have both been handled above.
   if (bs === ps && (await markerAwareMerge(bp, proj, out))) {
-    return { mode: 'merge', why: '', detail: '' }
+    return { mode: 'merge', why: '', detail: '', ok: true }
   }
-  await run('cp', [bp, out])
+  const r = await run('cp', [bp, out])
   return {
     mode: 'backup-copy',
     why: `marker structure mismatch (${bs.slice(3)} region(s) upstream, ${ps.slice(3)} here)`,
     detail: '',
+    ok: r.status === 0,
   }
 }
 
@@ -1436,7 +1484,7 @@ export async function bpProspectiveFor(f: string, out: string): Promise<Prospect
       try {
         const layer = await bpSettingsLayer(cmp, merged)
         if (layer.ok) return await bpProspectivePull(merged, f, out)
-        return { mode: 'refuse', why: layer.why, detail: layer.detail }
+        return { mode: 'refuse', why: layer.why, detail: layer.detail, ok: false }
       } finally {
         await unchecked(() => run('rm', ['-f', merged], { stdout: 'ignore', stderr: 'ignore' }))
       }
@@ -1755,7 +1803,13 @@ export async function cmdDrift(): Promise<number> {
       // abort drift; it must continue and the function returns its own
       // last-command status, as bash's disabled errexit does here.
       const prospective = await unchecked(() => bpProspectiveFor(f, driftOut))
-      if (prospective.mode === 'refuse') {
+      // `if ! bp_prospective_for …` (:1394) — the call's own STATUS, not
+      // `BP_PP_MODE` alone: a cp/merge failure inside a non-refuse branch
+      // still reads as `! bp_prospective_for` in the shell, so a cp failure
+      // here is REFUSED too, carrying whatever BP_PP_WHY that branch left
+      // (empty, for the writing branches) rather than being silently read
+      // as a clean comparison.
+      if (!prospective.ok) {
         refused.push(`${f} — ${prospective.why}`)
       } else {
         const diffR = await unchecked(() => run('diff', ['-q', driftOut, f], { stdout: 'ignore', stderr: 'ignore' }))
@@ -2121,12 +2175,13 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
       if (!existsSync(bp)) continue
       const selOut = await mktemp()
       try {
-        // BUG-113 — drift's predicate exactly (bp_prospective_for's mode is
-        // the one answer): a refused file is selected too, so its refusal is
+        // BUG-113 — drift's predicate exactly (bp_prospective_for's own
+        // STATUS is the one answer, not BP_PP_MODE alone — see Prospective's
+        // `ok`): a refused OR write-failed file is selected too, so it is
         // reported rather than silently left out.
         // Plan §2 rule 4 — same disabled-errexit dynamic extent as drift's call.
         const p = await unchecked(() => bpProspectiveFor(f, selOut))
-        if (p.mode === 'refuse') {
+        if (!p.ok) {
           files.push(f)
         } else {
           const diffR = await unchecked(() => run('diff', ['-q', selOut, f], { stdout: 'ignore', stderr: 'ignore' }))
@@ -2203,7 +2258,10 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
       // Plan §2 rule 4 — same disabled-errexit dynamic extent as drift's call.
       const p = await unchecked(() => bpProspectiveFor(f, pullOut))
       const fExists = existsSync(f)
-      if (p.mode !== 'refuse' && fExists) {
+      // `bp_prospective_for … && [ -f "$f" ] && diff -q …` (:1639) — the
+      // call's own STATUS gates the "same" shortcut, not BP_PP_MODE alone;
+      // see Prospective's `ok`.
+      if (p.ok && fExists) {
         const diffR = await unchecked(() => run('diff', ['-q', pullOut, f], { stdout: 'ignore', stderr: 'ignore' }))
         if (diffR.status === 0) {
           process.stdout.write(`  ${C_DIM}same${C_RESET}  ${f}\n`)

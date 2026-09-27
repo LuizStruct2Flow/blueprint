@@ -254,6 +254,50 @@ async function dateShimEnv(s: Scenario): Promise<Record<string, string>> {
   return { PATH: shims.path() }
 }
 
+// --- fault-injection PATH shims, shared by the finding-2/finding-1 rows below.
+//
+// Each shim is BUILT ONCE PER SIDE (a fresh shimDir per OLD/NEW run) so the
+// two runs never share a mutable directory — the same reason the pull
+// describe above builds two independent project copies rather than reusing
+// one, for any row that actually writes.
+
+async function realBinPath(s: Scenario, name: string): Promise<string> {
+  const r = await s.run('sh', ['-c', `command -v ${name}`], { cwd: s.workspace.root })
+  expect(r.stdout.trim(), `no ${name} on PATH — cannot build a passthrough shim`).not.toBe('')
+  return r.stdout.trim()
+}
+
+/** A PATH shim for `bin` that fails only when some WHOLE argv element
+ * exactly equals one of `verbs` — never a substring match, so a path or
+ * file name that merely CONTAINS a verb (e.g. a file called "show.md") does
+ * not trip it — and otherwise execs the real binary untouched. Same idiom as
+ * tests/gate-arming #9's `core.hooksPath` shim. */
+async function verbFailShim(s: Scenario, tag: string, bin: string, verbs: string[]): Promise<string> {
+  const real = await realBinPath(s, bin)
+  const shims = await s.shimDir(tag)
+  const cases = verbs.map((v) => `    ${JSON.stringify(v)}) exit 1 ;;`).join('\n')
+  await shims.add(bin, `for a in "$@"; do\n  case "$a" in\n${cases}\n  esac\ndone\nexec ${JSON.stringify(real)} "$@"\n`)
+  return shims.path()
+}
+
+/** A PATH shim for `bin` that fails only when some argv element CONTAINS the
+ * fixed string `needle` — for a jq PROGRAM argument that is one whole
+ * multi-line string, where the text that tells one jq call apart from
+ * another is buried inside it rather than being the whole argument. `needle`
+ * must carry no shell glob metacharacter (`*?[`); every needle used below is
+ * a plain jq keyword. */
+async function substringFailShim(s: Scenario, tag: string, bin: string, needle: string): Promise<string> {
+  expect(needle, 'needle must be glob-metacharacter-free — this helper does no escaping').not.toMatch(/[*?[]/)
+  const real = await realBinPath(s, bin)
+  const shims = await s.shimDir(tag)
+  // The needle is QUOTED inside the pattern (`*"needle"*`) — an unquoted
+  // space in a case pattern is a bash SYNTAX ERROR (confirmed directly: a
+  // bare `*def uniq*)` pattern fails the whole script to parse), which would
+  // break the shim for EVERY invocation rather than the one it targets.
+  await shims.add(bin, `for a in "$@"; do\n  case "$a" in\n    *${JSON.stringify(needle)}*) exit 1 ;;\n  esac\ndone\nexec ${JSON.stringify(real)} "$@"\n`)
+  return shims.path()
+}
+
 describe('blueprint-port differential — drift', () => {
   // ONE project directory for both CLIs — run OLD, capture its report, then
   // reset the gate/keepalive config it armed (so NEW sees the same "was
@@ -638,6 +682,210 @@ describe('blueprint-port differential — pull', () => {
 })
 
 /**
+ * blueprint-port differential — finding 1 (plan §5's required failure rows):
+ * `cp`, `awk` and `jq` failing INSIDE bp_prospective_for's own dynamic extent
+ * (bp_prospective_pull's `cp`, marker_aware_merge's `awk`, and
+ * _bp_settings_layer's merge `jq`) — 1ced574 proved the `unchecked()`
+ * mechanism itself with unit tests (a bare call rejects, the wrapped call
+ * absorbs and returns the last-command result); these four rows are the
+ * TRUE END-TO-END proof plan §5 asks for: a real `drift`/`pull` run, driven
+ * by a PATH shim, comparing the shell CLI against the port.
+ *
+ * Each shim fails the tool for EVERY invocation during the run (not just one
+ * call), which is safe here because a plain drift/pull run (no a2bp) reaches
+ * `cp`/`awk` NOWHERE ELSE — checked directly against scripts/blueprint and
+ * every scripts/lib/*.sh it sources for this file set. The one exception is
+ * `cp` in a PULL that actually writes: `_bp_shielded_write` (P2) ALSO runs a
+ * `cp -p DEST tmp` to preserve an EXISTING destination's mode before
+ * overwriting it — reached for `.blueprint-source` itself once any file is
+ * pulled — so a `cp` shim used in a pull row fails only the PLAIN, no-flags
+ * form `cp SRC DST` that bp_prospective_pull's own "new"/"copy"/"backup-copy"
+ * branches use, passing the `-p` form through untouched.
+ */
+describe('blueprint-port differential — finding 1 (tool failures inside prospective)', () => {
+  async function dateAndToolFailEnv(s: Scenario, tag: string, bin: string): Promise<Record<string, string>> {
+    const shims = await s.shimDir(tag)
+    await shims.add('date', 'echo 2026-01-01T00:00:00Z')
+    await shims.add(bin, 'exit 1\n')
+    return { PATH: shims.path() }
+  }
+
+  /** Same idea as `dateAndToolFailEnv`, but for `cp` in a row that reaches
+   * `_bp_shielded_write`'s OWN unrelated `cp -p` (the pull-writes-something
+   * case) — passes any invocation carrying `-p` through to the real `cp`,
+   * and fails only the plain two-argument form bp_prospective_pull uses. */
+  async function dateAndCpFailUnlessPreserveEnv(s: Scenario, tag: string): Promise<Record<string, string>> {
+    const real = await realBinPath(s, 'cp')
+    const shims = await s.shimDir(tag)
+    await shims.add('date', 'echo 2026-01-01T00:00:00Z')
+    await shims.add(
+      'cp',
+      `for a in "$@"; do\n  case "$a" in\n    -p) exec ${JSON.stringify(real)} "$@" ;;\n  esac\ndone\nexit 1\n`,
+    )
+    return { PATH: shims.path() }
+  }
+
+  it('drift — cp fails inside bp_prospective_pull\'s "copy" mode (none:none, no markers either side)', async () => {
+    await scenario('blueprint-port-f1-drift-cp', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      // Neither copy carries BLUEPRINT:BEGIN/END markers (seedBlueprintRepo's
+      // plain fixture content), so bp_marker_structure reports "none" on
+      // both sides and bp_prospective_pull takes the `none:none` branch —
+      // the one whose OWN body is a bare `cp`, not `marker_aware_merge`.
+      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+      await commitAll(s, proj, 'partial sync')
+
+      const oldEnv = { ...(await dateAndToolFailEnv(s, 'old-shims', 'cp')), BP_NO_PROMPT: '1' }
+      const oldResult = await runOld(s, proj, ['drift'], oldEnv)
+      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+      const newEnv = { ...(await dateAndToolFailEnv(s, 'new-shims', 'cp')), BP_NO_PROMPT: '1' }
+      const newResult = await runNew(s, proj, ['drift'], newEnv)
+
+      expectIdentical(oldResult, newResult)
+      // NON-VACUITY: a working `cp` here would report both files as cleanly
+      // DRIFTED (content differs, comparison succeeds) — the REFUSED bucket
+      // below is only reachable because the shimmed `cp` made
+      // bp_prospective_for's own return status non-zero for BOTH managed
+      // files (docs/DoD.md is unchanged content-wise, but its "copy" branch
+      // runs the same failing `cp`), which cmd_drift reads as a refusal
+      // regardless of the WHY it's carrying (a stale or empty BP_PP_WHY from
+      // this exact hazard — reproduced, not designed).
+      expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 2')
+    })
+  })
+
+  it('pull — cp fails inside bp_prospective_pull\'s "new" mode, on a file the project never pulled', async () => {
+    await scenario('blueprint-port-f1-pull-cp', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const oldProj = await s.workspace.dir('old-proj')
+      const newProj = await s.workspace.dir('new-proj')
+      await seedRegisteredProject(s, oldProj, bp, sha)
+      await seedRegisteredProject(s, newProj, bp, sha)
+      // Neither project has CLAUDE.md or docs/DoD.md at all — both are "new
+      // in blueprint", so bp_prospective_pull's `[ ! -f "$proj" ]` branch is
+      // what's exercised (mode=new, a bare `cp "$bp" "$out"`), never the
+      // `none:none` copy branch the drift row above targets.
+      const oldEnv = await dateAndCpFailUnlessPreserveEnv(s, 'old-shims')
+      const newEnv = await dateAndCpFailUnlessPreserveEnv(s, 'new-shims')
+      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], oldEnv)
+      const newResult = await runNew(s, newProj, ['pull', '--yes'], newEnv)
+
+      expectPullIdentical(oldResult, newResult)
+      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
+      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
+      expect(newClaude).toBe(oldClaude)
+      // NON-VACUITY, and the genuinely surprising part this row exists to
+      // pin: BP_PP_MODE stays "new" (set BEFORE the cp call), so pull_file
+      // proceeds to WRITE anyway — from an `$out` mktemp file the failed cp
+      // never populated. The write itself (`cat`, not `cp` — P2's shield)
+      // succeeds on zero bytes, so pull reports success and installs an
+      // EMPTY file rather than failing loudly. Both sides must agree this
+      // is what happens, not just that they agree with each other.
+      expect(oldClaude).toBe('')
+    })
+  })
+
+  it('pull — awk fails inside marker_aware_merge, falling back to backup-copy silently', async () => {
+    await scenario('blueprint-port-f1-pull-awk', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const oldProj = await s.workspace.dir('old-proj')
+      const newProj = await s.workspace.dir('new-proj')
+      await seedRegisteredProject(s, oldProj, bp, sha)
+      await seedRegisteredProject(s, newProj, bp, sha)
+      // bp_marker_structure is ITSELF awk-based, so once awk is globally
+      // broken it reports neither "none" nor "ok N" for either side — the
+      // failed command substitution captures empty stdout. That falls
+      // through both the `none:none`/`none:ok*`/`ok*:none` cases (none of
+      // which match an empty string) to the wildcard branch, whose own
+      // `marker_aware_merge` call fails on the SAME broken awk and the
+      // whole thing degrades to `backup-copy`: a bare `cp` overwrite (with a
+      // "marker structure mismatch" WHY that is cosmetically wrong — it
+      // wasn't a mismatch, awk itself failed — but stays byte-identical
+      // between the two CLIs, which is what this row actually proves).
+      for (const proj of [oldProj, newProj]) {
+        await mkdir(join(proj, 'docs'), { recursive: true })
+        await writeFile(join(proj, 'CLAUDE.md'), "# CLAUDE\nthe project's own edit\n", 'utf8')
+        await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+        await commitAll(s, proj, 'partial sync')
+      }
+      const oldEnv = await dateAndToolFailEnv(s, 'old-shims', 'awk')
+      const newEnv = await dateAndToolFailEnv(s, 'new-shims', 'awk')
+      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], oldEnv)
+      const newResult = await runNew(s, newProj, ['pull', '--yes'], newEnv)
+
+      expectPullIdentical(oldResult, newResult)
+      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
+      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
+      expect(newClaude).toBe(oldClaude)
+      // NON-VACUITY: the fallback landed the BLUEPRINT's content whole,
+      // never the project's own edit — the divergence a broken merge would
+      // otherwise hide.
+      expect(oldClaude).toBe('# CLAUDE\nfixture\n')
+      expect(oldClaude).not.toContain('own edit')
+    })
+  })
+
+  it('pull — jq fails inside the settings merge (_bp_settings_layer), refusing the file', async () => {
+    await scenario('blueprint-port-f1-pull-jq-merge', async (s) => {
+      const settingsJson = (allow: string[]) =>
+        `${JSON.stringify({ permissions: { allow, ask: [], deny: [] } }, null, 2)}\n`
+      const layer = `${JSON.stringify({ permissions: { allow: ['Bash(aws logs tail *)'] } }, null, 2)}\n`
+
+      async function seedSettingsBlueprint(dir: string): Promise<string> {
+        await mkdir(join(dir, 'docs'), { recursive: true })
+        await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+        await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+        await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
+        await mkdir(join(dir, '.claude'), { recursive: true })
+        await writeFile(join(dir, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
+        await initRepo(s, dir)
+        await commitAll(s, dir, 'base')
+        return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
+      }
+
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedSettingsBlueprint(bp)
+      const oldProj = await s.workspace.dir('old-proj')
+      const newProj = await s.workspace.dir('new-proj')
+      for (const proj of [oldProj, newProj]) {
+        await seedRegisteredProject(s, proj, bp, sha)
+        await mkdir(join(proj, 'docs'), { recursive: true })
+        await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+        await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+        await mkdir(join(proj, '.claude'), { recursive: true })
+        await writeFile(join(proj, '.claude/settings.json'), settingsJson([]), 'utf8')
+        await writeFile(join(proj, '.claude/settings.project.json'), layer, 'utf8')
+        await commitAll(s, proj, 'layered settings')
+      }
+
+      // Fails ONLY jq calls whose PROGRAM ARGUMENT contains "def uniq" — the
+      // settings MERGE program (BP_SETTINGS_MERGE) and no other jq call this
+      // run makes (bpOneObject's and the shape check's programs contain
+      // neither word), so the earlier checks succeed normally and the run
+      // reaches exactly the merge step this row means to break.
+      const oldPath = await substringFailShim(s, 'old-jq', 'jq', 'def uniq')
+      const newPath = await substringFailShim(s, 'new-jq', 'jq', 'def uniq')
+      const oldResult = await runOld(s, oldProj, ['pull', '.claude/settings.json'], { PATH: oldPath })
+      const newResult = await runNew(s, newProj, ['pull', '.claude/settings.json'], { PATH: newPath })
+
+      expectPullIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('could not be merged')
+      // Refused: nothing written, the project's settings.json is untouched.
+      const oldSettings = await readFile(join(oldProj, '.claude/settings.json'), 'utf8')
+      expect(oldSettings).toBe(settingsJson([]))
+    })
+  })
+})
+
+/**
  * blueprint-port differential — a2bp / prs (TASK-081 slice 4, plan §8 row 4).
  *
  * A representative slice of plan §5's a2bp/prs rows: dry-run, no-derived-
@@ -714,6 +962,104 @@ describe('blueprint-port differential — a2bp / prs', () => {
     expect(farm.code, farm.output).toBe(0)
     return dir
   }
+
+  /**
+   * Codex review finding 2 (TASK-081, commit 1ced574's body) — a2bp's
+   * `bp_file_base_content` call (scripts/blueprint:1944) and its
+   * `--no-pager diff --stat` pipeline (:2025) are BARE statements under
+   * `set -e`, never an `if`/`||` condition — unlike bp_prospective_for's own
+   * three call sites (plan §2 rule 4), a failure here must ABORT the whole
+   * run with the failing command's own status, not be silently absorbed.
+   * 1ced574 fixed the port to `throw` here instead of wrapping in
+   * `unchecked()`; these two rows are the differential proof the review
+   * asked for — a `git` PATH shim that fails ONLY the one verb each
+   * statement uses (matching argv, never a substring), passing every other
+   * git invocation through untouched, so `bp_file_fetch_base`'s own
+   * clone/fetch/rev-parse and the later commit-tree build are unaffected.
+   */
+  it('finding 2 — bp_file_base_content’s bare `git show` failing aborts the whole run', async () => {
+    await scenario('blueprint-port-a2bp-f2-base-content', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-f2a')
+      const newSide = await a2bpProject(s, 'new-f2a')
+      const oldPath = await verbFailShim(s, 'old-f2a-git', 'git', ['show'])
+      const newPath = await verbFailShim(s, 'new-f2a-git', 'git', ['show'])
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      // NON-VACUITY: died specifically of the shimmed git's own status, not
+      // some unrelated refusal (a2bp's own guard codes are 3/4/5/6 — never 1
+      // — so exit 1 here can only be the bare statement's abort).
+      expect(oldResult.code).toBe(1)
+    })
+  })
+
+  it('finding 2 — the bare `git --no-pager diff --stat` pipeline failing aborts the whole run', async () => {
+    await scenario('blueprint-port-a2bp-f2-diff-stat', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-f2b')
+      const newSide = await a2bpProject(s, 'new-f2b')
+      const oldPath = await verbFailShim(s, 'old-f2b-git', 'git', ['--stat'])
+      const newPath = await verbFailShim(s, 'new-f2b-git', 'git', ['--stat'])
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.stderr).toBe(oldResult.stderr)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(1)
+      // The request got as far as building the commit (both sides printed
+      // the "Request" header) before the bare diff --stat statement killed it.
+      expect(oldResult.stdout).toContain('Request')
+      expect(oldResult.stdout).not.toContain('request filed')
+    })
+  })
+
+  /**
+   * Codex review finding 3 — `scripts/lib/placeholders.sh` is not one of
+   * a2bp's six required libs (it is sourced separately, plan §9 D), so a
+   * project missing it does not hit the "lib is missing" refusal at all.
+   * Instead `bpShouldSubstitute` bridges to it directly, and the shell's own
+   * call site (`_should_substitute` at scripts/blueprint:1947, no
+   * redirection) lets bash's own "command not found" line reach the real
+   * stderr when the function is undefined. A path that SHOULD substitute
+   * (CLAUDE.md is not in bp_should_substitute's exemption list) is what
+   * reaches that call.
+   *
+   * FIXED, not just observed: `bpShouldSubstitute` used to pass
+   * `stderr: 'ignore'`, silently swallowing this diagnostic outright — a
+   * real divergence (CLAUDE.md's "no silent swallowing" rule), now
+   * `stderr: 'inherit'`. What remains a NAMED, ACCEPTED divergence (plan §6
+   * already has one of this shape) is the exact WORDING: the shell's
+   * diagnostic is bash's own "scripts/blueprint: line 287: …", naming the
+   * CLI's real file and line, while the port's bridge runs the function
+   * through a SEPARATE `bash -c` subprocess, whose own diagnostic can only
+   * ever read "bash: line 1: …" — a different bash process reporting on
+   * itself, not something `run()` synthesizes and could be taught the CLI's
+   * shape. Stdout and the exit code are still compared byte-for-byte; only
+   * this one stderr line is normalised (both sides' prefix stripped before
+   * the message).
+   */
+  it('finding 3 — scripts/lib/placeholders.sh missing, on a path that substitutes', async () => {
+    await scenario('blueprint-port-a2bp-f3-no-placeholders', async (s) => {
+      const oldSide = await a2bpProject(s, 'old-f3')
+      const newSide = await a2bpProject(s, 'new-f3')
+      const { rm } = await import('node:fs/promises')
+      await rm(join(oldSide.proj, 'scripts/lib/placeholders.sh'))
+      await rm(join(newSide.proj, 'scripts/lib/placeholders.sh'))
+      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'])
+      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'])
+      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      expect(newResult.code).toBe(oldResult.code)
+      // The one named normalisation: strip "<program>: line N: " off the
+      // front of each side's diagnostic before comparing — bash's own
+      // prefix, naming a different program and line per side, never
+      // reproducible byte-for-byte across two distinct bash processes.
+      const stripLinePrefix = (s: string) => s.replace(/^\S+: line \d+: /gm, '')
+      expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
+      expect(oldResult.stderr).toContain('bp_should_substitute: command not found')
+      expect(newResult.stderr).toContain('bp_should_substitute: command not found')
+    })
+  })
 
   it('dry-run — files, base and diff --stat, nothing pushed', async () => {
     await scenario('blueprint-port-a2bp-dry-run', async (s) => {

@@ -21,9 +21,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  CommandFailedError,
   HELP_TEXT,
   beginChild,
   bpCliLibs,
+  bpProspectiveFor,
   capture,
   endChild,
   errexitEnabled,
@@ -31,9 +33,11 @@ import {
   freeze,
   headLines,
   installSignals,
+  isTerminating,
   maybeRunHandler,
   recordSignal,
   run,
+  setTerminatingHandler,
   shield,
   shieldedWrite,
   unchecked,
@@ -220,6 +224,39 @@ describe('signal machinery (plan §2 rule 7, §3 P1/P2)', () => {
     await tick(2)
     expect(calls).toBe(1)
     expect(killedWith).toBe('SIGINT')
+  })
+
+  it('BUG-116: setTerminatingHandler(handler, true) resumes — the process is never killed, and a SECOND signal is handled again too', async () => {
+    // a2bp's own trap replaces the process-wide handler for one command
+    // (setTerminatingHandler(cleanup, true), scripts/blueprint.mts:2596),
+    // matching bash's `trap _a2bp_cleanup EXIT INT TERM` at scripts/blueprint:1886:
+    // a trap that returns normally, without calling `exit`, does not
+    // terminate the script — the command that was interrupted simply
+    // continues. Reproduced here, not fixed (plan §3 P5 "kept exactly").
+    let calls = 0
+    let killed = false
+    installSignals(() => {
+      // installSignals always arms resume=false; swap it before recording.
+    }, () => {
+      killed = true
+    })
+    setTerminatingHandler(() => {
+      calls++
+    }, true)
+
+    recordSignal('SIGTERM')
+    await maybeRunHandler()
+    expect(calls, 'the resuming handler did not run').toBe(1)
+    expect(killed, 'a resuming handler must never reach dieOfSignal — the run continues').toBe(false)
+    expect(isTerminating(), 'resume must clear the pending signal so the command can continue').toBe(false)
+
+    // "the command continues" — the next command in the same a2bp run checks
+    // the trap between commands exactly as before, and a SECOND signal is
+    // handled again rather than being swallowed by a handler that already ran.
+    recordSignal('SIGINT')
+    await maybeRunHandler()
+    expect(calls, 'a second signal during the same resumed run was not handled').toBe(2)
+    expect(killed).toBe(false)
   })
 })
 
@@ -428,6 +465,70 @@ describe('bpCliLibs / extractShLibNames — the closure with shim-follow (plan �
       expect(libs).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)', () => {
+  // The shell calls bp_prospective_pull / bp_prospective_for ONLY as an `if`
+  // condition (scripts/blueprint:1394, :1572, :1639), so errexit is off for
+  // its whole dynamic extent: an inner `cp` failing there does not abort
+  // drift/pull, it just continues past the failed command. Reproduced by
+  // wrapping the three call sites in `unchecked()` (drift's, selection's and
+  // the write's) — this proves the MECHANISM those three sites now share:
+  // called bare, an inner cp failure rejects; called through unchecked(), it
+  // does not. A regression that drops any of the three `unchecked()` wraps
+  // reproduces the bare case and would crash drift/pull instead of
+  // continuing past the failure, exactly as this test's bare case does.
+  it("bare (no unchecked): a failing inner cp makes bpProspectiveFor's promise reject", async () => {
+    const root = mkFixtureDir('bp-port-prospective-bare-root-')
+    const shimDir = mkFixtureDir('bp-port-prospective-bare-shim-')
+    const savedPath = process.env.PATH
+    try {
+      writeFileSync(join(root, 'CLAUDE.md'), 'blueprint content\n')
+      _setBlueprintRootForTests(root)
+      const fakeCp = join(shimDir, 'cp')
+      writeFileSync(fakeCp, '#!/bin/sh\nexit 9\n')
+      chmodSync(fakeCp, 0o755)
+      process.env.PATH = `${shimDir}:${savedPath}`
+
+      const out = join(shimDir, 'out')
+      // The project file does not exist, so bpProspectivePull takes the
+      // "new" branch: `await run('cp', [bp, out]); return {mode: 'new', ...}`
+      // — a bare, unwrapped `run()` call, ambient errexit-on by default.
+      await expect(bpProspectiveFor('CLAUDE.md', out)).rejects.toBeInstanceOf(CommandFailedError)
+    } finally {
+      process.env.PATH = savedPath
+      rmSync(root, { recursive: true, force: true })
+      rmSync(shimDir, { recursive: true, force: true })
+    }
+  })
+
+  it('unchecked(): the SAME failing cp is absorbed — the call continues and resolves, as bash does', async () => {
+    const root = mkFixtureDir('bp-port-prospective-unchecked-root-')
+    const shimDir = mkFixtureDir('bp-port-prospective-unchecked-shim-')
+    const savedPath = process.env.PATH
+    try {
+      writeFileSync(join(root, 'CLAUDE.md'), 'blueprint content\n')
+      _setBlueprintRootForTests(root)
+      const fakeCp = join(shimDir, 'cp')
+      writeFileSync(fakeCp, '#!/bin/sh\nexit 9\n')
+      chmodSync(fakeCp, 0o755)
+      process.env.PATH = `${shimDir}:${savedPath}`
+
+      const out = join(shimDir, 'out')
+      const p = await unchecked(() => bpProspectiveFor('CLAUDE.md', out))
+      // Reproduces the shell bug-for-bug: the function's own last statement
+      // still returns {mode: 'new'} even though the cp inside it failed and
+      // `out` was never written — this is what "an inner failure CONTINUES
+      // and the function returns its last command's status" means in
+      // practice, not a claim that the write actually happened.
+      expect(p.mode).toBe('new')
+      expect(existsSync(out)).toBe(false)
+    } finally {
+      process.env.PATH = savedPath
+      rmSync(root, { recursive: true, force: true })
+      rmSync(shimDir, { recursive: true, force: true })
     }
   })
 })

@@ -5,7 +5,7 @@
  * `node` is a shim reporting a chosen version; nothing is installed and nothing
  * reaches the network.
  *
- * TASK-027 (a2bp request PR #67 from linkedin-watcher-agent, upstream U3).
+ * TASK-027 (a2bp request PR #67 from linkedin-watcher-agent, upstream U3). a2bp-allow: the blueprint's own record of which project filed the request.
  * `check` REPORTED NODE OK ON A NODE THAT CANNOT RUN THE HARNESS. The installer
  * restated the requirement as `NODE_MIN_MAJOR="18"` while tests/package.json
  * declares `"node": "^20.19.0 || >=22.12.0"`, a floor that is a security
@@ -117,7 +117,7 @@
  * MANAGED_FILES reddens bootstrap-contents #0 (BUG-015). Not sourcing it
  * reddens 36 of sync-by-address's 41 cases, since drift and pull then refuse.
  *
- * TASK-029 — U7 OF a2bp REQUEST PR #69 (linkedin-watcher-agent), #U7a and #U7b.
+ * TASK-029 — U7 OF a2bp REQUEST PR #69 (linkedin-watcher-agent), #U7a and #U7b. a2bp-allow: the blueprint's own record of which project filed the request.
  * OBSERVED the same way (.scratch/c025/mutants8.py):
  *   CLI at the reproducer commit (silent skip) → #U7b (none): no gate line
  *   the command drops "$@"                     → #34 #37b #U7a #U7b
@@ -476,7 +476,13 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
     await scenario('install-toolchain-36', async (s) => {
       const m = await machine(s, 'a', await baseline(s))
       await install(s, m, [])
-      const touched = await s.run('touch', ['-d', '@0', m.target], { cwd: s.workspace.root })
+      // BUG-040: `touch -d @0` is GNU-only, and BSD touch (macOS) refuses it
+      // as an illegal time. `-t` with the zone pinned to UTC is the epoch on
+      // both, so the mtime below is still exactly 0.
+      const touched = await s.run('touch', ['-t', '197001010000.00', m.target], {
+        cwd: s.workspace.root,
+        env: { TZ: 'UTC' },
+      })
       expect(touched.code, touched.output).toBe(0)
       const again = await install(s, m, [])
       expect((await stat(m.target)).mtimeMs, `the command was rewritten:\n${again.output}`).toBe(0)
@@ -683,7 +689,7 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
   })
 })
 
-// --- TASK-029: U7 of a2bp request PR #69 (linkedin-watcher-agent) -------------
+// --- TASK-029: U7 of a2bp request PR #69 (linkedin-watcher-agent) ------------- a2bp-allow: the blueprint's own record of which project filed the request.
 //
 // The request made a SYMLINKED CLI load its lib/ from its physical path, and
 // made drift refuse to report without its helpers. The symlink rewrite is not

@@ -37,7 +37,31 @@ interface ProcRow {
   args: string
 }
 
-/** Parse `ps -eo pid,ppid,pgid,sid,stat,wchan:32,args` output into rows. */
+/**
+ * The `ps` arguments for this platform, always seven columns in the order
+ * `parsePs` reads.
+ *
+ * BUG-040. The Linux spelling was the only one, and Darwin's `ps` refuses two
+ * of its keywords (`sid: keyword not found`, `wchan:32: keyword not found`), so
+ * a timeout on a Mac wrote a dump holding the refusal and no process at all.
+ * Darwin's own keywords fill the same seven columns. Its `sess` prints 0 for
+ * every process, because the kernel no longer exposes the session, so `sid=`
+ * carries no information there: it is kept for the column count, not the value.
+ *
+ * Only the tree comes across. `/proc` is Linux, so on Darwin the per-process
+ * `/proc` reads below report `<unreadable: ENOENT …>`, which is how this dump
+ * has always reported a file it could not read, and the two parentage-
+ * independent nets find nothing. No `/proc` emulation is attempted.
+ *
+ * Linux, and every platform that is not Darwin, gets exactly the arguments it
+ * got before.
+ */
+export function psArgs(platform: NodeJS.Platform = process.platform): string[] {
+  if (platform === 'darwin') return ['-eo', 'pid,ppid,pgid,sess,stat,wchan,args']
+  return ['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args']
+}
+
+/** Parse the output of `ps` run with `psArgs()` into rows. */
 function parsePs(output: string): ProcRow[] {
   const rows: ProcRow[] = []
   for (const line of output.trim().split('\n').slice(1)) {
@@ -217,7 +241,7 @@ export async function dumpProcessTree(
   ]
   let all: ProcRow[] = []
   try {
-    const { stdout } = await execFileAsync('ps', ['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args'])
+    const { stdout } = await execFileAsync('ps', psArgs())
     all = parsePs(stdout)
     const tree = rootPids.length > 0 ? withDescendants(all, rootPids) : []
     if (tree.length === 0) {

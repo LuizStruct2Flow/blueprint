@@ -19,7 +19,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { appendFile, chmod, readFile, readdir, rename, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
-import { collectDumps } from './dump.js'
+import { collectDumps, psArgs } from './dump.js'
+import { skipVisibly } from '../helpers/project-config.js'
 import { RealStateCanary } from './canary.js'
 import { assertProcessEnvClean, fixtureEnv, FORBIDDEN_ENV } from './env.js'
 import { createWorkspace } from './workspace.js'
@@ -395,7 +396,7 @@ describe('harness — environment scrubbing (BUG-046 / BUG-047)', () => {
   })
 
   it('TASK-025 H2 the scenario OWNS XDG_CACHE_HOME: an ambient value is replaced, an outside override refused', async () => {
-    // The blueprint cache lives under ${XDG_CACHE_HOME:-$HOME/.cache}. A
+    // The blueprint cache lives under ${XDG_CACHE_HOME:-$HOME/.cache}. (a2bp-allow: the user's cache home, per-user, not per-project state.) A
     // per-scenario HOME does not cover an operator who exports XDG_CACHE_HOME.
     await withAmbient({ XDG_CACHE_HOME: '/somewhere/the-operators-real-cache' }, async () => {
       await scenario('xdg-cache-owned', async (s) => {
@@ -1136,7 +1137,7 @@ describe('harness — the default workspace base is private (BUG-121)', () => {
   // mkdir(..., { mode: 0o700 }) sets nothing on a directory that already exists.
   // The real default base on the machine that found this was 0775, so the base
   // was only private if it happened to be created by this harness. The base here
-  // is planted inside the scenario, never the real ~/.cache.
+  // is planted inside the scenario, never the real ~/.cache. (a2bp-allow: names the user's cache home in prose, not per-project state.)
   it('BUG-121 an existing default base with loose permissions is tightened to 0700', async () => {
     await scenario('bug121-loose-base', async (s) => {
       const systemTmp = await s.fs.mkdirp('shared-tmp')
@@ -1400,7 +1401,7 @@ describe('harness — process ownership', () => {
     // group, leaves the group itself (so SIGKILL does not reach it), and reaps
     // its child only 500 ms after it dies. Its stdio is /dev/null, so it cannot
     // hold `close` back the way a pipe holder would. Ported from PR #68
-    // (linkedin-watcher-agent).
+    // (linkedin-watcher-agent). a2bp-allow: the blueprint's own record of which project filed PR #68.
     //
     // The 3 s timeout is not the property: it only has to outlast perl starting
     // and writing `ready`, which under gate load can exceed the request's 1 s.
@@ -1680,7 +1681,31 @@ describe('harness — timeout evidence capture (BUG-146)', () => {
     })
   })
 
-  it('BUG-146: an orphan reparented past the tracked-roots walk is still named — the ppid walk alone cannot see it, but the pipe/env-marker nets do', async () => {
+  it('BUG-040: the dump asks ps for the same seven columns on Linux and on Darwin, and Linux’s own spelling is unchanged', () => {
+    // Pure, so it runs on every host: the Darwin branch is pinned on Linux and
+    // the Linux one on a Mac. The first BUG-146 case above is what proves, on
+    // whichever host runs it, that the real `ps` accepts its spelling.
+    expect(psArgs('linux')).toEqual(['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args'])
+    expect(psArgs('darwin')).toEqual(['-eo', 'pid,ppid,pgid,sess,stat,wchan,args'])
+    // Anything else keeps the Linux spelling it had before BUG-040.
+    expect(psArgs('freebsd')).toEqual(psArgs('linux'))
+    const columns = (platform: NodeJS.Platform): number => (psArgs(platform)[1] as string).split(',').length
+    expect(columns('darwin')).toBe(columns('linux'))
+  })
+
+  it('BUG-146: an orphan reparented past the tracked-roots walk is still named — the ppid walk alone cannot see it, but the pipe/env-marker nets do', async (ctx) => {
+    // BUG-040: both nets read /proc (the pipe ids captured at spawn, and each
+    // process's environ), and the fixture starts its orphan with `setsid`, a
+    // util-linux command. Off Linux there is neither, so this case cannot
+    // judge anything and says so. On Linux it runs exactly as before.
+    if (process.platform !== 'linux') {
+      skipVisibly(
+        ctx,
+        `the pipe and env-marker nets read /proc and the fixture needs setsid, both Linux-only — this host is ${process.platform}`,
+      )
+      return
+    }
+
     // BUG-146's row, fifth and sixth CI occurrences (runs 36129880176,
     // 36166194863): both real dumps read "nothing found under the tracked
     // roots — every tracked process had already exited" while the wait they

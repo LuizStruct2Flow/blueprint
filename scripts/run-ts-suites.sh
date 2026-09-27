@@ -119,26 +119,48 @@ ts_scrubbed(){
     _ts_old_tmpdir=$TMPDIR
     _ts_new_tmpdir=''
     # /dev/shm is Linux tmpfs, not the shared /tmp BUG-121 fled — cleaned up
-    # below on every exit path, so nothing accumulates there either. It is
-    # absent on macOS (this script ships to every project), so a missing or
-    # unwritable /dev/shm falls back to simply UNSETTING TMPDIR: the harness
-    # then falls back to its own private base
-    # (tests/harness/workspace.ts workspaceBase), and any other tool this
-    # invocation starts falls back to the OS default via os.tmpdir().
+    # below on every exit path, so nothing accumulates there either.
     if [ -d /dev/shm ] && [ -w /dev/shm ]; then
       _ts_new_tmpdir=$(mktemp -d /dev/shm/bp-ts-suites.XXXXXX 2>/dev/null) || _ts_new_tmpdir=''
     fi
+    # BUG-040 — /dev/shm is absent on macOS, and this script ships to every
+    # project. The fallback there used to be UNSETTING TMPDIR, which is a
+    # redirect to nowhere: the command this starts was told its TMPDIR moved
+    # and then found none, so `"$TMPDIR/x"` became `/x` (tests/ts-bridge #13b:
+    # `mkdir: /probe: Read-only file system`). The second candidate is the
+    # directory the harness itself calls private, the user's cache home
+    # (tests/harness/workspace.ts workspaceBase), so the redirect names a real
+    # directory on every host, removed below like the /dev/shm one.
+    if [ -z "$_ts_new_tmpdir" ]; then
+      _ts_cache=$(_ts_private_tmp_parent) || _ts_cache=''
+      if [ -n "$_ts_cache" ]; then
+        _ts_new_tmpdir=$(mktemp -d "$_ts_cache/bp-ts-suites.XXXXXX" 2>/dev/null) || _ts_new_tmpdir=''
+      fi
+    fi
+    # Neither candidate: the command runs with TMPDIR unset, the harness falls
+    # back to its own private base, and any other tool this invocation starts
+    # falls back to the OS default via os.tmpdir(). The notice below says so.
+    #
+    # TMPDIR ITSELF IS SET, OR UNSET, INSIDE THE SUBSHELLS BELOW, NEVER HERE
+    # (BUG-040). This function runs in the caller's shell, so assigning it here
+    # changed the caller's TMPDIR for good, and "only for this invocation"
+    # above was not true: once the redirected directory was removed, the
+    # caller held a TMPDIR naming a directory that no longer existed, and
+    # every later ts_scrubbed in the same shell (the gate's typecheck stage
+    # makes two, and the vitest stage follows) passed that on, with no marker
+    # above it to trigger a second redirect. With /dev/shm the only candidate
+    # that needed a TMPDIR inside a git tree AND two calls in one shell, on
+    # Linux. Making the redirect real on macOS would have made it every gate
+    # run a dispatched agent starts there.
     if [ -n "$_ts_new_tmpdir" ]; then
       chmod 700 "$_ts_new_tmpdir"
-      TMPDIR=$_ts_new_tmpdir
-      export TMPDIR
+      _ts_new_tmpdir_desc=$_ts_new_tmpdir
     else
-      unset TMPDIR
+      _ts_new_tmpdir_desc='(unset — falling back to the harness private base)'
     fi
     # NEVER SILENT: whichever branch fired, this run's TMPDIR differs from
     # what the launcher set, and that is worth a line every time, not only
     # when something goes wrong.
-    _ts_new_tmpdir_desc=${TMPDIR:-'(unset — falling back to the harness private base)'}
     printf 'run-ts-suites: TMPDIR=%s sits inside a git tree, which the TS harness refuses (BUG-110); using TMPDIR=%s for this run instead (TASK-083 sets TMPDIR to a repo path for every dispatched agent).\n' \
       "$_ts_old_tmpdir" "$_ts_new_tmpdir_desc" >&2
     # A child runs here, not `exec`: `exec` would replace THIS shell, so the
@@ -158,6 +180,8 @@ ts_scrubbed(){
     # caller's trap table is untouched no matter what this does.
     if [ -n "$_ts_new_tmpdir" ]; then
       (
+        TMPDIR=$_ts_new_tmpdir
+        export TMPDIR
         trap '_ts_tmpdir_sig_cleanup INT' INT
         trap '_ts_tmpdir_sig_cleanup TERM' TERM
         trap '_ts_tmpdir_sig_cleanup HUP' HUP
@@ -169,6 +193,8 @@ ts_scrubbed(){
       )
       return $?
     fi
+    ( unset TMPDIR; _ts_scrub_env; exec "$@" )
+    return $?
   fi
   ( _ts_scrub_env; exec "$@" )
 }
@@ -186,6 +212,35 @@ _ts_tmpdir_sig_cleanup(){
   trap - INT TERM HUP
   rm -rf "$_ts_new_tmpdir"
   kill "-$1" "$$"
+}
+
+# _ts_private_tmp_parent — print the directory a redirected TMPDIR is created
+# in where there is no /dev/shm (BUG-040), or print nothing and return 1.
+#
+# ${XDG_CACHE_HOME:-$HOME/.cache} (a2bp-allow: the user's cache home, per-user, not per-project state), the parent tests/harness/workspace.ts gives
+# its own private base, for the reason it gives: it is per-user, where /tmp is
+# shared with every process on the machine (BUG-121). Created 0700 if missing,
+# as the harness creates it.
+#
+# Refused, rather than used, when it is not an absolute path or when a project
+# marker sits above it: a home directory that is itself a git checkout would
+# hand the harness the very TMPDIR this redirect exists to replace. The marker
+# walk runs on the path as named, so nothing is created inside a git tree, and
+# again on the physical path, which is the one the harness resolves and judges.
+#
+# Call it in a command substitution: it changes directory to resolve the path.
+_ts_private_tmp_parent(){
+  _tpp_dir=${XDG_CACHE_HOME:-${HOME:+$HOME/.cache}}  # a2bp-allow: the user's cache home, per-user, not per-project state
+  case $_tpp_dir in
+    (/*) ;;
+    (*) return 1 ;;
+  esac
+  if _ts_tmpdir_has_marker_above "$_tpp_dir"; then return 1; fi
+  ( umask 077 && mkdir -p "$_tpp_dir" ) 2>/dev/null || return 1
+  _tpp_dir=$(cd "$_tpp_dir" 2>/dev/null && pwd -P) || return 1
+  if _ts_tmpdir_has_marker_above "$_tpp_dir"; then return 1; fi
+  [ -w "$_tpp_dir" ] || return 1
+  printf '%s\n' "$_tpp_dir"
 }
 
 # _ts_tmpdir_has_marker_above DIR — true if DIR or any ancestor carries a
@@ -463,14 +518,22 @@ ts_scripts_no_bare_imports(){
   # in a subshell, but only its stdout is read back, so nothing depends on a
   # variable surviving the subshell boundary (the SC2044 fix below would
   # otherwise be silently undone by exactly that mistake).
+  #
+  # THE CASE PATTERNS OPEN WITH A PARENTHESIS, AND MUST (BUG-040). macOS ships
+  # bash 3.2 as /bin/sh, and bash 3.2 finds the end of a `$( … )` by counting
+  # parentheses: a bare `pattern)` closes the substitution early, what is left
+  # is a syntax error, and the typecheck stage died on every push from a Mac.
+  # POSIX allows the leading `(`, dash and bash 4+ read both spellings the
+  # same, and `sh -n` does not catch the bare one — bash 3.2 parses a quoted
+  # substitution only when it runs it. Any `case` inside a `$( … )` needs this.
   _bi_bad="$(
     find "$_bi_root/scripts" -name '*.mts' -print 2>/dev/null | while IFS= read -r _bi_f; do
       grep -ohE "from[[:space:]]+['\"][^'\"]+['\"]|^import[[:space:]]+['\"][^'\"]+['\"]" "$_bi_f" \
         | sed -E "s/^(from|import)[[:space:]]+['\"]//; s/['\"]\$//" \
         | while IFS= read -r _bi_s; do
             case "$_bi_s" in
-              node:*|./*|../*) ;;
-              *) printf '%s: "%s"\n' "$_bi_f" "$_bi_s" ;;
+              (node:*|./*|../*) ;;
+              (*) printf '%s: "%s"\n' "$_bi_f" "$_bi_s" ;;
             esac
           done
     done

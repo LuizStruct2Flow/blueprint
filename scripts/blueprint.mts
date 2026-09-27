@@ -15,7 +15,7 @@
 // the general signal machinery (record, defer to a child's exit, `shield`,
 // the interruptible-wait `freeze`, and serialisation of repeated signals).
 //
-// SLICE 2 (this commit) — the read path, `drift` complete: config
+// SLICE 2 — the read path, `drift` complete: config
 // (request-config.sh bridge), the P1 fetch (address-mode git, the cache, the
 // BUG-120 gate), history, the staleness report (staleness.sh bridge), the
 // managed set (slice 1's, reused), marker structure and the marker-aware
@@ -23,7 +23,15 @@
 // layer, `_bp_is_blueprint_itself` / `_bp_project_root` (state-dir.sh
 // bridge) and gate arming (gate.sh bridge, stdout inherited so the bash
 // lib's own echo lines are the bytes this process emits — no re-formatting
-// seam to drift from them). `pull`, `a2bp` and `prs` remain placeholders.
+// seam to drift from them).
+//
+// SLICE 3 (this commit) — `pull` complete: selection (BUG-113/BUG-016), the
+// CLI-libs closure with shim-follow (plan §7 — `bpCliLibs` scans the pulled
+// CLI, and its `.mts` sibling too once that CLI IS the exact shim), prompts
+// (BUG-018/BUG-054), `pullFile`, the P2 shielded write (`shieldedWrite` —
+// bytes, exec bit and rename finish together under a signal), bootstrap_sha
+// (BUG-016/BUG-122) and retirement (TASK-021 §4.2). `a2bp` and `prs` remain
+// placeholders.
 //
 // THE PLACEHOLDER HOLE (plan §9 D, decided: Option 1). `bp_should_substitute`
 // (scripts/lib/placeholders.sh) exempts `*scripts/blueprint` from project-name
@@ -664,6 +672,13 @@ async function bpGit(args: readonly string[], opts: RunOptions = {}): Promise<Ru
 
 function bpBlueprintPath(f: string): string {
   return `${SYNC.blueprintRoot}/${f}`
+}
+
+// Test-only: point bpBlueprintPath (and so bpCliLibs) at a fixture tree
+// without going through the P1 fetch or the BLUEPRINT_ROOT override path.
+// Never called from main().
+export function _setBlueprintRootForTests(root: string): void {
+  SYNC.blueprintRoot = root
 }
 
 // --- _bp_sync_cleanup (scripts/blueprint:707-722) — BUG-120 -----------------
@@ -1707,9 +1722,495 @@ export async function cmdDrift(): Promise<number> {
   return 0
 }
 
+// =============================================================================
+// SLICE 3 — `pull` complete (plan §8 row 3): selection, the closure with
+// shim-follow (§7), prompts, pullFile, the P2 shielded write, bootstrap_sha,
+// retirement.
+// =============================================================================
+
+// --- P2, `_bp_shielded_write` (scripts/blueprint:746-760) -------------------
+//
+// bytes, exec bit and rename finish together. Each STEP below is its own
+// spawned `sh -c 'trap "" INT TERM; exec "$@"' bp-shield <cmd> …` — a group
+// signal, as a terminal's Ctrl-C sends, cannot kill it mid-step — wrapped in
+// `shield()` so a signal recorded while any step runs only waits, and takes
+// the terminating path the instant the write finishes (plan §3 P2).
+export async function shieldedWrite(src: string, dest: string, modeFrom?: string): Promise<boolean> {
+  return shield(async () => {
+    const tmp = `${dest}.bp-new.${process.pid}`
+    const step = (cmd: string, args: readonly string[], opts: RunOptions = {}): Promise<RunResult> =>
+      unchecked(() => run('sh', ['-c', 'trap "" INT TERM; exec "$@"', 'bp-shield', cmd, ...args], opts))
+
+    await step('rm', ['-f', tmp], { stdout: 'ignore', stderr: 'ignore' })
+    let ok = true
+    if (existsSync(dest)) {
+      const cpR = await step('cp', ['-p', dest, tmp], { stdout: 'ignore', stderr: 'ignore' })
+      ok = cpR.status === 0
+    }
+    if (ok) {
+      const catR = await step('cat', [src], { stdout: { file: tmp }, stderr: 'ignore' })
+      ok = catR.status === 0
+    }
+    if (ok && modeFrom !== undefined && modeFrom !== '') {
+      // _bp_sync_exec_bit, inline (plan §2 rule 3 — a `test` is JS; only the
+      // chmod itself is an external, shielded step). Only the executable bit
+      // is mirrored, never read/write bits.
+      if (existsSync(modeFrom) && existsSync(tmp)) {
+        const execBit = (statSync(modeFrom).mode & 0o111) !== 0
+        await step('chmod', [execBit ? '+x' : '-x', tmp], { stdout: 'ignore', stderr: 'ignore' })
+        // chmod is best-effort (`2>/dev/null || true` in the shell original)
+        // and never turns `ok` false.
+      }
+    }
+    if (ok) {
+      const mvR = await step('mv', ['-f', tmp, dest], { stdout: 'ignore', stderr: 'ignore' })
+      ok = mvR.status === 0
+    }
+    if (!ok) {
+      await step('rm', ['-f', tmp], { stdout: 'ignore', stderr: 'ignore' })
+    }
+    return ok
+  })
+}
+
+// --- pull_file (scripts/blueprint:612-640) ----------------------------------
+export async function pullFile(f: string, out: string, p: Prospective): Promise<boolean> {
+  const bp = bpBlueprintPath(f)
+  switch (p.mode) {
+    case 'refuse':
+      process.stdout.write(`  ${C_RED}    refuse: ${p.why}. Nothing written.${C_RESET}\n`)
+      if (p.detail) process.stdout.write(`${p.detail}\n`)
+      return false
+    case 'backup-copy':
+      process.stdout.write(`  ${C_YELLOW}    warn: ${p.why} — backing up + whole-file copy${C_RESET}\n`)
+      await shieldedWrite(f, `${f}.bp-bak`)
+      process.stdout.write(`  ${C_DIM}    backup at ${f}.bp-bak — reconcile manually${C_RESET}\n`)
+      break
+    case 'merge':
+      process.stdout.write(`  ${C_DIM}    (marker-aware merge: project outside-marker content preserved)${C_RESET}\n`)
+      break
+    case 'new':
+    case 'copy':
+      break
+  }
+  return shieldedWrite(out, f, bp)
+}
+
+// --- _bp_cli_libs, with shim-follow (plan §7) -------------------------------
+//
+// The exact two-line shim's text (scripts/lib/shim.mts's own shimContent for
+// "scripts/blueprint" — reproduced here, not imported: plan §2 rule 1 keeps
+// this file to one, with no local imports, so the CLI's closure stays "shim +
+// .mts + the libs it names").
+const CLI_SHIM_SOURCE = '#!/usr/bin/env bash\nexec node "$(dirname "$0")/blueprint.mts" "$@"\n'
+
+export function extractShLibNames(src: string): string[] {
+  const names = new Set<string>()
+  for (const line of src.split('\n')) {
+    const trimmed = line.trimStart()
+    if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue
+    for (const m of line.matchAll(/[A-Za-z0-9_-]+\.sh/g)) names.add(m[0])
+  }
+  return [...names]
+}
+
+export async function bpCliLibs(): Promise<string[]> {
+  let text: string
+  try {
+    text = readFileSync(bpBlueprintPath('scripts/blueprint'), 'utf8')
+  } catch {
+    // No scripts/blueprint at that path (a stripped fixture, or a caller that
+    // never checked existence first) — every caller here already reads this
+    // as "no libs to bring along", the same answer an empty scan would give,
+    // so returning [] rather than throwing costs pull nothing.
+    return []
+  }
+  const names = new Set(extractShLibNames(text))
+  // THE ONE BEHAVIOUR THIS PORT ADDS (plan §7). When the pulled CLI IS the
+  // exact shim, its two lines name no lib at all — the file that actually
+  // sources them is its `.mts` sibling, so the closure follows it. A shell
+  // `scripts/blueprint` (today's shape, and every fixture's until slice 5)
+  // takes the `if` above only and reproduces the shell function exactly.
+  if (text === CLI_SHIM_SOURCE) {
+    try {
+      const mtsText = readFileSync(bpBlueprintPath('scripts/blueprint.mts'), 'utf8')
+      for (const n of extractShLibNames(mtsText)) names.add(n)
+    } catch {
+      // No .mts sibling in the blueprint tree (a stripped or partial fixture)
+      // — nothing more to add; the shim's own needs (none) stand.
+    }
+  }
+  const out: string[] = []
+  for (const name of [...names].sort()) {
+    if (existsSync(bpBlueprintPath(`scripts/lib/${name}`))) out.push(`scripts/lib/${name}`)
+  }
+  return out
+}
+
+// --- TASK-021 §4.2, _bp_retire (scripts/blueprint:1477-1541) ----------------
+// Returns true when it could not prompt (refused_no_tty), matching the
+// shell's `refused_no_tty=1; return 0` — the caller reads it as exit 7.
+export async function bpRetire(autoYes: boolean): Promise<boolean> {
+  const cur = await mktemp()
+  const hist = await mktemp()
+  const blob = await mktemp()
+  const name = projectNameFromLogicalPwd()
+  try {
+    const tarf = await mktemp()
+    try {
+      const archR = await unchecked(() =>
+        bpGit(['-C', SYNC.blueprintRoot, 'archive', '--format=tar', 'HEAD'], { stdout: { file: tarf }, stderr: 'ignore' }),
+      )
+      if (archR.status !== 0) return die('could not list the blueprint archive to look for retired files')
+      const listR = await unchecked(() => run('tar', ['-tf', tarf], { stdout: 'capture', stderr: 'ignore' }))
+      if (listR.status !== 0) return die('could not list the blueprint archive to look for retired files')
+      const curLines = [...new Set(listR.stdout.split('\n').filter((l) => l !== '' && !l.endsWith('/')))].sort()
+      writeFileSync(cur, curLines.length > 0 ? `${curLines.join('\n')}\n` : '')
+    } finally {
+      await unchecked(() => run('rm', ['-f', tarf], { stdout: 'ignore', stderr: 'ignore' }))
+    }
+
+    const histR = await unchecked(() =>
+      bpGit(['-C', SYNC.blueprintRoot, 'log', '--format=', '--name-only', '--no-renames', 'HEAD'], {
+        stdout: 'capture',
+        stderr: 'ignore',
+      }),
+    )
+    if (histR.status !== 0) return die('could not read the blueprint history to look for retired files')
+    const histLines = [...new Set(histR.stdout.split('\n').filter((l) => l !== ''))].sort()
+    writeFileSync(hist, histLines.length > 0 ? `${histLines.join('\n')}\n` : '')
+
+    const commR = await unchecked(() =>
+      run('comm', ['-23', hist, cur], { env: { ...process.env, LC_ALL: 'C' }, stdout: 'capture', stderr: 'ignore' }),
+    )
+    const candidates = stripTrailingNewlines(commR.stdout).split('\n').filter((l) => l !== '')
+
+    const same: string[] = []
+    const edited: string[] = []
+    for (const p of candidates) {
+      if (!existsSync(p) || !statSync(p).isFile()) continue
+      if (TEMPLATE_FILES.includes(p)) continue
+
+      let shipped = false
+      let match = false
+      const commitsR = await unchecked(() =>
+        bpGit(['-C', SYNC.blueprintRoot, 'log', '--format=%H', '--no-renames', 'HEAD', '--', `:(literal)${p}`], {
+          stdout: 'capture',
+          stderr: 'ignore',
+        }),
+      )
+      const commits = stripTrailingNewlines(commitsR.stdout).split('\n').filter((l) => l !== '')
+
+      for (const c of commits) {
+        const showR = await unchecked(() =>
+          bpGit(['-C', SYNC.blueprintRoot, 'show', `${c}:${p}`], { stdout: { file: blob }, stderr: 'ignore' }),
+        )
+        if (showR.status !== 0) continue
+        let cmpTarget = blob
+        if (await bpShouldSubstitute(p)) {
+          const subOut = `${blob}.s`
+          const ok = await bpSubstituteStream(blob, name, subOut)
+          if (!ok) {
+            await unchecked(() => run('rm', ['-f', subOut], { stdout: 'ignore', stderr: 'ignore' }))
+            continue
+          }
+          cmpTarget = subOut
+        }
+        const cmpR = await unchecked(() => run('cmp', ['-s', cmpTarget, p], { stdout: 'ignore', stderr: 'ignore' }))
+        if (cmpTarget !== blob) await unchecked(() => run('rm', ['-f', cmpTarget], { stdout: 'ignore', stderr: 'ignore' }))
+        if (cmpR.status === 0) {
+          match = true
+          break
+        }
+      }
+
+      if (!match) {
+        for (const c of commits) {
+          const tarf2 = await mktemp()
+          try {
+            const archR = await unchecked(() =>
+              bpGit(['-C', SYNC.blueprintRoot, 'archive', '--format=tar', c, '--', `:(literal)${p}`], {
+                stdout: { file: tarf2 },
+                stderr: 'ignore',
+              }),
+            )
+            if (archR.status !== 0) continue
+            const listR = await unchecked(() => run('tar', ['-tf', tarf2], { stdout: 'capture', stderr: 'ignore' }))
+            if (listR.status !== 0) continue
+            if (stripTrailingNewlines(listR.stdout).split('\n').includes(p)) {
+              shipped = true
+              break
+            }
+          } finally {
+            await unchecked(() => run('rm', ['-f', tarf2], { stdout: 'ignore', stderr: 'ignore' }))
+          }
+        }
+      }
+
+      if (match) same.push(p)
+      else if (shipped) edited.push(p)
+    }
+
+    for (const p of edited) {
+      process.stdout.write(
+        `  ${C_DIM}yours now${C_RESET} ${p}  (the blueprint stopped shipping it; this copy differs from every version it shipped, so it stays)\n`,
+      )
+    }
+    for (const p of same) {
+      process.stdout.write('\n')
+      process.stdout.write(`${C_BOLD}── ${p}${C_RESET}\n`)
+      process.stdout.write(`  ${C_YELLOW}retire${C_RESET} — the blueprint no longer ships it, and this copy is unedited\n`)
+      if (!autoYes) {
+        if (!process.stdin.isTTY) {
+          process.stdout.write(`  ${C_YELLOW}not interactive${C_RESET} — cannot prompt, so nothing is retired.\n`)
+          process.stdout.write(`  ${C_DIM}Re-run with --yes to accept without prompting, or run from a terminal.${C_RESET}\n`)
+          return true
+        }
+        process.stdout.write('  Delete this file? [y/N/q] ')
+        const ans = readLineFromStdin()
+        if (ans === 'y' || ans === 'Y') {
+          // proceed
+        } else if (ans === 'q' || ans === 'Q') {
+          process.stdout.write(`  ${C_YELLOW}aborted${C_RESET}\n`)
+          return false
+        } else {
+          process.stdout.write(`  ${C_DIM}kept${C_RESET}\n`)
+          continue
+        }
+      }
+      await unchecked(() => run('rm', ['-f', p], { stdout: 'ignore', stderr: 'ignore' }))
+      process.stdout.write(`  ${C_GREEN}retired${C_RESET} ${p}\n`)
+    }
+    return false
+  } finally {
+    await unchecked(() => run('rm', ['-f', cur, hist, blob, `${blob}.s`], { stdout: 'ignore', stderr: 'ignore' }))
+  }
+}
+
+export function headLines(text: string, n: number): string {
+  const parts = text.match(/[^\n]*\n|[^\n]+$/g) ?? []
+  return parts.slice(0, n).join('')
+}
+
+// --- cmd_pull (scripts/blueprint:1543-1795) ---------------------------------
+export async function cmdPull(args: readonly string[]): Promise<number> {
+  const src = await readBlueprintSource()
+
+  let autoYes = false
+  let files: string[] = []
+  for (const arg of args) {
+    if (arg === '--yes' || arg === '-y') autoYes = true
+    else if (arg.startsWith('-')) return die(`unknown option: ${arg}`)
+    else files.push(arg)
+  }
+
+  // BUG-016 — captured before the default-fill below, because afterwards a
+  // named-files pull and a default full pull are indistinguishable.
+  const partial = files.length > 0
+
+  if (files.length === 0) {
+    for (const f of src.managed) {
+      const bp = bpBlueprintPath(f)
+      if (!existsSync(bp)) continue
+      const selOut = await mktemp()
+      try {
+        // BUG-113 — drift's predicate exactly (bp_prospective_for's mode is
+        // the one answer): a refused file is selected too, so its refusal is
+        // reported rather than silently left out.
+        const p = await bpProspectiveFor(f, selOut)
+        if (p.mode === 'refuse') {
+          files.push(f)
+        } else {
+          const diffR = await unchecked(() => run('diff', ['-q', selOut, f], { stdout: 'ignore', stderr: 'ignore' }))
+          if (diffR.status !== 0) files.push(f)
+        }
+      } finally {
+        await unchecked(() => run('rm', ['-f', selOut], { stdout: 'ignore', stderr: 'ignore' }))
+      }
+    }
+  }
+
+  if (files.length === 0) {
+    process.stdout.write(`${C_GREEN}✓ Nothing to pull. Project matches blueprint HEAD.${C_RESET}\n`)
+    const refusedNoTty = await bpRetire(autoYes)
+    await bpSyncCleanup()
+    return refusedNoTty ? 7 : 0
+  }
+
+  // TASK-025 / plan §7 — the CLI travels with the libs it sources, and
+  // (shim-follow) so does the .mts it names once scripts/blueprint IS the
+  // shim: naming either alone brings both, never one without the other.
+  const namesCli = (f: string): boolean => f === 'scripts/blueprint' || f === 'scripts/blueprint.mts'
+  let cliNeeds: string[] = []
+  let cliUnmet: string[] = []
+  if (files.some(namesCli)) {
+    const rest = files.filter((f) => !namesCli(f))
+    files = []
+    const libs = await bpCliLibs()
+    let cliNeedsStr = ' '
+    for (const lib of libs) {
+      cliNeedsStr += `${lib} `
+      if (!rest.includes(lib) && partial) files.push(lib)
+    }
+    cliNeeds = libs
+    files.push(...rest, 'scripts/blueprint', 'scripts/blueprint.mts')
+    if (partial && cliNeedsStr !== ' ') {
+      process.stdout.write(`scripts/blueprint brings the libs it sources:${cliNeedsStr}\n`)
+    }
+  }
+
+  process.stdout.write(
+    SYNC.mode === 'address'
+      ? `${C_BOLD}Pulling from ${SYNC.remote} (${SYNC.branch}) at ${SYNC.sha}${C_RESET}\n`
+      : `${C_BOLD}Pulling from LOCAL CHECKOUT ${SYNC.blueprintRoot} (BLUEPRINT_ROOT override, not the published address)${C_RESET}\n`,
+  )
+
+  // BUG-122 — `held` names every selected file this run did NOT land.
+  let pulled = 0
+  const held: string[] = []
+  let refusedGuard = false
+  let refusedNoTty = false
+  let aborted = false
+
+  for (const f of files) {
+    if (namesCli(f) && cliUnmet.length > 0) {
+      process.stdout.write('\n')
+      process.stdout.write(
+        `  ${C_RED}skipped${C_RESET} ${f} — it sources${cliUnmet.map((l) => ` ${l}`).join('')}, which was not pulled, so it would refuse to run\n`,
+      )
+      refusedGuard = true
+      held.push(f)
+      continue
+    }
+    const bp = bpBlueprintPath(f)
+    if (!existsSync(bp)) {
+      process.stdout.write(`  ${C_RED}skip${C_RESET}  ${f}  (not in blueprint)\n`)
+      continue
+    }
+
+    const pullOut = await mktemp()
+    try {
+      // BUG-113 — ONE prospective result per file, used for the same-check,
+      // the preview AND the write.
+      const p = await bpProspectiveFor(f, pullOut)
+      const fExists = existsSync(f)
+      if (p.mode !== 'refuse' && fExists) {
+        const diffR = await unchecked(() => run('diff', ['-q', pullOut, f], { stdout: 'ignore', stderr: 'ignore' }))
+        if (diffR.status === 0) {
+          process.stdout.write(`  ${C_DIM}same${C_RESET}  ${f}\n`)
+          continue
+        }
+      }
+
+      process.stdout.write('\n')
+      process.stdout.write(`${C_BOLD}── ${f}${C_RESET}\n`)
+
+      if (p.mode === 'refuse') {
+        const ok = await pullFile(f, pullOut, p)
+        if (!ok) {
+          refusedGuard = true
+          held.push(f)
+          if (cliNeeds.includes(f)) cliUnmet.push(f)
+        }
+        continue
+      }
+
+      if (!fExists) {
+        process.stdout.write(`  ${C_BLUE}new file${C_RESET} (blueprint adds it; project doesn't have it yet)\n`)
+      } else {
+        const diffU = await unchecked(() => run('diff', ['-u', f, pullOut], { stdout: 'capture', stderr: 'ignore' }))
+        process.stdout.write(headLines(diffU.stdout, 60))
+        process.stdout.write(`  ${C_DIM}(diff truncated at 60 lines — open the file to see all)${C_RESET}\n`)
+      }
+
+      if (!autoYes) {
+        if (!process.stdin.isTTY) {
+          process.stdout.write(`  ${C_YELLOW}not interactive${C_RESET} — cannot prompt, so nothing is pulled.\n`)
+          process.stdout.write(`  ${C_DIM}Re-run with --yes to accept without prompting, or run from a terminal.${C_RESET}\n`)
+          refusedNoTty = true
+          break
+        }
+        process.stdout.write('  Pull this file? [y/N/q] ')
+        const ans = readLineFromStdin()
+        if (ans === 'y' || ans === 'Y') {
+          // proceed
+        } else if (ans === 'q' || ans === 'Q') {
+          process.stdout.write(`  ${C_YELLOW}aborted${C_RESET}\n`)
+          held.push(`${f}(aborted-here)`)
+          aborted = true
+          break
+        } else {
+          process.stdout.write(`  ${C_DIM}skipped${C_RESET}\n`)
+          held.push(f)
+          if (cliNeeds.includes(f)) cliUnmet.push(f)
+          continue
+        }
+      }
+
+      await unchecked(() => run('mkdir', ['-p', dirname(f)], { stdout: 'ignore', stderr: 'ignore' }))
+      const ok = await pullFile(f, pullOut, p)
+      if (ok) {
+        process.stdout.write(`  ${C_GREEN}pulled${C_RESET} ${f}\n`)
+        pulled += 1
+      } else {
+        process.stdout.write(`  ${C_RED}skipped${C_RESET} ${f} (see warning above)\n`)
+        refusedGuard = true
+        held.push(f)
+        if (cliNeeds.includes(f)) cliUnmet.push(f)
+      }
+    } finally {
+      await unchecked(() => run('rm', ['-f', pullOut], { stdout: 'ignore', stderr: 'ignore' }))
+    }
+  }
+
+  process.stdout.write('\n')
+  if (pulled > 0) {
+    let currentSha: string
+    if (SYNC.mode === 'address') {
+      currentSha = SYNC.sha
+    } else {
+      const shaR = await unchecked(() =>
+        run('git', ['-C', SYNC.blueprintRoot, 'rev-parse', 'HEAD'], { stdout: 'capture', stderr: 'ignore' }),
+      )
+      currentSha = shaR.status === 0 ? stripTrailingNewlines(shaR.stdout) : 'no-sha'
+    }
+    if (partial) {
+      process.stdout.write(`${C_DIM}bootstrap_sha left unchanged — this was a partial pull, so the\n`)
+      process.stdout.write('project is not synced to blueprint HEAD. Run \'blueprint pull\' with no\n')
+      process.stdout.write(`paths to sync fully.${C_RESET}\n`)
+    } else if (held.length > 0) {
+      const heldStr = held.map((h) => ` ${h}`).join('')
+      process.stdout.write(`${C_YELLOW}bootstrap_sha left unchanged — these files were not synced:${heldStr}${C_RESET}\n`)
+      process.stdout.write(`${C_DIM}Fix or accept them, then run 'blueprint pull' again to record the tip.${C_RESET}\n`)
+    } else if (existsSync('.blueprint-source') && currentSha !== 'no-sha') {
+      const cfgNew = await mktemp()
+      const cfgText = readFileSync('.blueprint-source', 'utf8')
+      const newText = cfgText.replace(/^bootstrap_sha.*=.*/m, `bootstrap_sha    = ${currentSha}`)
+      writeFileSync(cfgNew, newText)
+      await shieldedWrite(cfgNew, '.blueprint-source')
+      await unchecked(() => run('rm', ['-f', cfgNew], { stdout: 'ignore', stderr: 'ignore' }))
+      process.stdout.write(`Updated .blueprint-source bootstrap_sha → ${currentSha}\n`)
+    }
+    process.stdout.write(`${C_GREEN}✓ Pulled ${pulled} file(s). Review with 'git diff' and commit.${C_RESET}\n`)
+  } else {
+    process.stdout.write(`${C_DIM}Nothing pulled.${C_RESET}\n`)
+  }
+
+  if (!partial && !aborted && !refusedNoTty) {
+    const retireRefusedNoTty = await bpRetire(autoYes)
+    if (retireRefusedNoTty) refusedNoTty = true
+  }
+
+  await bpSyncCleanup()
+
+  if (refusedNoTty) return 7
+  // BUG-034 — a file a guard REFUSED is not a file that was synced.
+  if (refusedGuard) return 4
+  return 0
+}
+
 // --- dispatch ---------------------------------------------------------------
 const NOT_YET_PORTED: Readonly<Record<string, number>> = {
-  pull: 3,
   a2bp: 4,
   prs: 4,
 }
@@ -1717,7 +2218,6 @@ const NOT_YET_PORTED: Readonly<Record<string, number>> = {
 export async function main(argv: readonly string[]): Promise<number> {
   const [subcmdRaw, ...rest] = argv
   const subcmd = subcmdRaw ?? 'help'
-  void rest
   switch (subcmd) {
     case 'files':
     case 'list':
@@ -1725,6 +2225,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return 0
     case 'drift':
       return await cmdDrift()
+    case 'pull':
+      return await cmdPull(rest)
     case 'help':
     case '--help':
     case '-h':

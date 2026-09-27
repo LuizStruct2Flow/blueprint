@@ -117,7 +117,9 @@ round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
 **State at the 2026-09-27 cut. ONE agent is in flight: Matthias (Claude) on
-TASK-081 slice 4 (`a2bp` + `prs`) in `.scratch/task081-port`. The mic is with
+TASK-081's Codex-review round in `.scratch/task081-port` (slices 1-4 are
+committed: `9d672e8`, `1061dbb`, `951f80a`, `1dcb67a` a2bp + prs, and Codex's
+`97271c9`). The mic is with
 the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
 
 **TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
@@ -136,6 +138,27 @@ before slice 5 lands (the row requires it, no waiver applies).
   pull-behaviour; P2 mutants caught exactly by `sync-by-address` #23/#23b/#23c;
   under the working-tree shim `pull-behaviour`, `pull-exec-bit`,
   `managed-references`, `suite-sync` green).
+- **Codex review (Andreas, 2026-09-27): NOT CLEAN, slice 5 blocked.** He fixed
+  the small findings in `97271c9` (output lost on `process.exit()` after
+  buffered writes; EXIT cleanup after success; logical PWD after `files`
+  chdir; a failed first shield step now fails the write; the JS sorts
+  replaced by `LC_ALL=C sort`; a2bp's PR body records the rebuilt base).
+  Still blocking, now with a fresh Matthias, who also four-eyes `97271c9`:
+  (1) `bpProspectiveFor`'s three callers bypass `unchecked()` (§2 rule 4), so
+  inner cp/awk/jq/merge failures do not reproduce bash's disabled-errexit
+  statuses; (2) a2bp swallows bridge failures the shell dies on
+  (`bp_file_base_content`, diff-stat); (3) missing `placeholders.sh` behaves
+  differently for a2bp; (4) the five TS git/gh wrappers go BACK to shell
+  bridges (Orchestrator's call: §4, libs stay shell); (5) no automated
+  "blueprint moved once/twice" a2bp cases; (6) no test of the BUG-116 resume
+  path; (7) ~29 of the plan's ~90 differential rows. After that round, the
+  changes go back to Codex for re-review. Codex's sandbox saw every NEW-side
+  release row return 0 with empty output, so its run was not evidence.
+  **Slice 5 additions from the review:** switch the differential to OLD =
+  parent shell, NEW = landed shim; remove the shell-inventory row; name the
+  pull-both-files deviation in plan §6; the exact shim, release announcement
+  and commit-body warning; every source-inspection test must resolve
+  `blueprint.mts`, not only a2bp-pr-filing and the marker-merge guard.
 - **Slice 5 MUST handle, found by slice 3:**
   (1) `marker-merge` BUG-112 #4 goes red under the shim: its sanity guard
   `expect(cli).toContain('BLUEPRINT:BEGIN')` reads the file `resolveConsumer`
@@ -195,8 +218,8 @@ before slice 5 lands (the row requires it, no waiver applies).
   accordingly.
 
 **Next, in order:**
-1. **TASK-081 slice 4** (in flight), then the **Codex review** of the whole
-   branch, then **slices 5 and 6** on `main` (plan §8; slice 5b is dropped),
+1. **TASK-081's review round** (in flight), then the **Codex re-review**,
+   then **slices 5 and 6** on `main` (plan §8; slice 5b is dropped),
    carrying the four slice-5 items above.
 2. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
    `CLAUDE.md` → `AGENTS.md` consolidation, plan first, reviewed by all three

@@ -17,11 +17,12 @@
  * reason tests/a2bp-e2e and tests/bootstrap-gate are release-tier.
  */
 import { describe, expect, it } from 'vitest'
-import { cp, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { chmod, cp, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { RunResult } from '../harness/process.js'
-import { withCttyNoStdin } from '../helpers/tty.js'
+import { withCttyAnswer, withCttyNoStdin } from '../helpers/tty.js'
 
 const SHELL_CLI = join(REPO_ROOT, 'scripts/blueprint')
 const PORTED_CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
@@ -446,6 +447,146 @@ describe('blueprint-port differential — drift', () => {
 })
 
 /**
+ * blueprint-port differential — drift's fast-forward prompt (plan §5's
+ * "drift … the fast-forward prompt y/N" row).
+ *
+ * Only reachable under the BLUEPRINT_ROOT override (report_staleness's own
+ * doc comment: "runs only where drift compares against a LOCAL checkout"),
+ * with a clean, on-branch, behind-but-not-diverged local checkout — the exact
+ * shape tests/staleness's own `driftFixture` builds. `BP_NO_PROMPT` is
+ * deliberately NOT set here (unlike every drift row above): those rows exist
+ * to prove the prompt is SUPPRESSED; these prove what happens when it fires.
+ */
+describe("blueprint-port differential — drift's fast-forward prompt", () => {
+  /** A registered project whose `.blueprint-source` carries ONLY
+   * bootstrap_sha/bootstrap_date (config v1 shape, no blueprint_remote) —
+   * report_staleness is only reached via the BLUEPRINT_ROOT override branch
+   * of read_blueprint_source, which needs no remote field at all. */
+  async function seedOverrideProject(s: Scenario, dir: string, bootstrapSha: string): Promise<void> {
+    await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
+    await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+    await mkdir(join(dir, '.githooks'), { recursive: true })
+    await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
+    await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
+    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+    await writeFile(
+      join(dir, '.blueprint-source'),
+      `bootstrap_sha    = ${bootstrapSha}\nbootstrap_date   = 2026-01-01\n`,
+      'utf8',
+    )
+    await initRepo(s, dir)
+    await commitAll(s, dir, 'init')
+  }
+
+  /** One shared upstream, cloned to `bp` at its FIRST commit, then advanced
+   * once — so a caller that clones `bp` again from the SAME `up` (the "y"
+   * row below, which needs two independent `bp` copies because fast-forward
+   * mutates one) gets the identical commit OBJECTS, not a second,
+   * independently-timestamped near-miss with a different sha. */
+  async function seedUpstream(s: Scenario, tag: string): Promise<{ up: string; firstSha: string }> {
+    const up = await s.workspace.dir(`${tag}-up`)
+    await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+    await initRepo(s, up)
+    await commitAll(s, up, 'base')
+    const firstSha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+    return { up, firstSha }
+  }
+
+  async function cloneBp(s: Scenario, tag: string, up: string): Promise<string> {
+    const bp = s.workspace.path(`${tag}-bp`)
+    await git(s, s.workspace.root, ['clone', '-q', up, bp])
+    await git(s, bp, ['config', 'user.email', 't@local'])
+    await git(s, bp, ['config', 'user.name', 't'])
+    return bp
+  }
+
+  it('y fast-forwards the local checkout to the (shared) remote tip', async () => {
+    await scenario('blueprint-port-drift-ff-y', async (s) => {
+      const { up, firstSha } = await seedUpstream(s, 'ff-y')
+      const oldBp = await cloneBp(s, 'ff-y-old', up)
+      const newBp = await cloneBp(s, 'ff-y-new', up)
+      // Advance the SHARED upstream exactly once — both clones will later
+      // fetch this SAME commit object, not two independently-built ones.
+      await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\nmore\n', 'utf8')
+      await commitAll(s, up, 'ahead')
+      const headSha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const oldProj = await s.workspace.dir('ff-y-old-proj')
+      const newProj = await s.workspace.dir('ff-y-new-proj')
+      await seedOverrideProject(s, oldProj, firstSha)
+      await seedOverrideProject(s, newProj, firstSha)
+
+      const oldResult = await withCttyAnswer(
+        s,
+        oldProj,
+        `BLUEPRINT_ROOT='${oldBp}' bash '${join(oldProj, 'scripts/blueprint')}' drift`,
+        'y\n',
+        { PWD: oldProj },
+      )
+      const newResult = await withCttyAnswer(
+        s,
+        newProj,
+        `BLUEPRINT_ROOT='${newBp}' '${process.execPath}' '${join(newProj, 'scripts/blueprint.mts')}' drift`,
+        'y\n',
+        { PWD: newProj },
+      )
+      // Every absolute fixture path differs between the two independent
+      // sides (bp AND proj alike — drift's own report prints `project:
+      // $(pwd)`), so both are scrubbed to a shared placeholder before
+      // comparing rather than only the one this row happens to mutate.
+      const scrub = (t: string) =>
+        t.split(oldBp).join('<bp>').split(newBp).join('<bp>').split(oldProj).join('<proj>').split(newProj).join('<proj>')
+      expect(scrub(newResult.output)).toBe(scrub(oldResult.output))
+      expect(oldResult.output).toContain('fast-forward it now?')
+      expect(oldResult.output).toContain(`✓ fast-forwarded to ${headSha.slice(0, 7)}`)
+      // NON-VACUITY: the LOCAL CHECKOUT actually moved, on both sides, to the
+      // SAME shared commit object — not merely "some later commit".
+      expect((await git(s, oldBp, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headSha)
+      expect((await git(s, newBp, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headSha)
+    })
+  })
+
+  it('N leaves the local checkout untouched', async () => {
+    await scenario('blueprint-port-drift-ff-n', async (s) => {
+      // No mutation on a decline, so ONE shared bp/proj pair for OLD then NEW
+      // is safe — same shape as `driftBoth` above.
+      const { up, firstSha } = await seedUpstream(s, 'ff-n')
+      const bp = await cloneBp(s, 'ff-n', up)
+      await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\nmore\n', 'utf8')
+      await commitAll(s, up, 'ahead')
+      const proj = await s.workspace.dir('ff-n-proj')
+      await seedOverrideProject(s, proj, firstSha)
+
+      const oldResult = await withCttyAnswer(
+        s,
+        proj,
+        `BLUEPRINT_ROOT='${bp}' bash '${join(proj, 'scripts/blueprint')}' drift`,
+        'N\n',
+        { PWD: proj },
+      )
+      // Same reset as `driftBoth` above: arm_gate writes core.hooksPath /
+      // core.sshCommand into the project's own LOCAL git config, and a
+      // second run on the SAME directory would otherwise see them already
+      // armed and print a DIFFERENT status line — a divergence the run
+      // ORDER would cause, not the CLI under test.
+      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+      const newResult = await withCttyAnswer(
+        s,
+        proj,
+        `BLUEPRINT_ROOT='${bp}' '${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' drift`,
+        'N\n',
+        { PWD: proj },
+      )
+      expect(newResult.output).toBe(oldResult.output)
+      expect(oldResult.output).toContain('fast-forward it now?')
+      expect(oldResult.output).toContain('left alone')
+      expect((await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(firstSha)
+    })
+  })
+})
+
+/**
  * blueprint-port differential — pull (TASK-081 slice 3, plan §8 row 3).
  *
  * A representative slice of plan §5's pull rows, not the whole ~30-row
@@ -696,6 +837,129 @@ describe('blueprint-port differential — pull', () => {
       expect(newNormalized).toBe(expectedNewNormalized)
     })
   })
+
+  /**
+   * The interactive `Pull this file? [y/N/q]` prompt itself (plan §5's first
+   * remaining row group), under a REAL controlling terminal with a REAL
+   * answer on stdin — `withCttyNoStdin` (used by the non-TTY row above)
+   * deliberately supplies an EMPTY answer to prove the refusal path; these
+   * three rows drive the answer PAST that guard to prove `read`/
+   * `readLineFromStdin()` itself, via `withCttyAnswer` (tests/helpers/tty.ts).
+   */
+
+  it('interactive prompt — y pulls the file and advances bootstrap_sha', async () => {
+    await scenario('blueprint-port-pull-prompt-y', async (s) => {
+      // TWO INDEPENDENT project copies (a write happens), but ONE SHARED
+      // upstream: `bp` is cloned twice from the SAME `up`, and `up`'s second
+      // commit is created exactly ONCE — so the commit object `bp` fast-
+      // forwards to (and the sha `pull` reports fetching) is the identical
+      // object on both sides, not two independently-timestamped near-misses.
+      // (Unlike the pull describe's own two-commit blueprint, which needs no
+      // such sharing because nothing here mutates a SEPARATE local checkout —
+      // this row's write is the pulled file, and `seedBlueprintRepoTwoCommits`
+      // already builds ONE bp both `oldProj`/`newProj` register against.)
+      const bp = await s.workspace.dir('prompt-y-bp')
+      const { first, head } = await seedBlueprintRepoTwoCommits(s, bp)
+      const oldProj = await driftedProject(s, 'prompt-y-old', bp, first)
+      const newProj = await driftedProject(s, 'prompt-y-new', bp, first)
+      const oldResult = await withCttyAnswer(
+        s,
+        oldProj,
+        `bash '${join(oldProj, 'scripts/blueprint')}' pull`,
+        'y\n',
+        { PWD: oldProj },
+      )
+      const newResult = await withCttyAnswer(
+        s,
+        newProj,
+        `'${process.execPath}' '${join(newProj, 'scripts/blueprint.mts')}' pull`,
+        'y\n',
+        { PWD: newProj },
+      )
+      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      expect(oldResult.output).toContain('✓ Pulled 1 file(s). Review')
+      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
+      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
+      expect(newClaude).toBe(oldClaude)
+      expect(oldClaude).toBe('# CLAUDE\nfixture\nsecond commit\n')
+      const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
+      const newSrc = await readFile(join(newProj, '.blueprint-source'), 'utf8')
+      expect(newSrc).toBe(oldSrc)
+      expect(oldSrc).toContain(`bootstrap_sha    = ${head}`)
+    })
+  })
+
+  it('interactive prompt — N skips the file, nothing written, bootstrap_sha unchanged', async () => {
+    await scenario('blueprint-port-pull-prompt-n', async (s) => {
+      // Nothing this answer can ever write (a skip, never a pull), so ONE
+      // shared project for OLD then NEW is safe — same shape as the non-TTY
+      // row's shared-directory reuse just above.
+      const bp = await s.workspace.dir('prompt-n-bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('prompt-n-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      const oldResult = await withCttyAnswer(
+        s,
+        proj,
+        `bash '${join(proj, 'scripts/blueprint')}' pull`,
+        'N\n',
+        { PWD: proj },
+      )
+      const newResult = await withCttyAnswer(
+        s,
+        proj,
+        `'${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' pull`,
+        'N\n',
+        { PWD: proj },
+      )
+      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      expect(oldResult.output).toContain('skipped')
+      expect(oldResult.output).toContain('Nothing pulled.')
+      // NON-VACUITY: both managed files are genuinely NEW here
+      // (seedRegisteredProject seeds no CLAUDE.md/docs/DoD.md of its own), so
+      // "skipped" means the operator's "N" was HONOURED — neither landed.
+      expect(existsSync(join(proj, 'CLAUDE.md'))).toBe(false)
+      expect(existsSync(join(proj, 'docs/DoD.md'))).toBe(false)
+    })
+  })
+
+  it("interactive prompt — q quits: the remaining file, retirement, and bootstrap_sha are all untouched", async () => {
+    await scenario('blueprint-port-pull-prompt-q', async (s) => {
+      // Two "new" managed files (CLAUDE.md, docs/DoD.md) so `q` at the FIRST
+      // file's prompt leaves a SECOND, later file provably unreached — the
+      // shape plan §5 asks for ("remaining files untouched"). `q` aborts
+      // before any write, so ONE shared project for OLD then NEW is safe.
+      const bp = await s.workspace.dir('prompt-q-bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('prompt-q-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      const oldResult = await withCttyAnswer(
+        s,
+        proj,
+        `bash '${join(proj, 'scripts/blueprint')}' pull`,
+        'q\n',
+        { PWD: proj },
+      )
+      const newResult = await withCttyAnswer(
+        s,
+        proj,
+        `'${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' pull`,
+        'q\n',
+        { PWD: proj },
+      )
+      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      expect(oldResult.output).toContain('aborted')
+      expect(oldResult.output).toContain('Nothing pulled.')
+      // NON-VACUITY, the whole point of this row: neither file landed, and
+      // the SECOND file's own prompt never even printed — `q` at the first
+      // stopped the loop before docs/DoD.md was ever reached.
+      expect(oldResult.output).not.toContain('docs/DoD.md')
+      expect(existsSync(join(proj, 'CLAUDE.md'))).toBe(false)
+      expect(existsSync(join(proj, 'docs/DoD.md'))).toBe(false)
+      const src = await readFile(join(proj, '.blueprint-source'), 'utf8')
+      expect(src).toContain(`bootstrap_sha    = ${sha}`)
+    })
+  })
 })
 
 /**
@@ -898,6 +1162,216 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
       // Refused: nothing written, the project's settings.json is untouched.
       const oldSettings = await readFile(join(oldProj, '.claude/settings.json'), 'utf8')
       expect(oldSettings).toBe(settingsJson([]))
+    })
+  })
+})
+
+/**
+ * blueprint-port differential — a needed tool ABSENT on PATH, or present but
+ * not executable, during a real `pull` run (plan §5's "command-not-found
+ * rows", extended beyond drift/pull's own two named cases to the tools this
+ * TASK actually asked for: `comm` and `cmp` in pull's retirement stage,
+ * `diff` in pull's preview, and `jq` entirely missing for a project that
+ * carries a settings file).
+ *
+ * `comm`/`cmp`/`diff` are unguarded in the shell (no `command -v` check
+ * anywhere near them) — bash's own "command not found"/"Permission denied"
+ * diagnostic is what fires, and `s.pathWithout` (TASK-025 H4) is what makes
+ * the tool GENUINELY ABSENT rather than merely shadowed by a shim `command
+ * -v` would still find. Building the retirement fixture (comm/cmp rows) SURFACED
+ * two real divergences in blueprint.mts — see the fix comments at each `run()`
+ * call site (comm, cmp, and the `diff -u` preview) — where 'ignore' had
+ * swallowed a diagnostic the shell's own unredirected stderr always showed.
+ */
+describe('blueprint-port differential — finding 4 (tool absence during pull)', () => {
+  // Strips the leading "<program>: " prefix bash's own diagnostic carries
+  // (measured directly: it is "<script>: line N: " when the failing call is
+  // a plain statement, but bash omits the "line N:" part for a call inside a
+  // process substitution — `_bp_retire`'s `< <(comm …)`, exactly what the
+  // comm/cmp rows below hit — so that middle segment is OPTIONAL). NEW's own
+  // message (run()'s `${cliName()}: ${cmd}: ${reason}`) carries the SAME
+  // kind of leading "<program>: " prefix with no line number at all, so this
+  // strips both sides down to the tool name uniformly rather than only OLD's.
+  const stripLinePrefix = (t: string): string => t.replace(/^\S+: (line \d+: )?/gm, '')
+
+  /** A blueprint that SHIPPED `OLD-FILE.md` at its first commit and STOPPED
+   * shipping it at its second — the shape `_bp_retire`'s own `comm -23 hist
+   * cur` needs to name a retirement candidate at all. The project's own copy
+   * is seeded byte-identical to what the blueprint shipped, so a WORKING
+   * `cmp` would call it a clean, unedited retire candidate. */
+  async function seedRetirementFixture(s: Scenario, tag: string): Promise<{ proj: string }> {
+    const bp = await s.workspace.dir(`${tag}-bp`)
+    await mkdir(join(bp, 'docs'), { recursive: true })
+    await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+    await writeFile(join(bp, 'OLD-FILE.md'), 'todo: retire me\n', 'utf8')
+    await initRepo(s, bp)
+    await commitAll(s, bp, 'base')
+    await rm(join(bp, 'OLD-FILE.md'))
+    await commitAll(s, bp, 'retire old file')
+    const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+    const proj = await s.workspace.dir(`${tag}-proj`)
+    await seedRegisteredProject(s, proj, bp, sha)
+    await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+    await mkdir(join(proj, 'docs'), { recursive: true })
+    await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+    await writeFile(join(proj, 'OLD-FILE.md'), 'todo: retire me\n', 'utf8')
+    await commitAll(s, proj, 'sync')
+    return { proj }
+  }
+
+  it('comm absent (127) — retirement never enumerates a candidate, on either CLI', async () => {
+    await scenario('blueprint-port-f4-retire-no-comm', async (s) => {
+      const { proj } = await seedRetirementFixture(s, 'no-comm')
+      const path = await s.pathWithout(['comm'])
+      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
+      expect(newResult.stdout).toBe(oldResult.stdout)
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.stderr).toContain('comm: command not found')
+      expect(oldResult.stdout).toContain('✓ Nothing to pull. Project matches blueprint HEAD.')
+      // NON-VACUITY: with a working `comm`, OLD-FILE.md is exactly the
+      // retirement candidate this fixture built — an unedited copy of a path
+      // the blueprint stopped shipping. `comm` failing means the candidate is
+      // never even enumerated (its process substitution feeds an empty loop,
+      // silently — bash does not fail the surrounding `while` on it), so the
+      // file survives, untouched, on both sides.
+      expect(await readFile(join(proj, 'OLD-FILE.md'), 'utf8')).toBe('todo: retire me\n')
+    })
+  })
+
+  it('cmp absent (127) — every substitutable managed file misreads as binary, refusing the whole pull', async () => {
+    await scenario('blueprint-port-f4-retire-no-cmp', async (s) => {
+      const { proj } = await seedRetirementFixture(s, 'no-cmp')
+      const path = await s.pathWithout(['cmp'])
+      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      // `cmp` is not only `_bp_retire`'s own call (:1500) — scripts/lib/
+      // placeholders.sh:189's `bp_contains_nul` ALSO shells out to it
+      // (`tr -d '\0' < "$1" | cmp -s - "$1"`), and BOTH CLIs bridge to that
+      // SAME shell library rather than reimplementing it (plan §4: libraries
+      // stay shell), so this is a SHARED side effect, not a porting
+      // divergence. NON-VACUITY, and the reason this row's title changed
+      // from the retirement-only story it started with: with `cmp` missing,
+      // `bp_contains_nul` misreports EVERY substitutable file as binary
+      // (`!` negates cmp's own 127 into a false "differs"), so CLAUDE.md and
+      // docs/DoD.md — both substitutable, and otherwise perfectly in sync —
+      // ALSO show up "drifted" with an empty prospective result. That drift
+      // reaches the interactive prompt BEFORE retirement's own turn ever
+      // comes (retirement runs only when nothing aborted the main loop), so
+      // with no TTY the whole pull refuses (exit 7) and `_bp_retire` never
+      // executes at all — OLD-FILE.md is neither retired NOR reclassified,
+      // simply never reached, on either CLI.
+      const stripScratch = (t: string) => t.replace(/blueprint-sync\.[A-Za-z0-9]+/g, 'blueprint-sync.<tmp>')
+      const strip = (t: string) => stripScratch(normalizeDiffHeaders(stripLinePrefix(t)))
+      expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
+      expect(strip(newResult.stdout)).toBe(strip(oldResult.stdout))
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(7)
+      expect(oldResult.stderr).toContain('cmp: command not found')
+      expect(oldResult.stdout).toContain('not interactive')
+      expect(oldResult.stdout).not.toContain('yours now')
+      expect(oldResult.stdout).not.toContain('OLD-FILE.md')
+      expect(await readFile(join(proj, 'OLD-FILE.md'), 'utf8')).toBe('todo: retire me\n')
+    })
+  })
+
+  /** One drifted managed file (CLAUDE.md), docs/DoD.md in sync — the shape
+   * `cmd_pull`'s main loop needs to reach the PREVIEW step at all. */
+  async function seedSingleDriftFixture(s: Scenario, tag: string): Promise<string> {
+    const bp = await s.workspace.dir(`${tag}-bp`)
+    const sha = await seedBlueprintRepo(s, bp)
+    const proj = await s.workspace.dir(`${tag}-proj`)
+    await seedRegisteredProject(s, proj, bp, sha)
+    await mkdir(join(proj, 'docs'), { recursive: true })
+    await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
+    await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+    await commitAll(s, proj, 'partial sync')
+    return proj
+  }
+
+  it('diff absent (127) — pull\'s preview, no TTY to prompt (refused, exit 7)', async () => {
+    await scenario('blueprint-port-f4-pull-no-diff', async (s) => {
+      const proj = await seedSingleDriftFixture(s, 'no-diff')
+      const path = await s.pathWithout(['diff'])
+      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      const strip = (t: string) => normalizeDiffHeaders(stripLinePrefix(t))
+      expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
+      expect(strip(newResult.stdout)).toBe(strip(oldResult.stdout))
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(7)
+      expect(oldResult.stderr).toContain('diff: command not found')
+      expect(oldResult.stdout).toContain('not interactive')
+    })
+  })
+
+  it('diff present but not executable (126) — same shape, Permission denied', async () => {
+    await scenario('blueprint-port-f4-pull-diff-noexec', async (s) => {
+      const proj = await seedSingleDriftFixture(s, 'diff-noexec')
+      const noExecDir = await s.workspace.dir('diff-noexec-bin')
+      const diffPath = join(noExecDir, 'diff')
+      await writeFile(diffPath, '#!/bin/sh\necho fake\n', 'utf8')
+      await chmod(diffPath, 0o644)
+      const path = `${noExecDir}:${await s.pathWithout(['diff'])}`
+      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      // TWO named normalisations here, not one: the usual "line N: " prefix
+      // (plan §6.5), plus the tool's own NAME vs the full RESOLVED PATH bash
+      // reports for a found-but-non-executable file (measured directly —
+      // bash: "<script>: line N: /abs/path/to/diff: Permission denied";
+      // Node's spawn EACCES handler, run()'s own code, only ever has argv0,
+      // "diff", to name). An accepted, per-row divergence, same shape as the
+      // a2bp "finding 3" row's stripLinePrefix — not something run() can fix
+      // without duplicating bash's own PATH resolution.
+      const strip = (t: string) => stripLinePrefix(t).replace(/\/\S*\/diff\b/g, 'diff')
+      expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
+      expect(normalizeDiffHeaders(newResult.stdout)).toBe(normalizeDiffHeaders(oldResult.stdout))
+      expect(newResult.code).toBe(oldResult.code)
+      expect(oldResult.code).toBe(7)
+      expect(oldResult.stderr).toContain('Permission denied')
+      expect(newResult.stderr).toContain('Permission denied')
+    })
+  })
+
+  it('jq entirely missing — the guarded refusal (BUG-127-shaped), not a raw crash', async () => {
+    await scenario('blueprint-port-f4-pull-no-jq', async (s) => {
+      const settingsJson = (allow: string[]) =>
+        `${JSON.stringify({ permissions: { allow, ask: [], deny: [] } }, null, 2)}\n`
+
+      const bp = await s.workspace.dir('no-jq-bp')
+      await mkdir(join(bp, 'docs'), { recursive: true })
+      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+      await mkdir(join(bp, '.claude'), { recursive: true })
+      await writeFile(join(bp, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
+      await initRepo(s, bp)
+      await commitAll(s, bp, 'base')
+      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const proj = await s.workspace.dir('no-jq-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+      await mkdir(join(proj, '.claude'), { recursive: true })
+      await writeFile(join(proj, '.claude/settings.json'), settingsJson([]), 'utf8')
+      await commitAll(s, proj, 'has settings')
+
+      const path = await s.pathWithout(['jq'])
+      const oldResult = await runOld(s, proj, ['pull', '.claude/settings.json'], { PATH: path })
+      const newResult = await runNew(s, proj, ['pull', '.claude/settings.json'], { PATH: path })
+      expectPullIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stdout).toContain('jq is not on PATH')
+      // Refused, not crashed: nothing written, the project's settings.json
+      // is untouched.
+      const settingsAfter = await readFile(join(proj, '.claude/settings.json'), 'utf8')
+      expect(settingsAfter).toBe(settingsJson([]))
     })
   })
 })

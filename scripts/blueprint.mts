@@ -1591,10 +1591,15 @@ async function reportStaleness(root: string, branchOverride?: string): Promise<v
   process.stdout.write('      fast-forward it now? [y/N] ')
   const reply = readLineFromStdin()
   if (reply === 'y' || reply === 'Y') {
+    // The shell's own call site (staleness.sh:182, `git -C "$root" merge
+    // --ff-only FETCH_HEAD`) redirects NEITHER stream — git's own progress
+    // ("Updating X..Y", "Fast-forward", the file-stat line) reaches the
+    // operator's real terminal. 'ignore' here swallowed it (TASK-081,
+    // differential row "y fast-forwards the local checkout").
     const ffR = await unchecked(() =>
       run('bash', ['-c', '. "$1"; bp_staleness_fast_forward "$2" "$3" "$4"', '_', lib, root, branch, remote], {
-        stdout: 'ignore',
-        stderr: 'ignore',
+        stdout: 'inherit',
+        stderr: 'inherit',
       }),
     )
     if (ffR.status === 0) {
@@ -2041,8 +2046,12 @@ export async function bpRetire(autoYes: boolean): Promise<boolean> {
     )
     if (sortHistR.status !== 0) return die('could not read the blueprint history to look for retired files')
 
+    // stderr is NOT redirected in the shell (`done < <(LC_ALL=C comm -23 …)`,
+    // no `2>` anywhere on that line), so a missing `comm` reaches the real
+    // stderr there — 'ignore' here used to swallow it silently instead
+    // (TASK-081, caught by the differential harness's comm-missing row).
     const commR = await unchecked(() =>
-      run('comm', ['-23', hist, cur], { env: { ...process.env, LC_ALL: 'C' }, stdout: 'capture', stderr: 'ignore' }),
+      run('comm', ['-23', hist, cur], { env: { ...process.env, LC_ALL: 'C' }, stdout: 'capture', stderr: 'inherit' }),
     )
     const candidates = stripTrailingNewlines(commR.stdout).split('\n').filter((l) => l !== '')
 
@@ -2077,7 +2086,11 @@ export async function bpRetire(autoYes: boolean): Promise<boolean> {
           }
           cmpTarget = subOut
         }
-        const cmpR = await unchecked(() => run('cmp', ['-s', cmpTarget, p], { stdout: 'ignore', stderr: 'ignore' }))
+        // `-s` silences cmp's OWN differ output, never bash's diagnostic for a
+        // missing binary — the shell's `cmp -s "$blob" "$p"` (:1500) carries no
+        // `2>` redirect either, so that diagnostic reaches the real stderr.
+        // 'ignore' here swallowed it (TASK-081, cmp-missing differential row).
+        const cmpR = await unchecked(() => run('cmp', ['-s', cmpTarget, p], { stdout: 'ignore', stderr: 'inherit' }))
         if (cmpTarget !== blob) await unchecked(() => run('rm', ['-f', cmpTarget], { stdout: 'ignore', stderr: 'ignore' }))
         if (cmpR.status === 0) {
           match = true
@@ -2285,7 +2298,11 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
       if (!fExists) {
         process.stdout.write(`  ${C_BLUE}new file${C_RESET} (blueprint adds it; project doesn't have it yet)\n`)
       } else {
-        const diffU = await unchecked(() => run('diff', ['-u', f, pullOut], { stdout: 'capture', stderr: 'ignore' }))
+        // The shell's `diff -u "$f" "$pull_out" | head -60 || true` (:1658)
+        // pipes only diff's STDOUT into head — diff's stderr is never
+        // redirected, so a missing `diff` there reaches the real stderr.
+        // 'ignore' here swallowed it (TASK-081, diff-missing differential row).
+        const diffU = await unchecked(() => run('diff', ['-u', f, pullOut], { stdout: 'capture', stderr: 'inherit' }))
         process.stdout.write(headLines(diffU.stdout, 60))
         process.stdout.write(`  ${C_DIM}(diff truncated at 60 lines — open the file to see all)${C_RESET}\n`)
       }

@@ -83,7 +83,14 @@
  *                  detection — `_bp_is_blueprint_itself`, never reached by
  *                  the `files` "in the blueprint" row, which is a DIFFERENT
  *                  branch keyed on a missing `.blueprint-source`, not on
- *                  this marker file),
+ *                  this marker file); 'cmp absent (127)' — plan §5's
+ *                  command-not-found row for drift, proving `cmp` reaches
+ *                  drift through the SAME shared primitive pull uses
+ *                  (`bp_prospective_for` → `substituted_blueprint_copy` →
+ *                  `bp_substitute_stream` → `bp_contains_nul`), never `comm`
+ *                  — `comm`'s only call site is `_bp_retire`, called only
+ *                  from `cmd_pull`, so drift has no comm row to add (the row
+ *                  itself names the line evidence);
  *                  drifted, new-in-blueprint, refused/BUG-034, unregistered,
  *                  not-a-project, `scripts/lib/gate.sh` missing, an exported
  *                  `GIT_DIR` — this round's own reproducer AND fix: a bare
@@ -316,6 +323,22 @@ async function runNew(s: Scenario, cwd: string, args: string[], env?: Record<str
 // only that suffix, never the rest of the path — is normalised too. A row
 // whose diff header still differs after this is a DIVERGENCE, not something
 // to paper over with a broader normaliser.
+// Strips ONLY bash's own "line N: " middle segment (plan §6.5) — never the
+// leading "<program>: " token ahead of it. Under same-path-twice, OLD's $0
+// and NEW's `cliName()` are the SAME absolute path (`cliName()` strips only
+// the `.mts` suffix off `process.argv[1]`, which the shim always sets to
+// "<the CLI's own dirname>/blueprint.mts" — the identical string bash's own
+// $0 resolves to for "<the CLI's own dirname>/blueprint"), so that token
+// already compares equal without normalising it away. "line N:" is bash's
+// own diagnostic middle segment (measured directly: "<script>: line N: " for
+// a plain statement, but bash OMITS "line N:" for a call inside a process
+// substitution — `_bp_retire`'s `< <(comm …)`, exactly what the pull-side
+// comm/cmp rows hit — so that middle segment is OPTIONAL), which NEW never
+// emits at all (`run()`'s own message has no line number). Hoisted to file
+// scope (originally local to the finding-4 describe) once the drift describe
+// needed the identical normalisation for its own cmp-absent row.
+const stripLinePrefix = (t: string): string => t.replace(/^(\S+: )line \d+: /gm, '$1')
+
 function normalizeDiffHeaders(output: string): string {
   return output
     .replace(/^(--- [^\t\n]*)\t[^\n]*$/gm, '$1\t<mtime>')
@@ -985,6 +1008,80 @@ describe('blueprint-port differential — drift', () => {
       expect(oldResult.stdout).toContain('nothing to sync against and no drift to report.')
       expect(oldResult.stdout).toContain('Derived projects run this to compare themselves against here.')
       expect(oldResult.code).toBe(0)
+    })
+  })
+
+  /** Plan §5's "command-not-found rows" ask for `comm`/`cmp` absent, "once in
+   * drift and once in pull". `comm` is unreachable from drift: its only call
+   * site is `_bp_retire` (scripts/blueprint:1513), and `_bp_retire` is called
+   * only from `cmd_pull` (scripts/blueprint:1581,1779) — `cmd_drift` never
+   * calls it, so there is no drift-side comm row to add; the existing pull
+   * "comm absent" row (finding 4) is the only one that exists for that tool.
+   * `cmp` IS reachable from drift, through the SAME shared primitive pull
+   * uses: `cmd_drift`'s per-file loop (scripts/blueprint:1394,
+   * `bp_prospective_for`) calls `substituted_blueprint_copy` for EVERY
+   * managed file, which calls `bp_substitute_stream` (scripts/lib/
+   * placeholders.sh:211) for a substitutable one, which calls
+   * `bp_contains_nul` (placeholders.sh:188) — `! tr -d '\0' < "$1" | cmp -s -
+   * "$1"` — unconditionally, before drift ever reaches its own `diff -q`
+   * comparison. Verified directly against the real shell CLI before writing
+   * this row (`.scratch/task081-gap2` in this worktree, not committed): with
+   * `cmp` absent, `bp_contains_nul` misnegates cmp's 127 into a false
+   * "contains NUL bytes", so `drift` — never `pull` — reports CLAUDE.md and
+   * docs/DoD.md as "Drifted" even though they are byte-identical to the
+   * blueprint, exit 0 (drift never fails on a refusal it doesn't
+   * recognise as one; `bp_prospective_for` returns non-zero, but
+   * `bp_substitute_stream`'s own non-zero return goes unchecked by
+   * `substituted_blueprint_copy`, so the temp file is empty and compares
+   * unequal to the real content — the same shared-library side effect the
+   * pull-side "cmp absent" row above documents, now proven on the drift path
+   * that row could only infer). */
+  it('cmp absent (127) — drift misreports every substitutable managed file as drifted, never touches the project', async () => {
+    await scenario('blueprint-port-drift-no-cmp', async (s) => {
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: async (s, fx, side) => {
+          // `pathWithoutBin` farms from the REAL process PATH, which drops
+          // `driftEnv`'s own date shim (its PATH is `dir:PATH`, replaced
+          // wholesale below) — rebuild a fixed-`date` shim here too, ahead of
+          // the no-cmp farm, so the "fetched: SHA at TIMESTAMP" line stays
+          // deterministic instead of the wall clock leaking in.
+          const date = await s.shimDir(`drift-no-cmp-date-${side}`)
+          await date.add('date', 'echo 2026-01-01T00:00:00Z')
+          const noCmp = await pathWithoutBin(s, 'cmp', `drift-no-cmp-${side}`)
+          const env = { ...fx.env, PATH: `${date.dir}:${noCmp}` }
+          return side === 'old' ? runOld(s, fx.proj, ['drift'], env) : runNew(s, fx.proj, ['drift'], env)
+        },
+        snapshotOpts: driftSnapshotOpts,
+        // Same two named exceptions as the pull-side cmp-absent row: bash's
+        // "line N:" (plan §6.5) and the mktemp scratch-dir suffix that lands
+        // INSIDE the "contains NUL bytes" error text, not only in the
+        // scratch-directory listing `samePathTwice` already checks is empty.
+        normalizeSnapshot: (snap) => {
+          const stripScratch = (t: string) => t.replace(/blueprint-sync\.[A-Za-z0-9]+/g, 'blueprint-sync.<tmp>')
+          const strip = (t: string) => stripScratch(stripLinePrefix(t))
+          return { ...snap, stdout: strip(snap.stdout), stderr: strip(snap.stderr) }
+        },
+      })
+      expect(oldSnapshot.projTree, 'cmp-absent (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'cmp-absent (NEW) must write nothing').toEqual(treeBefore)
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stderr).toContain('cmp: command not found')
+      expect(oldResult.stdout).toContain('Drifted (project ≠ blueprint HEAD): 2')
+      expect(oldResult.stdout).toContain('~ CLAUDE.md')
+      expect(oldResult.stdout).toContain('~ docs/DoD.md')
     })
   })
 
@@ -2440,20 +2537,6 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
  * swallowed a diagnostic the shell's own unredirected stderr always showed.
  */
 describe('blueprint-port differential — finding 4 (tool absence during pull)', () => {
-  // Strips ONLY bash's own "line N: " middle segment (plan §6.5) — never the
-  // leading "<program>: " token ahead of it. Under same-path-twice, OLD's $0
-  // and NEW's `cliName()` are the SAME absolute path (`cliName()` strips only
-  // the `.mts` suffix off `process.argv[1]`, which the shim always sets to
-  // "<the CLI's own dirname>/blueprint.mts" — the identical string bash's own
-  // $0 resolves to for "<the CLI's own dirname>/blueprint"), so that token
-  // already compares equal without normalising it away. "line N:" is bash's
-  // own diagnostic middle segment (measured directly: "<script>: line N: "
-  // for a plain statement, but bash OMITS "line N:" for a call inside a
-  // process substitution — `_bp_retire`'s `< <(comm …)`, exactly what the
-  // comm/cmp rows below hit — so that middle segment is OPTIONAL), which NEW
-  // never emits at all (`run()`'s own message has no line number).
-  const stripLinePrefix = (t: string): string => t.replace(/^(\S+: )line \d+: /gm, '$1')
-
   interface F4Fixture extends SamePathTwiceFixture {
     readonly bp: string
     readonly env: Record<string, string>

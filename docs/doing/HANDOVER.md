@@ -130,16 +130,17 @@ the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
 **TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
 Matthias (Claude) per slice, a fresh agent each; Codex reviews the whole port
 before slice 5 lands (the row requires it, no waiver applies).
-- **Worktree:** `.scratch/task081-port`, branch `task081-port` (local only,
-  never pushed). **This branch is a mistake the founder caught on 2026-09-28:
-  plan §8 said "branch" and nobody checked it against trunk-based.** Once the
-  in-flight test round ends and Codex has re-reviewed the commits since
-  `1dcb67a`, rebase it onto `main`, push through the gate, delete the branch
-  and the worktree. Slices 5 and 6 go straight to `main`, and plan §8 is
-  corrected to say so in the same push. `tests/node_modules` is installed there. Its inner
-  `.scratch/` still holds `blueprint.orig`, `tmp/`, `smoke1/` from slice 1-2
-  agents: `rm -rf` on them was refused by the permission rules, so they wait
-  for the founder or the worktree's removal after the port lands.
+- **Checkout:** `main`; slices 1-4 landed there as reviewed dark code. Slice 5
+  switches the exact shim on and is under final Codex review. The earlier
+  `task081-port` branch/worktree was a trunk-policy mistake; plan §1/§8 now
+  records that correction rather than describing it as the delivery path.
+- **Release announcement — keep verbatim until every derived project has done
+  its full pull:** After this release, update with a full `blueprint pull`, not
+  a single-file pull of the CLI (`blueprint pull scripts/blueprint`). A pre-port
+  CLI that pulls `scripts/blueprint` alone installs the shim without
+  `scripts/blueprint.mts`, and every `blueprint` command then fails with
+  `Cannot find module …/scripts/blueprint.mts`. To recover:
+  `git checkout -- scripts/blueprint`, then `blueprint pull`.
 - **Committed on the branch:** `9d672e8` slice 1 (skeleton; 8 differential
   rows), `1061dbb` slice 2 (`drift` complete; P1 and P3 mutants caught; gap:
   not every drift matrix row has a differential row, named in the release

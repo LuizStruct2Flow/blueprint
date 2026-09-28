@@ -1966,56 +1966,67 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
  * branches use, passing the `-p` form through untouched.
  */
 describe('blueprint-port differential — finding 1 (tool failures inside prospective)', () => {
-  async function dateAndToolFailEnv(s: Scenario, tag: string, bin: string): Promise<Record<string, string>> {
-    const shims = await s.shimDir(tag)
+  interface FindingFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
+  }
+
+  /** ONE fixed shim tag, not a per-side tag: `samePathTwice` calls `build`
+   * once per side already (never concurrently), and this shim's CONTENT is
+   * fully deterministic (a fixed `exit 1`/fixed `date`), so re-adding it on
+   * the NEW build simply overwrites the same bytes — no state leaks from
+   * OLD's run into NEW's. */
+  async function dateAndToolFailEnv(s: Scenario, root: string, bin: string): Promise<Record<string, string>> {
+    const shims = await s.shimDir('f1-fail-shims')
     await shims.add('date', 'echo 2026-01-01T00:00:00Z')
     await shims.add(bin, 'exit 1\n')
-    return { PATH: shims.path() }
+    const base = await rowEnv(root)
+    return { ...base, PATH: shims.path() }
   }
 
   /** Same idea as `dateAndToolFailEnv`, but for `cp` in a row that reaches
    * `_bp_shielded_write`'s OWN unrelated `cp -p` (the pull-writes-something
    * case) — passes any invocation carrying `-p` through to the real `cp`,
    * and fails only the plain two-argument form bp_prospective_pull uses. */
-  async function dateAndCpFailUnlessPreserveEnv(s: Scenario, tag: string): Promise<Record<string, string>> {
+  async function dateAndCpFailUnlessPreserveEnv(s: Scenario, root: string): Promise<Record<string, string>> {
     const real = await realBinPath(s, 'cp')
-    const shims = await s.shimDir(tag)
+    const shims = await s.shimDir('f1-cp-shims')
     await shims.add('date', 'echo 2026-01-01T00:00:00Z')
     await shims.add(
       'cp',
       `for a in "$@"; do\n  case "$a" in\n    -p) exec ${JSON.stringify(real)} "$@" ;;\n  esac\ndone\nexit 1\n`,
     )
-    return { PATH: shims.path() }
+    const base = await rowEnv(root)
+    return { ...base, PATH: shims.path() }
   }
 
   it('drift — cp fails inside bp_prospective_pull\'s "copy" mode (none:none, no markers either side)', async () => {
     await scenario('blueprint-port-f1-drift-cp', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // Neither copy carries BLUEPRINT:BEGIN/END markers (seedBlueprintRepo's
-      // plain fixture content), so bp_marker_structure reports "none" on
-      // both sides and bp_prospective_pull takes the `none:none` branch —
-      // the one whose OWN body is a bare `cp`, not `marker_aware_merge`.
-      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'partial sync')
-
-      const treeBefore = await walkFiles(proj)
-      const oldEnv = { ...(await dateAndToolFailEnv(s, 'old-shims', 'cp')), BP_NO_PROMPT: '1' }
-      const oldResult = await runOld(s, proj, ['drift'], oldEnv)
-      expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-      const newEnv = { ...(await dateAndToolFailEnv(s, 'new-shims', 'cp')), BP_NO_PROMPT: '1' }
-      const newResult = await runNew(s, proj, ['drift'], newEnv)
-      expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-
-      expectIdentical(oldResult, newResult)
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<FindingFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // Neither copy carries BLUEPRINT:BEGIN/END markers (the pinned
+          // fixture's plain content), so bp_marker_structure reports "none"
+          // on both sides and bp_prospective_pull takes the `none:none`
+          // branch — the one whose OWN body is a bare `cp`, not
+          // `marker_aware_merge`.
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'partial sync')
+          treeBefore = await walkFiles(proj)
+          const env = { ...(await dateAndToolFailEnv(s, root, 'cp')), BP_NO_PROMPT: '1' }
+          return { root, proj, bp, env }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
       // NON-VACUITY: a working `cp` here would report both files as cleanly
       // DRIFTED (content differs, comparison succeeds) — the REFUSED bucket
       // below is only reachable because the shimmed `cp` made
@@ -2030,82 +2041,70 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
 
   it('pull — cp fails inside bp_prospective_pull\'s "new" mode, on a file the project never pulled', async () => {
     await scenario('blueprint-port-f1-pull-cp', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const oldProj = await s.workspace.dir('old-proj')
-      const newProj = await s.workspace.dir('new-proj')
-      await seedRegisteredProject(s, oldProj, bp, sha)
-      await seedRegisteredProject(s, newProj, bp, sha)
-      // Neither project has CLAUDE.md or docs/DoD.md at all — both are "new
-      // in blueprint", so bp_prospective_pull's `[ ! -f "$proj" ]` branch is
-      // what's exercised (mode=new, a bare `cp "$bp" "$out"`), never the
-      // `none:none` copy branch the drift row above targets.
-      const oldEnv = await dateAndCpFailUnlessPreserveEnv(s, 'old-shims')
-      const newEnv = await dateAndCpFailUnlessPreserveEnv(s, 'new-shims')
-      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], oldEnv)
-      const newResult = await runNew(s, newProj, ['pull', '--yes'], newEnv)
-
-      expectPullIdentical(oldResult, newResult)
-      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
-      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
-      expect(newClaude).toBe(oldClaude)
+      await samePathTwice<FindingFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // Neither project has CLAUDE.md or docs/DoD.md at all — both are
+          // "new in blueprint", so bp_prospective_pull's `[ ! -f "$proj" ]`
+          // branch is what's exercised (mode=new, a bare `cp "$bp" "$out"`),
+          // never the `none:none` copy branch the drift row above targets.
+          return { root, proj, bp, env: await dateAndCpFailUnlessPreserveEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      const proj = join(s.workspace.path('root'), 'proj')
+      const claude = await readFile(join(proj, 'CLAUDE.md'), 'utf8')
       // NON-VACUITY, and the genuinely surprising part this row exists to
       // pin: BP_PP_MODE stays "new" (set BEFORE the cp call), so pull_file
       // proceeds to WRITE anyway — from an `$out` mktemp file the failed cp
       // never populated. The write itself (`cat`, not `cp` — P2's shield)
       // succeeds on zero bytes, so pull reports success and installs an
-      // EMPTY file rather than failing loudly. Both sides must agree this
-      // is what happens, not just that they agree with each other.
-      expect(oldClaude).toBe('')
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      // EMPTY file rather than failing loudly.
+      expect(claude).toBe('')
     })
   })
 
   it('pull — awk fails inside marker_aware_merge, falling back to backup-copy silently', async () => {
     await scenario('blueprint-port-f1-pull-awk', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const oldProj = await s.workspace.dir('old-proj')
-      const newProj = await s.workspace.dir('new-proj')
-      await seedRegisteredProject(s, oldProj, bp, sha)
-      await seedRegisteredProject(s, newProj, bp, sha)
-      // bp_marker_structure is ITSELF awk-based, so once awk is globally
-      // broken it reports neither "none" nor "ok N" for either side — the
-      // failed command substitution captures empty stdout. That falls
-      // through both the `none:none`/`none:ok*`/`ok*:none` cases (none of
-      // which match an empty string) to the wildcard branch, whose own
-      // `marker_aware_merge` call fails on the SAME broken awk and the
-      // whole thing degrades to `backup-copy`: a bare `cp` overwrite (with a
-      // "marker structure mismatch" WHY that is cosmetically wrong — it
-      // wasn't a mismatch, awk itself failed — but stays byte-identical
-      // between the two CLIs, which is what this row actually proves).
-      for (const proj of [oldProj, newProj]) {
-        await mkdir(join(proj, 'docs'), { recursive: true })
-        await writeFile(join(proj, 'CLAUDE.md'), "# CLAUDE\nthe project's own edit\n", 'utf8')
-        await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-        await commitAll(s, proj, 'partial sync')
-      }
-      const oldEnv = await dateAndToolFailEnv(s, 'old-shims', 'awk')
-      const newEnv = await dateAndToolFailEnv(s, 'new-shims', 'awk')
-      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], oldEnv)
-      const newResult = await runNew(s, newProj, ['pull', '--yes'], newEnv)
-
-      expectPullIdentical(oldResult, newResult)
-      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
-      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
-      expect(newClaude).toBe(oldClaude)
+      await samePathTwice<FindingFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // bp_marker_structure is ITSELF awk-based, so once awk is globally
+          // broken it reports neither "none" nor "ok N" for either side —
+          // the failed command substitution captures empty stdout. That
+          // falls through both the `none:none`/`none:ok*`/`ok*:none` cases
+          // (none of which match an empty string) to the wildcard branch,
+          // whose own `marker_aware_merge` call fails on the SAME broken awk
+          // and the whole thing degrades to `backup-copy`: a bare `cp`
+          // overwrite (with a "marker structure mismatch" WHY that is
+          // cosmetically wrong — it wasn't a mismatch, awk itself failed —
+          // but stays byte-identical between the two CLIs, which is what
+          // this row actually proves).
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await writeFile(join(proj, 'CLAUDE.md'), "# CLAUDE\nthe project's own edit\n", 'utf8')
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'partial sync')
+          return { root, proj, bp, env: await dateAndToolFailEnv(s, root, 'awk') }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      const proj = join(s.workspace.path('root'), 'proj')
+      const claude = await readFile(join(proj, 'CLAUDE.md'), 'utf8')
       // NON-VACUITY: the fallback landed the BLUEPRINT's content whole,
       // never the project's own edit — the divergence a broken merge would
       // otherwise hide.
-      expect(oldClaude).toBe('# CLAUDE\nfixture\n')
-      expect(oldClaude).not.toContain('own edit')
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      expect(claude).toBe('# CLAUDE\nfixture\n')
+      expect(claude).not.toContain('own edit')
     })
   })
 
@@ -2115,52 +2114,50 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
         `${JSON.stringify({ permissions: { allow, ask: [], deny: [] } }, null, 2)}\n`
       const layer = `${JSON.stringify({ permissions: { allow: ['Bash(aws logs tail *)'] } }, null, 2)}\n`
 
-      async function seedSettingsBlueprint(dir: string): Promise<string> {
-        await mkdir(join(dir, 'docs'), { recursive: true })
-        await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-        await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-        await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
-        await mkdir(join(dir, '.claude'), { recursive: true })
-        await writeFile(join(dir, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
-        await initRepo(s, dir)
-        await commitAll(s, dir, 'base')
-        return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
-      }
+      const { oldResult } = await samePathTwice<FindingFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await mkdir(join(bp, '.claude'), { recursive: true })
+          await writeFile(join(bp, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedSettingsBlueprint(bp)
-      const oldProj = await s.workspace.dir('old-proj')
-      const newProj = await s.workspace.dir('new-proj')
-      for (const proj of [oldProj, newProj]) {
-        await seedRegisteredProject(s, proj, bp, sha)
-        await mkdir(join(proj, 'docs'), { recursive: true })
-        await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-        await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-        await mkdir(join(proj, '.claude'), { recursive: true })
-        await writeFile(join(proj, '.claude/settings.json'), settingsJson([]), 'utf8')
-        await writeFile(join(proj, '.claude/settings.project.json'), layer, 'utf8')
-        await commitAll(s, proj, 'layered settings')
-      }
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await mkdir(join(proj, '.claude'), { recursive: true })
+          await writeFile(join(proj, '.claude/settings.json'), settingsJson([]), 'utf8')
+          await writeFile(join(proj, '.claude/settings.project.json'), layer, 'utf8')
+          await commitAllPinned(s, proj, 'layered settings')
 
-      // Fails ONLY jq calls whose PROGRAM ARGUMENT contains "def uniq" — the
-      // settings MERGE program (BP_SETTINGS_MERGE) and no other jq call this
-      // run makes (bpOneObject's and the shape check's programs contain
-      // neither word), so the earlier checks succeed normally and the run
-      // reaches exactly the merge step this row means to break.
-      const oldPath = await substringFailShim(s, 'old-jq', 'jq', 'def uniq')
-      const newPath = await substringFailShim(s, 'new-jq', 'jq', 'def uniq')
-      const oldResult = await runOld(s, oldProj, ['pull', '.claude/settings.json'], { PATH: oldPath })
-      const newResult = await runNew(s, newProj, ['pull', '.claude/settings.json'], { PATH: newPath })
-
-      expectPullIdentical(oldResult, newResult)
+          // Fails ONLY jq calls whose PROGRAM ARGUMENT contains "def uniq" —
+          // the settings MERGE program (BP_SETTINGS_MERGE) and no other jq
+          // call this run makes (bpOneObject's and the shape check's
+          // programs contain neither word), so the earlier checks succeed
+          // normally and the run reaches exactly the merge step this row
+          // means to break.
+          const path = await substringFailShim(s, 'f1-jq-shims', 'jq', 'def uniq')
+          const base = await rowEnv(root)
+          return { root, proj, bp, env: { ...base, PATH: path } }
+        },
+        run: (s, fx, side) =>
+          side === 'old'
+            ? runOld(s, fx.proj, ['pull', '.claude/settings.json'], fx.env)
+            : runNew(s, fx.proj, ['pull', '.claude/settings.json'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.stdout).toContain('could not be merged')
       // Refused: nothing written, the project's settings.json is untouched.
-      const oldSettings = await readFile(join(oldProj, '.claude/settings.json'), 'utf8')
-      expect(oldSettings).toBe(settingsJson([]))
-      expect(await walkFiles(newProj), 'the two independently-run refusals must leave byte-identical trees').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      const proj = join(s.workspace.path('root'), 'proj')
+      const settings = await readFile(join(proj, '.claude/settings.json'), 'utf8')
+      expect(settings).toBe(settingsJson([]))
     })
   })
 })

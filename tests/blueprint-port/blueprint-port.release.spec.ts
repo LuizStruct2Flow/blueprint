@@ -79,6 +79,11 @@
  *                  three rows (in the blueprint, BLUEPRINT_ROOT override, a
  *                  registered derived project).
  *   drift        — describe 'blueprint-port differential — drift' (clean,
+ *                  in the blueprint itself (`.blueprint-root` self-
+ *                  detection — `_bp_is_blueprint_itself`, never reached by
+ *                  the `files` "in the blueprint" row, which is a DIFFERENT
+ *                  branch keyed on a missing `.blueprint-source`, not on
+ *                  this marker file),
  *                  drifted, new-in-blueprint, refused/BUG-034, unregistered,
  *                  not-a-project, `scripts/lib/gate.sh` missing, an exported
  *                  `GIT_DIR` — this round's own reproducer AND fix: a bare
@@ -620,6 +625,25 @@ async function seedOverrideProjectPinned(s: Scenario, dir: string, bootstrapSha:
   await commitAllPinned(s, dir, 'init')
 }
 
+/** THE fixture that is the blueprint itself: `.blueprint-root` present,
+ * `.blueprint-source` absent — `_bp_is_blueprint_itself`'s own positive
+ * marker (scripts/blueprint:1294-1298), never a proxy for "no
+ * .blueprint-source" the way the `files` "in the blueprint" row uses. Full
+ * `scripts/` (including `lib/gate.sh`, since `cmd_drift` arms the gate
+ * before it even checks self-detection) and a real git repo with no
+ * `origin` remote, matching this checkout's own shape. */
+async function seedBlueprintItselfPinned(s: Scenario, dir: string): Promise<void> {
+  await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
+  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await mkdir(join(dir, '.githooks'), { recursive: true })
+  await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
+  await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
+  await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+  await writeFile(join(dir, '.blueprint-root'), '# blueprint marker\n', 'utf8')
+  await initRepo(s, dir)
+  await commitAllPinned(s, dir, 'init')
+}
+
 /** Row-scoped HOME/XDG_CACHE_HOME/TMPDIR (`rowEnv`) plus the fixed-`date`
  * shim every pull/drift row needs for its "fetched: SHA at TIMESTAMP" line
  * — hoisted here (originally local to the pull describe) once a second
@@ -943,6 +967,23 @@ describe('blueprint-port differential — drift', () => {
         snapshotOpts: driftSnapshotOpts,
       })
       expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
+      expect(oldResult.code).toBe(0)
+    })
+  })
+
+  it('in the blueprint itself — .blueprint-root self-detection, no .blueprint-source, no read_blueprint_source', async () => {
+    await scenario('blueprint-port-drift-in-blueprint', async (s) => {
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const proj = join(root, 'proj')
+          await seedBlueprintItselfPinned(s, proj)
+          return { root, proj, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+      })
+      expect(oldResult.stdout).toContain('This IS the blueprint — it is the source of truth, so there is')
+      expect(oldResult.stdout).toContain('nothing to sync against and no drift to report.')
+      expect(oldResult.stdout).toContain('Derived projects run this to compare themselves against here.')
       expect(oldResult.code).toBe(0)
     })
   })

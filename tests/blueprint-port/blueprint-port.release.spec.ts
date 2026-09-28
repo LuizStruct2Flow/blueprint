@@ -37,6 +37,21 @@
  * for the few proven at the unit tier) or has a reason it is not a row, with
  * its covering test named instead.
  *
+ * THE COMPARISON (TASK-081 "drift/pull differential rows to completion"
+ * round): every drift and pull row below — not only the ones in the
+ * describes literally named 'drift'/'pull' — goes through the generalised
+ * compare defined just above (`walkFiles`, `snapshotRefs`,
+ * `bpCacheRefsOrSentinel`, `assertNoDriftPullScratch`): stdout/stderr/exit/
+ * signal, the project tree's path/bytes/mode (which is also how
+ * `.blueprint-source` is compared — it is an ordinary file under that walk),
+ * the cache's refs where a row registers a remote, and that no
+ * `blueprint-sync.*`/`tmp.*` scratch survives the run. A shared-directory row
+ * additionally asserts the tree is byte-for-byte UNCHANGED by each side's own
+ * run (most of these rows are refusals whose name already claimed "nothing
+ * written"); a two-independent-copies row asserts `walkFiles(newProj)` equals
+ * `walkFiles(oldProj)` in full, not only the handful of files each row
+ * happens to spot-check.
+ *
  *   dispatch     — describe 'blueprint-port differential — dispatch': all
  *                  six rows (no args, help, --help, -h, an unknown
  *                  subcommand, push).
@@ -47,45 +62,44 @@
  *                  drifted, new-in-blueprint, refused/BUG-034, unregistered,
  *                  not-a-project); "…'s fast-forward prompt" (y, N);
  *                  'settings-layer refusals' (P4's array/object/null/number
- *                  shapes, both files, plus the drift-side refusal bucket);
- *                  'staleness states' (current/ahead/diverged/unknown);
- *                  'fetch failures' (unreachable, missing branch, no
- *                  timeout binary, hung/BP_FETCH_TIMEOUT, scratch
- *                  uncreatable, damaged cache — six of the matrix's
- *                  "unreachable(5)/hung(5)/…" rows; the placeholder-remote,
- *                  v1-config and missing-release-branch variants of each are
- *                  NOT separate rows here — they share bp_fetch_blueprint's
- *                  read_blueprint_source/timeout/cache code paths with the
- *                  six proven, and plan §5 does not require every
- *                  config-shape permutation to be its own row, only that
- *                  each CODE PATH is proven once).
- *                  NOT ROWS, with their reason: missing-in-blueprint (the
- *                  SAME managed-set-diff code path as "new in blueprint"
- *                  above with the two sides swapped — TASK-021 §4.2's
- *                  retirement rows in the pull matrix describe drive that
- *                  exact asymmetry end to end); gate.sh missing,
- *                  bootstrap_sha not in history, override-not-a-directory,
- *                  the leftover blueprint_source warning, an exported
- *                  GIT_DIR, a symlinked project directory, and a project
- *                  name holding `&`/`\` are each a real gap in this file —
- *                  none has a row here, and none is proven at the unit tier
- *                  either. Left open rather than claimed.
+ *                  shapes on BOTH settings.json and the layer, plus the
+ *                  drift-side refusal bucket); 'staleness states'
+ *                  (current/ahead/diverged/unknown); 'fetch failures'
+ *                  (unreachable, missing branch, no timeout binary,
+ *                  hung/BP_FETCH_TIMEOUT, scratch uncreatable, damaged
+ *                  cache); 'drift config-shape refusals' (v1 config (4),
+ *                  placeholder remote (4), missing release branch (5),
+ *                  bootstrap_sha not in history, BLUEPRINT_ROOT override not
+ *                  a directory, the leftover blueprint_source warning,
+ *                  missing-in-blueprint as its own row — the managed-set-diff
+ *                  asymmetry with "new in blueprint", proven directly rather
+ *                  than only asserted in prose).
+ *                  NOT ROWS, with their reason: `scripts/lib/gate.sh`
+ *                  missing, an exported `GIT_DIR`, a symlinked project
+ *                  directory, and a project name holding `&`/`\` are each a
+ *                  real gap in this file — none has a row here, and none is
+ *                  proven at the unit tier either. Left open rather than
+ *                  claimed.
  *   pull         — describe 'blueprint-port differential — pull' (nothing
  *                  to pull, full --yes, partial/BUG-016, non-TTY/BUG-018,
  *                  refused/BUG-034, `pull scripts/blueprint`, the y/N/q
- *                  interactive prompt); 'pull matrix' (backup-copy,
- *                  merge/BUG-someshape, retirement's y/edited-kept shape,
- *                  exec bit +x and -x); 'finding 1' (tool failures inside
+ *                  interactive prompt); 'pull matrix' (backup-copy — with an
+ *                  explicit `.bp-bak` bytes check, merge, retirement — with
+ *                  an explicit kept-file bytes check, exec bit +x and -x);
+ *                  'finding 1' (tool failures inside
  *                  bp_prospective_pull/marker_aware_merge/_bp_settings_layer);
  *                  'finding 4' (comm/cmp/diff absent, diff present-but-not-
- *                  executable, jq entirely missing).
+ *                  executable, jq entirely missing); 'pull remaining rows'
+ *                  (an unknown option dying after the fetch — proven via the
+ *                  cache the fetch must have populated, since pull prints no
+ *                  fetch-report line the way drift does; a held/refused file
+ *                  leaving bootstrap_sha unchanged even though a sibling
+ *                  file WAS pulled, BUG-034's own exit 4).
  *                  NOT ROWS: retirement's non-TTY and q sub-cases (only y is
  *                  proven here — the shell suite's own pull-behaviour and
  *                  pull-exec-bit unit tests, referenced from the pull
  *                  matrix describe's own header, cover the refusal shapes at
- *                  the unit tier, not differentially); a held file leaving
- *                  bootstrap_sha untouched; an unknown pull option dying
- *                  after the fetch. Left open.
+ *                  the unit tier, not differentially). Left open.
  *   a2bp         — describe 'blueprint-port differential — a2bp / prs':
  *                  finding 2 (x2), finding 3, dry-run, no files given, not a
  *                  derived project, a required lib missing, contamination
@@ -1974,6 +1988,14 @@ describe('blueprint-port differential — settings-layer refusals', () => {
       settingsBody: settingsJson([]),
       layerBody: 'null\n',
     },
+    // Plan §5's "the numeric `.claude/settings.project.json`" row — the same
+    // scalar-shape family as settings.json's own "is a number" row above,
+    // now on the LAYER side of bpSettingsLayer's other branch.
+    {
+      name: 'the layer is a number',
+      settingsBody: settingsJson([]),
+      layerBody: '42\n',
+    },
     // A merge-unsupported shape: a single JSON object, valid shape at the
     // top level, but carrying a key the layer schema does not allow.
     {
@@ -2618,6 +2640,329 @@ async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts:
 
   return { oldResult, newResult }
 }
+
+/**
+ * blueprint-port differential — drift's `.blueprint-source` config-shape
+ * refusals (plan §5's "v1 config (4); placeholder remote (4); missing
+ * release branch (5)" rows, plus "bootstrap_sha not in history", "override,
+ * and override not a directory" and "the leftover blueprint_source
+ * warning" — this round's Part 2, closing the gap the 'fetch failures'
+ * describe's own header comment left open on the grounds that these share
+ * `bp_config_load`'s code path with the six proven rows there: this round's
+ * brief asks for the rows explicitly, so they are added rather than left to
+ * that argument).
+ *
+ * All read-only refusals (nothing is ever written), so OLD then NEW share
+ * one project directory throughout, like the 'fetch failures' describe's
+ * own `runBoth`.
+ */
+describe('blueprint-port differential — drift config-shape refusals', () => {
+  async function seedFetchBlueprint(s: Scenario, dir: string): Promise<string> {
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
+    await initRepo(s, dir)
+    await commitAll(s, dir, 'base')
+    return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
+  }
+
+  async function runBoth(
+    s: Scenario,
+    proj: string,
+    args: string[],
+    env: Record<string, string>,
+  ): Promise<{ oldResult: RunResult; newResult: RunResult }> {
+    const treeBefore = await walkFiles(proj)
+    const oldResult = await runOld(s, proj, args, env)
+    expect(await walkFiles(proj), 'a config-shape refusal (OLD) must never write to the project tree').toEqual(
+      treeBefore,
+    )
+    await assertNoDriftPullScratch(s)
+    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+    const newResult = await runNew(s, proj, args, env)
+    expect(await walkFiles(proj), 'a config-shape refusal (NEW) must never write to the project tree').toEqual(
+      treeBefore,
+    )
+    await assertNoDriftPullScratch(s)
+    return { oldResult, newResult }
+  }
+
+  it('v1 config (no config_version): exit 4, names the lines to add', async () => {
+    await scenario('blueprint-port-drift-config-v1', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedFetchBlueprint(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      // No config_version line at all — the pre-TASK-025 shape.
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `blueprint_remote = ${bp}\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stderr).toContain('is a version 1 config')
+    })
+  })
+
+  it('placeholder remote (blueprint_remote still FILL-ME-IN): exit 4, no remote contact', async () => {
+    await scenario('blueprint-port-drift-config-placeholder', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedFetchBlueprint(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `config_version   = 2\nblueprint_remote = FILL-ME-IN\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stderr).toContain('still has the bootstrap placeholder')
+    })
+  })
+
+  it("missing release branch (blueprint_release_branch names a branch the remote doesn't have): exit 5", async () => {
+    await scenario('blueprint-port-drift-config-missing-release-branch', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedFetchBlueprint(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nblueprint_release_branch = released\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(5)
+      expect(oldResult.stderr).toContain("no branch 'released' on that remote")
+    })
+  })
+
+  it('bootstrap_sha not in the fetched history: warned, not fatal', async () => {
+    await scenario('blueprint-port-drift-config-sha-not-in-history', async (s) => {
+      // TWO UNRELATED repos: the actual fetch target (bp), and a second,
+      // independent one (other) whose HEAD sha is recorded as this project's
+      // bootstrap_sha — guaranteeing it is not an ancestor of bp's history
+      // without relying on any history-rewrite trick.
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedFetchBlueprint(s, bp)
+      // Distinct content, not just a distinct directory — two commits built
+      // from byte-identical trees/messages/authors can hash to the SAME sha
+      // (observed directly: `seedFetchBlueprint` run twice in the same
+      // second produces two IDENTICAL commit objects), which would make
+      // `otherSha` accidentally equal `sha` and this row vacuous.
+      const other = await s.workspace.dir('other')
+      await mkdir(join(other, 'docs'), { recursive: true })
+      await writeFile(join(other, 'CLAUDE.md'), '# CLAUDE\na wholly unrelated repo\n', 'utf8')
+      await writeFile(join(other, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+      await writeFile(join(other, 'README.md'), '# fixture project\n', 'utf8')
+      await initRepo(s, other)
+      await commitAll(s, other, 'unrelated base')
+      const otherSha = (await git(s, other, ['rev-parse', 'HEAD'])).stdout.trim()
+      expect(otherSha, 'the two fixtures must not accidentally share a commit sha').not.toBe(sha)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nbootstrap_sha    = ${otherSha}\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      const env = await dateShimEnv(s)
+      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stdout).toContain(`bootstrap_sha ${otherSha} is not in`)
+      expect(oldResult.stdout).toContain('history.')
+    })
+  })
+
+  it('BLUEPRINT_ROOT override not a directory: dies before any fetch', async () => {
+    await scenario('blueprint-port-drift-override-not-a-directory', async (s) => {
+      const proj = await s.workspace.dir('proj')
+      await seedCliOnly(s, proj)
+      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await writeFile(join(proj, 'docs/DoD.md'), '# DoD\n', 'utf8')
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `bootstrap_sha    = 0000000000000000000000000000000000000000\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      const notADir = s.workspace.path('not-a-real-checkout')
+      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], { BLUEPRINT_ROOT: notADir })
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(1)
+      expect(oldResult.stderr).toContain(`BLUEPRINT_ROOT is '${notADir}', which is not a directory`)
+    })
+  })
+
+  it('the leftover blueprint_source line: warned once, every run, until deleted', async () => {
+    await scenario('blueprint-port-drift-leftover-blueprint-source-line', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedFetchBlueprint(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      // TASK-025 — a config still naming the old, no-longer-read field.
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nblueprint_source = ${bp}\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      const env = await dateShimEnv(s)
+      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stderr).toContain('still has blueprint_source, which is no longer read')
+    })
+  })
+
+  /** BLUEPRINT_ROOT override, with a REAL local checkout — a committed file
+   * then deleted from the WORKING TREE without committing the deletion:
+   * `git archive HEAD` (bp_managed_files) still lists it, but
+   * bp_blueprint_path resolves straight to the working tree, where it is
+   * gone. The exact asymmetry the drift describe's own header names as
+   * "the SAME managed-set-diff code path as 'new in blueprint', with the
+   * two sides swapped" — proven here as its own row rather than only
+   * asserted in prose. */
+  it("missing in blueprint — committed at the blueprint's HEAD but absent from its working tree", async () => {
+    await scenario('blueprint-port-drift-missing-in-blueprint', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      await mkdir(join(bp, 'docs'), { recursive: true })
+      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+      await initRepo(s, bp)
+      await commitAll(s, bp, 'base')
+      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      // Committed, then removed from the WORKING TREE only — no commit for
+      // the removal, so HEAD (and `git archive HEAD`) still lists it.
+      await rm(join(bp, 'docs/DoD.md'))
+
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      // seedOverrideProject-equivalent inline: this row's project is judged
+      // through BLUEPRINT_ROOT (a local checkout), never the address path,
+      // because only a real working tree can be made to disagree with its
+      // own HEAD this way.
+      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+      await commitAll(s, proj, 'sync')
+
+      const env = { ...(await dateShimEnv(s)), BLUEPRINT_ROOT: bp, BP_NO_PROMPT: '1' }
+      const treeBefore = await walkFiles(proj)
+      const oldResult = await runOld(s, proj, ['drift'], env)
+      expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+      const newResult = await runNew(s, proj, ['drift'], env)
+      expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('Listed managed but missing in blueprint: 1')
+      expect(oldResult.stdout).toContain('! docs/DoD.md')
+      expect(oldResult.stdout).toContain("committed at the blueprint's HEAD but absent from its working tree")
+    })
+  })
+})
+
+/**
+ * blueprint-port differential — pull rows plan §5 still names and this file
+ * did not yet cover: an unknown option (dies after the fetch, as today) and
+ * a HELD file (refused mid-loop) leaving bootstrap_sha untouched alongside a
+ * SUCCESSFULLY pulled sibling — `held`'s own bucket in cmd_pull, distinct
+ * from the partial-pull row above (a named file, never entering the loop at
+ * all) and from the refused row above (nothing else to pull in that
+ * fixture).
+ */
+describe('blueprint-port differential — pull remaining rows', () => {
+  it('an unknown option dies after the fetch, same as today', async () => {
+    await scenario('blueprint-port-pull-unknown-option', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+      await commitAll(s, proj, 'sync')
+      const env = await dateShimEnv(s)
+      const treeBefore = await walkFiles(proj)
+      const oldResult = await runOld(s, proj, ['pull', '--not-a-real-option'], env)
+      expect(await walkFiles(proj), 'unknown option (OLD) must write nothing').toEqual(treeBefore)
+      // NON-VACUITY: `cmd_pull` calls `read_blueprint_source` (which fetches)
+      // BEFORE its own option loop, so the cache is populated even though
+      // nothing in the CLI's OWN output says so (unlike drift, pull prints no
+      // "blueprint: … fetched: …" report line at all) — checked directly
+      // against the cache `read_blueprint_source`'s fetch must have written.
+      const remote = await readBlueprintRemote(proj)
+      expect(remote, 'the fixture must have registered a remote').toBeDefined()
+      expect(await bpCacheRefsOrSentinel(s, remote!), 'the fetch must have run before the option was rejected').not.toBe(
+        '<no cache created>',
+      )
+      const newResult = await runNew(s, proj, ['pull', '--not-a-real-option'], env)
+      expect(await walkFiles(proj), 'unknown option (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      expectPullIdentical(oldResult, newResult)
+      expect(oldResult.code).not.toBe(0)
+      expect(oldResult.output).toContain('unknown option: --not-a-real-option')
+    })
+  })
+
+  it('a held file (refused mid-loop) leaves bootstrap_sha unchanged, even with a sibling successfully pulled', async () => {
+    await scenario('blueprint-port-pull-held-file', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      await mkdir(join(bp, 'docs'), { recursive: true })
+      await writeFile(
+        join(bp, 'CLAUDE.md'),
+        '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
+        'utf8',
+      )
+      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture v2\n', 'utf8')
+      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+      await initRepo(s, bp)
+      await commitAll(s, bp, 'base')
+      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const oldProj = await s.workspace.dir('old')
+      const newProj = await s.workspace.dir('new')
+      for (const proj of [oldProj, newProj]) {
+        await seedRegisteredProject(s, proj, bp, sha)
+        // CLAUDE.md: an END with no open region — REFUSED, held back.
+        await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
+        // docs/DoD.md: plain drift — pulls cleanly.
+        await mkdir(join(proj, 'docs'), { recursive: true })
+        await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture v1\n', 'utf8')
+        await commitAll(s, proj, 'one refused, one drifted')
+      }
+      const env = await dateShimEnv(s)
+      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], env)
+      const newResult = await runNew(s, newProj, ['pull', '--yes'], env)
+      expectPullIdentical(oldResult, newResult)
+      // BUG-034's own status: a guard-refused file makes the whole pull
+      // return 4, same as a2bp's "a guard refused; nothing done" — even
+      // though a SIBLING file did land (checked below).
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stdout).toContain('bootstrap_sha left unchanged — these files were not synced:')
+      const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
+      expect(oldSrc).toContain(`bootstrap_sha    = ${sha}`)
+      // NON-VACUITY: docs/DoD.md — the sibling that was NOT held — actually
+      // landed, proving this is the "held" bucket and not merely the refused
+      // row's own "nothing at all was pulled" shape.
+      expect(await readFile(join(oldProj, 'docs/DoD.md'), 'utf8')).toBe('# DoD\nfixture v2\n')
+      expect(await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')).toBe('# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n')
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
+    })
+  })
+})
 
 describe('blueprint-port differential — a2bp / prs', () => {
   /** A symlink farm of every executable on PATH EXCEPT `name` (a2bp-e2e's own

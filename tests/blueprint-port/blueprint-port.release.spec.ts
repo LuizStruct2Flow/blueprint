@@ -1568,6 +1568,91 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
     })
   })
 
+  /**
+   * TASK-081 "drift/pull differential rows to completion" round — plan §5's
+   * "retirement answered by a NON-TTY (the refusal path) and by q,
+   * differentially (only y exists)". Both reach `_bp_retire` via `cmd_pull`'s
+   * "nothing to pull" branch (`echo "✓ Nothing to pull..."; _bp_retire
+   * "$auto_yes"` — scripts/blueprint:1578-1581): a project fully synced on
+   * every OTHER managed file, with exactly one unedited retirement
+   * candidate, so the retirement prompt is the FIRST and only thing pull
+   * has left to do. Neither answer ever writes, so OLD then NEW share one
+   * project directory, like the pull describe's own refused/non-mutating
+   * rows.
+   */
+  async function seedRetirementCandidate(s: Scenario, tag: string): Promise<{ proj: string }> {
+    const bp = await s.workspace.dir(`${tag}-bp`)
+    await mkdir(join(bp, 'docs'), { recursive: true })
+    await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+    await writeFile(join(bp, 'docs/gone.md'), 'unedited, about to be retired\n', 'utf8')
+    await initRepo(s, bp)
+    await commitAll(s, bp, 'one')
+    const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+    await git(s, bp, ['rm', '-q', 'docs/gone.md'])
+    await commitAll(s, bp, 'two — stopped shipping docs/gone.md')
+
+    const proj = await s.workspace.dir(`${tag}-proj`)
+    await seedRegisteredProject(s, proj, bp, first)
+    await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+    await mkdir(join(proj, 'docs'), { recursive: true })
+    await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+    await writeFile(join(proj, 'docs/gone.md'), 'unedited, about to be retired\n', 'utf8')
+    await commitAll(s, proj, 'sync at first, plus the soon-to-retire file')
+    return { proj }
+  }
+
+  it('retirement — a non-TTY without --yes refuses to prompt, nothing retired (exit 7)', async () => {
+    await scenario('blueprint-port-pull-retirement-nontty', async (s) => {
+      const { proj } = await seedRetirementCandidate(s, 'nontty')
+      const treeBefore = await walkFiles(proj)
+      const oldResult = await withCttyNoStdin(s, proj, `bash '${SHELL_CLI}' pull </dev/null 2>&1`, { PWD: proj })
+      expect(await walkFiles(proj), 'retirement non-TTY (OLD) must write nothing').toEqual(treeBefore)
+      const newResult = await withCttyNoStdin(
+        s,
+        proj,
+        `'${process.execPath}' '${PORTED_CLI}' pull </dev/null 2>&1`,
+        { PWD: proj },
+      )
+      expect(await walkFiles(proj), 'retirement non-TTY (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      expect(oldResult.code).toBe(7)
+      expect(oldResult.output).toContain('not interactive')
+      expect(oldResult.output).toContain('cannot prompt, so nothing is retired')
+      expect(existsSync(join(proj, 'docs/gone.md'))).toBe(true)
+    })
+  })
+
+  it('retirement — q at the prompt leaves the candidate untouched', async () => {
+    await scenario('blueprint-port-pull-retirement-q', async (s) => {
+      const { proj } = await seedRetirementCandidate(s, 'retq')
+      const treeBefore = await walkFiles(proj)
+      const oldResult = await withCttyAnswer(
+        s,
+        proj,
+        `bash '${join(proj, 'scripts/blueprint')}' pull`,
+        'q\n',
+        { PWD: proj },
+      )
+      expect(await walkFiles(proj), 'retirement q (OLD) must write nothing').toEqual(treeBefore)
+      const newResult = await withCttyAnswer(
+        s,
+        proj,
+        `'${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' pull`,
+        'q\n',
+        { PWD: proj },
+      )
+      expect(await walkFiles(proj), 'retirement q (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      expect(oldResult.output).toContain('aborted')
+      expect(oldResult.code).toBe(0)
+      expect(existsSync(join(proj, 'docs/gone.md'))).toBe(true)
+    })
+  })
+
   it('exec bit — pull sets +x on a newly-executable managed file and clears it when the blueprint drops it', async () => {
     await scenario('blueprint-port-pull-exec-bit', async (s) => {
       const bp = await s.workspace.dir('bp')

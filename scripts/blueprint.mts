@@ -3043,7 +3043,16 @@ async function cmdPrs(): Promise<number> {
         '--json',
         'number,headRefName,title,createdAt,isDraft,url',
         '--jq',
-        '.[] | select(.headRefName | startswith("a2bp/")) | "\\(.number)\\t\\(.headRefName)\\t\\(.createdAt)\\t\\(.isDraft)\\t\\(.url)"',
+        // Byte-identical to the shell CLI's own `--jq '...'` argument
+        // (scripts/blueprint:2184-2185), embedded newline and 14-space
+        // indent included: the real script's single-quoted string spans two
+        // source lines for readability, and bash passes that literal
+        // whitespace through to gh's argv unchanged. jq itself does not
+        // care (it ignores insignificant whitespace in a filter), but the
+        // exact bytes are what TASK-081's differential harness compares in
+        // the gh-argv log (plan §5), so the port matches them rather than
+        // reformatting.
+        '.[] | select(.headRefName | startswith("a2bp/")) |\n              "\\(.number)\\t\\(.headRefName)\\t\\(.createdAt)\\t\\(.isDraft)\\t\\(.url)"',
       ],
       { stdout: 'capture', stderr: 'ignore' },
     ),

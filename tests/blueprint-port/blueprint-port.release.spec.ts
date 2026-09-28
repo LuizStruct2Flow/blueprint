@@ -145,8 +145,13 @@
  *                  — with an explicit `.bp-bak` bytes check, merge,
  *                  retirement — with an explicit kept-file bytes check, PLUS
  *                  retirement answered by a non-TTY (the "not interactive"
- *                  refusal, exit 7) and by q (aborted, exit 0), exec bit +x
- *                  and -x); 'finding 1' (tool failures inside
+ *                  refusal, exit 7), by q (aborted, exit 0), and by y
+ *                  THROUGH A REAL TTY via `withCttyAnswer` — no `--yes` —
+ *                  retiring the candidate and keeping the edited one, same
+ *                  fixture as the `--yes` row (Codex round-5 gap: every
+ *                  retirement row before this one was either `--yes` or a
+ *                  refusal, none drove a genuine interactive accept); exec
+ *                  bit +x and -x); 'finding 1' (tool failures inside
  *                  bp_prospective_pull/marker_aware_merge/_bp_settings_layer);
  *                  'finding 4' (comm/cmp/diff absent, diff present-but-not-
  *                  executable, jq entirely missing); 'pull remaining rows'
@@ -2122,37 +2127,44 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
     })
   })
 
+  /** One unedited retirement candidate (docs/gone.md) and one edited one
+   * (docs/kept.md), both stopped-shipping at the blueprint's second commit —
+   * the shape both the `--yes` row and the interactive-`y` row below need.
+   * Hoisted out of the `--yes` row (TASK-081 round E) once a second row
+   * needed the identical fixture, driven through a real TTY instead. */
+  async function seedRetirementBothPinned(s: Scenario, root: string): Promise<PullMatrixFixture> {
+    const bp = join(root, 'bp')
+    await mkdir(join(bp, 'docs'), { recursive: true })
+    await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+    await writeFile(join(bp, 'docs/gone.md'), 'unedited, about to be retired\n', 'utf8')
+    await writeFile(join(bp, 'docs/kept.md'), 'about to be retired, but edited\n', 'utf8')
+    await initRepo(s, bp)
+    await commitAllPinned(s, bp, 'one')
+    const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+    await git(s, bp, ['rm', '-q', 'docs/gone.md', 'docs/kept.md'])
+    await commitAllPinned(s, bp, 'two — stopped shipping both')
+
+    const proj = join(root, 'proj')
+    await seedRegisteredProjectPinned(s, proj, bp, first)
+    await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+    await mkdir(join(proj, 'docs'), { recursive: true })
+    await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+    await writeFile(join(proj, 'docs/gone.md'), 'unedited, about to be retired\n', 'utf8')
+    await writeFile(
+      join(proj, 'docs/kept.md'),
+      'about to be retired, but edited\nand the project added this\n',
+      'utf8',
+    )
+    await commitAllPinned(s, proj, 'sync at first, plus the soon-to-retire files')
+    return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+  }
+
   it('retirement — an unedited retired file is removed with --yes, an edited one is kept ("yours now")', async () => {
     await scenario('blueprint-port-pull-retirement', async (s) => {
       const { oldResult } = await samePathTwice<PullMatrixFixture>(s, 'root', {
-        build: async (s, root) => {
-          const bp = join(root, 'bp')
-          await mkdir(join(bp, 'docs'), { recursive: true })
-          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-          await writeFile(join(bp, 'docs/gone.md'), 'unedited, about to be retired\n', 'utf8')
-          await writeFile(join(bp, 'docs/kept.md'), 'about to be retired, but edited\n', 'utf8')
-          await initRepo(s, bp)
-          await commitAllPinned(s, bp, 'one')
-          const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
-          await git(s, bp, ['rm', '-q', 'docs/gone.md', 'docs/kept.md'])
-          await commitAllPinned(s, bp, 'two — stopped shipping both')
-
-          const proj = join(root, 'proj')
-          await seedRegisteredProjectPinned(s, proj, bp, first)
-          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-          await mkdir(join(proj, 'docs'), { recursive: true })
-          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-          await writeFile(join(proj, 'docs/gone.md'), 'unedited, about to be retired\n', 'utf8')
-          await writeFile(
-            join(proj, 'docs/kept.md'),
-            'about to be retired, but edited\nand the project added this\n',
-            'utf8',
-          )
-          await commitAllPinned(s, proj, 'sync at first, plus the soon-to-retire files')
-          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
-        },
+        build: (s, root) => seedRetirementBothPinned(s, root),
         run: (s, fx, side) =>
           side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
         snapshotOpts: (fx) => ({ remote: fx.bp }),
@@ -2166,6 +2178,39 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
       // Codex's named example: the KEPT file's bytes, compared explicitly —
       // "yours now" must mean the project's own edited copy survived
       // untouched.
+      const kept = await readFile(join(proj, 'docs/kept.md'), 'utf8')
+      expect(kept).toBe('about to be retired, but edited\nand the project added this\n')
+    })
+  })
+
+  /** Codex round-5 gap: every existing retirement row is either `--yes`
+   * (above) or a NON-TTY / `q` refusal (below) — none drives a genuine
+   * interactive `y` through a real controlling terminal, plan §5's own
+   * "retirement offered on a full pull" row. `withCttyAnswer` (tests/
+   * helpers/tty.ts) is the SAME pty-backed driver the `q` row below uses,
+   * answering `y\n` instead. Same fixture as the `--yes` row — one unedited
+   * candidate (retired), one edited (kept, no prompt at all) — so the ONLY
+   * difference from that row is HOW the answer reaches the CLI: `--yes`
+   * skipping the prompt outright vs. a real TTY reading a keystroke. */
+  it('retirement — y at the prompt (a real TTY, no --yes) retires the candidate, an edited one is kept', async () => {
+    await scenario('blueprint-port-pull-retirement-y-tty', async (s) => {
+      const { oldResult } = await samePathTwice<PullMatrixFixture>(s, 'root', {
+        build: (s, root) => seedRetirementBothPinned(s, root),
+        run: (s, fx, side) => withCttyAnswer(s, fx.proj, pullCommand(fx, side), 'y\n', { PWD: fx.proj, ...fx.env }),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldResult.code).toBe(0)
+      // Under a real TTY the CLI colourises its output (unlike the piped
+      // `--yes` row above), so the assertions below check substrings on
+      // either side of the ANSI reset code rather than one contiguous regex.
+      expect(oldResult.output).toContain('Delete this file? [y/N/q]')
+      expect(oldResult.output).toContain('retired')
+      expect(oldResult.output).toContain('yours now')
+      expect(oldResult.output).toContain('docs/gone.md')
+      expect(oldResult.output).toContain('docs/kept.md')
+      const proj = join(s.workspace.path('root'), 'proj')
+      expect(existsSync(join(proj, 'docs/gone.md'))).toBe(false)
+      expect(existsSync(join(proj, 'docs/kept.md'))).toBe(true)
       const kept = await readFile(join(proj, 'docs/kept.md'), 'utf8')
       expect(kept).toBe('about to be retired, but edited\nand the project added this\n')
     })

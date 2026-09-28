@@ -1,24 +1,118 @@
 /**
  * tests/blueprint-port/blueprint-port.release.spec.ts — TASK-081, the
  * differential harness (plan §5). Compares OLD (`bash scripts/blueprint`)
- * against NEW (`node scripts/blueprint.mts`) subcommand family by
+ * against NEW (`node scripts/blueprint.mts`), subcommand family by
  * subcommand family, as each slice lands. Deleted once the founder accepts
  * TASK-081 (plan §5) — its results live in the port commit body instead.
- *
- * SLICE 1 covers dispatch (no args, `help`, `--help`, `-h`, an unknown
- * subcommand, `push`) and `files` for the two paths that need no network
- * (standing in "the blueprint" itself, and the BLUEPRINT_ROOT override of
- * that same root). `files` in a REGISTERED derived project needs the fetch
- * machinery (P1), added in slice 2 — its own row is below, alongside drift
- * and pull.
  *
  * Release tier: it shells out to real `git`/`bash`/`node` against fixture
  * repositories, which is slower than the suite's usual unit tests — the same
  * reason tests/a2bp-e2e and tests/bootstrap-gate are release-tier.
+ *
+ * DETERMINISM (plan §5): "same path, twice" is enforced two different ways
+ * in this file, and which one a describe uses is a property of whether its
+ * rows WRITE.
+ *   - A row that never mutates its fixture (drift; most of `files`) runs OLD
+ *     on ONE fixture directory, then resets the local git config drift arms
+ *     (`driftBoth`), then runs NEW on the SAME directory — "same path" by
+ *     construction, since there is only ever one.
+ *   - A row that WRITES (pull's full/partial/prompt rows; every a2bp row)
+ *     cannot reuse one directory this way, so it goes through
+ *     `a2bpSamePathTwice` (the a2bp/prs describe) or an equivalent
+ *     build→run→delete→rebuild→run sequence: build the fixture at a fixed
+ *     path with PINNED `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` and identity,
+ *     run OLD, snapshot (stdout/stderr/status/signal, the project tree's
+ *     path/bytes/mode, `.blueprint-source`, the blueprint's refs, and for
+ *     a2bp the gh-argv log), delete the fixture, rebuild the IDENTICAL
+ *     fixture at the SAME path, run NEW, snapshot again, and diff with NO
+ *     normalisation beyond the three plan §5 names: random mktemp suffixes,
+ *     `diff -u` header timestamps, and bash's `line N:` prefix. This
+ *     replaces an earlier version of the a2bp/prs describe that built TWO
+ *     INDEPENDENT fixture trees per row and scrubbed the resulting
+ *     divergence (`scrubA2bp`) — a normaliser plan §5 does not allow, and
+ *     the finding Codex's round-3 review left open.
+ *
+ * THE §5 MATRIX CHECKLIST. Plan §5's table names ~90 rows by subcommand.
+ * Each row below is either a `it()` name in this file (or blueprint-port.spec.ts
+ * for the few proven at the unit tier) or has a reason it is not a row, with
+ * its covering test named instead.
+ *
+ *   dispatch     — describe 'blueprint-port differential — dispatch': all
+ *                  six rows (no args, help, --help, -h, an unknown
+ *                  subcommand, push).
+ *   files/list   — describe 'blueprint-port differential — files': the
+ *                  three rows (in the blueprint, BLUEPRINT_ROOT override, a
+ *                  registered derived project).
+ *   drift        — describe 'blueprint-port differential — drift' (clean,
+ *                  drifted, new-in-blueprint, refused/BUG-034, unregistered,
+ *                  not-a-project); "…'s fast-forward prompt" (y, N);
+ *                  'settings-layer refusals' (P4's array/object/null/number
+ *                  shapes, both files, plus the drift-side refusal bucket);
+ *                  'staleness states' (current/ahead/diverged/unknown);
+ *                  'fetch failures' (unreachable, missing branch, no
+ *                  timeout binary, hung/BP_FETCH_TIMEOUT, scratch
+ *                  uncreatable, damaged cache — six of the matrix's
+ *                  "unreachable(5)/hung(5)/…" rows; the placeholder-remote,
+ *                  v1-config and missing-release-branch variants of each are
+ *                  NOT separate rows here — they share bp_fetch_blueprint's
+ *                  read_blueprint_source/timeout/cache code paths with the
+ *                  six proven, and plan §5 does not require every
+ *                  config-shape permutation to be its own row, only that
+ *                  each CODE PATH is proven once).
+ *                  NOT ROWS, with their reason: missing-in-blueprint (the
+ *                  SAME managed-set-diff code path as "new in blueprint"
+ *                  above with the two sides swapped — TASK-021 §4.2's
+ *                  retirement rows in the pull matrix describe drive that
+ *                  exact asymmetry end to end); gate.sh missing,
+ *                  bootstrap_sha not in history, override-not-a-directory,
+ *                  the leftover blueprint_source warning, an exported
+ *                  GIT_DIR, a symlinked project directory, and a project
+ *                  name holding `&`/`\` are each a real gap in this file —
+ *                  none has a row here, and none is proven at the unit tier
+ *                  either. Left open rather than claimed.
+ *   pull         — describe 'blueprint-port differential — pull' (nothing
+ *                  to pull, full --yes, partial/BUG-016, non-TTY/BUG-018,
+ *                  refused/BUG-034, `pull scripts/blueprint`, the y/N/q
+ *                  interactive prompt); 'pull matrix' (backup-copy,
+ *                  merge/BUG-someshape, retirement's y/edited-kept shape,
+ *                  exec bit +x and -x); 'finding 1' (tool failures inside
+ *                  bp_prospective_pull/marker_aware_merge/_bp_settings_layer);
+ *                  'finding 4' (comm/cmp/diff absent, diff present-but-not-
+ *                  executable, jq entirely missing).
+ *                  NOT ROWS: retirement's non-TTY and q sub-cases (only y is
+ *                  proven here — the shell suite's own pull-behaviour and
+ *                  pull-exec-bit unit tests, referenced from the pull
+ *                  matrix describe's own header, cover the refusal shapes at
+ *                  the unit tier, not differentially); a held file leaving
+ *                  bootstrap_sha untouched; an unknown pull option dying
+ *                  after the fetch. Left open.
+ *   a2bp         — describe 'blueprint-port differential — a2bp / prs':
+ *                  finding 2 (x2), finding 3, dry-run, no files given, not a
+ *                  derived project, a required lib missing, contamination
+ *                  BLOCK, gitleaks unavailable, gh unavailable, filed (exit
+ *                  3, BUG-011 happy path). Every one of these ten now goes
+ *                  through `a2bpSamePathTwice` except the two that die
+ *                  before touching the blueprint at all (no files given,
+ *                  not a derived project), which need no rebuild because
+ *                  nothing about their output is fixture-path-dependent.
+ *                  NOT ROWS: `--force`; an unknown a2bp option; staging
+ *                  rc 3; GNU diff missing; an unshipped path; the remote
+ *                  moving once, then twice (tests/a2bp-e2e proves these
+ *                  shell-side, not differentially). Left open.
+ *   prs          — 'prs — empty, a listing, and a gh query failure'
+ *                  (INCOMPLETE, not empty).
+ *                  NOT ROWS: a draft PR; orphan branches (none listed, as
+ *                  today, per plan §5's own note that this is the SAME
+ *                  "none exist yet" state as everywhere else in this repo).
+ *                  Left open.
+ *
+ * Signals are not differential rows (plan §5's own words) — they are
+ * tests/sync-by-address #20-#23c, run against the port.
  */
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { chmod, cp, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, cp, copyFile, mkdir, readdir, readFile, readlink, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { RunResult } from '../harness/process.js'
@@ -2099,55 +2193,225 @@ describe('blueprint-port differential — fetch failures', () => {
 /**
  * blueprint-port differential — a2bp / prs (TASK-081 slice 4, plan §8 row 4).
  *
- * A representative slice of plan §5's a2bp/prs rows: dry-run, no-derived-
- * project, missing-lib, contamination refusal, gitleaks unavailable, gh
- * unavailable, filed (exit 3, via a `gh` shim — no real network), and prs
- * (empty / a listing / gh query failure). `a2bp` WRITES A REAL BRANCH to its
- * (local, filesystem) remote when it gets that far, so every row that reaches
- * that point builds its OWN blueprint remote per side, like the pull
- * describe's full/partial rows above — reusing one remote across OLD and NEW
- * would make the second run see the first run's already-pushed branch.
+ * Re-implemented after Codex round-3 review found the original harness did
+ * not implement plan §5's "same path, twice" determinism rule: it built TWO
+ * INDEPENDENT fixture trees (one per CLI, under `old-*`/`new-*` parent
+ * directories) and then papered over the resulting divergence — different
+ * absolute paths, different commit SHAs (unpinned author/committer dates),
+ * different a2bp request-branch keys (the key hashes in the remote's own
+ * absolute path, plan §5's own example) — with `scrubA2bp`, a normaliser
+ * plan §5 never allows. `scrubA2bp` is gone; nothing here normalises a path,
+ * a SHA or a request key.
+ *
+ * `a2bpSamePathTwice` is the one comparison helper every row in this
+ * describe goes through: build ONE fixture at a fixed root, run OLD,
+ * snapshot the project tree, the blueprint tree, the blueprint's refs (what
+ * a2bp pushed) and any gh-argv log; DELETE the root; rebuild the IDENTICAL
+ * fixture at the SAME path (pinned `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`
+ * and identity, so content-derived bytes are the same regardless of which
+ * run built them — plan §5's own determinism bullet); run NEW; snapshot
+ * again; diff with NO normalisation beyond the three plan §5 names: mktemp
+ * suffixes, `diff -u` header timestamps, and bash's `line N:` prefix.
+ *
+ * `a2bp` WRITES A REAL BRANCH to its (local, filesystem) remote when it gets
+ * that far — the snapshot's `bpRefs` field is how that write is compared,
+ * rather than reading it off stdout.
  */
-/** Normalises everything two INDEPENDENT scenario fixtures can never agree
- * on byte-for-byte: each side's own absolute workspace path (down to the
- * shared "proj"/"bp" leaf), the scratch clone's random mktemp suffix, commit
- * SHAs (content differs a hair between the two builds — the request commit
- * embeds the base's own committer date, which is fine to differ; the actual
- * TREE content is identical) and the request branch's content-derived key. */
-function scrubA2bp(out: string): string {
-  return out
-    .replace(/\/[^ \n]*-side\/(proj|bp)\b/g, '<$1>')
-    .replace(/\/[^ \n]*\/a2bp\.[^/ \n]+/g, '<scratch>')
-    .replace(/\b[0-9a-f]{40}\b/g, '<sha>')
-    .replace(/a2bp\/proj\/[0-9a-f]+/g, 'a2bp/proj/<key>')
+
+const PINNED_GIT_DATE = '2026-01-01T00:00:00Z'
+
+function pinnedGitEnv(): Record<string, string> {
+  return {
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@local',
+    GIT_AUTHOR_DATE: PINNED_GIT_DATE,
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@local',
+    GIT_COMMITTER_DATE: PINNED_GIT_DATE,
+  }
+}
+
+/** Same shape as `commitAll` above, except every commit's author/committer
+ * date and identity are pinned rather than left to the wall clock — the
+ * precondition plan §5 states for "same path, twice": identical content,
+ * built twice, must hash to the identical commit SHA. */
+async function commitAllPinned(s: Scenario, dir: string, message = 'init'): Promise<void> {
+  await git(s, dir, ['add', '-A'])
+  await s.run('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message], {
+    cwd: dir,
+    env: pinnedGitEnv(),
+  })
+}
+
+interface A2bpFixture {
+  readonly root: string
+  readonly bp: string
+  readonly proj: string
+}
+
+/** Builds `root/bp` (the blueprint remote) and `root/proj` (a registered
+ * project, with the real `scripts/` tree so a2bp's own lib-loading runs for
+ * real), both with pinned commits. Called twice per row, at the SAME `root`,
+ * with the SAME `claudeText` — so the two builds are byte-identical modulo
+ * nothing. */
+async function buildA2bpFixture(s: Scenario, root: string, claudeText: string): Promise<A2bpFixture> {
+  const bp = join(root, 'bp')
+  const proj = join(root, 'proj')
+
+  await mkdir(join(bp, 'docs'), { recursive: true })
+  await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+  await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+  await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+  await initRepo(s, bp)
+  await commitAllPinned(s, bp, 'base')
+  const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+  await cp(join(REPO_ROOT, 'scripts'), join(proj, 'scripts'), { recursive: true })
+  await s.run('chmod', ['+x', join(proj, 'scripts/blueprint')], { cwd: proj })
+  await mkdir(join(proj, '.githooks'), { recursive: true })
+  await writeFile(join(proj, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
+  await s.run('chmod', ['+x', join(proj, '.githooks/pre-push')], { cwd: proj })
+  await writeFile(
+    join(proj, '.blueprint-source'),
+    `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+    'utf8',
+  )
+  await initRepo(s, proj)
+  await commitAllPinned(s, proj, 'init')
+  // a2bp needs a project file that DIFFERS from the blueprint's copy, or
+  // every row exercises "nothing to request" (BP_RC_NOTHING) instead of the
+  // path it means to prove.
+  await writeFile(join(proj, 'CLAUDE.md'), claudeText, 'utf8')
+  await commitAllPinned(s, proj, 'edit')
+
+  return { root, bp, proj }
+}
+
+/** One file's path (relative to `dir`), permission bits and content hash —
+ * or, for a symlink, its target string in place of a hash. `.git` is
+ * excluded: its loose-object layout is an implementation detail of git's
+ * own storage, not part of what plan §5 asks this harness to compare (the
+ * project tree's path/bytes/mode, and separately the refs). */
+async function walkFiles(dir: string, base = dir): Promise<Array<{ path: string; mode: string; content: string }>> {
+  const out: Array<{ path: string; mode: string; content: string }> = []
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.name === '.git') continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      out.push(...(await walkFiles(full, base)))
+      continue
+    }
+    const st = await stat(full)
+    const mode = (st.mode & 0o777).toString(8)
+    const content = entry.isSymbolicLink()
+      ? `symlink:${await readlink(full)}`
+      : `sha256:${createHash('sha256').update(await readFile(full)).digest('hex')}`
+    out.push({ path: full.slice(base.length + 1), mode, content })
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+async function snapshotRefs(s: Scenario, dir: string): Promise<string> {
+  const r = await s.run('git', ['for-each-ref', '--format=%(refname) %(objectname)'], { cwd: dir })
+  return r.stdout
+    .split('\n')
+    .filter(Boolean)
+    .sort()
+    .join('\n')
+}
+
+interface A2bpSnapshot {
+  readonly projTree: Array<{ path: string; mode: string; content: string }>
+  readonly bpRefs: string
+  readonly blueprintSource: string
+  readonly ghLog: string
+}
+
+async function snapshotA2bp(s: Scenario, fx: A2bpFixture, ghLogPath?: string): Promise<A2bpSnapshot> {
+  return {
+    projTree: await walkFiles(fx.proj),
+    bpRefs: await snapshotRefs(s, fx.bp),
+    blueprintSource: await readFile(join(fx.proj, '.blueprint-source'), 'utf8').catch(() => ''),
+    ghLog: ghLogPath ? await readFile(ghLogPath, 'utf8').catch(() => '') : '',
+  }
+}
+
+/** Plan §5's "that no scratch is left": TMPDIR is this scenario's own `tmp/`
+ * (harness/index.ts's scenarioEnv), and a2bp's scratch clone is
+ * `a2bp.XXXXXXXXXX` there (plan §5's own named mktemp exception — its
+ * SUFFIX is unnormalised-but-ignored by virtue of not existing once the run
+ * is done, never by pattern-stripping it out of compared text). */
+async function assertNoA2bpScratch(s: Scenario): Promise<void> {
+  const tmp = join(s.workspace.root, 'tmp')
+  const entries = await readdir(tmp).catch(() => [] as string[])
+  const leftover = entries.filter((e) => e.startsWith('a2bp.'))
+  expect(leftover, `a2bp scratch left behind in ${tmp}: ${leftover.join(', ')}`).toEqual([])
+}
+
+/** Plan §5's own named mktemp exception, applied to compared TEXT rather
+ * than left unhandled: a2bp's scratch clone directory name
+ * (`a2bp.XXXXXXXXXX`, `mktemp -d`'s random suffix) is printed verbatim in
+ * `--dry-run`'s "Full diff" preview line (the `git -C <scratch>/bare diff …`
+ * command it shows rather than runs). Everything else on that line —
+ * including the workspace root ahead of it, identical under same-path-twice
+ * — is compared unnormalised. */
+function normalizeA2bpScratch(text: string): string {
+  return text.replace(/\ba2bp\.[A-Za-z0-9]+\b/g, 'a2bp.<scratch>')
+}
+
+interface A2bpRowOptions {
+  readonly claudeText?: string
+  /** Built fresh against each side's OWN root/proj, right before that side's
+   * run — e.g. a PATH shim or a gh-argv logger. Returning `{}` is fine. */
+  readonly env?: (fx: A2bpFixture, side: 'old' | 'new') => Promise<Record<string, string>>
+  /** When the row uses a gh shim that logs its own argv, the path that shim
+   * writes to (relative to `fx.root`) — snapshotted as part of the compare. */
+  readonly ghLogRelPath?: string
+}
+
+interface A2bpRowResult {
+  readonly oldResult: RunResult
+  readonly newResult: RunResult
+}
+
+async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts: A2bpRowOptions = {}): Promise<A2bpRowResult> {
+  const claudeText = opts.claudeText ?? '# CLAUDE\nfixture\nan improvement worth requesting\n'
+  const root = s.workspace.path(tag)
+
+  const fx1 = await buildA2bpFixture(s, root, claudeText)
+  const env1 = opts.env ? await opts.env(fx1, 'old') : {}
+  const oldResult = await runOld(s, fx1.proj, ['a2bp', ...args], env1)
+  const oldSnapshot = await snapshotA2bp(s, fx1, opts.ghLogRelPath ? join(root, opts.ghLogRelPath) : undefined)
+  await assertNoA2bpScratch(s)
+
+  await rm(root, { recursive: true, force: true })
+
+  const fx2 = await buildA2bpFixture(s, root, claudeText)
+  const env2 = opts.env ? await opts.env(fx2, 'new') : {}
+  const newResult = await runNew(s, fx2.proj, ['a2bp', ...args], env2)
+  const newSnapshot = await snapshotA2bp(s, fx2, opts.ghLogRelPath ? join(root, opts.ghLogRelPath) : undefined)
+  await assertNoA2bpScratch(s)
+
+  expect(normalizeA2bpScratch(newResult.stdout)).toBe(normalizeA2bpScratch(oldResult.stdout))
+  expect(normalizeA2bpScratch(newResult.stderr)).toBe(normalizeA2bpScratch(oldResult.stderr))
+  expect(newResult.code).toBe(oldResult.code)
+  expect(newResult.signal).toBe(oldResult.signal)
+  expect(newSnapshot).toEqual(oldSnapshot)
+
+  return { oldResult, newResult }
 }
 
 describe('blueprint-port differential — a2bp / prs', () => {
-  // SAME leaf name ("proj") under a per-side parent, like the "pull
-  // scripts/blueprint" row above — a2bp's own output prints the project's
-  // basename (`(name: <basename>)`), so an "old"/"new" leaf mismatch would
-  // make that difference the thing this row is trying to rule out.
-  async function a2bpProject(s: Scenario, tag: string, claudeText = '# CLAUDE\nfixture\nan improvement worth requesting\n') {
-    const bp = await s.workspace.dir(`${tag}-side`, 'bp')
-    const sha = await seedBlueprintRepo(s, bp)
-    const proj = await s.workspace.dir(`${tag}-side`, 'proj')
-    await seedRegisteredProject(s, proj, bp, sha)
-    // seedRegisteredProject seeds no CLAUDE.md of its own — a2bp needs a
-    // project file that DIFFERS from the blueprint's copy, or every row
-    // would exercise "nothing to request" (BP_RC_NOTHING) instead of the
-    // path it means to prove.
-    {
-      await writeFile(join(proj, 'CLAUDE.md'), claudeText, 'utf8')
-      await commitAll(s, proj, 'edit')
-    }
-    return { bp, proj }
-  }
-
-  /** A symlink farm of every executable on PATH EXCEPT `name`, deterministic
-   * on any host (a2bp-e2e's own technique — a shim is useless here, since
-   * `command -v` finds it; the binary must be genuinely absent). */
-  async function pathWithout(s: Scenario, name: string, tag: string): Promise<string> {
-    const dir = await s.workspace.dir(`${tag}-nobin`)
+  /** A symlink farm of every executable on PATH EXCEPT `name` (a2bp-e2e's own
+   * technique — a shim is useless here, since `command -v` finds it; the
+   * binary must be genuinely absent). `Scenario.pathWithout` always lands in
+   * the SAME `path-without/` workspace subdirectory, so a second call within
+   * one scenario (the "old" build, then the "new" rebuild) collides on its
+   * own already-planted symlinks — hence a distinct `dir` per call here,
+   * named by `tag` rather than reused. */
+  async function pathWithoutBin(s: Scenario, name: string, tag: string): Promise<string> {
+    const dir = await s.workspace.dir(tag)
     const farm = await s.run(
       'sh',
       [
@@ -2190,15 +2454,9 @@ describe('blueprint-port differential — a2bp / prs', () => {
    */
   it('finding 2 — bp_file_base_content’s bare `git show` failing aborts the whole run', async () => {
     await scenario('blueprint-port-a2bp-f2-base-content', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-f2a')
-      const newSide = await a2bpProject(s, 'new-f2a')
-      const oldPath = await verbFailShim(s, 'old-f2a-git', 'git', ['show'])
-      const newPath = await verbFailShim(s, 'new-f2a-git', 'git', ['show'])
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-f2a', ['CLAUDE.md'], {
+        env: async (_fx, side) => ({ PATH: await verbFailShim(s, `f2a-git-${side}`, 'git', ['show']) }),
+      })
       // NON-VACUITY: died specifically of the shimmed git's own status, not
       // some unrelated refusal (a2bp's own guard codes are 3/4/5/6 — never 1
       // — so exit 1 here can only be the bare statement's abort).
@@ -2208,15 +2466,9 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('finding 2 — the bare `git --no-pager diff --stat` pipeline failing aborts the whole run', async () => {
     await scenario('blueprint-port-a2bp-f2-diff-stat', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-f2b')
-      const newSide = await a2bpProject(s, 'new-f2b')
-      const oldPath = await verbFailShim(s, 'old-f2b-git', 'git', ['--stat'])
-      const newPath = await verbFailShim(s, 'new-f2b-git', 'git', ['--stat'])
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-f2b', ['CLAUDE.md'], {
+        env: async (_fx, side) => ({ PATH: await verbFailShim(s, `f2b-git-${side}`, 'git', ['--stat']) }),
+      })
       expect(oldResult.code).toBe(1)
       // The request got as far as building the commit (both sides printed
       // the "Request" header) before the bare diff --stat statement killed it.
@@ -2246,26 +2498,34 @@ describe('blueprint-port differential — a2bp / prs', () => {
    * through a SEPARATE `bash -c` subprocess, whose own diagnostic can only
    * ever read "bash: line 1: …" — a different bash process reporting on
    * itself, not something `run()` synthesizes and could be taught the CLI's
-   * shape. Stdout and the exit code are still compared byte-for-byte; only
-   * this one stderr line is normalised (both sides' prefix stripped before
-   * the message).
+   * shape. Stdout, the exit code and every snapshotted byte are still
+   * compared exactly; only this one stderr line is normalised (both sides'
+   * "<program>: line N: " prefix stripped before the message) — the one
+   * bash-line-number normalisation plan §5/§6 name outright.
    */
   it('finding 3 — scripts/lib/placeholders.sh missing, on a path that substitutes', async () => {
     await scenario('blueprint-port-a2bp-f3-no-placeholders', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-f3')
-      const newSide = await a2bpProject(s, 'new-f3')
-      const { rm } = await import('node:fs/promises')
-      await rm(join(oldSide.proj, 'scripts/lib/placeholders.sh'))
-      await rm(join(newSide.proj, 'scripts/lib/placeholders.sh'))
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'])
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'])
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
+      const claudeText = '# CLAUDE\nfixture\nan improvement worth requesting\n'
+      const root = s.workspace.path('a2bp-f3')
+
+      const fx1 = await buildA2bpFixture(s, root, claudeText)
+      await rm(join(fx1.proj, 'scripts/lib/placeholders.sh'))
+      const oldResult = await runOld(s, fx1.proj, ['a2bp', 'CLAUDE.md'])
+      const oldSnapshot = await snapshotA2bp(s, fx1)
+      await assertNoA2bpScratch(s)
+
+      await rm(root, { recursive: true, force: true })
+
+      const fx2 = await buildA2bpFixture(s, root, claudeText)
+      await rm(join(fx2.proj, 'scripts/lib/placeholders.sh'))
+      const newResult = await runNew(s, fx2.proj, ['a2bp', 'CLAUDE.md'])
+      const newSnapshot = await snapshotA2bp(s, fx2)
+      await assertNoA2bpScratch(s)
+
+      expect(newResult.stdout).toBe(oldResult.stdout)
       expect(newResult.code).toBe(oldResult.code)
-      // The one named normalisation: strip "<program>: line N: " off the
-      // front of each side's diagnostic before comparing — bash's own
-      // prefix, naming a different program and line per side, never
-      // reproducible byte-for-byte across two distinct bash processes.
-      const stripLinePrefix = (s: string) => s.replace(/^\S+: line \d+: /gm, '')
+      expect(newSnapshot).toEqual(oldSnapshot)
+      const stripLinePrefix = (t: string) => t.replace(/^\S+: line \d+: /gm, '')
       expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
       expect(oldResult.stderr).toContain('bp_should_substitute: command not found')
       expect(newResult.stderr).toContain('bp_should_substitute: command not found')
@@ -2274,14 +2534,8 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('dry-run — files, base and diff --stat, nothing pushed', async () => {
     await scenario('blueprint-port-a2bp-dry-run', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-dry')
-      const newSide = await a2bpProject(s, 'new-dry')
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', '--dry-run', 'CLAUDE.md'])
-      const newResult = await runNew(s, newSide.proj, ['a2bp', '--dry-run', 'CLAUDE.md'])
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-dry', ['--dry-run', 'CLAUDE.md'])
       expect(oldResult.code, oldResult.output).toBe(0)
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
       expect(oldResult.stdout).toContain('--dry-run: nothing pushed')
     })
   })
@@ -2318,7 +2572,6 @@ describe('blueprint-port differential — a2bp / prs', () => {
       await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
       await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
       await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
-      const { readdir } = await import('node:fs/promises')
       for (const name of await readdir(join(REPO_ROOT, 'scripts/lib'))) {
         if (name === 'request-build.sh') continue
         await copyFile(join(REPO_ROOT, 'scripts/lib', name), join(root, 'scripts/lib', name))
@@ -2338,14 +2591,9 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('contamination BLOCK — a host path in the file: nothing filed (exit 4)', async () => {
     await scenario('blueprint-port-a2bp-contamination', async (s) => {
-      const text = '# CLAUDE\nfixture\nsecret path /home/someuser/private/config\n'
-      const oldSide = await a2bpProject(s, 'old-contam', text)
-      const newSide = await a2bpProject(s, 'new-contam', text)
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'])
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'])
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-contam', ['CLAUDE.md'], {
+        claudeText: '# CLAUDE\nfixture\nsecret path /home/someuser/private/config\n',
+      })
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain('host home path')
       expect(oldResult.stdout).toContain('blocked — nothing filed')
@@ -2354,15 +2602,9 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('gitleaks unavailable — the secret scan refuses (BUG-127), exit 4', async () => {
     await scenario('blueprint-port-a2bp-no-gitleaks', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-nogl')
-      const newSide = await a2bpProject(s, 'new-nogl')
-      const oldPath = await pathWithout(s, 'gitleaks', 'old-nogl')
-      const newPath = await pathWithout(s, 'gitleaks', 'new-nogl')
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-nogl', ['CLAUDE.md'], {
+        env: async (_fx, side) => ({ PATH: await pathWithoutBin(s, 'gitleaks', `nogl-${side}`) }),
+      })
       expect(oldResult.code).toBe(4)
       expect(oldResult.stderr).toContain('gitleaks is not installed')
     })
@@ -2370,15 +2612,9 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('gh unavailable — pushed but no PR opened (BUG-011), exit 5', async () => {
     await scenario('blueprint-port-a2bp-no-gh', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-nogh')
-      const newSide = await a2bpProject(s, 'new-nogh')
-      const oldPath = await pathWithout(s, 'gh', 'old-nogh')
-      const newPath = await pathWithout(s, 'gh', 'new-nogh')
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldPath })
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newPath })
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-nogh', ['CLAUDE.md'], {
+        env: async (_fx, side) => ({ PATH: await pathWithoutBin(s, 'gh', `nogh-${side}`) }),
+      })
       expect(oldResult.code).toBe(5)
       expect(oldResult.stdout).toContain('gh is not installed')
     })
@@ -2386,23 +2622,17 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('filed — pushed and a PR opened via a gh shim: exit 3 (BUG-011 happy path)', async () => {
     await scenario('blueprint-port-a2bp-filed', async (s) => {
-      const oldSide = await a2bpProject(s, 'old-filed')
-      const newSide = await a2bpProject(s, 'new-filed')
-      const oldGh = await s.shimDir('old-filed-gh')
-      await oldGh.add(
-        'gh',
-        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/1" ;;\n  *) exit 1 ;;\nesac\n',
-      )
-      const newGh = await s.shimDir('new-filed-gh')
-      await newGh.add(
-        'gh',
-        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/1" ;;\n  *) exit 1 ;;\nesac\n',
-      )
-      const oldResult = await runOld(s, oldSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: oldGh.path() })
-      const newResult = await runNew(s, newSide.proj, ['a2bp', 'CLAUDE.md'], { PATH: newGh.path() })
-      expect(scrubA2bp(newResult.stdout)).toBe(scrubA2bp(oldResult.stdout))
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      expect(newResult.code).toBe(oldResult.code)
+      const ghScript =
+        'printf \'%s\\n\' "$*" >> "$A2BP_GH_LOG"\n' +
+        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/1" ;;\n  *) exit 1 ;;\nesac\n'
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-filed', ['CLAUDE.md'], {
+        ghLogRelPath: 'gh-argv.log',
+        env: async (fx, side) => {
+          const shims = await s.shimDir(`filed-gh-${side}`)
+          await shims.add('gh', ghScript)
+          return { PATH: shims.path(), A2BP_GH_LOG: join(fx.root, 'gh-argv.log') }
+        },
+      })
       expect(oldResult.code).toBe(3)
       expect(oldResult.stdout).toContain('✓ request filed: https://github.com/example/repo/pull/1')
     })

@@ -299,6 +299,15 @@ const ENV_KIND = {
   GIT_AUTHOR_EMAIL: 'inert',
   GIT_COMMITTER_NAME: 'inert',
   GIT_COMMITTER_EMAIL: 'inert',
+  // Same reasoning, same 'inert' kind: a timestamp carries no path and
+  // redirects nothing. TASK-081's differential harness (plan §5's "same
+  // path, twice") pins these on every commit a fixture makes, so two
+  // independently-built fixtures with identical content hash to the
+  // identical commit SHA regardless of wall-clock skew between the OLD and
+  // NEW runs — the precondition plan §5 states for comparing byte-for-byte
+  // without normalising a SHA away.
+  GIT_AUTHOR_DATE: 'inert',
+  GIT_COMMITTER_DATE: 'inert',
 } as const satisfies Record<string, EnvKind>
 
 type EnvKind =

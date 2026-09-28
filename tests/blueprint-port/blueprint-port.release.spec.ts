@@ -199,6 +199,97 @@ function expectPullIdentical(oldResult: RunResult, newResult: RunResult): void {
   expect(newResult.signal).toBe(oldResult.signal)
 }
 
+// --- generalised plan §5 comparison machinery, shared by drift AND pull ----
+//
+// Hoisted here (originally local to the a2bp/prs describe, where walkFiles
+// and snapshotRefs still get reused unchanged) so the drift and pull
+// differential rows below can reach the SAME "project tree (path/bytes/
+// mode), `.blueprint-source`, the cache's refs, no scratch left" comparison
+// plan §5 asks for, rather than each row hand-rolling a subset of it.
+
+/** One file's path (relative to `dir`), permission bits and content hash —
+ * or, for a symlink, its target string in place of a hash. `.git` is
+ * excluded: its loose-object layout is an implementation detail of git's
+ * own storage, not part of what plan §5 asks this harness to compare (the
+ * project tree's path/bytes/mode, and separately the refs). `.blueprint-
+ * source` is an ordinary file under `dir` and so is already included by
+ * this walk — no separate read is needed to cover it. */
+async function walkFiles(dir: string, base = dir): Promise<Array<{ path: string; mode: string; content: string }>> {
+  const out: Array<{ path: string; mode: string; content: string }> = []
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.name === '.git') continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      out.push(...(await walkFiles(full, base)))
+      continue
+    }
+    const st = await stat(full)
+    const mode = (st.mode & 0o777).toString(8)
+    const content = entry.isSymbolicLink()
+      ? `symlink:${await readlink(full)}`
+      : `sha256:${createHash('sha256').update(await readFile(full)).digest('hex')}`
+    out.push({ path: full.slice(base.length + 1), mode, content })
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+async function snapshotRefs(s: Scenario, dir: string): Promise<string> {
+  const r = await s.run('git', ['for-each-ref', '--format=%(refname) %(objectname)'], { cwd: dir })
+  return r.stdout
+    .split('\n')
+    .filter(Boolean)
+    .sort()
+    .join('\n')
+}
+
+/** Plan §5's "that no scratch is left", for drift/pull: `_bp_fetch_blueprint`'s
+ * own scratch (`blueprint-sync.XXXXXXXX`) and any bare `mktemp` (`tmp.…`, the
+ * shielded-write idiom) land under this scenario's own TMPDIR
+ * (harness/index.ts's scenarioEnv) and must not survive the run. The a2bp
+ * describe's own `assertNoA2bpScratch` covers the SAME directory for its own
+ * `a2bp.…` prefix — kept separate there because that describe is not this
+ * round's to touch. */
+async function assertNoDriftPullScratch(s: Scenario): Promise<void> {
+  const tmp = join(s.workspace.root, 'tmp')
+  const entries = await readdir(tmp).catch(() => [] as string[])
+  const leftover = entries.filter((e) => e.startsWith('blueprint-sync.') || e.startsWith('tmp.'))
+  expect(leftover, `drift/pull scratch left behind in ${tmp}: ${leftover.join(', ')}`).toEqual([])
+}
+
+/** `blueprint_remote = …` out of a project's `.blueprint-source`, or
+ * `undefined` for a fixture that never registered one (the unregistered/
+ * not-a-project rows, and the BLUEPRINT_ROOT-override rows, which read no
+ * remote address at all). */
+async function readBlueprintRemote(proj: string): Promise<string | undefined> {
+  const src = await readFile(join(proj, '.blueprint-source'), 'utf8').catch(() => '')
+  const m = /^blueprint_remote\s*=\s*(.+)$/m.exec(src)
+  return m?.[1] ? m[1].trim() : undefined
+}
+
+/** The on-disk path of `_bp_fetch_blueprint`'s per-remote cache
+ * (scripts/blueprint:839-843: `$cache_root/blueprint-$(git hash-object
+ * --stdin <<<remote).git`), replicated here rather than guessed — the key is
+ * git's own `hash-object`, run for real against the SAME remote string. */
+async function bpCachePath(s: Scenario, remote: string): Promise<string> {
+  const r = await s.run('sh', ['-c', 'printf %s "$1" | git hash-object --stdin', '_', remote], {
+    cwd: s.workspace.root,
+  })
+  const key = r.stdout.trim()
+  return join(s.home, '.cache', 'struct2flow', `blueprint-${key}.git`)
+}
+
+/** The cache's refs (plan §5's "the cache's refs"), or a fixed sentinel when
+ * no fetch has happened yet and the cache was never created — a row that
+ * never reaches the network (a refusal before `_bp_fetch_blueprint` runs)
+ * legitimately has no cache to compare, and that absence must itself match
+ * between OLD and NEW rather than being silently skipped. */
+async function bpCacheRefsOrSentinel(s: Scenario, remote: string): Promise<string> {
+  const cache = await bpCachePath(s, remote)
+  if (!existsSync(cache)) return '<no cache created>'
+  return snapshotRefs(s, cache)
+}
+
 describe('blueprint-port differential — dispatch', () => {
   const rows: Array<{ readonly name: string; readonly args: string[] }> = [
     { name: 'no args', args: [] },
@@ -423,15 +514,37 @@ describe('blueprint-port differential — drift', () => {
   // unset" starting state) and run NEW. This is the same directory rather
   // than one-per-side because `drift`'s own report prints `project: <cwd>`,
   // and two distinct fixture directories can never agree on that line.
+  // Plan §5's full comparison, generalised for drift's ONE-shared-directory
+  // shape: drift never writes to the project tree, so `treeBefore` and the
+  // tree read back after EACH side's run must all three be identical —
+  // asserted explicitly rather than assumed, which is what would actually
+  // catch a port that (wrongly) touched a project file. The cache is shared
+  // too (same remote, same cache key on both sides), so its refs after OLD
+  // must equal its refs after NEW.
   async function driftBoth(
     s: Scenario,
     proj: string,
     env: Record<string, string>,
   ): Promise<{ readonly oldResult: RunResult; readonly newResult: RunResult }> {
+    const remote = await readBlueprintRemote(proj)
+    const treeBefore = await walkFiles(proj)
+
     const oldResult = await runOld(s, proj, ['drift'], env)
+    expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+    await assertNoDriftPullScratch(s)
+    const cacheAfterOld = remote ? await bpCacheRefsOrSentinel(s, remote) : undefined
+
     await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
     await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+
     const newResult = await runNew(s, proj, ['drift'], env)
+    expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
+    await assertNoDriftPullScratch(s)
+    if (remote) {
+      const cacheAfterNew = await bpCacheRefsOrSentinel(s, remote)
+      expect(cacheAfterNew, "the cache's refs must match between OLD and NEW").toBe(cacheAfterOld)
+    }
+
     return { oldResult, newResult }
   }
 
@@ -2285,40 +2398,6 @@ async function buildA2bpFixture(s: Scenario, root: string, claudeText: string): 
   await commitAllPinned(s, proj, 'edit')
 
   return { root, bp, proj }
-}
-
-/** One file's path (relative to `dir`), permission bits and content hash —
- * or, for a symlink, its target string in place of a hash. `.git` is
- * excluded: its loose-object layout is an implementation detail of git's
- * own storage, not part of what plan §5 asks this harness to compare (the
- * project tree's path/bytes/mode, and separately the refs). */
-async function walkFiles(dir: string, base = dir): Promise<Array<{ path: string; mode: string; content: string }>> {
-  const out: Array<{ path: string; mode: string; content: string }> = []
-  const entries = await readdir(dir, { withFileTypes: true })
-  for (const entry of entries) {
-    if (entry.name === '.git') continue
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      out.push(...(await walkFiles(full, base)))
-      continue
-    }
-    const st = await stat(full)
-    const mode = (st.mode & 0o777).toString(8)
-    const content = entry.isSymbolicLink()
-      ? `symlink:${await readlink(full)}`
-      : `sha256:${createHash('sha256').update(await readFile(full)).digest('hex')}`
-    out.push({ path: full.slice(base.length + 1), mode, content })
-  }
-  return out.sort((a, b) => a.path.localeCompare(b.path))
-}
-
-async function snapshotRefs(s: Scenario, dir: string): Promise<string> {
-  const r = await s.run('git', ['for-each-ref', '--format=%(refname) %(objectname)'], { cwd: dir })
-  return r.stdout
-    .split('\n')
-    .filter(Boolean)
-    .sort()
-    .join('\n')
 }
 
 interface A2bpSnapshot {

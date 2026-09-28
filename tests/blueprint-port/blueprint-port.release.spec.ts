@@ -865,8 +865,13 @@ describe('blueprint-port differential — pull', () => {
       await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
       await commitAll(s, proj, 'sync')
       const env = await dateShimEnv(s)
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull'], env)
+      expect(await walkFiles(proj), 'nothing-to-pull (OLD) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       const newResult = await runNew(s, proj, ['pull'], env)
+      expect(await walkFiles(proj), 'nothing-to-pull (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('✓ Nothing to pull. Project matches blueprint HEAD.')
@@ -893,6 +898,12 @@ describe('blueprint-port differential — pull', () => {
       const newSrc = await readFile(join(newProj, '.blueprint-source'), 'utf8')
       expect(newSrc).toBe(oldSrc)
       expect(oldSrc).toContain(`bootstrap_sha    = ${head}`)
+      // Plan §5's full tree comparison, not only the two spot-checked files
+      // above — every path/byte/mode the pull touched or left alone.
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -912,6 +923,10 @@ describe('blueprint-port differential — pull', () => {
       expect(oldClaude).toBe('# CLAUDE\nfixture\nsecond commit\n')
       const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
       expect(oldSrc).toContain(`bootstrap_sha    = ${first}`)
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -921,13 +936,17 @@ describe('blueprint-port differential — pull', () => {
       const { first } = await seedBlueprintRepoTwoCommits(s, bp)
       const proj = await s.workspace.dir('proj')
       await driftedProjectInto(s, proj, bp, first)
+      const treeBefore = await walkFiles(proj)
       const oldResult = await withCttyNoStdin(s, proj, `bash '${SHELL_CLI}' pull </dev/null 2>&1`, { PWD: proj })
+      expect(await walkFiles(proj), 'non-TTY refusal (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await withCttyNoStdin(
         s,
         proj,
         `'${process.execPath}' '${PORTED_CLI}' pull </dev/null 2>&1`,
         { PWD: proj },
       )
+      expect(await walkFiles(proj), 'non-TTY refusal (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
       expect(oldResult.code).not.toBe(0)
       expect(oldResult.output).toMatch(/not interactive|no terminal|--yes/i)
@@ -975,8 +994,13 @@ describe('blueprint-port differential — pull', () => {
       await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
       await commitAll(s, proj, 'broken markers')
       const env = await dateShimEnv(s)
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull'], env)
+      expect(await walkFiles(proj), 'refused (OLD) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       const newResult = await runNew(s, proj, ['pull'], env)
+      expect(await walkFiles(proj), 'refused (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain("this project's markers are invalid")
@@ -1055,6 +1079,14 @@ describe('blueprint-port differential — pull', () => {
         '$1  same  scripts/blueprint.mts\n',
       )
       expect(newNormalized).toBe(expectedNewNormalized)
+      // Plan §5's tree comparison: the extra "same" line NEW prints is
+      // REPORTING-only (§6's own note — blueprint.mts substitutes to the
+      // identity), so once the report difference above is accounted for, the
+      // two independently-pulled trees must still be byte-identical.
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1106,6 +1138,10 @@ describe('blueprint-port differential — pull', () => {
       const newSrc = await readFile(join(newProj, '.blueprint-source'), 'utf8')
       expect(newSrc).toBe(oldSrc)
       expect(oldSrc).toContain(`bootstrap_sha    = ${head}`)
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1118,6 +1154,7 @@ describe('blueprint-port differential — pull', () => {
       const sha = await seedBlueprintRepo(s, bp)
       const proj = await s.workspace.dir('prompt-n-proj')
       await seedRegisteredProject(s, proj, bp, sha)
+      const treeBefore = await walkFiles(proj)
       const oldResult = await withCttyAnswer(
         s,
         proj,
@@ -1125,6 +1162,7 @@ describe('blueprint-port differential — pull', () => {
         'N\n',
         { PWD: proj },
       )
+      expect(await walkFiles(proj), 'prompt N (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await withCttyAnswer(
         s,
         proj,
@@ -1132,6 +1170,8 @@ describe('blueprint-port differential — pull', () => {
         'N\n',
         { PWD: proj },
       )
+      expect(await walkFiles(proj), 'prompt N (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
       expect(oldResult.output).toContain('skipped')
       expect(oldResult.output).toContain('Nothing pulled.')
@@ -1153,6 +1193,7 @@ describe('blueprint-port differential — pull', () => {
       const sha = await seedBlueprintRepo(s, bp)
       const proj = await s.workspace.dir('prompt-q-proj')
       await seedRegisteredProject(s, proj, bp, sha)
+      const treeBefore = await walkFiles(proj)
       const oldResult = await withCttyAnswer(
         s,
         proj,
@@ -1160,6 +1201,7 @@ describe('blueprint-port differential — pull', () => {
         'q\n',
         { PWD: proj },
       )
+      expect(await walkFiles(proj), 'prompt q (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await withCttyAnswer(
         s,
         proj,
@@ -1167,6 +1209,8 @@ describe('blueprint-port differential — pull', () => {
         'q\n',
         { PWD: proj },
       )
+      expect(await walkFiles(proj), 'prompt q (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
       expect(oldResult.output).toContain('aborted')
       expect(oldResult.output).toContain('Nothing pulled.')
@@ -1231,6 +1275,18 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
       // NON-VACUITY: the project's own edit is gone — backup-copy OVERWRITES,
       // unlike merge, which would have kept "keep" outside the region.
       expect(oldClaude).toBe(await readFile(join(bp, 'CLAUDE.md'), 'utf8'))
+      // Codex's named example (plan §5, this round's brief): the backup
+      // itself — `.bp-bak` — must exist with the ORIGINAL project bytes, on
+      // both sides, asserted explicitly rather than left to the tree
+      // comparison below to notice implicitly.
+      const oldBak = await readFile(join(oldProj, 'CLAUDE.md.bp-bak'), 'utf8')
+      const newBak = await readFile(join(newProj, 'CLAUDE.md.bp-bak'), 'utf8')
+      expect(oldBak).toBe('# CLAUDE\nplain, no markers, project-edited\n')
+      expect(newBak).toBe(oldBak)
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1274,6 +1330,10 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
       // NON-VACUITY: the merge, not a plain overwrite — the project's own
       // text outside the marker region survived.
       expect(oldClaude).toContain('the project wrote this')
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1314,6 +1374,17 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
       expect(existsSync(join(newProj, 'docs/gone.md'))).toBe(false)
       expect(existsSync(join(oldProj, 'docs/kept.md'))).toBe(true)
       expect(existsSync(join(newProj, 'docs/kept.md'))).toBe(true)
+      // Codex's named example: the KEPT file's bytes, compared explicitly —
+      // "yours now" must mean the project's own edited copy survived
+      // untouched, on both sides, not merely that the path still exists.
+      const oldKept = await readFile(join(oldProj, 'docs/kept.md'), 'utf8')
+      const newKept = await readFile(join(newProj, 'docs/kept.md'), 'utf8')
+      expect(oldKept).toBe('about to be retired, but edited\nand the project added this\n')
+      expect(newKept).toBe(oldKept)
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1369,6 +1440,10 @@ describe('blueprint-port differential — pull matrix (backup-copy, merge, retir
       expect(newToolMode).toBe(oldToolMode)
       expect(oldClaudeMode & 0o100, 'CLAUDE.md did not gain +x').toBe(0o100)
       expect(oldToolMode & 0o100, "scripts/tool.sh did not lose +x").toBe(0)
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 })

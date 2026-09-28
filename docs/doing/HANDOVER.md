@@ -117,7 +117,7 @@ round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
 **State at the 2026-09-27 cut. ONE agent is in flight: Matthias (Claude) on
-TASK-081's Codex-review round in `.scratch/task081-port` (slices 1-4 are
+TASK-081's last test rows in `.scratch/task081-port` (slices 1-4 are
 committed: `9d672e8`, `1061dbb`, `951f80a`, `1dcb67a` a2bp + prs, and Codex's
 `97271c9`). The mic is with
 the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
@@ -159,6 +159,23 @@ before slice 5 lands (the row requires it, no waiver applies).
   pull-both-files deviation in plan §6; the exact shim, release announcement
   and commit-body warning; every source-inspection test must resolve
   `blueprint.mts`, not only a2bp-pr-filing and the marker-merge guard.
+- **Review rounds after Codex (2026-09-27/28), all on the branch, unpushed:**
+  `1ced574` + `b66d8f4` fixed Codex findings 1-6 (prospective callers through
+  `unchecked()`; a2bp's bare bridge steps die as in the shell; the
+  `placeholders.sh` fallback; the five git/gh helpers bridged back to shell,
+  which exposed a missing trailing newline in the unshipped-path list; a2bp-e2e
+  #12b "moved twice"; the BUG-116 resume unit test) and passed `97271c9`'s
+  four-eyes. `842e9e7` + `b09c202` added the differential rows for findings
+  1-3, which caught three REAL divergences, fixed: `markerAwareMerge` ignored
+  awk's status; `Prospective` had no success channel, so a failed `cp` read as
+  a clean result (now `Prospective.ok`, used at all three call sites);
+  `bpShouldSubstitute` swallowed the stderr the shell shows. 37 release rows +
+  32 unit; the rest of plan §5's matrix is covered by suites run under the
+  shim (`permission-policy`, `staleness`). One named normalisation: the
+  `<program>: line N:` prefix in the missing-`placeholders.sh` row. In flight:
+  the last three row groups (pull's and drift's interactive prompts under a
+  pty; 127/126 with `comm`/`cmp`/`diff` absent or non-executable; `jq`
+  missing). Then Codex re-reviews everything since `1dcb67a`.
 - **Slice 5 MUST handle, found by slice 3:**
   (1) `marker-merge` BUG-112 #4 goes red under the shim: its sanity guard
   `expect(cli).toContain('BLUEPRINT:BEGIN')` reads the file `resolveConsumer`

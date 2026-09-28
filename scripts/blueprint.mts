@@ -605,7 +605,13 @@ export async function bpManagedFiles(blueprintRoot: string): Promise<string[]> {
     return die('cannot create a temp file to list the blueprint archive')
   }
   try {
-    await run('git', ['-C', blueprintRoot, 'archive', '--format=tar', 'HEAD'], {
+    // TASK-081 differential round: BUG-077's own scrub. `bp_managed_files`
+    // calls `_bp_git`, never plain `git`, so an exported GIT_DIR on the
+    // caller's address path cannot redirect this archive read at some other
+    // repository — a bare `run('git', …)` here missed that and read the
+    // GIT_DIR-named repo's tree instead of `blueprintRoot`'s, caught by the
+    // "an exported GIT_DIR" differential drift row.
+    await bpGit(['-C', blueprintRoot, 'archive', '--format=tar', 'HEAD'], {
       stdout: { file: tarf },
       stderr: 'ignore',
     })

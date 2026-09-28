@@ -125,7 +125,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { chmod, cp, copyFile, mkdir, readdir, readFile, readlink, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, cp, copyFile, mkdir, readdir, readFile, readlink, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -670,6 +670,172 @@ describe('blueprint-port differential — drift', () => {
       expectIdentical(oldResult, newResult)
       expect(oldResult.stderr).toContain('not a struct2flow project')
       expect(oldResult.code).toBe(1)
+    })
+  })
+
+  /**
+   * TASK-081 "drift/pull differential rows to completion" round — the four
+   * rows the plan §5 header comment named as gaps in this describe ("NOT
+   * ROWS … each a real gap in this file"): `scripts/lib/gate.sh` missing, an
+   * exported `GIT_DIR`, a symlinked project directory, and a project name
+   * holding `&`/`\`.
+   */
+
+  it('scripts/lib/gate.sh missing — refuses to report drift (TASK-029)', async () => {
+    await scenario('blueprint-port-drift-gate-missing', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+      await rm(join(proj, 'scripts/lib/gate.sh'))
+      await commitAll(s, proj, 'sync, minus gate.sh')
+      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
+      const { oldResult, newResult } = await driftBoth(s, proj, env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).not.toBe(0)
+      expect(oldResult.stdout).toContain('gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed')
+      expect(oldResult.stderr).toContain('refusing to report drift without scripts/lib/gate.sh')
+    })
+  })
+
+  it('an exported GIT_DIR does not redirect drift to another repository (BUG-077)', async () => {
+    await scenario('blueprint-port-drift-git-dir', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+      await commitAll(s, proj, 'sync')
+
+      const remote = await readBlueprintRemote(proj)
+      const treeBefore = await walkFiles(proj)
+
+      // A FRESH decoy repo PER SIDE — same reason verbFailShim rebuilds its
+      // shim per side (this file's own comment on that helper): a GIT_DIR
+      // pointed at one carrying state from the OLD run would make the NEW
+      // run's report ("already armed" vs "was unset") a fixture artefact of
+      // shared mutable state, not a genuine OLD-vs-NEW difference. `_bp_
+      // project_root`/`bp_state_root` never ask git (BUG-077's own fix, a
+      // pure filesystem walk) — this row's job is to prove the CLI's
+      // observable behaviour is identical under an exported GIT_DIR, not to
+      // assert where gate.sh's OWN `git -C` config calls land (shared,
+      // unported shell, identical on both sides either way).
+      const decoyOld = await s.workspace.dir('decoy-old')
+      await initRepo(s, decoyOld)
+      await commitAll(s, decoyOld, 'decoy base')
+      const envOld = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1', GIT_DIR: join(decoyOld, '.git') }
+      const oldResult = await runOld(s, proj, ['drift'], envOld)
+      expect(await walkFiles(proj), 'GIT_DIR (OLD) must never write to the project tree').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      const cacheAfterOld = remote ? await bpCacheRefsOrSentinel(s, remote) : undefined
+
+      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+
+      const decoyNew = await s.workspace.dir('decoy-new')
+      await initRepo(s, decoyNew)
+      await commitAll(s, decoyNew, 'decoy base')
+      const envNew = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1', GIT_DIR: join(decoyNew, '.git') }
+      const newResult = await runNew(s, proj, ['drift'], envNew)
+      expect(await walkFiles(proj), 'GIT_DIR (NEW) must never write to the project tree').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      if (remote) {
+        const cacheAfterNew = await bpCacheRefsOrSentinel(s, remote)
+        expect(cacheAfterNew, "the cache's refs must match between OLD and NEW").toBe(cacheAfterOld)
+      }
+
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
+    })
+  })
+
+  it('a symlinked project directory — run from the symlink', async () => {
+    await scenario('blueprint-port-drift-symlink', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const real = await s.workspace.dir('real-proj')
+      await seedRegisteredProject(s, real, bp, sha)
+      await copyFile(join(bp, 'CLAUDE.md'), join(real, 'CLAUDE.md'))
+      await mkdir(join(real, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(real, 'docs/DoD.md'))
+      await commitAll(s, real, 'sync')
+      // logicalPwd()/`$(pwd)` are what the CLI actually reads (both runOld and
+      // runNew inject PWD=cwd — see this file's own runOld/runNew comment), so
+      // running with `proj` itself set to the SYMLINK exercises the CLI as an
+      // operator standing inside it genuinely would, not merely a resolved
+      // physical path that happens to be reachable through one.
+      const symProj = join(s.workspace.root, 'proj-link')
+      await symlink(real, symProj)
+      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
+      const { oldResult, newResult } = await driftBoth(s, symProj, env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
+      expect(oldResult.stdout).toContain(`project:    ${symProj}`)
+    })
+  })
+
+  /**
+   * A project name holding `&` and `\` exercises placeholder substitution
+   * (scripts/lib/placeholders.sh's own header documents the sed/bash `${//}`
+   * bugs these two characters used to trigger). `&` alone is clean on both
+   * CLIs (verified while building this row). `\` is not: the project
+   * directory is the CLI's own ancestor (`scripts/blueprint.mts` lives
+   * inside it), and NODE'S OWN ESM LOADER refuses an entry-point specifier
+   * whose resolved path contains an encoded `\`
+   * (`ERR_INVALID_MODULE_SPECIFIER: … must not include encoded "/" or "\"
+   * characters`) — enforced by Node before a single line of blueprint.mts
+   * runs. This is a PLATFORM CONSTRAINT of the port's own design (plan §2
+   * rule 1, "one file … run via `node`"), not a fixture artefact: the real
+   * shim (`exec node "$(dirname "$0")/blueprint.mts" "$@"`) hits the
+   * identical failure for a project actually checked out under such a path.
+   * ACCEPTED DEVIATION, extending plan §6's list: a project directory name
+   * containing a literal `\` cannot run the ported CLI at all, though the
+   * shell CLI runs it normally. Documented here rather than fixed, because
+   * there is no `node <path>` invocation shape that accepts this path —
+   * `bp_substitute_stream`'s own literal split-and-join (which this row
+   * still exercises, for the CONTENT half — the `&` in the name) is not
+   * what fails.
+   */
+  it('a project name holding & and \\ — exercises placeholder substitution, and Node’s own ESM limit on \\', async () => {
+    await scenario('blueprint-port-drift-name-chars', async (s) => {
+      const projName = 'a&b\\c'
+      const bp = await s.workspace.dir('bp')
+      await mkdir(join(bp, 'docs'), { recursive: true })
+      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nproject={{PROJECT_NAME}}\nupper={{PROJECT_NAME_UPPER}}\n', 'utf8')
+      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+      await initRepo(s, bp)
+      await commitAll(s, bp, 'base')
+      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const proj = await s.workspace.dir(projName)
+      await seedRegisteredProject(s, proj, bp, sha)
+      // Hand-computed correct substitution: bp_placeholder_upper is
+      // `tr 'a-z-' 'A-Z_'`, which leaves `&` and `\` untouched.
+      await writeFile(join(proj, 'CLAUDE.md'), `# CLAUDE\nproject=${projName}\nupper=A&B\\C\n`, 'utf8')
+      await mkdir(join(proj, 'docs'), { recursive: true })
+      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+      await commitAll(s, proj, 'sync')
+      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
+
+      // OLD: the shell CLI substitutes correctly and reports clean — proof
+      // that the CONTENT-level substitution (the `&`/`\` literal split-and-
+      // join this row means to exercise) is correct.
+      const oldResult = await runOld(s, proj, ['drift'], env)
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
+
+      // NEW: Node refuses to even load scripts/blueprint.mts from inside a
+      // `\`-bearing ancestor directory — the accepted deviation above.
+      const newResult = await runNew(s, proj, ['drift'], env)
+      expect(newResult.code).not.toBe(0)
+      expect(newResult.stderr).toContain('ERR_INVALID_MODULE_SPECIFIER')
+      await assertNoDriftPullScratch(s)
     })
   })
 })

@@ -195,28 +195,43 @@ async function initRepo(s: Scenario, dir: string): Promise<void> {
   await git(s, dir, ['config', 'user.name', 't'])
 }
 
+/** Fixed so a commit built from identical content hashes to the identical
+ * SHA regardless of wall-clock time or which side (OLD/NEW) built it — the
+ * precondition plan §5's "same path, twice" states: a row's fixture is
+ * built twice (once per CLI), and every commit-derived byte (a SHA in
+ * `.blueprint-source`, in a "fetched: SHA at TIMESTAMP" line, in a
+ * fast-forward's "✓ fast-forwarded to SHA") must come out the same both
+ * times. Moved here (originally local to the a2bp/prs describe, the first
+ * user of this idiom) so the drift/files/staleness/fetch-failure builders
+ * below can reuse it too, rather than sharing one mutable fixture across
+ * OLD and NEW the way `driftBoth` used to.
+ */
+const PINNED_GIT_DATE = '2026-01-01T00:00:00Z'
+
+function pinnedGitEnv(): Record<string, string> {
+  return {
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@local',
+    GIT_AUTHOR_DATE: PINNED_GIT_DATE,
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@local',
+    GIT_COMMITTER_DATE: PINNED_GIT_DATE,
+  }
+}
+
+/** Same shape as `commitAll`, except author/committer date and identity are
+ * pinned rather than left to the wall clock. */
+async function commitAllPinned(s: Scenario, dir: string, message = 'init'): Promise<void> {
+  await git(s, dir, ['add', '-A'])
+  await s.run('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message], {
+    cwd: dir,
+    env: pinnedGitEnv(),
+  })
+}
+
 async function commitAll(s: Scenario, dir: string, message = 'init'): Promise<void> {
   await git(s, dir, ['add', '-A'])
   await git(s, dir, ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message])
-}
-
-/** Copy both CLI forms into `root/scripts/`, committed, so `git archive HEAD`
- * in that fixture sees them — bp_managed_files reads the TREE, never the
- * working directory. */
-async function seedFixtureRoot(s: Scenario, root: string): Promise<void> {
-  await mkdir(join(root, 'scripts'), { recursive: true })
-  await mkdir(join(root, 'docs'), { recursive: true })
-  await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
-  await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
-  await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
-  await writeFile(join(root, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-  await writeFile(join(root, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-  // README.md is a TEMPLATE_FILES entry: committed here so a passing test
-  // actually exercises the filter, rather than the filter never being asked
-  // to remove anything.
-  await writeFile(join(root, 'README.md'), '# fixture project\n', 'utf8')
-  await initRepo(s, root)
-  await commitAll(s, root, 'base')
 }
 
 // PWD is set explicitly to `cwd` for BOTH sides. Bash recomputes $PWD from
@@ -352,6 +367,209 @@ async function bpCacheRefsOrSentinel(s: Scenario, remote: string): Promise<strin
   const cache = await bpCachePath(s, remote)
   if (!existsSync(cache)) return '<no cache created>'
   return snapshotRefs(s, cache)
+}
+
+// --- plan §5's "same path, twice" — the ONE generalised helper -------------
+//
+// TASK-081 "differential harness to plan §5 exactly" round. Before this
+// round, only the a2bp/prs describe implemented plan §5's determinism rule
+// (build once, run OLD, snapshot, delete, rebuild identically, run NEW,
+// snapshot, compare byte-for-byte). Every other describe used `driftBoth`
+// (defined twice) or a hand-rolled `oldProj`/`newProj` pair instead — which
+// meant a read-only row shared ONE `HOME`/`XDG_CACHE_HOME` between OLD and
+// NEW (OLD's fetch silently warmed the cache NEW then read, so NEW's own
+// fetch path was never actually exercised), and a writing row that built two
+// INDEPENDENT fixture trees needed a path-scrubbing normaliser plan §5 never
+// allows. `samePathTwice` below is `a2bpSamePathTwice` generalised: every row
+// in this section now goes through it, and `a2bpSamePathTwice` itself (this
+// file's a2bp/prs section, further down) becomes a thin wrapper over it.
+
+/** A row-scoped `HOME`/`XDG_CACHE_HOME`/`TMPDIR`, created under the row's own
+ * `root`. Fixing this is the actual bug fix `driftBoth` needed: since these
+ * three live under `root`, deleting `root` between the OLD and NEW runs
+ * (plan §5's "same path, twice") deletes the fetch cache and any mktemp
+ * scratch too, so NEW always starts from a cold cache rather than silently
+ * reusing whatever OLD happened to warm. */
+async function rowEnv(root: string): Promise<Record<string, string>> {
+  const home = join(root, '.row-home')
+  const tmp = join(root, '.row-tmp')
+  await mkdir(join(home, '.cache'), { recursive: true })
+  await mkdir(tmp, { recursive: true })
+  return { HOME: home, XDG_CACHE_HOME: join(home, '.cache'), TMPDIR: tmp }
+}
+
+/** The minimum shape every `samePathTwice` fixture carries. A row's own
+ * `build` return type extends this with whatever else it needs (a `bp`
+ * checkout, a `blueprintRoot` override, …). */
+interface SamePathTwiceFixture {
+  readonly root: string
+  readonly proj: string
+}
+
+/** Plan §5's own list, bundled into ONE object so a row compares it in one
+ * `toEqual` rather than five separate `expect` calls: exit status/signal,
+ * stdout, stderr, the project tree (path/bytes/mode — `.blueprint-source` is
+ * an ordinary file under `proj` and so already included), the cache's refs,
+ * that no scratch survives, and — only when the row asks (`opts.remote`
+ * unset skips it, same for `remoteRefsDir`/`ghLogPath`) — a local checkout's
+ * own refs (the fast-forward/staleness rows) or a gh-argv log. */
+interface SamePathTwiceSnapshot {
+  readonly code: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly projTree: Array<{ path: string; mode: string; content: string }>
+  readonly cacheRefs: string
+  readonly scratch: readonly string[]
+  readonly remoteRefs: string | null
+  readonly ghLog: string | null
+}
+
+interface SnapshotOpts {
+  /** The address `bpFetchBlueprint`'s cache is keyed on — set only by a row
+   * whose CLI path actually fetches (an address-mode registered project). */
+  readonly remote?: string
+  /** Where to look for leftover `blueprint-sync.*`/`tmp.*`/`a2bp.*` scratch.
+   * Defaults to this row's own `.row-tmp` (see `rowEnv`). */
+  readonly tmp?: string
+  /** A local checkout whose refs are part of what this row's run can
+   * change (drift's fast-forward prompt, the staleness rows) — compared the
+   * same way `bpCacheRefsOrSentinel` compares the fetch cache. */
+  readonly remoteRefsDir?: string
+  /** A gh-argv log path (a2bp/prs only). */
+  readonly ghLogPath?: string | undefined
+}
+
+async function snapshot(s: Scenario, fx: SamePathTwiceFixture, result: RunResult, opts: SnapshotOpts = {}): Promise<SamePathTwiceSnapshot> {
+  const tmp = opts.tmp ?? join(fx.root, '.row-tmp')
+  const entries = await readdir(tmp).catch(() => [] as string[])
+  const scratch = entries.filter((e) => e.startsWith('blueprint-sync.') || e.startsWith('tmp.') || e.startsWith('a2bp.'))
+  return {
+    code: result.code,
+    signal: result.signal,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    projTree: await walkFiles(fx.proj),
+    cacheRefs: opts.remote ? await bpCacheRefsOrSentinel(s, opts.remote) : '<no remote>',
+    scratch,
+    remoteRefs: opts.remoteRefsDir ? await snapshotRefs(s, opts.remoteRefsDir) : null,
+    ghLog: opts.ghLogPath ? await readFile(opts.ghLogPath, 'utf8').catch(() => '') : null,
+  }
+}
+
+interface SamePathTwiceOptions<F extends SamePathTwiceFixture> {
+  /** Builds the fixture fresh, at the fixed `root` this row was assigned —
+   * called ONCE for OLD and, after `root` is deleted, ONCE more for NEW. */
+  readonly build: (s: Scenario, root: string) => Promise<F>
+  /** Runs one CLI against `fx` and returns its result. */
+  readonly run: (s: Scenario, fx: F, side: 'old' | 'new') => Promise<RunResult>
+  readonly snapshotOpts?: (fx: F) => SnapshotOpts
+  /** Default true: assert the two snapshots are byte-identical. A row sets
+   * this false only for an accepted deviation (plan §6) it asserts
+   * explicitly instead — e.g. a project name a real exec shim also cannot
+   * load under Node. */
+  readonly compareRuns?: boolean
+}
+
+async function samePathTwice<F extends SamePathTwiceFixture>(
+  s: Scenario,
+  tag: string,
+  opts: SamePathTwiceOptions<F>,
+): Promise<{
+  readonly oldResult: RunResult
+  readonly newResult: RunResult
+  readonly oldSnapshot: SamePathTwiceSnapshot
+  readonly newSnapshot: SamePathTwiceSnapshot
+}> {
+  const root = s.workspace.path(tag)
+
+  async function runSide(side: 'old' | 'new'): Promise<{ result: RunResult; snap: SamePathTwiceSnapshot }> {
+    const fx = await opts.build(s, root)
+    const result = await opts.run(s, fx, side)
+    const snap = await snapshot(s, fx, result, opts.snapshotOpts ? opts.snapshotOpts(fx) : {})
+    return { result, snap }
+  }
+
+  const oldSide = await runSide('old')
+  expect(oldSide.snap.scratch, `scratch left behind under ${tag} (OLD)`).toEqual([])
+  await rm(root, { recursive: true, force: true })
+
+  const newSide = await runSide('new')
+  expect(newSide.snap.scratch, `scratch left behind under ${tag} (NEW)`).toEqual([])
+
+  if (opts.compareRuns ?? true) {
+    expect(newSide.snap).toEqual(oldSide.snap)
+  }
+
+  return { oldResult: oldSide.result, newResult: newSide.result, oldSnapshot: oldSide.snap, newSnapshot: newSide.snap }
+}
+
+// --- pinned fixture builders, for rows that go through samePathTwice -------
+//
+// Same shapes as `seedFixtureRoot`/`seedBlueprintRepo`/`seedRegisteredProject`
+// above, except every commit is `commitAllPinned` rather than `commitAll` —
+// required so that building the SAME fixture twice (once for OLD, once for
+// NEW, per `samePathTwice`'s own contract) hashes to the IDENTICAL commit SHA
+// both times. The plain (unpinned) originals keep their existing callers
+// (the pull/settings-layer/finding describes, none of which rebuild a
+// fixture across two independent runs) untouched.
+
+async function seedFixtureRootPinned(s: Scenario, root: string): Promise<void> {
+  await mkdir(join(root, 'scripts'), { recursive: true })
+  await mkdir(join(root, 'docs'), { recursive: true })
+  await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
+  await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
+  await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
+  await writeFile(join(root, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+  await writeFile(join(root, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+  await writeFile(join(root, 'README.md'), '# fixture project\n', 'utf8')
+  await initRepo(s, root)
+  await commitAllPinned(s, root, 'base')
+}
+
+async function seedBlueprintRepoPinned(s: Scenario, dir: string): Promise<string> {
+  await mkdir(join(dir, 'docs'), { recursive: true })
+  await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+  await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+  await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
+  await initRepo(s, dir)
+  await commitAllPinned(s, dir, 'base')
+  const r = await git(s, dir, ['rev-parse', 'HEAD'])
+  return r.stdout.trim()
+}
+
+async function seedRegisteredProjectPinned(s: Scenario, dir: string, blueprintDir: string, bootstrapSha: string): Promise<void> {
+  await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
+  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await mkdir(join(dir, '.githooks'), { recursive: true })
+  await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
+  await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
+  await writeFile(
+    join(dir, '.blueprint-source'),
+    `config_version   = 2\nblueprint_remote = ${blueprintDir}\nblueprint_branch = main\nbootstrap_sha    = ${bootstrapSha}\nbootstrap_date   = 2026-01-01\n`,
+    'utf8',
+  )
+  await initRepo(s, dir)
+  await commitAllPinned(s, dir, 'init')
+}
+
+/** A registered project reached only via the `BLUEPRINT_ROOT` override — the
+ * fast-forward-prompt/staleness rows' own shape (no `blueprint_remote`,
+ * config v1). */
+async function seedOverrideProjectPinned(s: Scenario, dir: string, bootstrapSha: string): Promise<void> {
+  await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
+  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await mkdir(join(dir, '.githooks'), { recursive: true })
+  await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
+  await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
+  await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+  await writeFile(
+    join(dir, '.blueprint-source'),
+    `bootstrap_sha    = ${bootstrapSha}\nbootstrap_date   = 2026-01-01\n`,
+    'utf8',
+  )
+  await initRepo(s, dir)
+  await commitAllPinned(s, dir, 'init')
 }
 
 describe('blueprint-port differential — dispatch', () => {

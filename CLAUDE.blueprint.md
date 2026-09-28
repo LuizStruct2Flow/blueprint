@@ -60,8 +60,17 @@ back-propagation from a derived project still requires a human to merge it.
 Nothing about the reach of `main` changed — only who is asked for permission to
 use it.
 
-If you want isolation for a risky change, a branch is still available and still
-works. It is a tool now, not a rule.
+**Feature toggles, never feature branches** (founder, 2026-09-28). A risky or
+multi-step change lands on `main` in small commits, behind a toggle or as dark
+code that nothing calls until its switch-over. The only long-lived branches are
+the ones `blueprint a2bp` pushes from derived projects. An agent worktree may
+run agents in parallel, but its commits reach `main` when the agent's item ends
+and the worktree is removed; it never holds a feature across items. If a real
+branch ever seems needed, tell the founder in the reply before creating it — a
+plan that proposes one is not enough, because the founder does not read every
+plan in detail. This replaced "a branch is still available … a tool, not a
+rule", which let TASK-081's port sit two days on an unpushed branch because its
+plan said so.
 
 `CLAUDE.md`'s trunk-based bullet used to say the opposite — that the blueprint
 was exempt and every contribution there needed a branch and a PR. TASK-019

@@ -110,6 +110,11 @@ async function mkClone(
   for (const exe of ['.githooks/pre-push', 'scripts/agent-activity.sh', 'scripts/blueprint']) {
     await s.fs.write(`${name}/${exe}`, await show(exe), { mode: 0o755 })
   }
+  // TASK-081: scripts/blueprint is now the two-line shim, whose own `exec`
+  // needs scripts/blueprint.mts sitting right beside it — without this, every
+  // `bash .../scripts/blueprint drift` below dies of Node's "Cannot find
+  // module" instead of exercising arm_gate.
+  await s.fs.write(`${name}/scripts/blueprint.mts`, await show('scripts/blueprint.mts'))
 
   // THE WHOLE OF scripts/lib/, NEVER A NAMED FILE (the R12a lesson). Naming
   // gate.sh alone meant that adding any other lib the CLI sources silently broke

@@ -585,12 +585,19 @@ describe('blueprint-port differential — dispatch', () => {
   for (const row of rows) {
     it(row.name, async () => {
       await scenario(`blueprint-port-dispatch-${row.name}`, async (s) => {
-        const dir = await s.workspace.dir('cwd')
-        const [oldResult, newResult] = await Promise.all([
-          s.run('bash', [SHELL_CLI, ...row.args], { cwd: dir }),
-          s.run(process.execPath, [PORTED_CLI, ...row.args], { cwd: dir }),
-        ])
-        expectIdentical(oldResult, newResult)
+        interface Fixture extends SamePathTwiceFixture {
+          readonly env: Record<string, string>
+        }
+        await samePathTwice<Fixture>(s, 'cwd', {
+          build: async (_s, root) => {
+            await mkdir(root, { recursive: true })
+            return { root, proj: root, env: await rowEnv(root) }
+          },
+          run: (s, fx, side) =>
+            side === 'old'
+              ? s.run('bash', [SHELL_CLI, ...row.args], { cwd: fx.proj, env: fx.env })
+              : s.run(process.execPath, [PORTED_CLI, ...row.args], { cwd: fx.proj, env: fx.env }),
+        })
       })
     })
   }
@@ -599,10 +606,16 @@ describe('blueprint-port differential — dispatch', () => {
 describe('blueprint-port differential — files', () => {
   it('in the blueprint (no .blueprint-source: the CLI’s own root is BLUEPRINT_ROOT)', async () => {
     await scenario('blueprint-port-files-in-blueprint', async (s) => {
-      const root = await s.workspace.dir('bp')
-      await seedFixtureRoot(s, root)
-      const [oldResult, newResult] = await Promise.all([runOld(s, root, ['files']), runNew(s, root, ['files'])])
-      expectIdentical(oldResult, newResult)
+      interface Fixture extends SamePathTwiceFixture {
+        readonly env: Record<string, string>
+      }
+      const { oldResult } = await samePathTwice<Fixture>(s, 'bp', {
+        build: async (s, root) => {
+          await seedFixtureRootPinned(s, root)
+          return { root, proj: root, env: await rowEnv(root) }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['files'], fx.env) : runNew(s, fx.proj, ['files'], fx.env)),
+      })
       // Sanity: the filter actually did something observable, not merely
       // "both sides agree on nothing".
       expect(oldResult.stdout).toContain('scripts/blueprint')
@@ -616,22 +629,29 @@ describe('blueprint-port differential — files', () => {
 
   it('under the BLUEPRINT_ROOT override (a project with no .blueprint-source, pointed elsewhere)', async () => {
     await scenario('blueprint-port-files-override', async (s) => {
-      const projectRoot = await s.workspace.dir('project')
-      const blueprintRoot = await s.workspace.dir('elsewhere-blueprint')
-      await seedFixtureRoot(s, projectRoot)
-      // A distinct blueprint checkout with its own file set, so the override
-      // is provably being read rather than the project's own root.
-      await mkdir(join(blueprintRoot, 'docs'), { recursive: true })
-      await writeFile(join(blueprintRoot, 'ONLY-IN-OVERRIDE.md'), 'x\n', 'utf8')
-      await initRepo(s, blueprintRoot)
-      await commitAll(s, blueprintRoot, 'override base')
-
-      const env = { BLUEPRINT_ROOT: blueprintRoot }
-      const [oldResult, newResult] = await Promise.all([
-        runOld(s, projectRoot, ['files'], env),
-        runNew(s, projectRoot, ['files'], env),
-      ])
-      expectIdentical(oldResult, newResult)
+      interface Fixture extends SamePathTwiceFixture {
+        readonly blueprintRoot: string
+        readonly env: Record<string, string>
+      }
+      const { oldResult } = await samePathTwice<Fixture>(s, 'root', {
+        build: async (s, root) => {
+          const projectRoot = join(root, 'project')
+          const blueprintRoot = join(root, 'elsewhere-blueprint')
+          await seedFixtureRootPinned(s, projectRoot)
+          // A distinct blueprint checkout with its own file set, so the
+          // override is provably being read rather than the project's own
+          // root.
+          await mkdir(join(blueprintRoot, 'docs'), { recursive: true })
+          await writeFile(join(blueprintRoot, 'ONLY-IN-OVERRIDE.md'), 'x\n', 'utf8')
+          await initRepo(s, blueprintRoot)
+          await commitAllPinned(s, blueprintRoot, 'override base')
+          return { root, proj: projectRoot, blueprintRoot, env: await rowEnv(root) }
+        },
+        run: (s, fx, side) => {
+          const env = { ...fx.env, BLUEPRINT_ROOT: fx.blueprintRoot }
+          return side === 'old' ? runOld(s, fx.proj, ['files'], env) : runNew(s, fx.proj, ['files'], env)
+        },
+      })
       expect(oldResult.stdout).toContain('ONLY-IN-OVERRIDE.md')
       expect(oldResult.stdout).not.toContain('CLAUDE.md')
     })
@@ -639,17 +659,24 @@ describe('blueprint-port differential — files', () => {
 
   // The third matrix row this describe's own header comment once called
   // "no row for it here yet" — cmd_files' network-fetch path (read_blueprint_
-  // source → the address-mode managed set), added in slice 2. Reuses the
-  // same registered-project fixture the drift/pull describes below build,
-  // hoisted here by function declaration.
+  // source → the address-mode managed set), added in slice 2.
   it('in a registered derived project (read_blueprint_source, the address path)', async () => {
     await scenario('blueprint-port-files-registered', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      const [oldResult, newResult] = await Promise.all([runOld(s, proj, ['files']), runNew(s, proj, ['files'])])
-      expectIdentical(oldResult, newResult)
+      interface Fixture extends SamePathTwiceFixture {
+        readonly bp: string
+        readonly env: Record<string, string>
+      }
+      const { oldResult } = await samePathTwice<Fixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          return { root, proj, bp, env: await rowEnv(root) }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['files'], fx.env) : runNew(s, fx.proj, ['files'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.stdout).toContain('CLAUDE.md')
       expect(oldResult.stdout).toContain('docs/DoD.md')
     })

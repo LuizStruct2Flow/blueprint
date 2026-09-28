@@ -29,18 +29,31 @@
  *   which silently let OLD's fetch warm a cache NEW then read) and a
  *   hand-rolled `oldProj`/`newProj` pair of INDEPENDENT fixture trees (which
  *   needed its own path-scrubbing normaliser, the kind plan §5 does not
- *   allow). TASK-081 round C finished migrating every remaining row off
- *   both onto `samePathTwice`.
+ *   allow). TASK-081 round C migrated every drift/pull/files/dispatch row
+ *   off both onto `samePathTwice`, but left a THIRD shape standing in the
+ *   a2bp/prs describe: seven rows (three a2bp, four prs) that built ONE
+ *   fixture and ran OLD then NEW straight against it — safe only because
+ *   every one of the seven happens to be read-only, never plan §5's own
+ *   contract. Round D closed it: all seven now go through `samePathTwice`
+ *   (the three a2bp rows) or the new `buildPrsFixture`/`samePathTwice` pair
+ *   (the four prs rows, which also gained a gh-argv log to compare — they
+ *   had none before, since nothing needed one when both CLIs ran against
+ *   the identical already-built tree). No row in this file shares a
+ *   directory between OLD and NEW any more.
  *   `compareRuns: false` — which skips `samePathTwice`'s own byte-equal
  *   `toEqual` outright, asserting each side explicitly instead — is reserved
  *   for a row whose two sides genuinely diverge BY DESIGN, a plan §6
  *   accepted deviation named in the row's own comment; today exactly two
  *   rows use it (the `\`-holding project name under `drift`, and
  *   `pull scripts/blueprint` naming either CLI file brings both). Every
- *   other divergence — a random mktemp suffix, a leading-token or
- *   `line N:` difference the row needs to wash out — goes through
- *   `normalizeSnapshot` instead, which keeps the FULL comparison and only
- *   launders the one named substring.
+ *   other divergence — a random mktemp suffix or a `line N:` difference the
+ *   row needs to wash out — goes through `normalizeSnapshot` instead, which
+ *   keeps the FULL comparison and only launders the one named substring.
+ *   (TASK-081 round D closed the one row that used to need a SECOND,
+ *   row-specific normalisation on top of `line N:` — the a2bp "finding 3"
+ *   row's leading-token strip — by fixing the actual divergence in
+ *   `scripts/blueprint.mts` instead: every `bash -c` lib-bridge call now
+ *   passes `cliName()`, not the literal `_`, as bash's own argv0.)
  *
  * THE §5 MATRIX CHECKLIST. Plan §5's table names ~90 rows by subcommand.
  * Each row below is either a `it()` name in this file (or blueprint-port.spec.ts
@@ -158,10 +171,15 @@
  *                  own "moved" commit pinned to PINNED_GIT_DATE so its SHA
  *                  does not differ between the OLD run and the NEW rebuild).
  *                  Every row in this describe now goes through
- *                  `a2bpSamePathTwice` except the two that die before
+ *                  `a2bpSamePathTwice`, EXCEPT the three that die before
  *                  touching the blueprint at all (no files given, not a
- *                  derived project), which need no rebuild because nothing
- *                  about their output is fixture-path-dependent.
+ *                  derived project, a required lib missing) — their fixture
+ *                  shape (a bare `cwd`/`root`, no CLAUDE.md content, no
+ *                  gitleaks/contamination scan) does not fit
+ *                  `A2bpFixture`, so each goes through the generic
+ *                  `samePathTwice` directly instead (TASK-081 round D; they
+ *                  used to share one directory between OLD and NEW, the
+ *                  last rows in this describe that did).
  *                  EXIT-CODE AUDIT (plan §3 P5's own list): every BP_RC_*
  *                  code now has a row — OK=0 (dry-run), PENDING=3 (filed,
  *                  unshipped, move-once), BLOCKED=4 (not-a-project,
@@ -184,6 +202,19 @@
  *                  is undefined there, confirmed directly against both CLIs
  *                  before this row was written, `.scratch/rc3-e2e` in this
  *                  worktree).
+ *                  All four now go through `samePathTwice` (TASK-081 round
+ *                  D), via the describe-local `buildPrsFixture` (pinned
+ *                  `bp`+`proj`, same as every other fixture builder in this
+ *                  file) — they used to share one `bp`/`proj` pair between
+ *                  OLD and NEW (safe only because `prs` never writes, never
+ *                  plan §5's own contract), and the last row ran three gh
+ *                  scenarios against that one shared pair in sequence; it
+ *                  now runs three independent `samePathTwice` cycles
+ *                  instead, one per gh scenario. Every gh shim now logs its
+ *                  own argv to a file compared as part of the snapshot,
+ *                  which no prs row needed before (nothing distinguished
+ *                  OLD's call from NEW's when both ran against the same
+ *                  already-built tree).
  *                  NOT ROWS: none.
  *
  * Signals are not differential rows (plan §5's own words) — they are
@@ -235,19 +266,17 @@ function pinnedGitEnv(): Record<string, string> {
   }
 }
 
-/** Same shape as `commitAll`, except author/committer date and identity are
- * pinned rather than left to the wall clock. */
+/** `git add -A` then a commit with author/committer date and identity
+ * pinned (never left to the wall clock) — every `samePathTwice` fixture
+ * builder in this file commits through this, so a rebuild at the same path
+ * hashes to the identical SHA the first build produced (plan §5's "same
+ * path, twice" precondition). */
 async function commitAllPinned(s: Scenario, dir: string, message = 'init'): Promise<void> {
   await git(s, dir, ['add', '-A'])
   await s.run('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message], {
     cwd: dir,
     env: pinnedGitEnv(),
   })
-}
-
-async function commitAll(s: Scenario, dir: string, message = 'init'): Promise<void> {
-  await git(s, dir, ['add', '-A'])
-  await git(s, dir, ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message])
 }
 
 // PWD is set explicitly to `cwd` for BOTH sides. Bash recomputes $PWD from
@@ -265,13 +294,6 @@ async function runOld(s: Scenario, cwd: string, args: string[], env?: Record<str
 
 async function runNew(s: Scenario, cwd: string, args: string[], env?: Record<string, string>): Promise<RunResult> {
   return s.run(process.execPath, [join(cwd, 'scripts/blueprint.mts'), ...args], { cwd, env: { PWD: cwd, ...env } })
-}
-
-function expectIdentical(oldResult: RunResult, newResult: RunResult): void {
-  expect(newResult.stdout).toBe(oldResult.stdout)
-  expect(newResult.stderr).toBe(oldResult.stderr)
-  expect(newResult.code).toBe(oldResult.code)
-  expect(newResult.signal).toBe(oldResult.signal)
 }
 
 // `pull`'s preview runs `diff -u FILE TMP`, printing headers shaped like:
@@ -795,40 +817,12 @@ describe('blueprint-port differential — files', () => {
 // slice 3's pull rows can reuse them rather than reimplementing the same
 // blueprint/project fixtures.
 
-async function seedBlueprintRepo(s: Scenario, dir: string): Promise<string> {
-  await mkdir(join(dir, 'docs'), { recursive: true })
-  await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-  await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-  await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
-  await initRepo(s, dir)
-  await commitAll(s, dir, 'base')
-  const r = await git(s, dir, ['rev-parse', 'HEAD'])
-  return r.stdout.trim()
-}
-
-async function seedRegisteredProject(
-  s: Scenario,
-  dir: string,
-  blueprintDir: string,
-  bootstrapSha: string,
-): Promise<void> {
-  // runOld/runNew invoke `<dir>/scripts/blueprint[.mts]`, and cmd_drift's
-  // arm_gate / bpFetchBlueprint reach into `scripts/lib/*.sh` — the whole
-  // `scripts/` tree, not just the two CLI files, exactly like a real
-  // derived project that pulled it.
-  await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
-  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
-  await mkdir(join(dir, '.githooks'), { recursive: true })
-  await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
-  await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
-  await writeFile(
-    join(dir, '.blueprint-source'),
-    `config_version   = 2\nblueprint_remote = ${blueprintDir}\nblueprint_branch = main\nbootstrap_sha    = ${bootstrapSha}\nbootstrap_date   = 2026-01-01\n`,
-    'utf8',
-  )
-  await initRepo(s, dir)
-  await commitAll(s, dir, 'init')
-}
+// TASK-081 round D removed `seedBlueprintRepo`/`seedRegisteredProject` (the
+// unpinned pair) — the `prs` describe below was their last caller, and it
+// now builds through `seedBlueprintRepoPinned`/`seedRegisteredProjectPinned`
+// like every other same-path-twice row, so an unpinned commit date (which
+// would make the rebuilt SHA differ between OLD's build and NEW's) is never
+// on the table here.
 
 // For the unregistered/not-a-project rows: ONLY the CLI files and its libs
 // — never the whole `scripts/` tree, which also carries
@@ -4154,14 +4148,28 @@ describe('blueprint-port differential — a2bp / prs', () => {
     })
   })
 
+  // TASK-081 round D: these three used to build ONE fixture and run OLD then
+  // NEW against it — plan §5's "same path, twice" (build, run OLD, snapshot,
+  // DELETE, rebuild, run NEW) applies to every row, not only the ones that
+  // write. None of these three writes anything either (each dies before
+  // touching the blueprint), but §5 names no path-independence exemption for
+  // that — so each is now `samePathTwice`, same as every other row in this
+  // file.
   it('no files given — usage refusal, no remote contact', async () => {
     await scenario('blueprint-port-a2bp-no-files', async (s) => {
-      const dir = await s.workspace.dir('cwd')
-      const [oldResult, newResult] = await Promise.all([
-        s.run('bash', [SHELL_CLI, 'a2bp'], { cwd: dir }),
-        s.run(process.execPath, [PORTED_CLI, 'a2bp'], { cwd: dir }),
-      ])
-      expectIdentical(oldResult, newResult)
+      interface Fixture extends SamePathTwiceFixture {
+        readonly env: Record<string, string>
+      }
+      const { oldResult } = await samePathTwice<Fixture>(s, 'cwd', {
+        build: async (_s, root) => {
+          await mkdir(root, { recursive: true })
+          return { root, proj: root, env: await rowEnv(root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old'
+            ? s.run('bash', [SHELL_CLI, 'a2bp'], { cwd: fx.proj, env: fx.env })
+            : s.run(process.execPath, [PORTED_CLI, 'a2bp'], { cwd: fx.proj, env: fx.env }),
+      })
       expect(oldResult.code).toBe(1)
       expect(oldResult.stderr).toContain('usage: blueprint a2bp')
     })
@@ -4169,35 +4177,41 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('not a derived project — no .blueprint-source here', async () => {
     await scenario('blueprint-port-a2bp-not-a-project', async (s) => {
-      const dir = await s.workspace.dir('cwd')
-      await seedCliOnly(s, dir)
-      await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
-      const oldResult = await runOld(s, dir, ['a2bp', 'CLAUDE.md'])
-      const newResult = await runNew(s, dir, ['a2bp', 'CLAUDE.md'])
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<SamePathTwiceFixture>(s, 'cwd', {
+        build: async (s, root) => {
+          await seedCliOnly(s, root)
+          await writeFile(join(root, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          return { root, proj: root }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['a2bp', 'CLAUDE.md']) : runNew(s, fx.proj, ['a2bp', 'CLAUDE.md']),
+      })
       expect(oldResult.code).toBe(4)
     })
   })
 
   it('a required lib is missing — dies with the exact scripts/lib/<name> message', async () => {
     await scenario('blueprint-port-a2bp-missing-lib', async (s) => {
-      const root = await s.workspace.dir('missinglib')
-      await mkdir(join(root, 'scripts/lib'), { recursive: true })
-      await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
-      await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
-      await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
-      for (const name of await readdir(join(REPO_ROOT, 'scripts/lib'))) {
-        if (name === 'request-build.sh') continue
-        await copyFile(join(REPO_ROOT, 'scripts/lib', name), join(root, 'scripts/lib', name))
-      }
-      await writeFile(
-        join(root, '.blueprint-source'),
-        'config_version   = 2\nblueprint_remote = /nonexistent\nblueprint_branch = main\nbootstrap_sha    = 0000000000000000000000000000000000000000\nbootstrap_date   = 2026-01-01\n',
-        'utf8',
-      )
-      const oldResult = await runOld(s, root, ['a2bp', 'CLAUDE.md'])
-      const newResult = await runNew(s, root, ['a2bp', 'CLAUDE.md'])
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<SamePathTwiceFixture>(s, 'missinglib', {
+        build: async (s, root) => {
+          await mkdir(join(root, 'scripts/lib'), { recursive: true })
+          await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
+          await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
+          await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
+          for (const name of await readdir(join(REPO_ROOT, 'scripts/lib'))) {
+            if (name === 'request-build.sh') continue
+            await copyFile(join(REPO_ROOT, 'scripts/lib', name), join(root, 'scripts/lib', name))
+          }
+          await writeFile(
+            join(root, '.blueprint-source'),
+            'config_version   = 2\nblueprint_remote = /nonexistent\nblueprint_branch = main\nbootstrap_sha    = 0000000000000000000000000000000000000000\nbootstrap_date   = 2026-01-01\n',
+            'utf8',
+          )
+          return { root, proj: root }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['a2bp', 'CLAUDE.md']) : runNew(s, fx.proj, ['a2bp', 'CLAUDE.md']),
+      })
       expect(oldResult.code).toBe(1)
       expect(oldResult.stderr).toContain('scripts/lib/request-build.sh is missing')
     })
@@ -4415,16 +4429,51 @@ describe('blueprint-port differential — a2bp / prs', () => {
   // move-twice), NOTHING=6 (this round's own "nothing to request" row —
   // the one code with no prior row). Nothing is missing.
 
+  // TASK-081 round D: these four used to build ONE `bp`/`proj` pair and run
+  // OLD then NEW (or, the last row, three gh scenarios) against the SAME
+  // directory — a shortcut that happens to be safe for `prs` (read-only,
+  // nothing it does can make the second run observe a different starting
+  // state) but is not plan §5's contract, which names no such exemption.
+  // Migrated onto `samePathTwice`, same shape as every other row in this
+  // file: `buildPrsFixture` below rebuilds `bp`+`proj` fresh (with pinned
+  // commit dates, so the rebuild's SHAs match the first build's) for each
+  // side, and every gh shim now logs its own argv so the FULL snapshot
+  // (`ghLog` included) is what `samePathTwice`'s default `compareRuns: true`
+  // compares, not just stdout/stderr/code by hand.
+  interface PrsFixture extends SamePathTwiceFixture {
+    readonly bp: string
+  }
+
+  async function buildPrsFixture(s: Scenario, root: string): Promise<PrsFixture> {
+    const bp = join(root, 'bp')
+    const proj = join(root, 'proj')
+    const sha = await seedBlueprintRepoPinned(s, bp)
+    await seedRegisteredProjectPinned(s, proj, bp, sha)
+    return { root, proj, bp }
+  }
+
+  function prsGhLogPath(fx: PrsFixture): string {
+    return join(fx.root, 'gh-argv.log')
+  }
+
+  /** A gh shim that logs its own argv (one line per invocation, `"$*"`)
+   * before running `script`, built fresh per side under `tag`-`side`. */
+  async function prsGhShim(s: Scenario, fx: PrsFixture, tag: string, side: 'old' | 'new', script: string): Promise<Record<string, string>> {
+    const shims = await s.shimDir(`${tag}-${side}`)
+    await shims.add('gh', `printf '%s\\n' "$*" >> "$PRS_GH_LOG"\n${script}`)
+    return { PATH: shims.path(), PRS_GH_LOG: prsGhLogPath(fx) }
+  }
+
+  async function runPrs(s: Scenario, fx: PrsFixture, side: 'old' | 'new', env: Record<string, string>): Promise<RunResult> {
+    return side === 'old' ? runOld(s, fx.proj, ['prs'], env) : runNew(s, fx.proj, ['prs'], env)
+  }
+
   it('prs — gh is not installed: die before any remote contact', async () => {
     await scenario('blueprint-port-prs-no-gh', async (s) => {
-      const bp = await s.workspace.dir('prs-nogh-bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('prs-nogh-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      const noGh = await pathWithoutBin(s, 'gh', 'prs-no-gh')
-      const oldResult = await runOld(s, proj, ['prs'], { PATH: noGh })
-      const newResult = await runNew(s, proj, ['prs'], { PATH: noGh })
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<PrsFixture>(s, 'prs-no-gh', {
+        build: buildPrsFixture,
+        run: async (s, fx, side) => runPrs(s, fx, side, { PATH: await pathWithoutBin(s, 'gh', `prs-no-gh-${side}`) }),
+      })
       expect(oldResult.code).toBe(1)
       expect(oldResult.stderr).toContain('gh is not installed — cannot list requests')
     })
@@ -4432,22 +4481,16 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('prs — a draft PR in the listing is marked [draft]', async () => {
     await scenario('blueprint-port-prs-draft', async (s) => {
-      const bp = await s.workspace.dir('prs-draft-bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('prs-draft-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-
-      const draftGh = await s.shimDir('prs-draft-gh')
-      await draftGh.add(
-        'gh',
+      const script =
         'case "$1 $2" in\n' +
-          '  "pr list") printf \'7\\ta2bp/proj-b/cafef00d\\t2026-02-03T04:05:06Z\\ttrue\\thttps://github.com/example/repo/pull/7\\n\' ;;\n' +
-          '  *) exit 1 ;;\n' +
-          'esac\n',
-      )
-      const oldResult = await runOld(s, proj, ['prs'], { PATH: draftGh.path() })
-      const newResult = await runNew(s, proj, ['prs'], { PATH: draftGh.path() })
-      expectIdentical(oldResult, newResult)
+        '  "pr list") printf \'7\\ta2bp/proj-b/cafef00d\\t2026-02-03T04:05:06Z\\ttrue\\thttps://github.com/example/repo/pull/7\\n\' ;;\n' +
+        '  *) exit 1 ;;\n' +
+        'esac\n'
+      const { oldResult } = await samePathTwice<PrsFixture>(s, 'prs-draft', {
+        build: buildPrsFixture,
+        run: async (s, fx, side) => runPrs(s, fx, side, await prsGhShim(s, fx, 'prs-draft-gh', side, script)),
+        snapshotOpts: (fx) => ({ ghLogPath: prsGhLogPath(fx) }),
+      })
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('#7')
       expect(oldResult.stdout).toContain('[draft]')
@@ -4466,17 +4509,16 @@ describe('blueprint-port differential — a2bp / prs', () => {
    */
   it('prs — orphan branches: none listed, as today (dead code, plan §3 P5)', async () => {
     await scenario('blueprint-port-prs-orphans', async (s) => {
-      const bp = await s.workspace.dir('prs-orphan-bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      await git(s, bp, ['branch', 'a2bp/proj-a/deadbeef'])
-      const proj = await s.workspace.dir('prs-orphan-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-
-      const emptyGh = await s.shimDir('prs-orphan-gh')
-      await emptyGh.add('gh', 'case "$1 $2" in\n  "pr list") echo "" ;;\n  *) exit 1 ;;\nesac\n')
-      const oldResult = await runOld(s, proj, ['prs'], { PATH: emptyGh.path() })
-      const newResult = await runNew(s, proj, ['prs'], { PATH: emptyGh.path() })
-      expectIdentical(oldResult, newResult)
+      const script = 'case "$1 $2" in\n  "pr list") echo "" ;;\n  *) exit 1 ;;\nesac\n'
+      const { oldResult } = await samePathTwice<PrsFixture>(s, 'prs-orphans', {
+        build: async (s, root) => {
+          const fx = await buildPrsFixture(s, root)
+          await git(s, fx.bp, ['branch', 'a2bp/proj-a/deadbeef'])
+          return fx
+        },
+        run: async (s, fx, side) => runPrs(s, fx, side, await prsGhShim(s, fx, 'prs-orphans-gh', side, script)),
+        snapshotOpts: (fx) => ({ ghLogPath: prsGhLogPath(fx) }),
+      })
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).not.toContain('Pushed branches with no open PR')
     })
@@ -4484,39 +4526,34 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('prs — empty, a listing, and a gh query failure', async () => {
     await scenario('blueprint-port-prs', async (s) => {
-      const bp = await s.workspace.dir('prs-bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('prs-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-
-      const emptyGh = await s.shimDir('prs-empty-gh')
-      await emptyGh.add('gh', 'case "$1 $2" in\n  "pr list") echo "" ;;\n  *) exit 1 ;;\nesac\n')
-      const emptyOld = await runOld(s, proj, ['prs'], { PATH: emptyGh.path() })
-      const emptyNew = await runNew(s, proj, ['prs'], { PATH: emptyGh.path() })
-      expectIdentical(emptyOld, emptyNew)
+      const emptyScript = 'case "$1 $2" in\n  "pr list") echo "" ;;\n  *) exit 1 ;;\nesac\n'
+      const { oldResult: emptyOld } = await samePathTwice<PrsFixture>(s, 'prs-empty', {
+        build: buildPrsFixture,
+        run: async (s, fx, side) => runPrs(s, fx, side, await prsGhShim(s, fx, 'prs-empty-gh', side, emptyScript)),
+        snapshotOpts: (fx) => ({ ghLogPath: prsGhLogPath(fx) }),
+      })
       expect(emptyOld.code).toBe(0)
       expect(emptyOld.stdout).toContain('No open a2bp requests.')
 
-      const listingGh = await s.shimDir('prs-listing-gh')
-      await listingGh.add(
-        'gh',
+      const listingScript =
         'case "$1 $2" in\n' +
-          '  "pr list") printf \'42\\ta2bp/proj-a/deadbeef\\t2026-01-02T03:04:05Z\\tfalse\\thttps://github.com/example/repo/pull/42\\n\' ;;\n' +
-          '  *) exit 1 ;;\n' +
-          'esac\n',
-      )
-      const listingOld = await runOld(s, proj, ['prs'], { PATH: listingGh.path() })
-      const listingNew = await runNew(s, proj, ['prs'], { PATH: listingGh.path() })
-      expectIdentical(listingOld, listingNew)
+        '  "pr list") printf \'42\\ta2bp/proj-a/deadbeef\\t2026-01-02T03:04:05Z\\tfalse\\thttps://github.com/example/repo/pull/42\\n\' ;;\n' +
+        '  *) exit 1 ;;\n' +
+        'esac\n'
+      const { oldResult: listingOld } = await samePathTwice<PrsFixture>(s, 'prs-listing', {
+        build: buildPrsFixture,
+        run: async (s, fx, side) => runPrs(s, fx, side, await prsGhShim(s, fx, 'prs-listing-gh', side, listingScript)),
+        snapshotOpts: (fx) => ({ ghLogPath: prsGhLogPath(fx) }),
+      })
       expect(listingOld.code).toBe(0)
       expect(listingOld.stdout).toContain('#42')
       expect(listingOld.stdout).toContain('proj-a')
 
-      const failGh = await s.shimDir('prs-fail-gh')
-      await failGh.add('gh', 'exit 1\n')
-      const failOld = await runOld(s, proj, ['prs'], { PATH: failGh.path() })
-      const failNew = await runNew(s, proj, ['prs'], { PATH: failGh.path() })
-      expectIdentical(failOld, failNew)
+      const { oldResult: failOld } = await samePathTwice<PrsFixture>(s, 'prs-fail', {
+        build: buildPrsFixture,
+        run: async (s, fx, side) => runPrs(s, fx, side, await prsGhShim(s, fx, 'prs-fail-gh', side, 'exit 1\n')),
+        snapshotOpts: (fx) => ({ ghLogPath: prsGhLogPath(fx) }),
+      })
       expect(failOld.code).toBe(1)
       expect(failOld.stdout).toContain('INCOMPLETE, not empty')
     })

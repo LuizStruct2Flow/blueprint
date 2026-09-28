@@ -9,48 +9,55 @@
  * repositories, which is slower than the suite's usual unit tests — the same
  * reason tests/a2bp-e2e and tests/bootstrap-gate are release-tier.
  *
- * DETERMINISM (plan §5): "same path, twice" is enforced two different ways
- * in this file, and which one a describe uses is a property of whether its
- * rows WRITE.
- *   - A row that never mutates its fixture (drift; most of `files`) runs OLD
- *     on ONE fixture directory, then resets the local git config drift arms
- *     (`driftBoth`), then runs NEW on the SAME directory — "same path" by
- *     construction, since there is only ever one.
- *   - A row that WRITES (pull's full/partial/prompt rows; every a2bp row)
- *     cannot reuse one directory this way, so it goes through
- *     `a2bpSamePathTwice` (the a2bp/prs describe) or an equivalent
- *     build→run→delete→rebuild→run sequence: build the fixture at a fixed
- *     path with PINNED `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` and identity,
- *     run OLD, snapshot (stdout/stderr/status/signal, the project tree's
- *     path/bytes/mode, `.blueprint-source`, the blueprint's refs, and for
- *     a2bp the gh-argv log), delete the fixture, rebuild the IDENTICAL
- *     fixture at the SAME path, run NEW, snapshot again, and diff with NO
- *     normalisation beyond the three plan §5 names: random mktemp suffixes,
- *     `diff -u` header timestamps, and bash's `line N:` prefix. This
- *     replaces an earlier version of the a2bp/prs describe that built TWO
- *     INDEPENDENT fixture trees per row and scrubbed the resulting
- *     divergence (`scrubA2bp`) — a normaliser plan §5 does not allow, and
- *     the finding Codex's round-3 review left open.
+ * DETERMINISM (plan §5): "same path, twice" is the ONE mechanism every row
+ * in this file uses, through the shared `samePathTwice` helper (defined
+ * below, near `SamePathTwiceFixture`): build the fixture at a fixed path
+ * with PINNED `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` and identity
+ * (`commitAllPinned`), run OLD, snapshot (stdout/stderr/status/signal, the
+ * project tree's path/bytes/mode, `.blueprint-source`, the cache's refs, a
+ * local checkout's own refs when the row asks, and for a2bp the gh-argv
+ * log), delete the fixture, rebuild the IDENTICAL fixture at the SAME path,
+ * run NEW, snapshot again, and diff with NO normalisation beyond plan §5's
+ * three named exceptions (random mktemp suffixes, `diff -u` header
+ * timestamps, bash's `line N:` prefix) — applied, when a row needs one,
+ * through `samePathTwice`'s own `normalizeSnapshot` hook, never by skipping
+ * the comparison outright. A row whose fixture never writes (most of drift,
+ * most of `files`) still goes through the full build→run→delete→rebuild→run
+ * cycle; nothing shares one directory between OLD and NEW any more.
+ *   HISTORY: earlier rounds used two OTHER shapes this file no longer
+ *   contains — `driftBoth` (a shared-directory reset between OLD and NEW,
+ *   which silently let OLD's fetch warm a cache NEW then read) and a
+ *   hand-rolled `oldProj`/`newProj` pair of INDEPENDENT fixture trees (which
+ *   needed its own path-scrubbing normaliser, the kind plan §5 does not
+ *   allow). TASK-081 round C finished migrating every remaining row off
+ *   both onto `samePathTwice`.
+ *   `compareRuns: false` — which skips `samePathTwice`'s own byte-equal
+ *   `toEqual` outright, asserting each side explicitly instead — is reserved
+ *   for a row whose two sides genuinely diverge BY DESIGN, a plan §6
+ *   accepted deviation named in the row's own comment; today exactly two
+ *   rows use it (the `\`-holding project name under `drift`, and
+ *   `pull scripts/blueprint` naming either CLI file brings both). Every
+ *   other divergence — a random mktemp suffix, a leading-token or
+ *   `line N:` difference the row needs to wash out — goes through
+ *   `normalizeSnapshot` instead, which keeps the FULL comparison and only
+ *   launders the one named substring.
  *
  * THE §5 MATRIX CHECKLIST. Plan §5's table names ~90 rows by subcommand.
  * Each row below is either a `it()` name in this file (or blueprint-port.spec.ts
  * for the few proven at the unit tier) or has a reason it is not a row, with
  * its covering test named instead.
  *
- * THE COMPARISON (TASK-081 "drift/pull differential rows to completion"
- * round): every drift and pull row below — not only the ones in the
+ * THE COMPARISON: every drift and pull row below — not only the ones in the
  * describes literally named 'drift'/'pull' — goes through the generalised
  * compare defined just above (`walkFiles`, `snapshotRefs`,
- * `bpCacheRefsOrSentinel`, `assertNoDriftPullScratch`): stdout/stderr/exit/
- * signal, the project tree's path/bytes/mode (which is also how
- * `.blueprint-source` is compared — it is an ordinary file under that walk),
- * the cache's refs where a row registers a remote, and that no
- * `blueprint-sync.*`/`tmp.*` scratch survives the run. A shared-directory row
- * additionally asserts the tree is byte-for-byte UNCHANGED by each side's own
- * run (most of these rows are refusals whose name already claimed "nothing
- * written"); a two-independent-copies row asserts `walkFiles(newProj)` equals
- * `walkFiles(oldProj)` in full, not only the handful of files each row
- * happens to spot-check.
+ * `bpCacheRefsOrSentinel`, `assertNoDriftPullScratch`), via `samePathTwice`:
+ * stdout/stderr/exit/signal, the project tree's path/bytes/mode (which is
+ * also how `.blueprint-source` is compared — it is an ordinary file under
+ * that walk), the cache's refs where a row registers a remote, and that no
+ * `blueprint-sync.*`/`tmp.*` scratch survives the run. A row whose fixture
+ * never writes additionally asserts the tree is byte-for-byte UNCHANGED by
+ * each side's own run (most of these rows are refusals whose name already
+ * claimed "nothing written").
  *
  *   dispatch     — describe 'blueprint-port differential — dispatch': all
  *                  six rows (no args, help, --help, -h, an unknown
@@ -71,38 +78,50 @@
  *                  specifier with an encoded `\`, an accepted deviation this
  *                  round documents rather than "fixes", since the real exec
  *                  shim hits the identical wall for a project actually
- *                  checked out under such a path); "…'s fast-forward prompt"
- *                  (y, N); 'settings-layer refusals' (P4's array/object/
- *                  null/number shapes on BOTH settings.json and the layer,
- *                  plus the drift-side refusal bucket); 'settings layer
- *                  merge and legacy proposal' (P4's "a layer present, which
- *                  merges" — through pull, with the landed bytes compared,
- *                  and through drift; "a legacy settings.json with extra
- *                  rules, which produces the proposal text" — through pull
- *                  and drift; "jq missing from PATH" through drift, pull's
- *                  own row already lived in 'finding 4'); 'staleness states'
- *                  (current/ahead/diverged/unknown); 'fetch failures'
- *                  (unreachable, missing branch, no timeout binary,
- *                  hung/BP_FETCH_TIMEOUT, scratch uncreatable, damaged
- *                  cache); 'drift config-shape refusals' (v1 config (4),
- *                  placeholder remote (4), missing release branch (5),
- *                  bootstrap_sha not in history, BLUEPRINT_ROOT override not
- *                  a directory, the leftover blueprint_source warning,
- *                  missing-in-blueprint as its own row — the managed-set-diff
- *                  asymmetry with "new in blueprint", proven directly rather
- *                  than only asserted in prose).
- *                  NOT ROWS: none — this round closed every gap this
- *                  describe's header previously named.
+ *                  checked out under such a path); refused — none:ok (the
+ *                  project's copy has markers, the blueprint copy has none,
+ *                  the OTHER half of `bp_prospective_pull`'s marker-shape
+ *                  refusal branch from the "refused" row above, which is
+ *                  none:bad); "…'s fast-forward prompt" (y, N, PLUS
+ *                  behind + BP_NO_PROMPT — reports Behind and never prompts,
+ *                  the remaining half of that describe's own row group);
+ *                  'settings-layer refusals' (P4's array/object/null/number
+ *                  shapes on BOTH settings.json and the layer, EACH one now
+ *                  proven through BOTH `pull` and `drift`, not only the one
+ *                  array-layer shape a single shared drift row proved
+ *                  before); 'settings layer merge and legacy proposal' (P4's
+ *                  "a layer present, which merges" — through pull, with the
+ *                  landed bytes compared, and through drift; "a legacy
+ *                  settings.json with extra rules, which produces the
+ *                  proposal text" — through pull and drift; "jq missing from
+ *                  PATH" through drift, pull's own row already lived in
+ *                  'finding 4'); 'staleness states' (current/ahead/diverged/
+ *                  unknown); 'fetch failures' (unreachable, missing branch,
+ *                  no timeout binary, hung/BP_FETCH_TIMEOUT, scratch
+ *                  uncreatable, damaged cache); 'drift config-shape
+ *                  refusals' (v1 config (4), placeholder remote (4), missing
+ *                  release branch (5), bootstrap_sha not in history,
+ *                  BLUEPRINT_ROOT override not a directory, the leftover
+ *                  blueprint_source warning, missing-in-blueprint as its own
+ *                  row — the managed-set-diff asymmetry with "new in
+ *                  blueprint", proven directly rather than only asserted in
+ *                  prose).
+ *                  NOT ROWS: none.
  *   pull         — describe 'blueprint-port differential — pull' (nothing
- *                  to pull, full --yes, partial/BUG-016, non-TTY/BUG-018,
- *                  refused/BUG-034, `pull scripts/blueprint`, the y/N/q
- *                  interactive prompt); 'pull matrix' (backup-copy — with an
- *                  explicit `.bp-bak` bytes check, merge, retirement — with
- *                  an explicit kept-file bytes check, PLUS retirement
- *                  answered by a non-TTY (the "not interactive" refusal,
- *                  exit 7) and by q (aborted, exit 0) — the only sub-case
- *                  left unproven differentially before this round —, exec
- *                  bit +x and -x); 'finding 1' (tool failures inside
+ *                  to pull, a successful pull of a genuinely NEW file
+ *                  (BP_PP_MODE=new with a WORKING cp — the successful
+ *                  counterpart 'finding 1'\'s own cp-FAILURE row exercises),
+ *                  full --yes, partial/BUG-016, non-TTY/BUG-018, refused/
+ *                  BUG-034, `pull scripts/blueprint` against the real CLI's
+ *                  own libs, PLUS `pull scripts/blueprint` with one lib
+ *                  REFUSED — the CLI itself is then skipped, never pulled
+ *                  (scripts/blueprint's own "libs FIRST, CLI LAST" comment),
+ *                  the y/N/q interactive prompt); 'pull matrix' (backup-copy
+ *                  — with an explicit `.bp-bak` bytes check, merge,
+ *                  retirement — with an explicit kept-file bytes check, PLUS
+ *                  retirement answered by a non-TTY (the "not interactive"
+ *                  refusal, exit 7) and by q (aborted, exit 0), exec bit +x
+ *                  and -x); 'finding 1' (tool failures inside
  *                  bp_prospective_pull/marker_aware_merge/_bp_settings_layer);
  *                  'finding 4' (comm/cmp/diff absent, diff present-but-not-
  *                  executable, jq entirely missing); 'pull remaining rows'
@@ -111,8 +130,7 @@
  *                  fetch-report line the way drift does; a held/refused file
  *                  leaving bootstrap_sha unchanged even though a sibling
  *                  file WAS pulled, BUG-034's own exit 4).
- *                  NOT ROWS: none — this round closed the retirement
- *                  non-TTY/q gap this describe's header previously named.
+ *                  NOT ROWS: none.
  *   a2bp         — describe 'blueprint-port differential — a2bp / prs':
  *                  finding 2 (x2), finding 3, dry-run, no files given, not a
  *                  derived project, a required lib missing, contamination
@@ -150,8 +168,7 @@
  *                  contamination, gitleaks, staging-rc3, GNU-diff-missing),
  *                  FAILED=5 (gh unavailable, move-twice), NOTHING=6 (nothing
  *                  to request). Nothing is missing.
- *                  NOT ROWS: none — this round closed every gap this
- *                  describe's header previously named.
+ *                  NOT ROWS: none.
  *   prs          — 'prs — empty, a listing, and a gh query failure' (an
  *                  empty listing, then a listing, then INCOMPLETE-not-empty
  *                  — the INCOMPLETE case already covers "gh erroring", plan
@@ -167,8 +184,7 @@
  *                  is undefined there, confirmed directly against both CLIs
  *                  before this row was written, `.scratch/rc3-e2e` in this
  *                  worktree).
- *                  NOT ROWS: none — this round closed every gap this
- *                  describe's header previously named.
+ *                  NOT ROWS: none.
  *
  * Signals are not differential rows (plan §5's own words) — they are
  * tests/sync-by-address #20-#23c, run against the port.
@@ -488,10 +504,18 @@ interface SamePathTwiceOptions<F extends SamePathTwiceFixture> {
   /** Runs one CLI against `fx` and returns its result. */
   readonly run: (s: Scenario, fx: F, side: 'old' | 'new') => Promise<RunResult>
   readonly snapshotOpts?: (fx: F) => SnapshotOpts
-  /** Default true: assert the two snapshots are byte-identical. A row sets
-   * this false only for an accepted deviation (plan §6) it asserts
-   * explicitly instead — e.g. a project name a real exec shim also cannot
-   * load under Node. */
+  /** Applied to EACH snapshot, independently, before the `compareRuns`
+   * comparison below — the one hook plan §5's named normalisations (a
+   * random mktemp suffix, a `diff -u` header timestamp, bash's `line N:`)
+   * are allowed to use. Identity when omitted. A row that needs this is
+   * still comparing the FULL snapshot, just after washing out the one named
+   * substring — nothing is dropped from the comparison, unlike
+   * `compareRuns: false`. */
+  readonly normalizeSnapshot?: (snap: SamePathTwiceSnapshot) => SamePathTwiceSnapshot
+  /** Default true: assert the two (normalised) snapshots are byte-identical.
+   * A row sets this false only for an accepted deviation (plan §6) it
+   * asserts explicitly instead — e.g. a project name a real exec shim also
+   * cannot load under Node. */
   readonly compareRuns?: boolean
 }
 
@@ -522,7 +546,8 @@ async function samePathTwice<F extends SamePathTwiceFixture>(
   expect(newSide.snap.scratch, `scratch left behind under ${tag} (NEW)`).toEqual([])
 
   if (opts.compareRuns ?? true) {
-    expect(newSide.snap).toEqual(oldSide.snap)
+    const normalize = opts.normalizeSnapshot ?? ((snap: SamePathTwiceSnapshot) => snap)
+    expect(normalize(newSide.snap)).toEqual(normalize(oldSide.snap))
   }
 
   return { oldResult: oldSide.result, newResult: newSide.result, oldSnapshot: oldSide.snap, newSnapshot: newSide.snap }
@@ -1027,6 +1052,44 @@ describe('blueprint-port differential — drift', () => {
     })
   })
 
+  it("refused — none:ok (the project's copy has markers, the blueprint copy has none — a pull would strip them)", async () => {
+    await scenario('blueprint-port-drift-refused-none-ok', async (s) => {
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          // The blueprint's own CLAUDE.md carries no markers at all — the
+          // `bs` side of `bp_marker_structure`'s "none" case.
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture, no markers\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // The project's copy carries a well-formed marker region — `ps`'s
+          // "ok N" case, `bs:ps` = "none:ok N", `bp_prospective_pull`'s own
+          // refusal branch (scripts/blueprint:392-395).
+          await writeFile(
+            join(proj, 'CLAUDE.md'),
+            '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
+            'utf8',
+          )
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'project added markers')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
+      expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
+      expect(oldResult.stdout).toContain('this project has markers but the blueprint copy has none — a pull would strip them')
+    })
+  })
+
   it('unregistered — three or more struct2flow marker files but no .blueprint-source', async () => {
     await scenario('blueprint-port-drift-unregistered', async (s) => {
       const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
@@ -1187,7 +1250,7 @@ describe('blueprint-port differential — drift', () => {
   it('a project name holding & and \\ — exercises placeholder substitution, and Node’s own ESM limit on \\', async () => {
     await scenario('blueprint-port-drift-name-chars', async (s) => {
       const projName = 'a&b\\c'
-      const { oldResult, newResult } = await samePathTwice<DriftFixture>(s, 'root', {
+      const { oldResult, newResult, oldSnapshot, newSnapshot } = await samePathTwice<DriftFixture>(s, 'root', {
         build: async (s, root) => {
           const bp = join(root, 'bp')
           await mkdir(join(bp, 'docs'), { recursive: true })
@@ -1221,6 +1284,19 @@ describe('blueprint-port differential — drift', () => {
       // `\`-bearing ancestor directory — the accepted deviation above.
       expect(newResult.code).not.toBe(0)
       expect(newResult.stderr).toContain('ERR_INVALID_MODULE_SPECIFIER')
+      // Every OTHER field `samePathTwice`'s default `toEqual` would have
+      // covered still has to match explicitly (TASK-081 round C) — the
+      // deviation this row accepts is ONLY code/stdout/stderr (and, as a
+      // direct consequence of Node dying before ever calling git,
+      // `cacheRefs`: NEW never creates one at all). Measured directly:
+      // `projTree`/`scratch`/`remoteRefs`/`ghLog` come out identical on
+      // both sides regardless.
+      expect(newSnapshot.projTree).toEqual(oldSnapshot.projTree)
+      expect(newSnapshot.scratch).toEqual(oldSnapshot.scratch)
+      expect(newSnapshot.remoteRefs).toEqual(oldSnapshot.remoteRefs)
+      expect(newSnapshot.ghLog).toEqual(oldSnapshot.ghLog)
+      expect(oldSnapshot.cacheRefs).toBe('')
+      expect(newSnapshot.cacheRefs).toBe('<no cache created>')
     })
   })
 })
@@ -1319,6 +1395,34 @@ describe("blueprint-port differential — drift's fast-forward prompt", () => {
       expect(newSnapshot.remoteRefs).toContain(firstSha)
     })
   })
+
+  it('behind + BP_NO_PROMPT: reports Behind, never prompts, the local checkout is left untouched', async () => {
+    await scenario('blueprint-port-drift-ff-behind-no-prompt', async (s) => {
+      let firstSha = ''
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<FfFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await buildFastForward(s, root)
+          firstSha = fx.firstSha
+          return fx
+        },
+        // BP_NO_PROMPT alone already suppresses the prompt (report_staleness
+        // never reaches it), so this proves the prompt text never appears
+        // and the checkout stays put — no controlling TTY needed the way the
+        // y/N rows above need one to drive an actual answer.
+        run: (s, fx, side) => {
+          const env = { BLUEPRINT_ROOT: fx.bp, BP_NO_PROMPT: '1' }
+          return side === 'old' ? runOld(s, fx.proj, ['drift'], env) : runNew(s, fx.proj, ['drift'], env)
+        },
+        snapshotOpts: (fx) => ({ remoteRefsDir: fx.bp }),
+      })
+      expect(oldResult.output).not.toContain('fast-forward it now?')
+      expect(oldResult.output).toMatch(/[Bb]ehind/)
+      // NON-VACUITY: BP_NO_PROMPT suppresses the PROMPT, not the fast-forward
+      // itself being offered — the local checkout stays exactly where it was.
+      expect(oldSnapshot.remoteRefs).toContain(firstSha)
+      expect(newSnapshot.remoteRefs).toContain(firstSha)
+    })
+  })
 })
 
 /**
@@ -1403,6 +1507,37 @@ describe('blueprint-port differential — pull', () => {
       expect(newSnapshot.projTree, 'nothing-to-pull (NEW) must write nothing').toEqual(treeBefore)
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('✓ Nothing to pull. Project matches blueprint HEAD.')
+    })
+  })
+
+  it('a successful pull of a new file — the project never had it, cp actually runs (BP_PP_MODE=new)', async () => {
+    await scenario('blueprint-port-pull-new-file', async (s) => {
+      const { oldResult } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          // seedRegisteredProjectPinned seeds only `.blueprint-source`,
+          // `.githooks/` and `scripts/` — CLAUDE.md and docs/DoD.md are
+          // genuinely ABSENT from the project, unlike the "full --yes"
+          // row below (whose project already has both, just drifted). That
+          // is `bp_prospective_pull`'s `[ ! -f "$proj" ]` branch with a
+          // WORKING `cp`, the successful counterpart 'finding 1'\'s own
+          // "cp fails inside … new mode" row exercises as a failure.
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stdout).toContain('✓ Pulled 2 file(s). Review')
+      const proj = join(s.workspace.path('root'), 'proj')
+      // NON-VACUITY: the REAL blueprint bytes landed, not an empty file the
+      // way the finding-1 cp-failure row's own EMPTY CLAUDE.md does.
+      expect(await readFile(join(proj, 'CLAUDE.md'), 'utf8')).toBe('# CLAUDE\nfixture\n')
+      expect(await readFile(join(proj, 'docs/DoD.md'), 'utf8')).toBe('# DoD\nfixture\n')
     })
   })
 
@@ -1601,6 +1736,76 @@ describe('blueprint-port differential — pull', () => {
       expect(newSnapshot.scratch).toEqual(oldSnapshot.scratch)
       expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(newSnapshot.signal).toBe(oldSnapshot.signal)
+    })
+  })
+
+  it('pull scripts/blueprint — a refused lib skips the CLI (libs first, CLI last)', async () => {
+    await scenario('blueprint-port-pull-cli-libs-refused', async (s) => {
+      const { oldResult } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await cp(join(REPO_ROOT, 'scripts'), join(bp, 'scripts'), { recursive: true })
+          await s.run('chmod', ['+x', join(bp, 'scripts/blueprint')], { cwd: bp })
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // scripts/lib/gate.sh, one of `_bp_cli_libs`'s own entries, is
+          // otherwise byte-identical to the blueprint's copy — EXCEPT the
+          // project's carries a lone, unmatched END marker appended, in
+          // BASH comment syntax (`BP_MARKER_LEAD` accepts `#`, `//` or
+          // `<!--`, so a shell comment qualifies same as an HTML one, and
+          // this changes nothing the file DOES, only what
+          // `bp_marker_structure` reports: "bad …" on the project side,
+          // regardless of the blueprint side, which stays "none"). That is
+          // `bp_prospective_pull`'s refusal branch, so the lib is never
+          // pulled — the shape this row exists to prove: `cmd_pull` then
+          // refuses to write `scripts/blueprint` ITSELF, because it sources
+          // a lib that was not pulled (scripts/blueprint:1621-1626, "libs
+          // FIRST, CLI LAST").
+          const libPath = join(proj, 'scripts/lib/gate.sh')
+          const original = await readFile(libPath, 'utf8')
+          await writeFile(libPath, `${original}\n# BLUEPRINT:END\n`, 'utf8')
+          await commitAllPinned(s, proj, 'break one lib')
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old'
+            ? runOld(s, fx.proj, ['pull', 'scripts/blueprint', '--yes'], fx.env)
+            : runNew(s, fx.proj, ['pull', 'scripts/blueprint', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+        // Same plan §6 accepted deviation as the sibling row above (naming
+        // EITHER CLI file brings both): NEW additionally considers
+        // `scripts/blueprint.mts`, itself unaffected by the broken lib, so
+        // it reports one extra line about it OLD can never print — "same"
+        // when the lib pulls clean (the sibling row), "skipped" here since
+        // the SAME broken lib holds `scripts/blueprint.mts` back too.
+        // Stripped from whichever side has it (a no-op on OLD) rather than
+        // a second `compareRuns: false` — the round's own point is that
+        // this is now the ONLY shape of accepted-deviation handling left in
+        // the file.
+        normalizeSnapshot: (snap) => ({
+          ...snap,
+          stdout: snap.stdout.replace(/^.*\bscripts\/blueprint\.mts\b.*\n\n?/gm, ''),
+        }),
+      })
+      expect(oldResult.stdout).toContain("this project's markers are invalid")
+      expect(oldResult.stdout).toContain('skipped')
+      expect(oldResult.stdout).toContain('scripts/blueprint — it sources')
+      expect(oldResult.stdout).toContain('scripts/lib/gate.sh')
+      expect(oldResult.stdout).toContain('was not pulled, so it would refuse to run')
+      // NON-VACUITY: the CLI file itself is untouched — "skipped", not
+      // "same" or "pulled".
+      const proj = join(s.workspace.path('root'), 'proj')
+      const cliAfter = await readFile(join(proj, 'scripts/blueprint'), 'utf8')
+      const cliBefore = await readFile(join(REPO_ROOT, 'scripts/blueprint'), 'utf8')
+      expect(cliAfter).toBe(cliBefore)
     })
   })
 
@@ -2223,15 +2428,19 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
  * swallowed a diagnostic the shell's own unredirected stderr always showed.
  */
 describe('blueprint-port differential — finding 4 (tool absence during pull)', () => {
-  // Strips the leading "<program>: " prefix bash's own diagnostic carries
-  // (measured directly: it is "<script>: line N: " when the failing call is
-  // a plain statement, but bash omits the "line N:" part for a call inside a
+  // Strips ONLY bash's own "line N: " middle segment (plan §6.5) — never the
+  // leading "<program>: " token ahead of it. Under same-path-twice, OLD's $0
+  // and NEW's `cliName()` are the SAME absolute path (`cliName()` strips only
+  // the `.mts` suffix off `process.argv[1]`, which the shim always sets to
+  // "<the CLI's own dirname>/blueprint.mts" — the identical string bash's own
+  // $0 resolves to for "<the CLI's own dirname>/blueprint"), so that token
+  // already compares equal without normalising it away. "line N:" is bash's
+  // own diagnostic middle segment (measured directly: "<script>: line N: "
+  // for a plain statement, but bash OMITS "line N:" for a call inside a
   // process substitution — `_bp_retire`'s `< <(comm …)`, exactly what the
-  // comm/cmp rows below hit — so that middle segment is OPTIONAL). NEW's own
-  // message (run()'s `${cliName()}: ${cmd}: ${reason}`) carries the SAME
-  // kind of leading "<program>: " prefix with no line number at all, so this
-  // strips both sides down to the tool name uniformly rather than only OLD's.
-  const stripLinePrefix = (t: string): string => t.replace(/^\S+: (line \d+: )?/gm, '')
+  // comm/cmp rows below hit — so that middle segment is OPTIONAL), which NEW
+  // never emits at all (`run()`'s own message has no line number).
+  const stripLinePrefix = (t: string): string => t.replace(/^(\S+: )line \d+: /gm, '$1')
 
   interface F4Fixture extends SamePathTwiceFixture {
     readonly bp: string
@@ -2284,13 +2493,14 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
           return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
         },
         snapshotOpts: (fx) => ({ remote: fx.bp }),
-        compareRuns: false,
+        // TASK-081 round C: `compareRuns` back on, line-N-removal (plan
+        // §6.5) its only normalisation — same-path-twice already makes the
+        // leading program token equal, so `stripLinePrefix`'s own narrowing
+        // (never touching that token) is enough here.
+        normalizeSnapshot: (snap) => ({ ...snap, stdout: stripLinePrefix(snap.stdout), stderr: stripLinePrefix(snap.stderr) }),
       })
       expect(oldSnapshot.projTree, 'comm-absent (OLD) must write nothing').toEqual(treeBefore)
       expect(newSnapshot.projTree, 'comm-absent (NEW) must write nothing').toEqual(treeBefore)
-      expect(stripLinePrefix(newSnapshot.stderr)).toBe(stripLinePrefix(oldSnapshot.stderr))
-      expect(newSnapshot.stdout).toBe(oldSnapshot.stdout)
-      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.stderr).toContain('comm: command not found')
       expect(oldResult.stdout).toContain('✓ Nothing to pull. Project matches blueprint HEAD.')
       // NON-VACUITY: with a working `comm`, OLD-FILE.md is exactly the
@@ -2319,7 +2529,20 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
           return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
         },
         snapshotOpts: (fx) => ({ remote: fx.bp }),
-        compareRuns: false,
+        // TASK-081 round C: `compareRuns` back on. Line-N-removal (see the
+        // comm-absent row above) PLUS plan §5's other named exception, a
+        // random mktemp suffix — `bp_contains_nul`'s own scratch tree
+        // (`blueprint-sync.XXXXXXXX`) lands inside the "contains NUL bytes"
+        // error text itself here, not only the scratch-directory LISTING
+        // `samePathTwice` already checks is empty afterwards, so the text
+        // needs the same suffix washed out too: this is mktemp's ordinary
+        // per-run randomness, identical in kind on OLD and NEW, never a
+        // bash-vs-node divergence normalizeSnapshot exists to paper over.
+        normalizeSnapshot: (snap) => {
+          const stripScratch = (t: string) => t.replace(/blueprint-sync\.[A-Za-z0-9]+/g, 'blueprint-sync.<tmp>')
+          const strip = (t: string) => stripScratch(stripLinePrefix(t))
+          return { ...snap, stdout: strip(snap.stdout), stderr: strip(snap.stderr) }
+        },
       })
       expect(oldSnapshot.projTree, 'cmp-absent (OLD) must write nothing').toEqual(treeBefore)
       expect(newSnapshot.projTree, 'cmp-absent (NEW) must write nothing').toEqual(treeBefore)
@@ -2339,11 +2562,6 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       // with no TTY the whole pull refuses (exit 7) and `_bp_retire` never
       // executes at all — OLD-FILE.md is neither retired NOR reclassified,
       // simply never reached, on either CLI.
-      const stripScratch = (t: string) => t.replace(/blueprint-sync\.[A-Za-z0-9]+/g, 'blueprint-sync.<tmp>')
-      const strip = (t: string) => stripScratch(stripLinePrefix(t))
-      expect(strip(newSnapshot.stderr)).toBe(strip(oldSnapshot.stderr))
-      expect(strip(newSnapshot.stdout)).toBe(strip(oldSnapshot.stdout))
-      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.code).toBe(7)
       expect(oldResult.stderr).toContain('cmp: command not found')
       expect(oldResult.stdout).toContain('not interactive')
@@ -2383,14 +2601,12 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
           return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
         },
         snapshotOpts: (fx) => ({ remote: fx.bp }),
-        compareRuns: false,
+        // TASK-081 round C: `compareRuns` back on, line-N-removal its only
+        // normalisation (see the comm-absent row above).
+        normalizeSnapshot: (snap) => ({ ...snap, stdout: stripLinePrefix(snap.stdout), stderr: stripLinePrefix(snap.stderr) }),
       })
       expect(oldSnapshot.projTree, 'diff-absent (OLD) must write nothing').toEqual(treeBefore)
       expect(newSnapshot.projTree, 'diff-absent (NEW) must write nothing').toEqual(treeBefore)
-      const strip = (t: string) => stripLinePrefix(t)
-      expect(strip(newSnapshot.stderr)).toBe(strip(oldSnapshot.stderr))
-      expect(strip(newSnapshot.stdout)).toBe(strip(oldSnapshot.stdout))
-      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.code).toBe(7)
       expect(oldResult.stderr).toContain('diff: command not found')
       expect(oldResult.stdout).toContain('not interactive')
@@ -2420,22 +2636,24 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
           return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
         },
         snapshotOpts: (fx) => ({ remote: fx.bp }),
-        compareRuns: false,
+        // TASK-081 round C: `compareRuns` back on. TWO named normalisations
+        // here, not one (the only row in this describe with a second): the
+        // usual "line N: " prefix (plan §6.5), plus the tool's own NAME vs
+        // the full RESOLVED PATH bash reports for a found-but-non-executable
+        // file (measured directly — bash: "<script>: line N:
+        // /abs/path/to/diff: Permission denied"; Node's spawn EACCES
+        // handler, run()'s own code, only ever has argv0, "diff", to name) —
+        // plan §6(a)'s own accepted divergence, same shape as the a2bp
+        // "finding 3" row's leading-token strip: not something run() can fix
+        // without duplicating bash's own PATH resolution.
+        normalizeSnapshot: (snap) => ({
+          ...snap,
+          stdout: stripLinePrefix(snap.stdout),
+          stderr: stripLinePrefix(snap.stderr).replace(/\/\S*\/diff\b/g, 'diff'),
+        }),
       })
       expect(oldSnapshot.projTree, 'diff-noexec (OLD) must write nothing').toEqual(treeBefore)
       expect(newSnapshot.projTree, 'diff-noexec (NEW) must write nothing').toEqual(treeBefore)
-      // TWO named normalisations here, not one: the usual "line N: " prefix
-      // (plan §6.5), plus the tool's own NAME vs the full RESOLVED PATH bash
-      // reports for a found-but-non-executable file (measured directly —
-      // bash: "<script>: line N: /abs/path/to/diff: Permission denied";
-      // Node's spawn EACCES handler, run()'s own code, only ever has argv0,
-      // "diff", to name). An accepted, per-row divergence, same shape as the
-      // a2bp "finding 3" row's stripLinePrefix — not something run() can fix
-      // without duplicating bash's own PATH resolution.
-      const strip = (t: string) => stripLinePrefix(t).replace(/\/\S*\/diff\b/g, 'diff')
-      expect(strip(newSnapshot.stderr)).toBe(strip(oldSnapshot.stderr))
-      expect(newSnapshot.stdout).toBe(oldSnapshot.stdout)
-      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.code).toBe(7)
       expect(oldResult.stderr).toContain('Permission denied')
     })
@@ -2514,19 +2732,41 @@ describe('blueprint-port differential — settings-layer refusals', () => {
   const settingsJson = (allow: string[]) =>
     `${JSON.stringify({ permissions: { allow, ask: [], deny: [] } }, null, 2)}\n`
 
+  interface SettingsShapeFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
+  }
+
+  /** The blueprint side of every row below: same shape as
+   * `seedBlueprintRepoPinned`, plus the `.claude/settings.json` every shape
+   * row diffs the project's own copy against. */
+  async function seedShapeBlueprintPinned(s: Scenario, dir: string): Promise<string> {
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
+    await mkdir(join(dir, '.claude'), { recursive: true })
+    await writeFile(join(dir, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
+    await initRepo(s, dir)
+    await commitAllPinned(s, dir, 'base')
+    return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
+  }
+
   /** A registered project whose `.claude/settings.json` and/or
    * `.claude/settings.project.json` (the layer) are written VERBATIM —
    * `body`/`layerBody` are raw bytes, never JSON.stringify'd, so a shape
    * that is not even one JSON object (a stream, an array, a scalar) can be
-   * placed exactly as the permission-policy suite does. */
-  async function seedShapeProject(
+   * placed exactly as the permission-policy suite does. Pinned so building
+   * the SAME fixture twice (once per CLI, `samePathTwice`'s own contract)
+   * hashes to the identical commit SHA both times. */
+  async function seedShapeProjectPinned(
     s: Scenario,
     dir: string,
     bp: string,
     sha: string,
     opts: { settingsBody?: string | undefined; layerBody?: string | undefined },
   ): Promise<void> {
-    await seedRegisteredProject(s, dir, bp, sha)
+    await seedRegisteredProjectPinned(s, dir, bp, sha)
     await mkdir(join(dir, 'docs'), { recursive: true })
     await copyFile(join(bp, 'CLAUDE.md'), join(dir, 'CLAUDE.md'))
     await copyFile(join(bp, 'docs/DoD.md'), join(dir, 'docs/DoD.md'))
@@ -2537,7 +2777,7 @@ describe('blueprint-port differential — settings-layer refusals', () => {
     if (opts.layerBody !== undefined) {
       await writeFile(join(dir, '.claude/settings.project.json'), opts.layerBody, 'utf8')
     }
-    await commitAll(s, dir, 'settings fixture')
+    await commitAllPinned(s, dir, 'settings fixture')
   }
 
   const rows: Array<{ name: string; settingsBody?: string; layerBody?: string }> = [
@@ -2592,32 +2832,24 @@ describe('blueprint-port differential — settings-layer refusals', () => {
   for (const row of rows) {
     it(`pull refuses — ${row.name}`, async () => {
       await scenario(`blueprint-port-settings-shape-${row.name.replace(/[^a-z0-9]+/gi, '-')}`, async (s) => {
-        const bp = await s.workspace.dir('bp')
-        await mkdir(join(bp, 'docs'), { recursive: true })
-        await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-        await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-        await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-        await mkdir(join(bp, '.claude'), { recursive: true })
-        await writeFile(join(bp, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
-        await initRepo(s, bp)
-        await commitAll(s, bp, 'base')
-        const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
-
-        const proj = await s.workspace.dir('proj')
-        await seedShapeProject(s, proj, bp, sha, { settingsBody: row.settingsBody, layerBody: row.layerBody })
-
-        // Refusal writes nothing, so OLD then NEW share the same directory
-        // (same idiom as the pull-refused / drift-refused rows above).
-        const treeBefore = await walkFiles(proj)
-        const oldResult = await runOld(s, proj, ['pull', '.claude/settings.json', '--yes'])
-        expect(await walkFiles(proj), 'settings-shape refusal (OLD) must write nothing').toEqual(treeBefore)
-        const newResult = await runNew(s, proj, ['pull', '.claude/settings.json', '--yes'])
-        expect(await walkFiles(proj), 'settings-shape refusal (NEW) must write nothing').toEqual(treeBefore)
-        await assertNoDriftPullScratch(s)
-        expectPullIdentical(oldResult, newResult)
+        const { oldResult } = await samePathTwice<SettingsShapeFixture>(s, 'root', {
+          build: async (s, root) => {
+            const bp = join(root, 'bp')
+            const proj = join(root, 'proj')
+            const sha = await seedShapeBlueprintPinned(s, bp)
+            await seedShapeProjectPinned(s, proj, bp, sha, { settingsBody: row.settingsBody, layerBody: row.layerBody })
+            return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+          },
+          run: (s, fx, side) =>
+            side === 'old'
+              ? runOld(s, fx.proj, ['pull', '.claude/settings.json', '--yes'], fx.env)
+              : runNew(s, fx.proj, ['pull', '.claude/settings.json', '--yes'], fx.env),
+          snapshotOpts: (fx) => ({ remote: fx.bp }),
+        })
         expect(oldResult.code, oldResult.output).toBe(4)
         expect(oldResult.stdout, oldResult.output).not.toMatch(/not valid JSON/i)
         if (row.settingsBody !== undefined) {
+          const proj = join(s.workspace.path('root'), 'proj')
           const after = await readFile(join(proj, '.claude/settings.json'), 'utf8')
           expect(after, 'a refusal must never overwrite the project file').toBe(row.settingsBody)
         }
@@ -2625,35 +2857,31 @@ describe('blueprint-port differential — settings-layer refusals', () => {
     })
   }
 
-  it('drift also refuses the same shape (the array-layer row), in its own report bucket', async () => {
-    await scenario('blueprint-port-settings-shape-drift', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await mkdir(join(bp, '.claude'), { recursive: true })
-      await writeFile(join(bp, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
-
-      const proj = await s.workspace.dir('proj')
-      await seedShapeProject(s, proj, bp, sha, { settingsBody: settingsJson([]), layerBody: '[]\n' })
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['drift'], env)
-      expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-      const newResult = await runNew(s, proj, ['drift'], env)
-      expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expectIdentical(oldResult, newResult)
-      expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
+  // TASK-081 round C: EVERY shape above, through `drift` too — not only the
+  // one array-layer row round B proved — since `bpSettingsLayer` is reached
+  // identically from both subcommands (the "settings layer merge and legacy
+  // proposal" describe's own header makes the same point about `pull` vs
+  // `drift` sharing this call). `drift`'s own report bucket is "Cannot sync",
+  // never pull's exit 4, so that is what each row checks instead.
+  for (const row of rows) {
+    it(`drift also refuses — ${row.name}`, async () => {
+      await scenario(`blueprint-port-settings-shape-drift-${row.name.replace(/[^a-z0-9]+/gi, '-')}`, async (s) => {
+        const { oldResult } = await samePathTwice<SettingsShapeFixture>(s, 'root', {
+          build: async (s, root) => {
+            const bp = join(root, 'bp')
+            const proj = join(root, 'proj')
+            const sha = await seedShapeBlueprintPinned(s, bp)
+            await seedShapeProjectPinned(s, proj, bp, sha, { settingsBody: row.settingsBody, layerBody: row.layerBody })
+            return { root, proj, bp, env: { ...(await pullFixtureEnv(s, root)), BP_NO_PROMPT: '1' } }
+          },
+          run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)),
+          snapshotOpts: (fx) => ({ remote: fx.bp }),
+        })
+        expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
+        expect(oldResult.stdout, oldResult.output).not.toMatch(/not valid JSON/i)
+      })
     })
-  })
+  }
 })
 
 /**
@@ -2675,7 +2903,12 @@ describe('blueprint-port differential — settings layer merge and legacy propos
   const settingsJson = (allow: string[], ask: string[] = [], deny: string[] = []) =>
     `${JSON.stringify({ permissions: { allow, ask, deny } }, null, 2)}\n`
 
-  async function seedSettingsBlueprint(s: Scenario, dir: string, bpSettings: string): Promise<string> {
+  interface SettingsMergeFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
+  }
+
+  async function seedSettingsBlueprintPinned(s: Scenario, dir: string, bpSettings: string): Promise<string> {
     await mkdir(join(dir, 'docs'), { recursive: true })
     await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
     await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
@@ -2683,18 +2916,18 @@ describe('blueprint-port differential — settings layer merge and legacy propos
     await mkdir(join(dir, '.claude'), { recursive: true })
     await writeFile(join(dir, '.claude/settings.json'), bpSettings, 'utf8')
     await initRepo(s, dir)
-    await commitAll(s, dir, 'base')
+    await commitAllPinned(s, dir, 'base')
     return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
   }
 
-  async function seedSettingsProject(
+  async function seedSettingsProjectPinned(
     s: Scenario,
     dir: string,
     bp: string,
     sha: string,
     opts: { settingsBody?: string | undefined; layerBody?: string | undefined },
   ): Promise<void> {
-    await seedRegisteredProject(s, dir, bp, sha)
+    await seedRegisteredProjectPinned(s, dir, bp, sha)
     await mkdir(join(dir, 'docs'), { recursive: true })
     await copyFile(join(bp, 'CLAUDE.md'), join(dir, 'CLAUDE.md'))
     await copyFile(join(bp, 'docs/DoD.md'), join(dir, 'docs/DoD.md'))
@@ -2705,74 +2938,53 @@ describe('blueprint-port differential — settings layer merge and legacy propos
     if (opts.layerBody !== undefined) {
       await writeFile(join(dir, '.claude/settings.project.json'), opts.layerBody, 'utf8')
     }
-    await commitAll(s, dir, 'settings fixture')
-  }
-
-  /** driftBoth's own shape (the 'drift' describe above), reimplemented here
-   * because that helper is local to its own describe — same reset-between-
-   * sides idiom, same plan §5 comparison. */
-  async function driftBoth(
-    s: Scenario,
-    proj: string,
-    env: Record<string, string>,
-  ): Promise<{ readonly oldResult: RunResult; readonly newResult: RunResult }> {
-    const treeBefore = await walkFiles(proj)
-    const oldResult = await runOld(s, proj, ['drift'], env)
-    expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
-    await assertNoDriftPullScratch(s)
-    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-    const newResult = await runNew(s, proj, ['drift'], env)
-    expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
-    await assertNoDriftPullScratch(s)
-    return { oldResult, newResult }
+    await commitAllPinned(s, dir, 'settings fixture')
   }
 
   it('a successful merge — the layer merges into the landed settings.json (pull)', async () => {
     await scenario('blueprint-port-settings-merge-pull', async (s) => {
-      const bp = await s.workspace.dir('bp')
       const bpSettings = settingsJson(['Bash(git status)'], [], ['Bash(rm -rf /)'])
-      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
       const layerBody = `${JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }, null, 2)}\n`
-
-      const oldProj = await s.workspace.dir('merge-old')
-      const newProj = await s.workspace.dir('merge-new')
-      for (const proj of [oldProj, newProj]) {
-        await seedSettingsProject(s, proj, bp, sha, { layerBody })
-      }
-      const env = await dateShimEnv(s)
-      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], env)
-      const newResult = await runNew(s, newProj, ['pull', '--yes'], env)
-      expectPullIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<SettingsMergeFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedSettingsBlueprintPinned(s, bp, bpSettings)
+          await seedSettingsProjectPinned(s, proj, bp, sha, { layerBody })
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.code).toBe(0)
-      const oldSettings = await readFile(join(oldProj, '.claude/settings.json'), 'utf8')
-      const newSettings = await readFile(join(newProj, '.claude/settings.json'), 'utf8')
-      expect(newSettings).toBe(oldSettings)
-      const merged = JSON.parse(oldSettings) as { permissions: { allow: string[]; deny: string[] } }
+      const proj = join(s.workspace.path('root'), 'proj')
+      const settings = await readFile(join(proj, '.claude/settings.json'), 'utf8')
+      const merged = JSON.parse(settings) as { permissions: { allow: string[]; deny: string[] } }
       expect(merged.permissions.allow).toEqual(expect.arrayContaining(['Bash(git status)', 'Bash(npm test)']))
       expect(merged.permissions.deny).toEqual(expect.arrayContaining(['Bash(rm -rf /)']))
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
     })
   })
 
   it('a successful merge — drift reaches it too, not a refusal (drift)', async () => {
     await scenario('blueprint-port-settings-merge-drift', async (s) => {
-      const bp = await s.workspace.dir('bp')
       const bpSettings = settingsJson(['Bash(git status)'])
-      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
       const layerBody = `${JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }, null, 2)}\n`
-      const proj = await s.workspace.dir('proj')
-      // A stale placeholder settings.json (never the merged result), so
-      // bp_prospective_for's diff finds a difference and the file lands in
-      // the Drifted bucket — proof the merge chain ran to completion rather
-      // than being skipped as "missing in project" or refused.
-      await seedSettingsProject(s, proj, bp, sha, { settingsBody: settingsJson([]), layerBody })
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<SettingsMergeFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedSettingsBlueprintPinned(s, bp, bpSettings)
+          // A stale placeholder settings.json (never the merged result), so
+          // bp_prospective_for's diff finds a difference and the file lands
+          // in the Drifted bucket — proof the merge chain ran to completion
+          // rather than being skipped as "missing in project" or refused.
+          await seedSettingsProjectPinned(s, proj, bp, sha, { settingsBody: settingsJson([]), layerBody })
+          return { root, proj, bp, env: { ...(await pullFixtureEnv(s, root)), BP_NO_PROMPT: '1' } }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.stdout).toContain('Drifted (project ≠ blueprint HEAD): 1')
       expect(oldResult.stdout).toContain('.claude/settings.json')
       expect(oldResult.stdout).not.toContain('Cannot sync')
@@ -2781,21 +2993,20 @@ describe('blueprint-port differential — settings layer merge and legacy propos
 
   it("the legacy-extra-rule proposal — settings.json (no layer) carries rules the blueprint doesn't ship (pull)", async () => {
     await scenario('blueprint-port-settings-proposal-pull', async (s) => {
-      const bp = await s.workspace.dir('bp')
       const bpSettings = settingsJson(['Bash(git status)'])
-      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
-      const proj = await s.workspace.dir('proj')
-      await seedSettingsProject(s, proj, bp, sha, {
-        settingsBody: settingsJson(['Bash(git status)', 'Bash(npm run build)']),
+      const { oldResult } = await samePathTwice<SettingsMergeFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedSettingsBlueprintPinned(s, bp, bpSettings)
+          await seedSettingsProjectPinned(s, proj, bp, sha, {
+            settingsBody: settingsJson(['Bash(git status)', 'Bash(npm run build)']),
+          })
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['pull'], fx.env) : runNew(s, fx.proj, ['pull'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
       })
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'])
-      expect(await walkFiles(proj), 'proposal refusal (OLD) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      const newResult = await runNew(s, proj, ['pull'])
-      expect(await walkFiles(proj), 'proposal refusal (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain("this project's settings.json carries permission rules of its own")
       expect(oldResult.stdout).toContain(
@@ -2807,16 +3018,20 @@ describe('blueprint-port differential — settings layer merge and legacy propos
 
   it("the legacy-extra-rule proposal — drift reports it under Cannot sync (drift)", async () => {
     await scenario('blueprint-port-settings-proposal-drift', async (s) => {
-      const bp = await s.workspace.dir('bp')
       const bpSettings = settingsJson(['Bash(git status)'])
-      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
-      const proj = await s.workspace.dir('proj')
-      await seedSettingsProject(s, proj, bp, sha, {
-        settingsBody: settingsJson(['Bash(git status)', 'Bash(npm run build)']),
+      const { oldResult } = await samePathTwice<SettingsMergeFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedSettingsBlueprintPinned(s, bp, bpSettings)
+          await seedSettingsProjectPinned(s, proj, bp, sha, {
+            settingsBody: settingsJson(['Bash(git status)', 'Bash(npm run build)']),
+          })
+          return { root, proj, bp, env: { ...(await pullFixtureEnv(s, root)), BP_NO_PROMPT: '1' } }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
       })
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
       expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
       expect(oldResult.stdout).toContain(".claude/settings.json — this project's settings.json carries permission rules of its own")
     })
@@ -2824,23 +3039,34 @@ describe('blueprint-port differential — settings layer merge and legacy propos
 
   it('jq missing from PATH — drift refuses the file, not a crash (drift)', async () => {
     await scenario('blueprint-port-settings-jq-missing-drift', async (s) => {
-      const bp = await s.workspace.dir('bp')
       const bpSettings = settingsJson(['Bash(git status)'])
-      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
-      const proj = await s.workspace.dir('proj')
-      await seedSettingsProject(s, proj, bp, sha, { settingsBody: settingsJson([]) })
-      // A fixed `date` (matching every other drift row's determinism) ahead
-      // of a jq-less copy of PATH on the SAME PATH string — pathWithout's
-      // own directory is a full real-PATH mirror, not a bare shim, so it
-      // already carries a real `date`; without pinning it, OLD's and NEW's
-      // "fetched: … at …" line could straddle a real second boundary and
-      // diverge on nothing but wall-clock timing.
-      const shims = await s.shimDir('jq-missing-date')
-      await shims.add('date', 'echo 2026-01-01T00:00:00Z')
-      const path = `${shims.dir}:${await s.pathWithout(['jq'])}`
-      const env = { BP_NO_PROMPT: '1', PATH: path }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<SettingsMergeFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedSettingsBlueprintPinned(s, bp, bpSettings)
+          await seedSettingsProjectPinned(s, proj, bp, sha, { settingsBody: settingsJson([]) })
+          return { root, proj, bp, env: await rowEnv(root) }
+        },
+        // `pathWithoutBin`/the date shim cannot be built inside `build` (no
+        // `side` there, and both farms are once-per-scenario workspace
+        // subdirectories, tagged by `side` here — same reason the finding-4
+        // rows above build theirs inside `run` too).
+        run: async (s, fx, side) => {
+          // A fixed `date` (matching every other drift row's determinism)
+          // ahead of a jq-less copy of PATH on the SAME PATH string —
+          // pathWithoutBin's own directory is a full real-PATH mirror, not a
+          // bare shim, so it already carries a real `date`; without pinning
+          // it, OLD's and NEW's "fetched: … at …" line could straddle a real
+          // second boundary and diverge on nothing but wall-clock timing.
+          const shims = await s.shimDir(`jq-missing-date-${side}`)
+          await shims.add('date', 'echo 2026-01-01T00:00:00Z')
+          const path = `${shims.dir}:${await pathWithoutBin(s, 'jq', `settings-jq-missing-${side}`)}`
+          const env = { ...fx.env, BP_NO_PROMPT: '1', PATH: path }
+          return side === 'old' ? runOld(s, fx.proj, ['drift'], env) : runNew(s, fx.proj, ['drift'], env)
+        },
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
       expect(oldResult.stdout).toContain('jq is not on PATH')
     })
@@ -3390,20 +3616,22 @@ interface A2bpRowResult {
  * (`buildA2bpFixture`), env-per-side hook and gh-log/`a2bp.*`-scratch
  * plumbing stay exactly as before; only the build→run→snapshot→delete→
  * rebuild→run→snapshot skeleton itself is now shared with drift/files/
- * staleness/fetch-failures rather than duplicated. `compareRuns: false`
- * because this describe compares stdout/stderr through
- * `normalizeA2bpScratch` first (plan §5's own named mktemp exception),
- * which the generic byte-equal default does not apply. TMPDIR is
- * deliberately left at the SCENARIO's own `tmp/` here, not a per-row one —
- * a2bp never touches `bpFetchBlueprint`'s cache (no `driftBoth`-style
- * cache-sharing bug to fix for it), and `assertNoA2bpScratch`'s existing
- * `a2bp.*` check already covers its own scratch prefix correctly at that
- * path. */
+ * staleness/fetch-failures rather than duplicated. The comparison is
+ * `samePathTwice`'s own default (`compareRuns` stays true, unset here) —
+ * TASK-081 round C — run through its `normalizeSnapshot` hook, which washes
+ * `a2bp.<scratch>`'s random mktemp suffix out of stdout/stderr (plan §5's
+ * own named exception) before the full snapshot (tree, refs, scratch check,
+ * gh log included) is compared byte-for-byte; nothing is skipped the way a
+ * `compareRuns: false` row would. TMPDIR is deliberately left at the
+ * SCENARIO's own `tmp/` here, not a per-row one — a2bp never touches
+ * `bpFetchBlueprint`'s cache (no `driftBoth`-style cache-sharing bug to fix
+ * for it), and `assertNoA2bpScratch`'s existing `a2bp.*` check already
+ * covers its own scratch prefix correctly at that path. */
 async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts: A2bpRowOptions = {}): Promise<A2bpRowResult> {
   const claudeText = opts.claudeText ?? '# CLAUDE\nfixture\nan improvement worth requesting\n'
   const scenarioTmp = join(s.workspace.root, 'tmp')
 
-  const { oldResult, newResult, oldSnapshot, newSnapshot } = await samePathTwice<A2bpFixture>(s, tag, {
+  const { oldResult, newResult } = await samePathTwice<A2bpFixture>(s, tag, {
     build: (s, root) => buildA2bpFixture(s, root, claudeText, opts.fixture),
     run: async (s, fx, side) => {
       const env = opts.env ? await opts.env(fx, side) : {}
@@ -3414,21 +3642,11 @@ async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts:
       tmp: scenarioTmp,
       ghLogPath: opts.ghLogRelPath ? join(fx.root, opts.ghLogRelPath) : undefined,
     }),
-    compareRuns: false,
-  })
-
-  expect(normalizeA2bpScratch(newResult.stdout)).toBe(normalizeA2bpScratch(oldResult.stdout))
-  expect(normalizeA2bpScratch(newResult.stderr)).toBe(normalizeA2bpScratch(oldResult.stderr))
-  expect(newResult.code).toBe(oldResult.code)
-  expect(newResult.signal).toBe(oldResult.signal)
-  // The snapshot's own stdout/stderr (a copy of `result`'s) still carry the
-  // unnormalised `a2bp.<scratch>` name a --dry-run preview line prints, so
-  // the same normaliser applies here too before the rest of the snapshot
-  // (project tree, refs, scratch check, gh log) is compared byte-for-byte.
-  expect({ ...newSnapshot, stdout: normalizeA2bpScratch(newSnapshot.stdout), stderr: normalizeA2bpScratch(newSnapshot.stderr) }).toEqual({
-    ...oldSnapshot,
-    stdout: normalizeA2bpScratch(oldSnapshot.stdout),
-    stderr: normalizeA2bpScratch(oldSnapshot.stderr),
+    normalizeSnapshot: (snap) => ({
+      ...snap,
+      stdout: normalizeA2bpScratch(snap.stdout),
+      stderr: normalizeA2bpScratch(snap.stderr),
+    }),
   })
 
   return { oldResult, newResult }
@@ -3881,16 +4099,21 @@ describe('blueprint-port differential — a2bp / prs', () => {
    * `stderr: 'ignore'`, silently swallowing this diagnostic outright — a
    * real divergence (CLAUDE.md's "no silent swallowing" rule), now
    * `stderr: 'inherit'`. What remains a NAMED, ACCEPTED divergence (plan §6
-   * already has one of this shape) is the exact WORDING: the shell's
-   * diagnostic is bash's own "scripts/blueprint: line 287: …", naming the
-   * CLI's real file and line, while the port's bridge runs the function
-   * through a SEPARATE `bash -c` subprocess, whose own diagnostic can only
-   * ever read "bash: line 1: …" — a different bash process reporting on
-   * itself, not something `run()` synthesizes and could be taught the CLI's
-   * shape. Stdout, the exit code and every snapshotted byte are still
-   * compared exactly; only this one stderr line is normalised (both sides'
-   * "<program>: line N: " prefix stripped before the message) — the one
-   * bash-line-number normalisation plan §5/§6 name outright.
+   * already has one of this shape) is the exact leading TOKEN — measured
+   * directly, neither side ever prints "line N:" here (the call sits where
+   * bash omits it, the same shape `_bp_retire`'s process-substitution rows
+   * hit), so the divergence is not finding-4's "line N:" at all: OLD's
+   * diagnostic names the real CLI path ("<proj>/scripts/blueprint: …"), bash
+   * reporting on itself, while the port's bridge invokes
+   * `bash -c '…' _ LIB ARGS…` (plan §4's own bridge shape) — bash's own
+   * convention for "no real $0 to give," so the bridge's inner "command not
+   * found" reads "_: …" verbatim, the literal placeholder, never something
+   * `run()` synthesizes or could teach the bridge the CLI's own path without
+   * reimplementing bash's diagnostic. Stdout, the exit code and every
+   * snapshotted byte are still compared exactly; only this one stderr line's
+   * leading token is normalised away — a second, row-specific normalisation
+   * on top of (not instead of) the file's shared `stripLinePrefix`, which
+   * stays narrow (line-N-only) here as everywhere else in this round.
    */
   it('finding 3 — scripts/lib/placeholders.sh missing, on a path that substitutes', async () => {
     await scenario('blueprint-port-a2bp-f3-no-placeholders', async (s) => {
@@ -3914,8 +4137,16 @@ describe('blueprint-port differential — a2bp / prs', () => {
       expect(newResult.stdout).toBe(oldResult.stdout)
       expect(newResult.code).toBe(oldResult.code)
       expect(newSnapshot).toEqual(oldSnapshot)
-      const stripLinePrefix = (t: string) => t.replace(/^\S+: line \d+: /gm, '')
-      expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
+      // Narrowed the same way as finding-4's own `stripLinePrefix` (TASK-081
+      // round C): strips ONLY "line N: ", never the leading program token —
+      // a no-op on this row's own stderr (neither side ever prints "line
+      // N:" here, see the block comment above), so the row's OWN divergence
+      // (the leading token itself, "_" vs the real CLI path) is stripped
+      // separately, right where it is used, rather than folded into the
+      // shared helper.
+      const stripLinePrefix = (t: string) => t.replace(/^(\S+: )line \d+: /gm, '$1')
+      const stripLeadingToken = (t: string) => t.replace(/^\S+: /gm, '')
+      expect(stripLeadingToken(stripLinePrefix(newResult.stderr))).toBe(stripLeadingToken(stripLinePrefix(oldResult.stderr)))
       expect(oldResult.stderr).toContain('bp_should_substitute: command not found')
       expect(newResult.stderr).toContain('bp_should_substitute: command not found')
     })

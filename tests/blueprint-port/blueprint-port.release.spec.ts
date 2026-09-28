@@ -319,15 +319,6 @@ function normalizeDiffHeaders(output: string): string {
     )
 }
 
-/** Like expectIdentical, but for a pull row whose preview includes a `diff
- * -u` block — stdout is compared after normalizeDiffHeaders. */
-function expectPullIdentical(oldResult: RunResult, newResult: RunResult): void {
-  expect(normalizeDiffHeaders(newResult.stdout)).toBe(normalizeDiffHeaders(oldResult.stdout))
-  expect(newResult.stderr).toBe(oldResult.stderr)
-  expect(newResult.code).toBe(oldResult.code)
-  expect(newResult.signal).toBe(oldResult.signal)
-}
-
 // --- generalised plan §5 comparison machinery, shared by drift AND pull ----
 //
 // Hoisted here (originally local to the a2bp/prs describe, where walkFiles
@@ -370,20 +361,6 @@ async function snapshotRefs(s: Scenario, dir: string): Promise<string> {
     .filter(Boolean)
     .sort()
     .join('\n')
-}
-
-/** Plan §5's "that no scratch is left", for drift/pull: `_bp_fetch_blueprint`'s
- * own scratch (`blueprint-sync.XXXXXXXX`) and any bare `mktemp` (`tmp.…`, the
- * shielded-write idiom) land under this scenario's own TMPDIR
- * (harness/index.ts's scenarioEnv) and must not survive the run. The a2bp
- * describe's own `assertNoA2bpScratch` covers the SAME directory for its own
- * `a2bp.…` prefix — kept separate there because that describe is not this
- * round's to touch. */
-async function assertNoDriftPullScratch(s: Scenario): Promise<void> {
-  const tmp = join(s.workspace.root, 'tmp')
-  const entries = await readdir(tmp).catch(() => [] as string[])
-  const leftover = entries.filter((e) => e.startsWith('blueprint-sync.') || e.startsWith('tmp.'))
-  expect(leftover, `drift/pull scratch left behind in ${tmp}: ${leftover.join(', ')}`).toEqual([])
 }
 
 /** `blueprint_remote = …` out of a project's `.blueprint-source`, or

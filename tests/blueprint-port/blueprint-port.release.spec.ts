@@ -3256,6 +3256,10 @@ interface A2bpSnapshot {
   readonly ghLog: string
 }
 
+/** Still called directly (not through `a2bpSamePathTwice`) by the one row
+ * below whose OLD/NEW invocations differ in more than env/args (finding 3:
+ * a file removed from each side's own fixture before that side's run) —
+ * kept exactly as before. */
 async function snapshotA2bp(s: Scenario, fx: A2bpFixture, ghLogPath?: string): Promise<A2bpSnapshot> {
   return {
     projTree: await walkFiles(fx.proj),
@@ -3269,7 +3273,8 @@ async function snapshotA2bp(s: Scenario, fx: A2bpFixture, ghLogPath?: string): P
  * (harness/index.ts's scenarioEnv), and a2bp's scratch clone is
  * `a2bp.XXXXXXXXXX` there (plan §5's own named mktemp exception — its
  * SUFFIX is unnormalised-but-ignored by virtue of not existing once the run
- * is done, never by pattern-stripping it out of compared text). */
+ * is done, never by pattern-stripping it out of compared text). Still called
+ * directly by the same row `snapshotA2bp` above serves. */
 async function assertNoA2bpScratch(s: Scenario): Promise<void> {
   const tmp = join(s.workspace.root, 'tmp')
   const entries = await readdir(tmp).catch(() => [] as string[])
@@ -3306,29 +3311,51 @@ interface A2bpRowResult {
   readonly newResult: RunResult
 }
 
+/** A thin wrapper over the shared `samePathTwice` (TASK-081 "differential
+ * harness to plan §5 exactly" round A) — this describe's own fixture
+ * (`buildA2bpFixture`), env-per-side hook and gh-log/`a2bp.*`-scratch
+ * plumbing stay exactly as before; only the build→run→snapshot→delete→
+ * rebuild→run→snapshot skeleton itself is now shared with drift/files/
+ * staleness/fetch-failures rather than duplicated. `compareRuns: false`
+ * because this describe compares stdout/stderr through
+ * `normalizeA2bpScratch` first (plan §5's own named mktemp exception),
+ * which the generic byte-equal default does not apply. TMPDIR is
+ * deliberately left at the SCENARIO's own `tmp/` here, not a per-row one —
+ * a2bp never touches `bpFetchBlueprint`'s cache (no `driftBoth`-style
+ * cache-sharing bug to fix for it), and `assertNoA2bpScratch`'s existing
+ * `a2bp.*` check already covers its own scratch prefix correctly at that
+ * path. */
 async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts: A2bpRowOptions = {}): Promise<A2bpRowResult> {
   const claudeText = opts.claudeText ?? '# CLAUDE\nfixture\nan improvement worth requesting\n'
-  const root = s.workspace.path(tag)
+  const scenarioTmp = join(s.workspace.root, 'tmp')
 
-  const fx1 = await buildA2bpFixture(s, root, claudeText, opts.fixture)
-  const env1 = opts.env ? await opts.env(fx1, 'old') : {}
-  const oldResult = await runOld(s, fx1.proj, ['a2bp', ...args], env1)
-  const oldSnapshot = await snapshotA2bp(s, fx1, opts.ghLogRelPath ? join(root, opts.ghLogRelPath) : undefined)
-  await assertNoA2bpScratch(s)
-
-  await rm(root, { recursive: true, force: true })
-
-  const fx2 = await buildA2bpFixture(s, root, claudeText, opts.fixture)
-  const env2 = opts.env ? await opts.env(fx2, 'new') : {}
-  const newResult = await runNew(s, fx2.proj, ['a2bp', ...args], env2)
-  const newSnapshot = await snapshotA2bp(s, fx2, opts.ghLogRelPath ? join(root, opts.ghLogRelPath) : undefined)
-  await assertNoA2bpScratch(s)
+  const { oldResult, newResult, oldSnapshot, newSnapshot } = await samePathTwice<A2bpFixture>(s, tag, {
+    build: (s, root) => buildA2bpFixture(s, root, claudeText, opts.fixture),
+    run: async (s, fx, side) => {
+      const env = opts.env ? await opts.env(fx, side) : {}
+      return side === 'old' ? runOld(s, fx.proj, ['a2bp', ...args], env) : runNew(s, fx.proj, ['a2bp', ...args], env)
+    },
+    snapshotOpts: (fx) => ({
+      remoteRefsDir: fx.bp,
+      tmp: scenarioTmp,
+      ghLogPath: opts.ghLogRelPath ? join(fx.root, opts.ghLogRelPath) : undefined,
+    }),
+    compareRuns: false,
+  })
 
   expect(normalizeA2bpScratch(newResult.stdout)).toBe(normalizeA2bpScratch(oldResult.stdout))
   expect(normalizeA2bpScratch(newResult.stderr)).toBe(normalizeA2bpScratch(oldResult.stderr))
   expect(newResult.code).toBe(oldResult.code)
   expect(newResult.signal).toBe(oldResult.signal)
-  expect(newSnapshot).toEqual(oldSnapshot)
+  // The snapshot's own stdout/stderr (a copy of `result`'s) still carry the
+  // unnormalised `a2bp.<scratch>` name a --dry-run preview line prints, so
+  // the same normaliser applies here too before the rest of the snapshot
+  // (project tree, refs, scratch check, gh log) is compared byte-for-byte.
+  expect({ ...newSnapshot, stdout: normalizeA2bpScratch(newSnapshot.stdout), stderr: normalizeA2bpScratch(newSnapshot.stderr) }).toEqual({
+    ...oldSnapshot,
+    stdout: normalizeA2bpScratch(oldSnapshot.stdout),
+    stderr: normalizeA2bpScratch(oldSnapshot.stderr),
+  })
 
   return { oldResult, newResult }
 }
@@ -3349,52 +3376,35 @@ async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts:
  * own `runBoth`.
  */
 describe('blueprint-port differential — drift config-shape refusals', () => {
-  async function seedFetchBlueprint(s: Scenario, dir: string): Promise<string> {
-    await mkdir(join(dir, 'docs'), { recursive: true })
-    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-    await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-    await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
-    await initRepo(s, dir)
-    await commitAll(s, dir, 'base')
-    return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
+  interface ConfigFixture extends SamePathTwiceFixture {
+    readonly bp?: string
+    readonly env: Record<string, string>
   }
 
-  async function runBoth(
-    s: Scenario,
-    proj: string,
-    args: string[],
-    env: Record<string, string>,
-  ): Promise<{ oldResult: RunResult; newResult: RunResult }> {
-    const treeBefore = await walkFiles(proj)
-    const oldResult = await runOld(s, proj, args, env)
-    expect(await walkFiles(proj), 'a config-shape refusal (OLD) must never write to the project tree').toEqual(
-      treeBefore,
-    )
-    await assertNoDriftPullScratch(s)
-    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-    const newResult = await runNew(s, proj, args, env)
-    expect(await walkFiles(proj), 'a config-shape refusal (NEW) must never write to the project tree').toEqual(
-      treeBefore,
-    )
-    await assertNoDriftPullScratch(s)
-    return { oldResult, newResult }
-  }
+  const runConfig = (s: Scenario, fx: ConfigFixture, side: 'old' | 'new'): Promise<RunResult> =>
+    side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)
+
+  const configSnapshotOpts = (fx: ConfigFixture): SnapshotOpts => (fx.bp ? { remote: fx.bp } : {})
 
   it('v1 config (no config_version): exit 4, names the lines to add', async () => {
     await scenario('blueprint-port-drift-config-v1', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // No config_version line at all — the pre-TASK-025 shape.
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `blueprint_remote = ${bp}\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // No config_version line at all — the pre-TASK-025 shape.
+          await writeFile(
+            join(proj, '.blueprint-source'),
+            `blueprint_remote = ${bp}\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+            'utf8',
+          )
+          return { root, proj, bp, env: await rowEnv(root) }
+        },
+        run: runConfig,
+        snapshotOpts: configSnapshotOpts,
+      })
       expect(oldResult.code).toBe(4)
       expect(oldResult.stderr).toContain('is a version 1 config')
     })

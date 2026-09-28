@@ -361,13 +361,19 @@ async function readBlueprintRemote(proj: string): Promise<string | undefined> {
 /** The on-disk path of `_bp_fetch_blueprint`'s per-remote cache
  * (scripts/blueprint:839-843: `$cache_root/blueprint-$(git hash-object
  * --stdin <<<remote).git`), replicated here rather than guessed — the key is
- * git's own `hash-object`, run for real against the SAME remote string. */
-async function bpCachePath(s: Scenario, remote: string): Promise<string> {
+ * git's own `hash-object`, run for real against the SAME remote string.
+ * `home` is the HOME a row's run actually used — every `samePathTwice` row
+ * that sets `snapshotOpts.remote` also builds its env from `rowEnv(root)`,
+ * whose HOME is `<root>/.row-home`, NOT this scenario's own `s.home`
+ * (TASK-081 round B: passing `s.home` here made every such row's cache-refs
+ * comparison silently vacuous — both sides read a cache that was never
+ * written at that path, "equal" only because both were equally wrong). */
+async function bpCachePath(s: Scenario, home: string, remote: string): Promise<string> {
   const r = await s.run('sh', ['-c', 'printf %s "$1" | git hash-object --stdin', '_', remote], {
     cwd: s.workspace.root,
   })
   const key = r.stdout.trim()
-  return join(s.home, '.cache', 'struct2flow', `blueprint-${key}.git`)
+  return join(home, '.cache', 'struct2flow', `blueprint-${key}.git`)
 }
 
 /** The cache's refs (plan §5's "the cache's refs"), or a fixed sentinel when
@@ -375,8 +381,8 @@ async function bpCachePath(s: Scenario, remote: string): Promise<string> {
  * never reaches the network (a refusal before `_bp_fetch_blueprint` runs)
  * legitimately has no cache to compare, and that absence must itself match
  * between OLD and NEW rather than being silently skipped. */
-async function bpCacheRefsOrSentinel(s: Scenario, remote: string): Promise<string> {
-  const cache = await bpCachePath(s, remote)
+async function bpCacheRefsOrSentinel(s: Scenario, home: string, remote: string): Promise<string> {
+  const cache = await bpCachePath(s, home, remote)
   if (!existsSync(cache)) return '<no cache created>'
   return snapshotRefs(s, cache)
 }
@@ -468,7 +474,7 @@ async function snapshot(s: Scenario, fx: SamePathTwiceFixture, result: RunResult
     stdout: normalizeDiffHeaders(result.stdout),
     stderr: result.stderr,
     projTree: await walkFiles(fx.proj),
-    cacheRefs: opts.remote ? await bpCacheRefsOrSentinel(s, opts.remote) : '<no remote>',
+    cacheRefs: opts.remote ? await bpCacheRefsOrSentinel(s, join(fx.root, '.row-home'), opts.remote) : '<no remote>',
     scratch,
     remoteRefs: opts.remoteRefsDir ? await snapshotRefs(s, opts.remoteRefsDir) : null,
     ghLog: opts.ghLogPath ? await readFile(opts.ghLogPath, 'utf8').catch(() => '') : null,
@@ -3678,85 +3684,100 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
  * fixture).
  */
 describe('blueprint-port differential — pull remaining rows', () => {
+  interface PullRemainingFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
+  }
+
   it('an unknown option dies after the fetch, same as today', async () => {
     await scenario('blueprint-port-pull-unknown-option', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'sync')
-      const env = await dateShimEnv(s)
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull', '--not-a-real-option'], env)
-      expect(await walkFiles(proj), 'unknown option (OLD) must write nothing').toEqual(treeBefore)
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullRemainingFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old'
+            ? runOld(s, fx.proj, ['pull', '--not-a-real-option'], fx.env)
+            : runNew(s, fx.proj, ['pull', '--not-a-real-option'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'unknown option (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'unknown option (NEW) must write nothing').toEqual(treeBefore)
+      expect(oldResult.code).not.toBe(0)
+      expect(oldResult.output).toContain('unknown option: --not-a-real-option')
       // NON-VACUITY: `cmd_pull` calls `read_blueprint_source` (which fetches)
       // BEFORE its own option loop, so the cache is populated even though
       // nothing in the CLI's OWN output says so (unlike drift, pull prints no
       // "blueprint: … fetched: …" report line at all) — checked directly
-      // against the cache `read_blueprint_source`'s fetch must have written.
+      // against the cache `read_blueprint_source`'s fetch must have written,
+      // on the surviving (NEW-side) build.
+      const root = s.workspace.path('root')
+      const proj = join(root, 'proj')
       const remote = await readBlueprintRemote(proj)
       expect(remote, 'the fixture must have registered a remote').toBeDefined()
-      expect(await bpCacheRefsOrSentinel(s, remote!), 'the fetch must have run before the option was rejected').not.toBe(
-        '<no cache created>',
-      )
-      const newResult = await runNew(s, proj, ['pull', '--not-a-real-option'], env)
-      expect(await walkFiles(proj), 'unknown option (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expectPullIdentical(oldResult, newResult)
-      expect(oldResult.code).not.toBe(0)
-      expect(oldResult.output).toContain('unknown option: --not-a-real-option')
+      expect(
+        await bpCacheRefsOrSentinel(s, join(root, '.row-home'), remote!),
+        'the fetch must have run before the option was rejected',
+      ).not.toBe('<no cache created>')
     })
   })
 
   it('a held file (refused mid-loop) leaves bootstrap_sha unchanged, even with a sibling successfully pulled', async () => {
     await scenario('blueprint-port-pull-held-file', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(
-        join(bp, 'CLAUDE.md'),
-        '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
-        'utf8',
-      )
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture v2\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      let baseSha = ''
+      const { oldResult } = await samePathTwice<PullRemainingFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(
+            join(bp, 'CLAUDE.md'),
+            '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
+            'utf8',
+          )
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture v2\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+          baseSha = sha
 
-      const oldProj = await s.workspace.dir('old')
-      const newProj = await s.workspace.dir('new')
-      for (const proj of [oldProj, newProj]) {
-        await seedRegisteredProject(s, proj, bp, sha)
-        // CLAUDE.md: an END with no open region — REFUSED, held back.
-        await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
-        // docs/DoD.md: plain drift — pulls cleanly.
-        await mkdir(join(proj, 'docs'), { recursive: true })
-        await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture v1\n', 'utf8')
-        await commitAll(s, proj, 'one refused, one drifted')
-      }
-      const env = await dateShimEnv(s)
-      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], env)
-      const newResult = await runNew(s, newProj, ['pull', '--yes'], env)
-      expectPullIdentical(oldResult, newResult)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // CLAUDE.md: an END with no open region — REFUSED, held back.
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
+          // docs/DoD.md: plain drift — pulls cleanly.
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture v1\n', 'utf8')
+          await commitAllPinned(s, proj, 'one refused, one drifted')
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       // BUG-034's own status: a guard-refused file makes the whole pull
       // return 4, same as a2bp's "a guard refused; nothing done" — even
       // though a SIBLING file did land (checked below).
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain('bootstrap_sha left unchanged — these files were not synced:')
-      const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
-      expect(oldSrc).toContain(`bootstrap_sha    = ${sha}`)
+      const proj = join(s.workspace.path('root'), 'proj')
+      const src = await readFile(join(proj, '.blueprint-source'), 'utf8')
+      expect(src).toContain(`bootstrap_sha    = ${baseSha}`)
       // NON-VACUITY: docs/DoD.md — the sibling that was NOT held — actually
       // landed, proving this is the "held" bucket and not merely the refused
       // row's own "nothing at all was pulled" shape.
-      expect(await readFile(join(oldProj, 'docs/DoD.md'), 'utf8')).toBe('# DoD\nfixture v2\n')
-      expect(await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')).toBe('# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n')
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      expect(await readFile(join(proj, 'docs/DoD.md'), 'utf8')).toBe('# DoD\nfixture v2\n')
+      expect(await readFile(join(proj, 'CLAUDE.md'), 'utf8')).toBe('# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n')
     })
   })
 })

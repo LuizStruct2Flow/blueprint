@@ -60,10 +60,27 @@
  *                  registered derived project).
  *   drift        — describe 'blueprint-port differential — drift' (clean,
  *                  drifted, new-in-blueprint, refused/BUG-034, unregistered,
- *                  not-a-project); "…'s fast-forward prompt" (y, N);
- *                  'settings-layer refusals' (P4's array/object/null/number
- *                  shapes on BOTH settings.json and the layer, plus the
- *                  drift-side refusal bucket); 'staleness states'
+ *                  not-a-project, `scripts/lib/gate.sh` missing, an exported
+ *                  `GIT_DIR` — this round's own reproducer AND fix: a bare
+ *                  `run('git', …)` inside `bpManagedFiles` read the wrong
+ *                  repository's tree under GIT_DIR, now routed through
+ *                  `bpGit` like every other blueprint-side read — a
+ *                  symlinked project directory, and a project name holding
+ *                  `&` and `\` — the `&` half is clean on both CLIs, the `\`
+ *                  half is Node's own ESM loader refusing an entry-point
+ *                  specifier with an encoded `\`, an accepted deviation this
+ *                  round documents rather than "fixes", since the real exec
+ *                  shim hits the identical wall for a project actually
+ *                  checked out under such a path); "…'s fast-forward prompt"
+ *                  (y, N); 'settings-layer refusals' (P4's array/object/
+ *                  null/number shapes on BOTH settings.json and the layer,
+ *                  plus the drift-side refusal bucket); 'settings layer
+ *                  merge and legacy proposal' (P4's "a layer present, which
+ *                  merges" — through pull, with the landed bytes compared,
+ *                  and through drift; "a legacy settings.json with extra
+ *                  rules, which produces the proposal text" — through pull
+ *                  and drift; "jq missing from PATH" through drift, pull's
+ *                  own row already lived in 'finding 4'); 'staleness states'
  *                  (current/ahead/diverged/unknown); 'fetch failures'
  *                  (unreachable, missing branch, no timeout binary,
  *                  hung/BP_FETCH_TIMEOUT, scratch uncreatable, damaged
@@ -74,19 +91,18 @@
  *                  missing-in-blueprint as its own row — the managed-set-diff
  *                  asymmetry with "new in blueprint", proven directly rather
  *                  than only asserted in prose).
- *                  NOT ROWS, with their reason: `scripts/lib/gate.sh`
- *                  missing, an exported `GIT_DIR`, a symlinked project
- *                  directory, and a project name holding `&`/`\` are each a
- *                  real gap in this file — none has a row here, and none is
- *                  proven at the unit tier either. Left open rather than
- *                  claimed.
+ *                  NOT ROWS: none — this round closed every gap this
+ *                  describe's header previously named.
  *   pull         — describe 'blueprint-port differential — pull' (nothing
  *                  to pull, full --yes, partial/BUG-016, non-TTY/BUG-018,
  *                  refused/BUG-034, `pull scripts/blueprint`, the y/N/q
  *                  interactive prompt); 'pull matrix' (backup-copy — with an
  *                  explicit `.bp-bak` bytes check, merge, retirement — with
- *                  an explicit kept-file bytes check, exec bit +x and -x);
- *                  'finding 1' (tool failures inside
+ *                  an explicit kept-file bytes check, PLUS retirement
+ *                  answered by a non-TTY (the "not interactive" refusal,
+ *                  exit 7) and by q (aborted, exit 0) — the only sub-case
+ *                  left unproven differentially before this round —, exec
+ *                  bit +x and -x); 'finding 1' (tool failures inside
  *                  bp_prospective_pull/marker_aware_merge/_bp_settings_layer);
  *                  'finding 4' (comm/cmp/diff absent, diff present-but-not-
  *                  executable, jq entirely missing); 'pull remaining rows'
@@ -95,11 +111,8 @@
  *                  fetch-report line the way drift does; a held/refused file
  *                  leaving bootstrap_sha unchanged even though a sibling
  *                  file WAS pulled, BUG-034's own exit 4).
- *                  NOT ROWS: retirement's non-TTY and q sub-cases (only y is
- *                  proven here — the shell suite's own pull-behaviour and
- *                  pull-exec-bit unit tests, referenced from the pull
- *                  matrix describe's own header, cover the refusal shapes at
- *                  the unit tier, not differentially). Left open.
+ *                  NOT ROWS: none — this round closed the retirement
+ *                  non-TTY/q gap this describe's header previously named.
  *   a2bp         — describe 'blueprint-port differential — a2bp / prs':
  *                  finding 2 (x2), finding 3, dry-run, no files given, not a
  *                  derived project, a required lib missing, contamination

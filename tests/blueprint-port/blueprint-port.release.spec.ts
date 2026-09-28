@@ -2331,6 +2331,197 @@ describe('blueprint-port differential — settings-layer refusals', () => {
 })
 
 /**
+ * blueprint-port differential — settings layer merge and legacy proposal
+ * (TASK-081 "drift/pull differential rows to completion" round, plan §3 P4's
+ * "a layer present, which merges" and "a legacy settings.json with extra
+ * rules, which produces the proposal text", plus P4's "jq missing from PATH"
+ * proven through `drift` — `pull`'s own jq-missing row already lives in the
+ * "finding 4" describe above).
+ *
+ * `_bp_settings_layer` is reached identically from `drift` and `pull` (both
+ * call `bp_prospective_for('.claude/settings.json', …)`), so the SUCCESS and
+ * PROPOSAL shapes are each proven once through `pull` — the cheapest call
+ * that exercises the whole chain — and once more through `drift`, to prove
+ * the same result reaches drift's own report shape (a Drifted/Cannot-sync
+ * bucket entry, not a crash or a silent skip).
+ */
+describe('blueprint-port differential — settings layer merge and legacy proposal', () => {
+  const settingsJson = (allow: string[], ask: string[] = [], deny: string[] = []) =>
+    `${JSON.stringify({ permissions: { allow, ask, deny } }, null, 2)}\n`
+
+  async function seedSettingsBlueprint(s: Scenario, dir: string, bpSettings: string): Promise<string> {
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
+    await mkdir(join(dir, '.claude'), { recursive: true })
+    await writeFile(join(dir, '.claude/settings.json'), bpSettings, 'utf8')
+    await initRepo(s, dir)
+    await commitAll(s, dir, 'base')
+    return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
+  }
+
+  async function seedSettingsProject(
+    s: Scenario,
+    dir: string,
+    bp: string,
+    sha: string,
+    opts: { settingsBody?: string | undefined; layerBody?: string | undefined },
+  ): Promise<void> {
+    await seedRegisteredProject(s, dir, bp, sha)
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await copyFile(join(bp, 'CLAUDE.md'), join(dir, 'CLAUDE.md'))
+    await copyFile(join(bp, 'docs/DoD.md'), join(dir, 'docs/DoD.md'))
+    await mkdir(join(dir, '.claude'), { recursive: true })
+    if (opts.settingsBody !== undefined) {
+      await writeFile(join(dir, '.claude/settings.json'), opts.settingsBody, 'utf8')
+    }
+    if (opts.layerBody !== undefined) {
+      await writeFile(join(dir, '.claude/settings.project.json'), opts.layerBody, 'utf8')
+    }
+    await commitAll(s, dir, 'settings fixture')
+  }
+
+  /** driftBoth's own shape (the 'drift' describe above), reimplemented here
+   * because that helper is local to its own describe — same reset-between-
+   * sides idiom, same plan §5 comparison. */
+  async function driftBoth(
+    s: Scenario,
+    proj: string,
+    env: Record<string, string>,
+  ): Promise<{ readonly oldResult: RunResult; readonly newResult: RunResult }> {
+    const treeBefore = await walkFiles(proj)
+    const oldResult = await runOld(s, proj, ['drift'], env)
+    expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+    await assertNoDriftPullScratch(s)
+    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+    const newResult = await runNew(s, proj, ['drift'], env)
+    expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
+    await assertNoDriftPullScratch(s)
+    return { oldResult, newResult }
+  }
+
+  it('a successful merge — the layer merges into the landed settings.json (pull)', async () => {
+    await scenario('blueprint-port-settings-merge-pull', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const bpSettings = settingsJson(['Bash(git status)'], [], ['Bash(rm -rf /)'])
+      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
+      const layerBody = `${JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }, null, 2)}\n`
+
+      const oldProj = await s.workspace.dir('merge-old')
+      const newProj = await s.workspace.dir('merge-new')
+      for (const proj of [oldProj, newProj]) {
+        await seedSettingsProject(s, proj, bp, sha, { layerBody })
+      }
+      const env = await dateShimEnv(s)
+      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], env)
+      const newResult = await runNew(s, newProj, ['pull', '--yes'], env)
+      expectPullIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(0)
+      const oldSettings = await readFile(join(oldProj, '.claude/settings.json'), 'utf8')
+      const newSettings = await readFile(join(newProj, '.claude/settings.json'), 'utf8')
+      expect(newSettings).toBe(oldSettings)
+      const merged = JSON.parse(oldSettings) as { permissions: { allow: string[]; deny: string[] } }
+      expect(merged.permissions.allow).toEqual(expect.arrayContaining(['Bash(git status)', 'Bash(npm test)']))
+      expect(merged.permissions.deny).toEqual(expect.arrayContaining(['Bash(rm -rf /)']))
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
+    })
+  })
+
+  it('a successful merge — drift reaches it too, not a refusal (drift)', async () => {
+    await scenario('blueprint-port-settings-merge-drift', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const bpSettings = settingsJson(['Bash(git status)'])
+      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
+      const layerBody = `${JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }, null, 2)}\n`
+      const proj = await s.workspace.dir('proj')
+      // A stale placeholder settings.json (never the merged result), so
+      // bp_prospective_for's diff finds a difference and the file lands in
+      // the Drifted bucket — proof the merge chain ran to completion rather
+      // than being skipped as "missing in project" or refused.
+      await seedSettingsProject(s, proj, bp, sha, { settingsBody: settingsJson([]), layerBody })
+      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
+      const { oldResult, newResult } = await driftBoth(s, proj, env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('Drifted (project ≠ blueprint HEAD): 1')
+      expect(oldResult.stdout).toContain('.claude/settings.json')
+      expect(oldResult.stdout).not.toContain('Cannot sync')
+    })
+  })
+
+  it("the legacy-extra-rule proposal — settings.json (no layer) carries rules the blueprint doesn't ship (pull)", async () => {
+    await scenario('blueprint-port-settings-proposal-pull', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const bpSettings = settingsJson(['Bash(git status)'])
+      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
+      const proj = await s.workspace.dir('proj')
+      await seedSettingsProject(s, proj, bp, sha, {
+        settingsBody: settingsJson(['Bash(git status)', 'Bash(npm run build)']),
+      })
+      const treeBefore = await walkFiles(proj)
+      const oldResult = await runOld(s, proj, ['pull'])
+      expect(await walkFiles(proj), 'proposal refusal (OLD) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      const newResult = await runNew(s, proj, ['pull'])
+      expect(await walkFiles(proj), 'proposal refusal (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stdout).toContain("this project's settings.json carries permission rules of its own")
+      expect(oldResult.stdout).toContain(
+        "Save the permission rules that are this project's own as .claude/settings.project.json",
+      )
+      expect(oldResult.stdout).toContain('Bash(npm run build)')
+    })
+  })
+
+  it("the legacy-extra-rule proposal — drift reports it under Cannot sync (drift)", async () => {
+    await scenario('blueprint-port-settings-proposal-drift', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const bpSettings = settingsJson(['Bash(git status)'])
+      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
+      const proj = await s.workspace.dir('proj')
+      await seedSettingsProject(s, proj, bp, sha, {
+        settingsBody: settingsJson(['Bash(git status)', 'Bash(npm run build)']),
+      })
+      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
+      const { oldResult, newResult } = await driftBoth(s, proj, env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
+      expect(oldResult.stdout).toContain(".claude/settings.json — this project's settings.json carries permission rules of its own")
+    })
+  })
+
+  it('jq missing from PATH — drift refuses the file, not a crash (drift)', async () => {
+    await scenario('blueprint-port-settings-jq-missing-drift', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const bpSettings = settingsJson(['Bash(git status)'])
+      const sha = await seedSettingsBlueprint(s, bp, bpSettings)
+      const proj = await s.workspace.dir('proj')
+      await seedSettingsProject(s, proj, bp, sha, { settingsBody: settingsJson([]) })
+      // A fixed `date` (matching every other drift row's determinism) ahead
+      // of a jq-less copy of PATH on the SAME PATH string — pathWithout's
+      // own directory is a full real-PATH mirror, not a bare shim, so it
+      // already carries a real `date`; without pinning it, OLD's and NEW's
+      // "fetched: … at …" line could straddle a real second boundary and
+      // diverge on nothing but wall-clock timing.
+      const shims = await s.shimDir('jq-missing-date')
+      await shims.add('date', 'echo 2026-01-01T00:00:00Z')
+      const path = `${shims.dir}:${await s.pathWithout(['jq'])}`
+      const env = { BP_NO_PROMPT: '1', PATH: path }
+      const { oldResult, newResult } = await driftBoth(s, proj, env)
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
+      expect(oldResult.stdout).toContain('jq is not on PATH')
+    })
+  })
+})
+
+/**
  * blueprint-port differential — staleness states under the BLUEPRINT_ROOT
  * override (plan §5's "staleness current/behind/ahead/diverged/unknown" row
  * group, Codex re-review finding 7). `reportStaleness`/`bp_staleness_assess`

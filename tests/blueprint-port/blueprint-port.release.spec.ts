@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { chmod, cp, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, cp, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { RunResult } from '../harness/process.js'
@@ -1868,14 +1868,13 @@ describe('blueprint-port differential — staleness states', () => {
  * scenario workspace already (the harness's own env scrub), so OLD and NEW
  * never share a blueprint-sync cache across the two runs.
  *
- * NOT YET A ROW HERE: damaged cache (plan §5's `bp_prospective_pull` sibling
- * row). Reaching it needs a WARM cache first (a successful drift, which
- * itself already exercises this exact fetch machinery end-to-end) and then
- * corrupting that cache's own git objects before a second drift reads it —
- * sync-by-address #27a's technique, non-differential today. Left for a
- * follow-up row rather than this pass: unlike the five below, it needs the
- * fetch path to succeed once before it can be broken, which is a materially
- * bigger fixture than any row in this group.
+ * The damaged-cache row below reuses sync-by-address #27a's technique: a
+ * WARM cache first (a successful drift, which already exercises this exact
+ * fetch machinery end-to-end), then a leftover per-run ref pinned at the
+ * tip PLUS the tip's root tree made loose and deleted — a refresh only
+ * re-verifies objects no ref already covers, so without the leftover ref
+ * git notices the gap on its own and heals the cache instead of reporting
+ * it damaged (observed while writing sync-by-address #27a).
  */
 describe('blueprint-port differential — fetch failures', () => {
   async function seedFetchBlueprint(s: Scenario, dir: string): Promise<string> {
@@ -2013,6 +2012,86 @@ describe('blueprint-port differential — fetch failures', () => {
       expect(oldResult.stderr).toContain('could not create a scratch directory')
       expect(existsSync(cacheRoot)).toBe(false)
       expect(await readFile(join(proj, '.blueprint-source'), 'utf8')).toBe(before)
+    })
+  })
+
+  it('a damaged cache exits 5, naming the cache and how to remove it', async () => {
+    await scenario('blueprint-port-fetch-damaged-cache', async (s) => {
+      const bp = await s.workspace.dir('bp')
+      const sha = await seedFetchBlueprint(s, bp)
+      const proj = await s.workspace.dir('proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      const cacheHome = s.workspace.path('cache-home')
+
+      // Warm the cache with a successful drift, then damage it exactly as
+      // sync-by-address #27a does, then drift again through the SAME cache.
+      async function warmThenDamage(runDrift: (env: Record<string, string>) => Promise<RunResult>): Promise<RunResult> {
+        const env = { XDG_CACHE_HOME: cacheHome }
+        const warm = await runDrift(env)
+        expect(warm.code, warm.output).toBe(0)
+
+        const cacheParent = join(cacheHome, 'struct2flow')
+        const cacheNames = (await readdir(cacheParent).catch(() => [] as string[])).filter(
+          (n) => n.startsWith('blueprint-') && n.endsWith('.git'),
+        )
+        expect(cacheNames, 'expected exactly one blueprint cache').toHaveLength(1)
+        const cache = join(cacheParent, cacheNames[0]!)
+
+        // A leftover per-run ref at the tip is the condition, not decoration:
+        // with it present the next refresh trusts the tip and skips
+        // connectivity-checking objects it already "has"; without it git
+        // would notice the gap on its own and refetch, healing the cache.
+        await s.run('git', ['--git-dir', cache, 'update-ref', 'refs/bp-run/blueprint-sync.0', sha], {
+          cwd: s.workspace.root,
+        })
+
+        // Every packed object loose, so a single deletion can target the
+        // tip's root tree specifically.
+        const packDir = join(cache, 'objects/pack')
+        for (const name of await readdir(packDir).catch(() => [] as string[])) {
+          if (!name.endsWith('.pack')) continue
+          const moved = s.workspace.path(`loose-${name}`)
+          await rename(join(packDir, name), moved)
+          const unpack = await s.run(
+            'sh',
+            ['-c', 'git --git-dir="$1" unpack-objects -q < "$2"', 'sh', cache, moved],
+            { cwd: s.workspace.root },
+          )
+          expect(unpack.code, unpack.output).toBe(0)
+        }
+        for (const name of await readdir(packDir).catch(() => [] as string[])) {
+          if (name.endsWith('.idx') || name.endsWith('.rev')) await rm(join(packDir, name), { force: true })
+        }
+
+        const treeR = await s.run('git', ['--git-dir', cache, 'rev-parse', `${sha}^{tree}`], {
+          cwd: s.workspace.root,
+        })
+        expect(treeR.code, treeR.output).toBe(0)
+        const tree = treeR.stdout.trim()
+        const object = join(cache, 'objects', tree.slice(0, 2), tree.slice(2))
+        expect(existsSync(object), 'the tree object is not loose, so deleting it proves nothing').toBe(true)
+        await rm(object)
+
+        return runDrift(env)
+      }
+
+      const oldResult = await warmThenDamage((env) => runOld(s, proj, ['drift'], env))
+      // Same reset `runBoth` uses above, plus resetting the cache directory
+      // itself so the NEW side gets its own independent warm-then-damage
+      // cycle through the identical cache PATH (same XDG_CACHE_HOME, same
+      // remote address), which is what lets a plain expectIdentical compare
+      // the two sides byte-for-byte despite the cache path being embedded in
+      // the error message.
+      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
+      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
+      await rm(cacheHome, { recursive: true, force: true })
+      const newResult = await warmThenDamage((env) => runNew(s, proj, ['drift'], env))
+
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(5)
+      expect(oldResult.stderr).toContain(`cache ${join(cacheHome, 'struct2flow')}`)
+      expect(oldResult.stderr).toContain('is damaged')
+      expect(oldResult.stderr).toContain('remove it (rm -rf')
     })
   })
 })

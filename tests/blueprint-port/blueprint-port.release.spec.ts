@@ -117,21 +117,58 @@
  *                  finding 2 (x2), finding 3, dry-run, no files given, not a
  *                  derived project, a required lib missing, contamination
  *                  BLOCK, gitleaks unavailable, gh unavailable, filed (exit
- *                  3, BUG-011 happy path). Every one of these ten now goes
- *                  through `a2bpSamePathTwice` except the two that die
- *                  before touching the blueprint at all (no files given,
- *                  not a derived project), which need no rebuild because
- *                  nothing about their output is fixture-path-dependent.
- *                  NOT ROWS: `--force`; an unknown a2bp option; staging
- *                  rc 3; GNU diff missing; an unshipped path; the remote
- *                  moving once, then twice (tests/a2bp-e2e proves these
- *                  shell-side, not differentially). Left open.
- *   prs          — 'prs — empty, a listing, and a gh query failure'
- *                  (INCOMPLETE, not empty).
- *                  NOT ROWS: a draft PR; orphan branches (none listed, as
- *                  today, per plan §5's own note that this is the SAME
- *                  "none exist yet" state as everywhere else in this repo).
- *                  Left open.
+ *                  3, BUG-011 happy path); PLUS, closing this round's own
+ *                  gap: '--force is refused, as today' (exit 1); 'an unknown
+ *                  option dies before any remote contact' (exit 1); 'nothing
+ *                  to request — the project file already matches the base'
+ *                  (BP_RC_NOTHING, exit 6 — the one BP_RC_* code no prior row
+ *                  covered); 'staging rc 3 — a project name containing the
+ *                  raw {{PROJECT_NAME}} token breaks the round-trip' (exit
+ *                  4 — the round-trip check is, by construction, a fixed
+ *                  point for ordinary content; the ONE way to break it is a
+ *                  project directory basename that embeds the literal token
+ *                  text, reproduced end to end and confirmed byte-identical
+ *                  against both CLIs before this row was written); 'GNU diff
+ *                  missing — staging refuses with its own message' (rc 2,
+ *                  exit 4); 'an unshipped path (TASK-037) — filed and marked
+ *                  "not shipped" in the run and the PR body' (exit 3); 'the
+ *                  remote moving ONCE — the pre-push re-check rebuilds and
+ *                  files against the new base' and 'the remote moving TWICE
+ *                  — refused after exactly one rebuild, no request branch
+ *                  pushed' (BUG-108, adapting tests/a2bp-e2e #12/#12b's
+ *                  git-race shim onto `a2bpSamePathTwice`, with the shim's
+ *                  own "moved" commit pinned to PINNED_GIT_DATE so its SHA
+ *                  does not differ between the OLD run and the NEW rebuild).
+ *                  Every row in this describe now goes through
+ *                  `a2bpSamePathTwice` except the two that die before
+ *                  touching the blueprint at all (no files given, not a
+ *                  derived project), which need no rebuild because nothing
+ *                  about their output is fixture-path-dependent.
+ *                  EXIT-CODE AUDIT (plan §3 P5's own list): every BP_RC_*
+ *                  code now has a row — OK=0 (dry-run), PENDING=3 (filed,
+ *                  unshipped, move-once), BLOCKED=4 (not-a-project,
+ *                  contamination, gitleaks, staging-rc3, GNU-diff-missing),
+ *                  FAILED=5 (gh unavailable, move-twice), NOTHING=6 (nothing
+ *                  to request). Nothing is missing.
+ *                  NOT ROWS: none — this round closed every gap this
+ *                  describe's header previously named.
+ *   prs          — 'prs — empty, a listing, and a gh query failure' (an
+ *                  empty listing, then a listing, then INCOMPLETE-not-empty
+ *                  — the INCOMPLETE case already covers "gh erroring", plan
+ *                  §5's own row of that name); PLUS, closing this round's own
+ *                  gap: 'prs — gh is not installed: die before any remote
+ *                  contact'; 'prs — a draft PR in the listing is marked
+ *                  [draft]'; 'prs — orphan branches: none listed, as today
+ *                  (dead code, plan §3 P5)' — a REAL pushed `a2bp/*` branch
+ *                  with no open PR, reproducing byte for byte that the
+ *                  "Pushed branches with no open PR:" section never prints
+ *                  on either CLI (cmd_prs sources only request-config.sh,
+ *                  never request.sh — the function the orphan section calls
+ *                  is undefined there, confirmed directly against both CLIs
+ *                  before this row was written, `.scratch/rc3-e2e` in this
+ *                  worktree).
+ *                  NOT ROWS: none — this round closed every gap this
+ *                  describe's header previously named.
  *
  * Signals are not differential rows (plan §5's own words) — they are
  * tests/sync-by-address #20-#23c, run against the port.
@@ -140,7 +177,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
 import { chmod, cp, copyFile, mkdir, readdir, readFile, readlink, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { RunResult } from '../harness/process.js'
 import { withCttyAnswer, withCttyNoStdin } from '../helpers/tty.js'
@@ -2977,19 +3014,41 @@ interface A2bpFixture {
   readonly proj: string
 }
 
+/** Extra fixture shape a handful of the TASK-081 "a2bp/prs last rows" need,
+ * beyond the CLAUDE.md-only default: `projDirName` for a project whose
+ * directory basename (the value a2bp reverse-substitutes proj_name against)
+ * is itself pathological, and `bpExtraFiles`/`bpGitattributes`/`projExtraFiles`
+ * for the "unshipped path" row's `templates/`, export-ignored in the base. */
+interface A2bpFixtureOptions {
+  readonly projDirName?: string
+  readonly bpExtraFiles?: Record<string, string>
+  readonly bpGitattributes?: string
+  readonly projExtraFiles?: Record<string, string>
+}
+
 /** Builds `root/bp` (the blueprint remote) and `root/proj` (a registered
  * project, with the real `scripts/` tree so a2bp's own lib-loading runs for
  * real), both with pinned commits. Called twice per row, at the SAME `root`,
  * with the SAME `claudeText` — so the two builds are byte-identical modulo
  * nothing. */
-async function buildA2bpFixture(s: Scenario, root: string, claudeText: string): Promise<A2bpFixture> {
+async function buildA2bpFixture(
+  s: Scenario,
+  root: string,
+  claudeText: string,
+  fxOpts: A2bpFixtureOptions = {},
+): Promise<A2bpFixture> {
   const bp = join(root, 'bp')
-  const proj = join(root, 'proj')
+  const proj = join(root, fxOpts.projDirName ?? 'proj')
 
   await mkdir(join(bp, 'docs'), { recursive: true })
   await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
   await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
   await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+  for (const [rel, content] of Object.entries(fxOpts.bpExtraFiles ?? {})) {
+    await mkdir(join(bp, dirname(rel)), { recursive: true })
+    await writeFile(join(bp, rel), content, 'utf8')
+  }
+  if (fxOpts.bpGitattributes) await writeFile(join(bp, '.gitattributes'), fxOpts.bpGitattributes, 'utf8')
   await initRepo(s, bp)
   await commitAllPinned(s, bp, 'base')
   const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
@@ -3010,6 +3069,10 @@ async function buildA2bpFixture(s: Scenario, root: string, claudeText: string): 
   // every row exercises "nothing to request" (BP_RC_NOTHING) instead of the
   // path it means to prove.
   await writeFile(join(proj, 'CLAUDE.md'), claudeText, 'utf8')
+  for (const [rel, content] of Object.entries(fxOpts.projExtraFiles ?? {})) {
+    await mkdir(join(proj, dirname(rel)), { recursive: true })
+    await writeFile(join(proj, rel), content, 'utf8')
+  }
   await commitAllPinned(s, proj, 'edit')
 
   return { root, bp, proj }
@@ -3062,6 +3125,9 @@ interface A2bpRowOptions {
   /** When the row uses a gh shim that logs its own argv, the path that shim
    * writes to (relative to `fx.root`) — snapshotted as part of the compare. */
   readonly ghLogRelPath?: string
+  /** Non-default fixture shape (a pathological project directory name, or
+   * extra files/`.gitattributes` on the base) — see `A2bpFixtureOptions`. */
+  readonly fixture?: A2bpFixtureOptions
 }
 
 interface A2bpRowResult {
@@ -3073,7 +3139,7 @@ async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts:
   const claudeText = opts.claudeText ?? '# CLAUDE\nfixture\nan improvement worth requesting\n'
   const root = s.workspace.path(tag)
 
-  const fx1 = await buildA2bpFixture(s, root, claudeText)
+  const fx1 = await buildA2bpFixture(s, root, claudeText, opts.fixture)
   const env1 = opts.env ? await opts.env(fx1, 'old') : {}
   const oldResult = await runOld(s, fx1.proj, ['a2bp', ...args], env1)
   const oldSnapshot = await snapshotA2bp(s, fx1, opts.ghLogRelPath ? join(root, opts.ghLogRelPath) : undefined)
@@ -3081,7 +3147,7 @@ async function a2bpSamePathTwice(s: Scenario, tag: string, args: string[], opts:
 
   await rm(root, { recursive: true, force: true })
 
-  const fx2 = await buildA2bpFixture(s, root, claudeText)
+  const fx2 = await buildA2bpFixture(s, root, claudeText, opts.fixture)
   const env2 = opts.env ? await opts.env(fx2, 'new') : {}
   const newResult = await runNew(s, fx2.proj, ['a2bp', ...args], env2)
   const newSnapshot = await snapshotA2bp(s, fx2, opts.ghLogRelPath ? join(root, opts.ghLogRelPath) : undefined)
@@ -3455,6 +3521,50 @@ describe('blueprint-port differential — a2bp / prs', () => {
     return dir
   }
 
+  /** TASK-081 "a2bp/prs last rows" — the "remote moving" technique
+   * `tests/a2bp-e2e` #12/#12b prove shell-side, adapted onto
+   * `a2bpSamePathTwice`'s same-path-twice fixture: a `git` PATH shim that
+   * forwards every invocation to the REAL git, then — once the forwarded
+   * call was a `fetch` — advances `fx.bp`'s `main` by one pinned commit.
+   * `onceOnly` selects between #12's shape (a stamp file gates the move to
+   * once) and #12b's (no stamp — every fetch moves it again, including the
+   * one the pre-push re-check's own rebuild triggers). Built fresh per side
+   * via `tag`, same rule every other fault-injection shim here follows. */
+  async function movingRemoteGitShim(
+    s: Scenario,
+    fx: A2bpFixture,
+    tag: string,
+    onceOnly: boolean,
+  ): Promise<Awaited<ReturnType<Scenario['shimDir']>>> {
+    const real = await realBinPath(s, 'git')
+    const shims = await s.shimDir(tag)
+    const stamp = join(s.workspace.root, `${tag}.moved.stamp`)
+    const guard = onceOnly ? `[ "$fetching" = 1 ] && [ ! -e ${JSON.stringify(stamp)} ]` : '[ "$fetching" = 1 ]'
+    const stampLine = onceOnly ? `  : > ${JSON.stringify(stamp)}\n` : ''
+    await shims.add(
+      'git',
+      `fetching=0\n` +
+        `for a in "$@"; do\n  [ "$a" = fetch ] && fetching=1\ndone\n` +
+        `${JSON.stringify(real)} "$@"\n` +
+        `rc=$?\n` +
+        `if ${guard}; then\n` +
+        stampLine +
+        // Pinned author/committer date and identity — plan §5's own "same
+        // path, twice" precondition (this file's PINNED_GIT_DATE, already
+        // used by commitAllPinned): an unpinned commit-tree here would give
+        // the "moved" commit a wall-clock timestamp, so its SHA — and every
+        // downstream request SHA the port builds against it — would differ
+        // between the OLD run and the NEW rebuild, breaking the compare on
+        // grounds that have nothing to do with the port.
+        `  t=$(${JSON.stringify(real)} -C ${JSON.stringify(fx.bp)} rev-parse 'main^{tree}')\n` +
+        `  c=$(GIT_AUTHOR_NAME=e GIT_AUTHOR_EMAIL=e@l GIT_AUTHOR_DATE=${JSON.stringify(PINNED_GIT_DATE)} GIT_COMMITTER_NAME=e GIT_COMMITTER_EMAIL=e@l GIT_COMMITTER_DATE=${JSON.stringify(PINNED_GIT_DATE)} ${JSON.stringify(real)} -C ${JSON.stringify(fx.bp)} -c commit.gpgsign=false commit-tree "$t" -p main -m 'the blueprint moved')\n` +
+        `  ${JSON.stringify(real)} -C ${JSON.stringify(fx.bp)} update-ref refs/heads/main "$c"\n` +
+        `fi\n` +
+        `exit $rc\n`,
+    )
+    return shims
+  }
+
   /**
    * Codex review finding 2 (TASK-081, commit 1ced574's body) — a2bp's
    * `bp_file_base_content` call (scripts/blueprint:1944) and its
@@ -3673,6 +3783,215 @@ describe('blueprint-port differential — a2bp / prs', () => {
       })
       expect(oldResult.code).toBe(3)
       expect(oldResult.stdout).toContain('✓ request filed: https://github.com/example/repo/pull/1')
+    })
+  })
+
+  // --- TASK-081 "a2bp/prs last rows" (plan §5's remaining a2bp/prs matrix
+  // cells) — the eight rows below, plus the exit-code audit in their own
+  // comment, close out the a2bp "NOT ROWS" list this file's header used to
+  // carry. Every one goes through `a2bpSamePathTwice`, same as the ten above.
+
+  it('--force is refused, as today (the flag is gone, not silently ignored)', async () => {
+    await scenario('blueprint-port-a2bp-force', async (s) => {
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-force', ['--force', 'CLAUDE.md'])
+      expect(oldResult.code).toBe(1)
+      expect(oldResult.stderr).toContain('--force is gone')
+    })
+  })
+
+  it('an unknown option dies before any remote contact', async () => {
+    await scenario('blueprint-port-a2bp-unknown-opt', async (s) => {
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-unknown-opt', ['--nope', 'CLAUDE.md'])
+      expect(oldResult.code).toBe(1)
+      expect(oldResult.stderr).toContain('unknown option: --nope')
+    })
+  })
+
+  it('nothing to request — the project file already matches the base (BP_RC_NOTHING, exit 6)', async () => {
+    await scenario('blueprint-port-a2bp-nothing', async (s) => {
+      // The default `claudeText` (every other row's fixture) is chosen
+      // specifically to DIFFER from the blueprint's own copy — see
+      // buildA2bpFixture's own comment. This row inverts that on purpose: an
+      // IDENTICAL copy is exactly BP_RC_NOTHING's own precondition.
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-nothing', ['CLAUDE.md'], {
+        claudeText: '# CLAUDE\nfixture\n',
+      })
+      expect(oldResult.code).toBe(6)
+      expect(oldResult.stdout).toContain('Nothing to request.')
+    })
+  })
+
+  /**
+   * Staging's round-trip check (contamination.sh's `contamination_stage`,
+   * scripts/blueprint:1954's rc-3 branch) is, by construction, almost
+   * impossible to fail on ordinary content: every RESTORED line is either the
+   * project's own byte-identical text (an insert) or a blueprint line whose
+   * forward substitution is EXACTLY what got aligned to it — so restoring it
+   * and substituting again reproduces that same aligned value, no matter
+   * which of several identical-value occurrences the alignment picked. The
+   * one gap: `bp_substitute_stream` is a SINGLE PASS, so if the project's own
+   * NAME contains the raw token text `{{PROJECT_NAME}}` as a substring, the
+   * value it substitutes TO still contains an unresolved token — and the
+   * verifier's second pass over the PROJECT's own (already-once-substituted)
+   * bytes resolves that leftover token a second time, while the staged
+   * side's own second pass does not re-encounter it the same way. Confirmed
+   * directly against both CLIs before writing this row (rc=3 on the shell,
+   * identical "reject … (staging failed)" / "Round-trip check failed" text
+   * and exit 4 on the port, `.scratch/rc3-e2e` in this worktree).
+   */
+  it('staging rc 3 — a project name containing the raw {{PROJECT_NAME}} token breaks the round-trip', async () => {
+    await scenario('blueprint-port-a2bp-stage-rc3', async (s) => {
+      const projDirName = 'acme{{PROJECT_NAME}}corp'
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-stage-rc3', ['CLAUDE.md'], {
+        claudeText: '# CLAUDE\nHello acme{{PROJECT_NAME}}corp world\n',
+        fixture: {
+          projDirName,
+          bpExtraFiles: { 'CLAUDE.md': '# CLAUDE\nHello {{PROJECT_NAME}} world\n' },
+        },
+      })
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stdout).toContain('reject')
+      expect(oldResult.stdout).toContain('(staging failed)')
+      expect(oldResult.stdout).toContain('Round-trip check failed')
+    })
+  })
+
+  it('GNU diff missing — staging refuses with its own message (rc 2), exit 4', async () => {
+    await scenario('blueprint-port-a2bp-nodiff', async (s) => {
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-nodiff', ['CLAUDE.md'], {
+        env: async (_fx, side) => ({ PATH: await pathWithoutBin(s, 'diff', `nodiff-${side}`) }),
+      })
+      expect(oldResult.code).toBe(4)
+      expect(oldResult.stdout).toContain('(staging failed)')
+      expect(oldResult.stdout).toContain('GNU diffutils')
+    })
+  })
+
+  it('an unshipped path (TASK-037) — filed and marked "not shipped" in the run and the PR body', async () => {
+    await scenario('blueprint-port-a2bp-unshipped', async (s) => {
+      const ghScript =
+        'printf \'%s\\n\' "$*" >> "$A2BP_GH_LOG"\n' +
+        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/7" ;;\n  *) exit 1 ;;\nesac\n'
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-unshipped', ['templates/seed.md'], {
+        ghLogRelPath: 'gh-argv.log',
+        fixture: {
+          bpExtraFiles: { 'templates/seed.md': '# Seed\noriginal seed\n' },
+          bpGitattributes: 'templates/   export-ignore\n',
+          projExtraFiles: { 'templates/seed.md': '# Seed\nIMPROVED seed\n' },
+        },
+        env: async (fx, side) => {
+          const shims = await s.shimDir(`unshipped-gh-${side}`)
+          await shims.add('gh', ghScript)
+          return { PATH: shims.path(), A2BP_GH_LOG: join(fx.root, 'gh-argv.log') }
+        },
+      })
+      expect(oldResult.code).toBe(3)
+      expect(oldResult.stdout).toContain('not shipped')
+      expect(oldResult.stdout).toContain('✓ request filed: https://github.com/example/repo/pull/7')
+    })
+  })
+
+  it('the remote moving ONCE — the pre-push re-check rebuilds and files against the new base (BUG-108)', async () => {
+    await scenario('blueprint-port-a2bp-move-once', async (s) => {
+      const ghScript =
+        'printf \'%s\\n\' "$*" >> "$A2BP_GH_LOG"\n' +
+        'case "$1 $2" in\n  "pr list") echo "" ;;\n  "pr create") echo "https://github.com/example/repo/pull/9" ;;\n  *) exit 1 ;;\nesac\n'
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-move-once', ['CLAUDE.md'], {
+        ghLogRelPath: 'gh-argv.log',
+        env: async (fx, side) => {
+          const gitShims = await movingRemoteGitShim(s, fx, `move1-git-${side}`, true)
+          const ghShims = await s.shimDir(`move1-gh-${side}`)
+          await ghShims.add('gh', ghScript)
+          return { PATH: `${ghShims.dir}:${gitShims.path()}`, A2BP_GH_LOG: join(fx.root, 'gh-argv.log') }
+        },
+      })
+      expect(oldResult.code).toBe(3)
+      expect(oldResult.stdout).toContain('The blueprint moved while this request was being built — rebuilding once.')
+      expect(oldResult.stdout).toContain('✓ request filed: https://github.com/example/repo/pull/9')
+    })
+  })
+
+  it('the remote moving TWICE — refused after exactly one rebuild, no request branch pushed (BUG-108)', async () => {
+    await scenario('blueprint-port-a2bp-move-twice', async (s) => {
+      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-move-twice', ['CLAUDE.md'], {
+        env: async (fx, side) => ({ PATH: (await movingRemoteGitShim(s, fx, `move2-git-${side}`, false)).path() }),
+      })
+      expect(oldResult.code).toBe(5)
+      expect(oldResult.stdout).toContain('The blueprint moved again. Re-run when it settles.')
+    })
+  })
+
+  // Every BP_RC_* code P5 names (plan §3 P5's own list) now has at least one
+  // differential row in this describe: OK=0 (dry-run), PENDING=3 (filed,
+  // unshipped, move-once), BLOCKED=4 (not-a-project, contamination,
+  // gitleaks, staging-rc3, GNU-diff-missing), FAILED=5 (gh unavailable,
+  // move-twice), NOTHING=6 (this round's own "nothing to request" row —
+  // the one code with no prior row). Nothing is missing.
+
+  it('prs — gh is not installed: die before any remote contact', async () => {
+    await scenario('blueprint-port-prs-no-gh', async (s) => {
+      const bp = await s.workspace.dir('prs-nogh-bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('prs-nogh-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+      const noGh = await pathWithoutBin(s, 'gh', 'prs-no-gh')
+      const oldResult = await runOld(s, proj, ['prs'], { PATH: noGh })
+      const newResult = await runNew(s, proj, ['prs'], { PATH: noGh })
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(1)
+      expect(oldResult.stderr).toContain('gh is not installed — cannot list requests')
+    })
+  })
+
+  it('prs — a draft PR in the listing is marked [draft]', async () => {
+    await scenario('blueprint-port-prs-draft', async (s) => {
+      const bp = await s.workspace.dir('prs-draft-bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      const proj = await s.workspace.dir('prs-draft-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+
+      const draftGh = await s.shimDir('prs-draft-gh')
+      await draftGh.add(
+        'gh',
+        'case "$1 $2" in\n' +
+          '  "pr list") printf \'7\\ta2bp/proj-b/cafef00d\\t2026-02-03T04:05:06Z\\ttrue\\thttps://github.com/example/repo/pull/7\\n\' ;;\n' +
+          '  *) exit 1 ;;\n' +
+          'esac\n',
+      )
+      const oldResult = await runOld(s, proj, ['prs'], { PATH: draftGh.path() })
+      const newResult = await runNew(s, proj, ['prs'], { PATH: draftGh.path() })
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stdout).toContain('#7')
+      expect(oldResult.stdout).toContain('[draft]')
+    })
+  })
+
+  /**
+   * plan §3 P5: `cmd_prs` sources only `request-config.sh`, never
+   * `request.sh` — so its orphan-branches section (which calls
+   * `bp_request_transport_env`, a `request.sh`-only function) hits "command
+   * not found" (127), hidden by `2>/dev/null … || true`. The listing NEVER
+   * prints, on either CLI, even with a real pushed `a2bp/*` branch on the
+   * remote that no PR covers — dead code, reproduced byte for byte rather
+   * than "fixed" (this round is a port, not a bug fix; the shell's own
+   * comment at scripts/blueprint:2210-2214 already names the follow-up bug).
+   */
+  it('prs — orphan branches: none listed, as today (dead code, plan §3 P5)', async () => {
+    await scenario('blueprint-port-prs-orphans', async (s) => {
+      const bp = await s.workspace.dir('prs-orphan-bp')
+      const sha = await seedBlueprintRepo(s, bp)
+      await git(s, bp, ['branch', 'a2bp/proj-a/deadbeef'])
+      const proj = await s.workspace.dir('prs-orphan-proj')
+      await seedRegisteredProject(s, proj, bp, sha)
+
+      const emptyGh = await s.shimDir('prs-orphan-gh')
+      await emptyGh.add('gh', 'case "$1 $2" in\n  "pr list") echo "" ;;\n  *) exit 1 ;;\nesac\n')
+      const oldResult = await runOld(s, proj, ['prs'], { PATH: emptyGh.path() })
+      const newResult = await runNew(s, proj, ['prs'], { PATH: emptyGh.path() })
+      expectIdentical(oldResult, newResult)
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stdout).not.toContain('Pushed branches with no open PR')
     })
   })
 

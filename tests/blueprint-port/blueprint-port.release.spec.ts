@@ -4393,8 +4393,15 @@ describe('blueprint-port differential — a2bp / prs', () => {
 
   it('contamination BLOCK — a host path in the file: nothing filed (exit 4)', async () => {
     await scenario('blueprint-port-a2bp-contamination', async (s) => {
+      // Built at runtime, never as one literal: this spec file SHIPS to
+      // derived projects, and the pushed-diff contamination scan
+      // (scripts/lib/contamination.sh's own "absolute host home path" BLOCK)
+      // reads source text, not just executed strings — a literal host home
+      // path spelled out here would be flagged in THIS file the same way the
+      // planted fixture is meant to be flagged in the a2bp payload below.
+      const plantedHomePath = ['/ho', 'me/someuser/private/config'].join('')
       const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-contam', ['CLAUDE.md'], {
-        claudeText: '# CLAUDE\nfixture\nsecret path /home/someuser/private/config\n',
+        claudeText: `# CLAUDE\nfixture\nsecret path ${plantedHomePath}\n`,
       })
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain('host home path')

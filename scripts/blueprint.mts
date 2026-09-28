@@ -1271,8 +1271,10 @@ export interface Prospective {
   // The shell's `bp_prospective_pull`/`bp_prospective_for` is a bash FUNCTION
   // whose own return status is its LAST command's exit status — for
   // 'refuse' that is an explicit `return 1`, for 'merge' it is the always-
-  // succeeding `BP_PP_MODE=merge` assignment (0), and for every cp-writing
-  // branch ('new', 'copy', 'backup-copy') it is THAT `cp`'s own exit status.
+  // succeeding `BP_PP_MODE=merge` assignment (0), and for the 'copy' and
+  // 'backup-copy' branches it is THAT `cp`'s own exit status. The 'new'
+  // branch is the odd one out: it has an explicit `return 0` after `cp`, so
+  // with errexit disabled a failed copy still returns success.
   // Every one of the three call sites (drift :1394, selection :1572, the
   // same-check at :1639) decides on THIS status, never on BP_PP_MODE alone —
   // `if ! bp_prospective_for …`. `ok` is that status, exposed as a field
@@ -1301,8 +1303,11 @@ export async function bpProspectivePull(bp: string, proj: string, out: string): 
     }
   }
   if (!projExists) {
-    const r = await run('cp', [bp, out])
-    return { mode: 'new', why: '', detail: '', ok: r.status === 0 }
+    await run('cp', [bp, out])
+    // The shell explicitly `return 0`s after this cp. Under unchecked(), a
+    // failed cp therefore leaves an empty output but the function succeeds;
+    // outside unchecked(), run() still throws before reaching this return.
+    return { mode: 'new', why: '', detail: '', ok: true }
   }
   if (bs === 'none' && ps === 'none') {
     const r = await run('cp', [bp, out])
@@ -2399,15 +2404,11 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
 // request-build.sh, request-config.sh, request-inputs.sh, request-file.sh),
 // so it ports as straight-line TypeScript over bridge calls into the SAME
 // shell functions — the libs are not reimplemented, only called (plan §4).
-// `reqLib` sources placeholders.sh alongside the six: the real CLI sources
-// placeholders.sh at top level for every subcommand (scripts/blueprint:55-62),
-// and contamination_stage calls bp_substitute_stream INTERNALLY, so a bridge
-// that omitted it would make every staging call fail differently than the
-// real CLI ever does. A handful of purely mechanical wrappers around `git`/
-// `gh` (bp_file_remote_tip, bp_file_push, bp_file_existing_pr, bp_file_pr_body,
-// `gh pr create`) are reproduced directly rather than bridged: each is an
-// `env`-scrubbed one-liner or plain text formatting with no jq/awk/diff logic
-// to drift from.
+// `reqLib` recreates the real CLI's point-of-use placeholders.sh fallback
+// alongside the six: contamination_stage calls bp_substitute_stream
+// INTERNALLY, so a bridge that omitted it would fail differently. The five
+// git/gh wrappers are bridged too, keeping request-file.sh/request.sh as their
+// single implementation (review finding 4).
 const A2BP_LIB_NAMES: readonly string[] = [
   'contamination.sh',
   'request.sh',

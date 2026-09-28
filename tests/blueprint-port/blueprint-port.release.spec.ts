@@ -258,15 +258,27 @@ function expectIdentical(oldResult: RunResult, newResult: RunResult): void {
   expect(newResult.signal).toBe(oldResult.signal)
 }
 
-// `pull`'s preview runs `diff -u FILE TMP`, and both header lines carry
-// non-deterministic bytes the differential must normalise away rather than
-// compare (plan §5's "only normalisations" list): the `---` line's mtime
-// timestamp (real wall-clock time, a few hundred ms apart between the OLD
-// and NEW invocations even against the SAME file) and the `+++` line's
-// mktemp path (a fresh random suffix, and a fresh workspace directory when
-// the row builds two independent project copies).
+// `pull`'s preview runs `diff -u FILE TMP`, printing headers shaped like:
+//   --- FILE\t2026-01-01 00:00:00.123456789 +0000
+//   +++ TMP\t2026-01-01 00:00:00.234567890 +0000
+// TASK-081 round B narrowed this to plan §5's own list — "the timestamps in
+// diff -u headers", nothing more: NEVER blank a whole header line, because
+// with same-path-twice (every row in this file, after this round) `$f` is
+// the project's own RELATIVE path (`diff -u "$f" "$pull_out"`, run with cwd
+// = the project — scripts/blueprint:1658), already identical on both sides
+// by construction, so the `---` line needs only its timestamp stripped. The
+// `+++` line's path is `$pull_out`, a bare `mktemp` file: its TMPDIR is
+// fixed per row (`rowEnv`'s `.row-tmp`, same both sides), but `mktemp`'s own
+// random suffix is freshly drawn every invocation, so that suffix — and
+// only that suffix, never the rest of the path — is normalised too. A row
+// whose diff header still differs after this is a DIVERGENCE, not something
+// to paper over with a broader normaliser.
 function normalizeDiffHeaders(output: string): string {
-  return output.replace(/^(--- [^\t\n]*)\t[^\n]*$/gm, '$1').replace(/^\+\+\+ [^\n]*$/gm, '+++ <tmp>')
+  return output
+    .replace(/^(--- [^\t\n]*)\t[^\n]*$/gm, '$1\t<mtime>')
+    .replace(/^(\+\+\+ [^\t\n]*)\t[^\n]*$/gm, (_line, header: string) =>
+      `${(header as string).replace(/tmp\.[A-Za-z0-9]{6,}$/, 'tmp.<rand>')}\t<mtime>`,
+    )
 }
 
 /** Like expectIdentical, but for a pull row whose preview includes a `diff
@@ -447,7 +459,13 @@ async function snapshot(s: Scenario, fx: SamePathTwiceFixture, result: RunResult
   return {
     code: result.code,
     signal: result.signal,
-    stdout: result.stdout,
+    // normalizeDiffHeaders is a no-op unless the output actually carries a
+    // `diff -u` header (only pull's preview ever prints one — confirmed
+    // there is exactly one `diff -u` call site in scripts/blueprint), so
+    // applying it unconditionally here is safe for every OTHER describe's
+    // stdout and is what lets a pull row go through the same generalised
+    // `toEqual` as everything else rather than a hand-rolled comparison.
+    stdout: normalizeDiffHeaders(result.stdout),
     stderr: result.stderr,
     projTree: await walkFiles(fx.proj),
     cacheRefs: opts.remote ? await bpCacheRefsOrSentinel(s, opts.remote) : '<no remote>',

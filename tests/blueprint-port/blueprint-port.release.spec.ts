@@ -1264,29 +1264,44 @@ describe("blueprint-port differential — drift's fast-forward prompt", () => {
  * settings-layer refusals reached via `pull` are proven in that describe's
  * own group (closing Codex re-review finding 7).
  *
-
- * PULL WRITES FILES, unlike drift. A row that actually lands something
- * builds TWO INDEPENDENT project copies (one per CLI) rather than reusing
- * driftBoth's one-directory-then-reset pattern, which only works because
- * drift never mutates. A row that provably writes nothing (nothing-to-pull,
- * the two refusal rows, and the fully-in-sync `scripts/blueprint` row) runs
- * OLD then NEW on the SAME directory, like driftBoth.
+ * TASK-081 round B: every row now goes through `samePathTwice` (plan §5's
+ * "same path, twice") — build the fixture at ONE fixed path with pinned
+ * commits, run OLD, snapshot, delete, rebuild the IDENTICAL fixture at the
+ * SAME path, run NEW, snapshot, compare. This replaces the earlier
+ * two-independent-project-copies shape a WRITING row used to need (a fresh
+ * absolute path per CLI made the two runs incomparable byte-for-byte any
+ * other way) — same-path-twice needs no such copy, since OLD's build is
+ * deleted before NEW's is built.
  */
 describe('blueprint-port differential — pull', () => {
-  /** A blueprint with TWO commits, so "the project is one commit behind" and
-   * "the project is fully synced" are distinguishable — with one commit the
-   * two coincide and a bootstrap_sha assertion would be vacuous (the same
-   * mistake pull-behaviour's own fixtureBlueprint calls out). */
-  async function seedBlueprintRepoTwoCommits(s: Scenario, dir: string): Promise<{ first: string; head: string }> {
+  interface PullFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
+  }
+
+  /** Row-scoped HOME/XDG_CACHE_HOME/TMPDIR (`rowEnv`) plus the fixed-`date`
+   * shim every pull row needs for its "fetched: SHA at TIMESTAMP" line. */
+  async function pullFixtureEnv(s: Scenario, root: string): Promise<Record<string, string>> {
+    const base = await rowEnv(root)
+    const dateEnv = await dateShimEnv(s)
+    return { ...base, ...dateEnv }
+  }
+
+  /** Same shape as the module-scope pinned builders — a blueprint with TWO
+   * commits, so "one commit behind" and "fully synced" are distinguishable —
+   * pinned so building it twice at the SAME path (once per CLI,
+   * `samePathTwice`'s own contract) hashes to the identical commit SHA both
+   * times. */
+  async function seedBlueprintRepoTwoCommitsPinned(s: Scenario, dir: string): Promise<{ first: string; head: string }> {
     await mkdir(join(dir, 'docs'), { recursive: true })
     await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
     await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
     await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
     await initRepo(s, dir)
-    await commitAll(s, dir, 'base')
+    await commitAllPinned(s, dir, 'base')
     const first = (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
     await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\nsecond commit\n', 'utf8')
-    await commitAll(s, dir, 'second')
+    await commitAllPinned(s, dir, 'second')
     const head = (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
     return { first, head }
   }
@@ -1294,35 +1309,47 @@ describe('blueprint-port differential — pull', () => {
   /** A project registered against the blueprint's FIRST commit, drifted on
    * CLAUDE.md only (docs/DoD.md stays in sync) — the shape both the
    * full-pull and partial-pull rows need. */
-  async function driftedProject(s: Scenario, tag: string, bp: string, firstSha: string): Promise<string> {
-    const proj = await s.workspace.dir(tag)
-    await seedRegisteredProject(s, proj, bp, firstSha)
-    await mkdir(join(proj, 'docs'), { recursive: true })
-    await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-    await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-    await commitAll(s, proj, 'partial sync')
-    return proj
+  async function driftedProjectPinned(s: Scenario, dir: string, bp: string, firstSha: string): Promise<void> {
+    await seedRegisteredProjectPinned(s, dir, bp, firstSha)
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+    await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+    await commitAllPinned(s, dir, 'partial sync')
+  }
+
+  function pullNoTtyCommand(fx: PullFixture, side: 'old' | 'new'): string {
+    return side === 'old'
+      ? `bash '${join(fx.proj, 'scripts/blueprint')}' pull </dev/null 2>&1`
+      : `'${process.execPath}' '${join(fx.proj, 'scripts/blueprint.mts')}' pull </dev/null 2>&1`
+  }
+
+  function pullCommand(fx: PullFixture, side: 'old' | 'new'): string {
+    return side === 'old'
+      ? `bash '${join(fx.proj, 'scripts/blueprint')}' pull`
+      : `'${process.execPath}' '${join(fx.proj, 'scripts/blueprint.mts')}' pull`
   }
 
   it('nothing to pull — a fully synced project', async () => {
     await scenario('blueprint-port-pull-nothing', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'sync')
-      const env = await dateShimEnv(s)
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'], env)
-      expect(await walkFiles(proj), 'nothing-to-pull (OLD) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      const newResult = await runNew(s, proj, ['pull'], env)
-      expect(await walkFiles(proj), 'nothing-to-pull (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expectIdentical(oldResult, newResult)
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['pull'], fx.env) : runNew(s, fx.proj, ['pull'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'nothing-to-pull (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'nothing-to-pull (NEW) must write nothing').toEqual(treeBefore)
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('✓ Nothing to pull. Project matches blueprint HEAD.')
     })
@@ -1330,128 +1357,120 @@ describe('blueprint-port differential — pull', () => {
 
   it('full --yes — the one drifted managed file is pulled, bootstrap_sha advances', async () => {
     await scenario('blueprint-port-pull-full-yes', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const { first, head } = await seedBlueprintRepoTwoCommits(s, bp)
-      const oldProj = await driftedProject(s, 'old', bp, first)
-      const newProj = await driftedProject(s, 'new', bp, first)
-      const env = await dateShimEnv(s)
-      const oldResult = await runOld(s, oldProj, ['pull', '--yes'], env)
-      const newResult = await runNew(s, newProj, ['pull', '--yes'], env)
-      expectPullIdentical(oldResult, newResult)
+      let headSha = ''
+      const { oldResult } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const { first, head } = await seedBlueprintRepoTwoCommitsPinned(s, bp)
+          headSha = head
+          await driftedProjectPinned(s, proj, bp, first)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old' ? runOld(s, fx.proj, ['pull', '--yes'], fx.env) : runNew(s, fx.proj, ['pull', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('✓ Pulled 1 file(s). Review')
-      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
-      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
-      expect(newClaude).toBe(oldClaude)
-      expect(oldClaude).toBe('# CLAUDE\nfixture\nsecond commit\n')
-      const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
-      const newSrc = await readFile(join(newProj, '.blueprint-source'), 'utf8')
-      expect(newSrc).toBe(oldSrc)
-      expect(oldSrc).toContain(`bootstrap_sha    = ${head}`)
-      // Plan §5's full tree comparison, not only the two spot-checked files
-      // above — every path/byte/mode the pull touched or left alone.
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      // Plan §5's full tree comparison (path/bytes/mode) already ran inside
+      // samePathTwice's own toEqual; these reads are the NAMED spot-checks
+      // Codex's review asked for, against the surviving (NEW-side) build.
+      const proj = join(s.workspace.path('root'), 'proj')
+      const claude = await readFile(join(proj, 'CLAUDE.md'), 'utf8')
+      expect(claude).toBe('# CLAUDE\nfixture\nsecond commit\n')
+      const src = await readFile(join(proj, '.blueprint-source'), 'utf8')
+      expect(src).toContain(`bootstrap_sha    = ${headSha}`)
     })
   })
 
   it('partial — one named file pulls, bootstrap_sha stays at the OLD sha (BUG-016)', async () => {
     await scenario('blueprint-port-pull-partial', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const { first } = await seedBlueprintRepoTwoCommits(s, bp)
-      const oldProj = await driftedProject(s, 'old', bp, first)
-      const newProj = await driftedProject(s, 'new', bp, first)
-      const env = await dateShimEnv(s)
-      const oldResult = await runOld(s, oldProj, ['pull', 'CLAUDE.md', '--yes'], env)
-      const newResult = await runNew(s, newProj, ['pull', 'CLAUDE.md', '--yes'], env)
-      expectPullIdentical(oldResult, newResult)
+      let firstSha = ''
+      const { oldResult } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const { first } = await seedBlueprintRepoTwoCommitsPinned(s, bp)
+          firstSha = first
+          await driftedProjectPinned(s, proj, bp, first)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old'
+            ? runOld(s, fx.proj, ['pull', 'CLAUDE.md', '--yes'], fx.env)
+            : runNew(s, fx.proj, ['pull', 'CLAUDE.md', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('bootstrap_sha left unchanged — this was a partial pull')
-      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
-      expect(oldClaude).toBe('# CLAUDE\nfixture\nsecond commit\n')
-      const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
-      expect(oldSrc).toContain(`bootstrap_sha    = ${first}`)
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      const proj = join(s.workspace.path('root'), 'proj')
+      const claude = await readFile(join(proj, 'CLAUDE.md'), 'utf8')
+      expect(claude).toBe('# CLAUDE\nfixture\nsecond commit\n')
+      const src = await readFile(join(proj, '.blueprint-source'), 'utf8')
+      expect(src).toContain(`bootstrap_sha    = ${firstSha}`)
     })
   })
 
   it('non-TTY without --yes: a controlling terminal, non-interactive stdin — exit 7 (BUG-018/BUG-054)', async () => {
     await scenario('blueprint-port-pull-non-tty', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const { first } = await seedBlueprintRepoTwoCommits(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await driftedProjectInto(s, proj, bp, first)
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await withCttyNoStdin(s, proj, `bash '${SHELL_CLI}' pull </dev/null 2>&1`, { PWD: proj })
-      expect(await walkFiles(proj), 'non-TTY refusal (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await withCttyNoStdin(
-        s,
-        proj,
-        `'${process.execPath}' '${PORTED_CLI}' pull </dev/null 2>&1`,
-        { PWD: proj },
-      )
-      expect(await walkFiles(proj), 'non-TTY refusal (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const { first } = await seedBlueprintRepoTwoCommitsPinned(s, bp)
+          await driftedProjectPinned(s, proj, bp, first)
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => withCttyNoStdin(s, fx.proj, pullNoTtyCommand(fx, side), { PWD: fx.proj, ...fx.env }),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'non-TTY refusal (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'non-TTY refusal (NEW) must write nothing').toEqual(treeBefore)
       expect(oldResult.code).not.toBe(0)
       expect(oldResult.output).toMatch(/not interactive|no terminal|--yes/i)
-      // Nothing written: both runs share ONE directory, so a write in the
-      // first run would make the second run see an already-synced project.
+      const proj = join(s.workspace.path('root'), 'proj')
       const claudeAfter = await readFile(join(proj, 'CLAUDE.md'), 'utf8')
       expect(claudeAfter).toBe('# CLAUDE\nfixture\n')
     })
   })
 
-  /** driftedProject, but writing into an ALREADY-CREATED directory — the
-   * non-TTY row runs OLD then NEW on one shared project (nothing is ever
-   * written), so it needs the fixture built once, not the two-copy shape. */
-  async function driftedProjectInto(s: Scenario, proj: string, bp: string, firstSha: string): Promise<void> {
-    await seedRegisteredProject(s, proj, bp, firstSha)
-    await mkdir(join(proj, 'docs'), { recursive: true })
-    await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-    await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-    await commitAll(s, proj, 'partial sync')
-  }
-
   it('refused — invalid marker structure in the project copy: exit 4 (BUG-034)', async () => {
     await scenario('blueprint-port-pull-refused', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(
-        join(bp, 'CLAUDE.md'),
-        '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
-        'utf8',
-      )
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(
+            join(bp, 'CLAUDE.md'),
+            '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
+            'utf8',
+          )
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // An END with no open region: bp_marker_structure reports "bad …", so
-      // pull_file refuses it outright — no prompt is ever reached for this
-      // file, so OLD then NEW on the SAME directory is safe (nothing else in
-      // this fixture drifts, so nothing else is written either).
-      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'broken markers')
-      const env = await dateShimEnv(s)
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'], env)
-      expect(await walkFiles(proj), 'refused (OLD) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      const newResult = await runNew(s, proj, ['pull'], env)
-      expect(await walkFiles(proj), 'refused (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expectIdentical(oldResult, newResult)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // An END with no open region: bp_marker_structure reports "bad …",
+          // so pull_file refuses it outright — no prompt is ever reached.
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'broken markers')
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => (side === 'old' ? runOld(s, fx.proj, ['pull'], fx.env) : runNew(s, fx.proj, ['pull'], fx.env)),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'refused (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'refused (NEW) must write nothing').toEqual(treeBefore)
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain("this project's markers are invalid")
       expect(oldResult.stdout).toContain('Nothing pulled.')
@@ -1465,59 +1484,50 @@ describe('blueprint-port differential — pull', () => {
    * so `_bp_cli_libs`'s grep and `bpCliLibs`'s regex are compared on the
    * bytes that matter.
    *
-   * ONE DELIBERATE, DOCUMENTED DIVERGENCE (not yet in plan §6's accepted-
-   * deviations list — worth adding there): `cmd_pull`'s `namesCli` treats
-   * naming EITHER `scripts/blueprint` OR `scripts/blueprint.mts` as naming
-   * BOTH (plan §7, "naming either alone brings both, never one without the
-   * other"), and `scripts/blueprint.mts` is itself a real tracked file in
-   * THIS repo already (mid-port), so it is part of the blueprint's managed
-   * set today, not only after slice 5. The shell CLI has no notion of it at
-   * all, so OLD's output can never mention it. `scripts/blueprint.mts` never
-   * spells the project-name placeholder token (pinned by a slice 1 test), so
-   * substituting it is the identity regardless of the project's name — it
-   * reports "same" on both fixture copies, one extra line, asserted
-   * explicitly rather than papered over with `expectIdentical`.
-   *
-   * TWO INDEPENDENT PROJECT COPIES, not one shared directory: several of the
-   * REAL scripts/lib/*.sh files DO carry the placeholder token (e.g.
-   * request-inputs.sh, state-dir.sh's incident-record quote), and this
-   * fixture's project tree is a raw filesystem `cp`, never a real pull — so
-   * those libs compare as DRIFTED (the blueprint's copy, substituted with
-   * this project's name, differs from the project's still-literal-token raw
-   * copy) and DO get pulled. That is correct, substitution-driven behaviour,
-   * not a fixture bug — but it means this row mutates, like the full/partial
-   * rows above.
+   * ONE DELIBERATE, DOCUMENTED DIVERGENCE (plan §6): `cmd_pull`'s `namesCli`
+   * treats naming EITHER `scripts/blueprint` OR `scripts/blueprint.mts` as
+   * naming BOTH (plan §7, "naming either alone brings both, never one
+   * without the other"), and `scripts/blueprint.mts` is itself a real
+   * tracked file in THIS repo already (mid-port), so it is part of the
+   * blueprint's managed set today, not only after slice 5. The shell CLI has
+   * no notion of it at all, so OLD's output can never mention it.
+   * `scripts/blueprint.mts` never spells the project-name placeholder token
+   * (pinned by a slice 1 test), so substituting it is the identity
+   * regardless of the project's name — it reports "same", one extra line,
+   * asserted explicitly via `compareRuns: false` rather than papered over
+   * with the default full-snapshot equality.
    */
   it('pull scripts/blueprint — the real shell CLI and its real libs', async () => {
     await scenario('blueprint-port-pull-cli-libs', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await cp(join(REPO_ROOT, 'scripts'), join(bp, 'scripts'), { recursive: true })
-      await s.run('chmod', ['+x', join(bp, 'scripts/blueprint')], { cwd: bp })
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      const { oldResult, newResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await cp(join(REPO_ROOT, 'scripts'), join(bp, 'scripts'), { recursive: true })
+          await s.run('chmod', ['+x', join(bp, 'scripts/blueprint')], { cwd: bp })
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      // SAME leaf name ("proj") under two distinct parents — several of the
-      // real libs substitute the project's name (its logical PWD's basename)
-      // into their content, and a `old`/`new` leaf mismatch would make that
-      // substitution itself the difference this row is trying to rule out.
-      const oldProj = await s.workspace.dir('side-old', 'proj')
-      const newProj = await s.workspace.dir('side-new', 'proj')
-      await seedRegisteredProject(s, oldProj, bp, sha)
-      await seedRegisteredProject(s, newProj, bp, sha)
-      const env = await dateShimEnv(s)
-      const oldResult = await runOld(s, oldProj, ['pull', 'scripts/blueprint', '--yes'], env)
-      const newResult = await runNew(s, newProj, ['pull', 'scripts/blueprint', '--yes'], env)
-
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) =>
+          side === 'old'
+            ? runOld(s, fx.proj, ['pull', 'scripts/blueprint', '--yes'], fx.env)
+            : runNew(s, fx.proj, ['pull', 'scripts/blueprint', '--yes'], fx.env),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+        compareRuns: false,
+      })
       expect(oldResult.code).toBe(0)
       expect(newResult.code).toBe(0)
-      expect(newResult.stderr).toBe(oldResult.stderr)
-      const oldNormalized = normalizeDiffHeaders(oldResult.stdout)
-      const newNormalized = normalizeDiffHeaders(newResult.stdout)
+      expect(newSnapshot.stderr).toBe(oldSnapshot.stderr)
+      const oldNormalized = oldSnapshot.stdout
+      const newNormalized = newSnapshot.stdout
       expect(oldNormalized).toContain('scripts/blueprint brings the libs it sources:')
       expect(oldNormalized).not.toContain('scripts/blueprint.mts')
       expect(oldNormalized).toMatch(/ {2}same {2}scripts\/blueprint\n/)
@@ -1531,12 +1541,15 @@ describe('blueprint-port differential — pull', () => {
       expect(newNormalized).toBe(expectedNewNormalized)
       // Plan §5's tree comparison: the extra "same" line NEW prints is
       // REPORTING-only (§6's own note — blueprint.mts substitutes to the
-      // identity), so once the report difference above is accounted for, the
-      // two independently-pulled trees must still be byte-identical.
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      // identity), so once that ONE accepted deviation is accounted for, the
+      // two builds must land byte-identical — every other snapshot field
+      // asserted explicitly since `compareRuns: false` skipped the blanket
+      // toEqual.
+      expect(newSnapshot.projTree).toEqual(oldSnapshot.projTree)
+      expect(newSnapshot.cacheRefs).toEqual(oldSnapshot.cacheRefs)
+      expect(newSnapshot.scratch).toEqual(oldSnapshot.scratch)
+      expect(newSnapshot.code).toBe(oldSnapshot.code)
+      expect(newSnapshot.signal).toBe(oldSnapshot.signal)
     })
   })
 
@@ -1551,83 +1564,51 @@ describe('blueprint-port differential — pull', () => {
 
   it('interactive prompt — y pulls the file and advances bootstrap_sha', async () => {
     await scenario('blueprint-port-pull-prompt-y', async (s) => {
-      // TWO INDEPENDENT project copies (a write happens), but ONE SHARED
-      // upstream: `bp` is cloned twice from the SAME `up`, and `up`'s second
-      // commit is created exactly ONCE — so the commit object `bp` fast-
-      // forwards to (and the sha `pull` reports fetching) is the identical
-      // object on both sides, not two independently-timestamped near-misses.
-      // (Unlike the pull describe's own two-commit blueprint, which needs no
-      // such sharing because nothing here mutates a SEPARATE local checkout —
-      // this row's write is the pulled file, and `seedBlueprintRepoTwoCommits`
-      // already builds ONE bp both `oldProj`/`newProj` register against.)
-      const bp = await s.workspace.dir('prompt-y-bp')
-      const { first, head } = await seedBlueprintRepoTwoCommits(s, bp)
-      const oldProj = await driftedProject(s, 'prompt-y-old', bp, first)
-      const newProj = await driftedProject(s, 'prompt-y-new', bp, first)
-      const oldResult = await withCttyAnswer(
-        s,
-        oldProj,
-        `bash '${join(oldProj, 'scripts/blueprint')}' pull`,
-        'y\n',
-        { PWD: oldProj },
-      )
-      const newResult = await withCttyAnswer(
-        s,
-        newProj,
-        `'${process.execPath}' '${join(newProj, 'scripts/blueprint.mts')}' pull`,
-        'y\n',
-        { PWD: newProj },
-      )
-      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      let headSha = ''
+      const { oldResult } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const { first, head } = await seedBlueprintRepoTwoCommitsPinned(s, bp)
+          headSha = head
+          await driftedProjectPinned(s, proj, bp, first)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => withCttyAnswer(s, fx.proj, pullCommand(fx, side), 'y\n', { PWD: fx.proj, ...fx.env }),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.output).toContain('✓ Pulled 1 file(s). Review')
-      const oldClaude = await readFile(join(oldProj, 'CLAUDE.md'), 'utf8')
-      const newClaude = await readFile(join(newProj, 'CLAUDE.md'), 'utf8')
-      expect(newClaude).toBe(oldClaude)
-      expect(oldClaude).toBe('# CLAUDE\nfixture\nsecond commit\n')
-      const oldSrc = await readFile(join(oldProj, '.blueprint-source'), 'utf8')
-      const newSrc = await readFile(join(newProj, '.blueprint-source'), 'utf8')
-      expect(newSrc).toBe(oldSrc)
-      expect(oldSrc).toContain(`bootstrap_sha    = ${head}`)
-      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
-        await walkFiles(oldProj),
-      )
-      await assertNoDriftPullScratch(s)
+      const proj = join(s.workspace.path('root'), 'proj')
+      const claude = await readFile(join(proj, 'CLAUDE.md'), 'utf8')
+      expect(claude).toBe('# CLAUDE\nfixture\nsecond commit\n')
+      const src = await readFile(join(proj, '.blueprint-source'), 'utf8')
+      expect(src).toContain(`bootstrap_sha    = ${headSha}`)
     })
   })
 
   it('interactive prompt — N skips the file, nothing written, bootstrap_sha unchanged', async () => {
     await scenario('blueprint-port-pull-prompt-n', async (s) => {
-      // Nothing this answer can ever write (a skip, never a pull), so ONE
-      // shared project for OLD then NEW is safe — same shape as the non-TTY
-      // row's shared-directory reuse just above.
-      const bp = await s.workspace.dir('prompt-n-bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('prompt-n-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await withCttyAnswer(
-        s,
-        proj,
-        `bash '${join(proj, 'scripts/blueprint')}' pull`,
-        'N\n',
-        { PWD: proj },
-      )
-      expect(await walkFiles(proj), 'prompt N (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await withCttyAnswer(
-        s,
-        proj,
-        `'${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' pull`,
-        'N\n',
-        { PWD: proj },
-      )
-      expect(await walkFiles(proj), 'prompt N (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => withCttyAnswer(s, fx.proj, pullCommand(fx, side), 'N\n', { PWD: fx.proj, ...fx.env }),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'prompt N (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'prompt N (NEW) must write nothing').toEqual(treeBefore)
       expect(oldResult.output).toContain('skipped')
       expect(oldResult.output).toContain('Nothing pulled.')
       // NON-VACUITY: both managed files are genuinely NEW here
-      // (seedRegisteredProject seeds no CLAUDE.md/docs/DoD.md of its own), so
-      // "skipped" means the operator's "N" was HONOURED — neither landed.
+      // (seedRegisteredProjectPinned seeds no CLAUDE.md/docs/DoD.md of its
+      // own), so "skipped" means the operator's "N" was HONOURED.
+      const proj = join(s.workspace.path('root'), 'proj')
       expect(existsSync(join(proj, 'CLAUDE.md'))).toBe(false)
       expect(existsSync(join(proj, 'docs/DoD.md'))).toBe(false)
     })
@@ -1635,43 +1616,34 @@ describe('blueprint-port differential — pull', () => {
 
   it("interactive prompt — q quits: the remaining file, retirement, and bootstrap_sha are all untouched", async () => {
     await scenario('blueprint-port-pull-prompt-q', async (s) => {
-      // Two "new" managed files (CLAUDE.md, docs/DoD.md) so `q` at the FIRST
-      // file's prompt leaves a SECOND, later file provably unreached — the
-      // shape plan §5 asks for ("remaining files untouched"). `q` aborts
-      // before any write, so ONE shared project for OLD then NEW is safe.
-      const bp = await s.workspace.dir('prompt-q-bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('prompt-q-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await withCttyAnswer(
-        s,
-        proj,
-        `bash '${join(proj, 'scripts/blueprint')}' pull`,
-        'q\n',
-        { PWD: proj },
-      )
-      expect(await walkFiles(proj), 'prompt q (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await withCttyAnswer(
-        s,
-        proj,
-        `'${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' pull`,
-        'q\n',
-        { PWD: proj },
-      )
-      expect(await walkFiles(proj), 'prompt q (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expect(normalizeDiffHeaders(newResult.output)).toBe(normalizeDiffHeaders(oldResult.output))
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      let baseSha = ''
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          baseSha = sha
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          treeBefore = await walkFiles(proj)
+          return { root, proj, bp, env: await pullFixtureEnv(s, root) }
+        },
+        run: (s, fx, side) => withCttyAnswer(s, fx.proj, pullCommand(fx, side), 'q\n', { PWD: fx.proj, ...fx.env }),
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
+      expect(oldSnapshot.projTree, 'prompt q (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'prompt q (NEW) must write nothing').toEqual(treeBefore)
       expect(oldResult.output).toContain('aborted')
       expect(oldResult.output).toContain('Nothing pulled.')
       // NON-VACUITY, the whole point of this row: neither file landed, and
       // the SECOND file's own prompt never even printed — `q` at the first
       // stopped the loop before docs/DoD.md was ever reached.
       expect(oldResult.output).not.toContain('docs/DoD.md')
+      const proj = join(s.workspace.path('root'), 'proj')
       expect(existsSync(join(proj, 'CLAUDE.md'))).toBe(false)
       expect(existsSync(join(proj, 'docs/DoD.md'))).toBe(false)
       const src = await readFile(join(proj, '.blueprint-source'), 'utf8')
-      expect(src).toContain(`bootstrap_sha    = ${sha}`)
+      expect(src).toContain(`bootstrap_sha    = ${baseSha}`)
     })
   })
 })

@@ -12,7 +12,6 @@
     ".githooks/pre-push-project": "973d9860cfdfb0087b7d1a6d9a6ad4b337deb521",
     ".githooks/pre-push-project.example": "992556faa3f8a01a21850a2efa4c6526b9a2eed7",
     "scripts/agent-activity.sh": "2fd8993148a7f53383a7f823285d09990648c398",
-    "scripts/blueprint": "db08716daef482128a1fa2cab0dbd65af905e13e",
     "scripts/build-deck.sh": "e74e79640109b57aa4aa84074c64c3655fc321b7",
     "scripts/check-commit-subjects.sh": "bae1b92c34d4704dd2701a95fdfb9e8e519924bc",
     "scripts/claude-agents.sh": "d6869aecc354cbbe5c65c5fd07a5d9ec2c2a9d0a",

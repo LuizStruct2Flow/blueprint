@@ -19,27 +19,42 @@ Method: [`../done/PLAN-TASK-067-shell-to-typescript.md`](../done/PLAN-TASK-067-s
 
 **The FILE ports whole; the WORK is sliced; `main` never runs half of it.**
 
+**Correction, 2026-09-28 (founder): slices 1-4 land on `main` as dark code,
+never on a branch.** Everything below originally described a branch
+(`task-081-blueprint-port`) for slices 1-4, squashed onto `main` at slice 5.
+That was a mistake nobody checked against `CLAUDE.blueprint.md` §"The
+blueprint's `main` is its trunk" (*"NO branches, NO worktrees — feature
+toggles, never feature branches"*) before work started, caught only well
+into slice 3's review rounds. The table and the two paragraphs after it are
+corrected in place rather than left to contradict §8, which carries the same
+fix and the same note.
+
 | Where | What is there |
 |---|---|
 | `main`, slice 0 | Test preparation only (§8). No `scripts/` change except the shim-helper export. Green against the unported shell. |
-| branch `task-081-blueprint-port`, slices 1-4 | `scripts/blueprint.mts` grows one subcommand family per commit, each with its own differential rows and unit tests. `scripts/blueprint` is untouched, so every suite on the branch still runs the shell. |
-| `main`, slice 5 | ONE port commit: the branch squashed, plus the shim, the inventory row, the doc lines. |
+| `main`, slices 1-4 | `scripts/blueprint.mts` grows one subcommand family per commit, each with its own differential rows and unit tests. `scripts/blueprint` is untouched, so every suite on `main` between these commits still runs the shell, and `scripts/blueprint.mts` itself sits dark — nothing calls it — until slice 5 switches the shim on. |
+| `main`, slice 5 | ONE port commit: the shim, the inventory row, the doc lines. |
 | ~~`main`, slice 5b~~ | Dropped by the founder (§9 E): no `drift` line; the commit body and release announcement carry the full-pull rule. |
 | `main`, slice 6 | The `_bp_cli_libs` change BUG-152 needs, as its own reproducer and fix. |
 
-**Between slices `main` is exactly today's `main`.** `scripts/blueprint.mts`
-does not exist there until the port commit. It cannot land earlier as dead
-code: `scripts/` ships (`git archive`), so every derived project's next
-`blueprint pull` would install a half-built `.mts` and `drift` would report it.
+**Between slices `main` is exactly today's `main`, plus the growing dark
+`.mts`.** `scripts/blueprint` (the shell CLI actually dispatched to) is
+untouched until slice 5, so nothing in `scripts/blueprint.mts` runs for a
+derived project's `blueprint pull` before the port commit — the file ships
+(`scripts/` is in `git archive`) but is inert, exactly as dead code shipped
+early would need to be, except here it is proven by ~90 differential rows
+run locally at each slice rather than left unexercised.
 
-**The branch cannot conflict on its subject.** `scripts/blueprint` is a legacy
-row in `scripts/shell-inventory.json`; nothing else may change it until the
-port. Libs can move on `main`, so the branch rebases before each slice's review.
+**Nothing else may change `scripts/blueprint` until the port.** It stays a
+legacy row in `scripts/shell-inventory.json` throughout slices 0-4; the port
+commit (slice 5) is the one commit that turns it into the shim and removes
+that row in the same breath.
 
-**Squash, not fast-forward.** CLAUDE.md: "the migration is its own commit".
-The slice commits stay on the branch ref for provenance. Reviews run per slice
-(smaller units, design drift caught early), then once more on the squashed diff
-before push, which is the Codex four-eyes the backlog row requires.
+**One port commit, not a squash.** CLAUDE.md: "the migration is its own
+commit". Each slice commit lands on `main` as its own reviewed unit (smaller
+units, design drift caught early); slice 5 is the ONE commit that performs
+the actual migration (the shim switch), which the Codex four-eyes review the
+backlog row requires covers on top of every slice's own review.
 
 **Owner:** a provider that can run the fixture-git suites (port method rule 6).
 Codex reviews; it does not implement.
@@ -467,6 +482,20 @@ Each is named in the port commit body.
    that part.
 6. **A pre-port CLI must not pull `scripts/blueprint` alone** (§7, founder
    decision 2026-09-24). Announced, not fixed.
+7. **`pull` naming either `scripts/blueprint` or `scripts/blueprint.mts`
+   brings both** (§7, "naming either alone brings both, never one without the
+   other"). A `pull scripts/blueprint` differential row cannot be
+   byte-identical while `scripts/blueprint.mts` exists: NEW prints one extra
+   "same"/"pulled"/"skipped" line for the sibling the shell CLI has no notion
+   of at all. Named explicitly in the affected row rather than papered over
+   with a normaliser (found by slice 3; see also HANDOVER's slice-5 list).
+8. **A project path containing `\` cannot run the ported CLI** (found in
+   `drift`'s differential matrix; founder-accepted 2026-09-28). Node's ESM
+   loader refuses an entry-point specifier with an encoded `\` in it, so
+   `node scripts/blueprint.mts` dies loading itself from such a path — the
+   real exec shim hits the identical wall for a project actually checked out
+   under such a path, so this is not a regression the port introduced, only
+   one it cannot paper over. Documented, not fixed.
 
 ## 7. The CLI's closure, before and after
 
@@ -536,15 +565,31 @@ it."** The exact two-line shim stays; no shim variant, and no fallback in it.
 
 ## 8. Slices, in order
 
+**Correction, 2026-09-28: slices 1-4 landed on `main` as dark code, not on a
+branch.** This section originally said "branch" for every slice up to the
+port commit, and nobody checked that against `CLAUDE.blueprint.md`
+§"The blueprint's `main` is its trunk" before work started — the branch
+(`task081-port`, in `.scratch/task081-port`) was a mistake the founder caught
+on 2026-09-28, well into slice 3's review rounds. Per §1's own boundary
+("`main` never runs half of it"), each slice is instead a commit directly on
+`main`: `scripts/blueprint.mts` grows one subcommand family at a time,
+`scripts/blueprint` stays untouched until slice 5, so every suite on `main`
+between slices still runs the shell CLI and `scripts/blueprint.mts` sits dark
+(nothing calls it) until the port commit switches the shim on. The "Where"
+column below is corrected to `main` throughout; the differential rows for
+slices 2-4 still run against a working-tree-only shim that is never
+committed (§5's own note), since committing one early would be exactly the
+half-ported state §1 forbids.
+
 | # | Where | Content | Test and proof | Size |
 |---|---|---|---|---|
 | 0 | `main` | **Test preparation.** #20c/#20d predicate `bash`→`bash\|sh`. #23b rewritten as a behavioural test asserting the new bytes and mode (§3 P2). #20e stays structural. New #20f, repeated signals (§3 P1). managed-references #5 inode assertion. `drift-in-blueprint` and `suite-sync` fixtures copy a shim's target. marker-merge's self-pull case and forbidden-idiom's population follow a shim (`resolveConsumer`). The shim helpers are exported from `shell-inventory-check.mts` behind an entry-point guard. | Full suite green against the unported shell. #23b shown red on a shell copy whose ignore follows the `cp`. #20f records the shell's outcome. | S, ~400 test lines |
-| 1 | branch | **Skeleton.** Dispatch, `help`, `files`, colours, `die`, `run()` with the errexit-context rule, `unchecked`/`capture`, command-not-found mapping, the lib bridge, logical `PWD`, the signal machinery (record, defer to child exit, shield, fetch-wait freeze, serialisation). Harness plus rows for dispatch and `files`. A grep case pinning that `scripts/blueprint.mts` never spells the placeholder token (§9 D, if the founder takes the recommendation). | Unit tests for errexit contexts, 127/126 mapping, deferral, shield, freeze and serialisation. Differential rows identical. | M, ~400 TS + ~400 harness |
-| 2 | branch | **Read path, `drift` complete.** Config, fetch (P1), history, staleness report, managed set, marker structure and merge, prospective (P3), settings layer (P4). | Drift rows identical. `sync-by-address`, `marker-merge`, `permission-policy`, `staleness`, `drift-in-blueprint`, `gate-arming`, `git-isolation` run against a working-tree-only shim (never committed on the branch). P1 and P3 mutants. | L, ~800 TS |
-| 3 | branch | **`pull` complete.** Selection, the closure with shim-follow (§7), prompts, `pullFile`, shield (P2), `bootstrap_sha`, retirement. | Pull rows identical. `pull-behaviour`, `pull-exec-bit`, `marker-merge`, `sync-by-address` #9-#23c, `managed-references`, `suite-sync`. P2 mutants. | L, ~500 TS |
-| 4 | branch | **`a2bp` and `prs`** (P5). | a2bp and prs rows identical. The five a2bp suites, plus `a2bp-e2e` run directly. | M, ~450 TS |
-| 5 | `main` | **The port commit.** The branch squashed; `scripts/blueprint` becomes the exact two-line shim; its inventory row goes; CLAUDE.md's `TEMPLATE_FILES in scripts/blueprint` becomes `scripts/blueprint.mts`; `signals.sh`'s header is corrected; structural #20e is replaced by the cleanup unit test and the structural `.mts` check (§3 P1). The body carries the announcement (§7) verbatim. | Full suite, plus the release tier run directly (`bootstrap-gate` materialises committed HEAD). The first CI run of the signal suites against the port. Full differential against the parent. Every recorded mutant from the suites above, re-applied to the `.mts`. The drift timing. Codex review of the whole diff before push. | S diff, most of the cost is proof |
-| 5b | `main`, same push as 5 | **The drift line** (§7 item 3, subject to §9 E). | Reproducer first: a `drift` case where `scripts/blueprint.mts` is new prints the line. Red on the port commit, green after. | S, ~15 TS + ~40 test |
+| 1 | `main` | **Skeleton.** Dispatch, `help`, `files`, colours, `die`, `run()` with the errexit-context rule, `unchecked`/`capture`, command-not-found mapping, the lib bridge, logical `PWD`, the signal machinery (record, defer to child exit, shield, fetch-wait freeze, serialisation). Harness plus rows for dispatch and `files`. A grep case pinning that `scripts/blueprint.mts` never spells the placeholder token (§9 D, if the founder takes the recommendation). | Unit tests for errexit contexts, 127/126 mapping, deferral, shield, freeze and serialisation. Differential rows identical. | M, ~400 TS + ~400 harness |
+| 2 | `main` | **Read path, `drift` complete.** Config, fetch (P1), history, staleness report, managed set, marker structure and merge, prospective (P3), settings layer (P4). | Drift rows identical. `sync-by-address`, `marker-merge`, `permission-policy`, `staleness`, `drift-in-blueprint`, `gate-arming`, `git-isolation` run against a working-tree-only shim (never committed). P1 and P3 mutants. | L, ~800 TS |
+| 3 | `main` | **`pull` complete.** Selection, the closure with shim-follow (§7), prompts, `pullFile`, shield (P2), `bootstrap_sha`, retirement. | Pull rows identical. `pull-behaviour`, `pull-exec-bit`, `marker-merge`, `sync-by-address` #9-#23c, `managed-references`, `suite-sync`. P2 mutants. | L, ~500 TS |
+| 4 | `main` | **`a2bp` and `prs`** (P5). | a2bp and prs rows identical. The five a2bp suites, plus `a2bp-e2e` run directly. | M, ~450 TS |
+| 5 | `main` | **The port commit.** `scripts/blueprint` becomes the exact two-line shim; its inventory row goes; CLAUDE.md's `TEMPLATE_FILES in scripts/blueprint` becomes `scripts/blueprint.mts`; `signals.sh`'s header is corrected; structural #20e is replaced by the cleanup unit test and the structural `.mts` check (§3 P1); the differential harness's OLD source moves from the live `scripts/blueprint` to history (§5, `managed-references` #3's own technique), since REPO_ROOT's own copy is now the shim. The body carries the announcement (§7) verbatim. | Full suite, plus the release tier run directly (`bootstrap-gate` materialises committed HEAD). The first CI run of the signal suites against the port. Full differential against the parent. Every recorded mutant from the suites above, re-applied to the `.mts`. The drift timing. Codex review of the whole diff before push. | S diff, most of the cost is proof |
+| 5b | dropped (§9 E) | ~~The drift line~~ (§7 item 3). Not built — the full-pull rule is announced in the port commit body and the release announcement only. | — | — |
 | 6 | `main` | **Closure as a fixed point** (§7). | Reproducer first: a new `managed-references` case, in which a fixture blueprint's `scripts/lib/gate.sh` is an adapter naming `gate.mts`, and an old project pulls only `scripts/blueprint`, then its own `drift` must exit 0. Red, then green. | S, ~60 TS + ~100 test |
 
 **Done when** (the backlog row, corrected in the same commit as this

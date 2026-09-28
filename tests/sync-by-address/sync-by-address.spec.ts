@@ -158,12 +158,24 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import type { ChildProcess } from 'node:child_process'
-import { closeSync, constants, existsSync, openSync, statSync, writeSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs'
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, truncate, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { notGithubActions, skipVisibly } from '../helpers/project-config.js'
 import { parseDocument } from 'yaml'
+import { bpSyncCleanup, _setSyncStateForTests } from '../../scripts/blueprint.mts'
 
 const BLACKHOLE = 'ssh://git@127.0.0.1/blackhole.git'
 const WARNING =
@@ -1330,32 +1342,60 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
     // can pin the two orderings the gate relies on: the token is revoked BEFORE
     // the TERM, and with a builtin, since a forked `rm` yields the CPU to the
     // child in between (7/50 red pinned, measured).
-    const text = await readFile(join(REPO_ROOT, 'scripts/blueprint'), 'utf8')
-    const code = (body: string) =>
-      body
-        .split('\n')
-        .filter((l) => !/^\s*#/.test(l))
-        .join('\n')
+    //
+    // TASK-081 §8 slice 5 (plan §3 P1): scripts/blueprint is now the two-line
+    // shim, so this case can no longer read `_bp_sync_cleanup`'s TEXT out of
+    // it — that logic lives in scripts/blueprint.mts's bpSyncCleanup now.
+    // Replaced by two checks, exactly as the plan schedules: a BEHAVIOURAL
+    // unit test on the exported cleanup (an injected `process.kill`, proving
+    // the token is empty by the time `kill` is called), and a STRUCTURAL
+    // check on the .mts source (no `await` or spawn between the write and
+    // the kill — a syscall does not fork, so nothing can run in that gap
+    // only if nothing yields the event loop there).
+    const goPath = join(mkdtempSync(join(tmpdir(), 'bp-sync-cleanup-')), 'go')
+    writeFileSync(goPath, 'go\n')
+    let goAtKillTime: string | undefined
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      goAtKillTime = readFileSync(goPath, 'utf8')
+      return true
+    })
+    try {
+      _setSyncStateForTests({ go: goPath, child: 999999, childExit: Promise.resolve({ status: 0 }) })
+      await bpSyncCleanup()
+      expect(killSpy, 'bpSyncCleanup never called process.kill on the refresh child').toHaveBeenCalledWith(
+        999999,
+        'SIGTERM',
+      )
+      expect(goAtKillTime, 'the GO token was not yet empty when process.kill was called').toBe('')
+    } finally {
+      killSpy.mockRestore()
+      _setSyncStateForTests({ go: '', child: null, childExit: null })
+      await rm(goPath, { force: true })
+    }
 
-    const cleanup = code(text.match(/^_bp_sync_cleanup\(\) \{\n([\s\S]*?)\n\}$/m)?.[1] ?? '')
-    expect(cleanup, 'no _bp_sync_cleanup() { … } definition to check').not.toBe('')
-    const revoke = cleanup.search(/:\s[^\n]*>\s*"\$BP_SYNC_GO"/)
-    const term = cleanup.indexOf('kill -TERM "$BP_SYNC_CHILD"')
-    expect(revoke, 'cleanup does not revoke the token with a builtin truncation').toBeGreaterThanOrEqual(0)
-    expect(term, 'cleanup sends no TERM to the refresh child').toBeGreaterThan(revoke)
+    const source = await readFile(join(REPO_ROOT, 'scripts/blueprint.mts'), 'utf8')
+    const body = source.match(/^export async function bpSyncCleanup\(\): Promise<void> \{\n([\s\S]*?)\n\}\n/m)?.[1] ?? ''
+    expect(body, 'no bpSyncCleanup() { … } definition to check').not.toBe('')
+    const writeIdx = body.indexOf('writeFileSync(SYNC.go')
+    const killIdx = body.indexOf("process.kill(pid, 'SIGTERM')")
+    expect(writeIdx, 'cleanup does not revoke the token with a synchronous write').toBeGreaterThanOrEqual(0)
+    expect(killIdx, 'cleanup sends no TERM to the refresh child').toBeGreaterThan(writeIdx)
     expect(
-      cleanup.slice(0, term),
-      'cleanup runs an external command before its TERM, which yields the CPU to the child',
-    ).not.toMatch(/\b(rm|mv|truncate|sh|bash|env)\s/)
+      body.slice(writeIdx, killIdx),
+      'cleanup awaits or spawns something between revoking the token and its TERM, which can yield the event loop to the child',
+    ).not.toMatch(/\bawait\b/)
 
-    const launch = code(text.match(/^_bp_fetch_blueprint\(\) \{\n([\s\S]*?)\n\}$/m)?.[1] ?? '')
-    expect(launch, 'no _bp_fetch_blueprint() { … } definition to check').not.toBe('')
-    const gate = launch.indexOf(`sh -c '[ -s "$1" ] || exit 1; shift; exec "$@"' bp-refresh "$BP_SYNC_GO"`)
-    expect(gate, 'the refresh is not gated on the token after its first exec').toBeGreaterThanOrEqual(0)
-    expect(launch.indexOf('"$tcmd" "$BP_FETCH_TIMEOUT"', gate), 'the gate does not run before the fetch').toBeGreaterThan(gate)
-    const token = launch.indexOf(`printf 'go\\n' > "$BP_SYNC_GO"`)
-    expect(token, 'the token is not written non-empty before the launch').toBeGreaterThanOrEqual(0)
-    expect(token).toBeLessThan(gate)
+    // The other half of the old shell-text check: the token is written
+    // non-empty BEFORE the refresh child is launched (the gate embedded in
+    // its own `sh -c` script reads that same file) — bpFetchBlueprint, not
+    // bpSyncCleanup.
+    const launchBody =
+      source.match(/^async function bpFetchBlueprint\(\): Promise<void> \{\n([\s\S]*?)\n\}\n/m)?.[1] ?? ''
+    expect(launchBody, 'no bpFetchBlueprint() { … } definition to check').not.toBe('')
+    const tokenWrite = launchBody.indexOf('writeFileSync(SYNC.go')
+    const spawnCall = launchBody.indexOf('const child = spawn(')
+    expect(tokenWrite, 'the token is not written non-empty before the launch').toBeGreaterThanOrEqual(0)
+    expect(spawnCall, 'the refresh child is never spawned').toBeGreaterThan(tokenWrite)
   })
 
   it('#21 INT and TERM during the compare: died of the signal, no scratch, no ref, no write', async () => {

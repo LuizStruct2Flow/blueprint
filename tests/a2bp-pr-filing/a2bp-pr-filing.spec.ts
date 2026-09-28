@@ -48,12 +48,14 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
+import { resolveConsumer } from '../helpers/shim.js'
 
 const SUBJECT_ROOT = process.env.BP_SUBJECT_ROOT ?? REPO_ROOT
 const LIB = join(SUBJECT_ROOT, 'scripts/lib/request-file.sh')
-const CLI = join(SUBJECT_ROOT, 'scripts/blueprint')
+const CLI_REL = 'scripts/blueprint'
 
 /**
  * A `gh` whose `pr list` returns `json`.
@@ -117,11 +119,35 @@ function existingPr(s: Scenario, path: string): Promise<RunResult> {
   })
 }
 
+/** Resolves `scripts/blueprint` to whichever file the source-inspection
+ * cases below should actually read: the shell CLI itself, or — once
+ * TASK-081's shim lands — the `.mts` it points at (`resolveConsumer`
+ * follows the shim, same mechanism `tests/marker-merge` uses). */
+async function resolvedCli(): Promise<{ path: string; kind: 'shell' | 'ts' }> {
+  const consumer = resolveConsumer(SUBJECT_ROOT, CLI_REL)
+  expect(consumer, `${CLI_REL} is missing from this checkout`).toBeDefined()
+  return { path: join(SUBJECT_ROOT, consumer?.rel ?? CLI_REL), kind: consumer?.kind ?? 'shell' }
+}
+
 /** `sed -n '/start/,/end/p'` over the CLI — the shell suite's own selector. */
-async function block(s: Scenario, range: string): Promise<string> {
-  const r = await s.run('sed', ['-n', range, CLI], { cwd: s.workspace.root })
+async function block(s: Scenario, path: string, range: string): Promise<string> {
+  const r = await s.run('sed', ['-n', range, path], { cwd: s.workspace.root })
   expect(r.code, r.output).toBe(0)
   return r.stdout
+}
+
+/** The TS-side block selector: no shell block syntax (`esac`, `^  }`) exists
+ * for sed's range to key on in the ported `.mts`, so this scans lines
+ * instead — the first line matching `start`, through the first line AT OR
+ * AFTER it matching `end` (inclusive). */
+async function tsBlock(path: string, start: RegExp, end: RegExp): Promise<string> {
+  const source = await readFile(path, 'utf8')
+  const lines = source.split('\n')
+  const s0 = lines.findIndex((l) => start.test(l))
+  if (s0 < 0) return ''
+  const e0 = lines.findIndex((l, i) => i >= s0 && end.test(l))
+  if (e0 < 0) return ''
+  return lines.slice(s0, e0 + 1).join('\n')
 }
 
 /**
@@ -140,8 +166,8 @@ async function block(s: Scenario, range: string): Promise<string> {
  * the syntax rather than a guess about neighbouring text, so deleting the clause
  * shrinks the selection instead of exploding it.
  */
-async function condition(s: Scenario, startPattern: RegExp): Promise<string> {
-  const source = await s.run('cat', [CLI], { cwd: s.workspace.root })
+async function condition(s: Scenario, path: string, startPattern: RegExp): Promise<string> {
+  const source = await s.run('cat', [path], { cwd: s.workspace.root })
   expect(source.code, source.output).toBe(0)
   const lines = source.stdout.split('\n')
   const start = lines.findIndex((l) => startPattern.test(l))
@@ -209,19 +235,39 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
       const lib = await s.run('grep', ['-q', 'BP_RC_FAILED=5', LIB], { cwd: s.workspace.root })
       expect(lib.code, 'BP_RC_FAILED is not 5 — the contract this asserts has moved').toBe(0)
 
-      const failBranch = await block(s, '/opening the PR failed/,/^  }/p')
+      const { path, kind } = await resolvedCli()
+      // TASK-081: once scripts/blueprint is the shim, resolveConsumer follows
+      // it to scripts/blueprint.mts — no shell block syntax (`^  }`) there for
+      // sed's range to key on, so the ported file is read with tsBlock
+      // instead, and BP_RC_FAILED/BP_RC_PENDING are its runtime-read
+      // codes.failed/codes.pending (§3 P5: never a hardcoded TS constant).
+      const failBranch =
+        kind === 'ts'
+          ? await tsBlock(path, /opening the PR failed/, /return codes\.failed/)
+          : await block(s, path, '/opening the PR failed/,/^  }/p')
       expect(
         failBranch,
         'could not locate the pr-create failure branch — the assertion would be vacuous',
       ).not.toBe('')
-      expect(
-        failBranch,
-        "the branch is pushed and the PR failed, yet it returns BP_RC_PENDING (3) — 'filed' asserted while nothing was filed",
-      ).not.toContain('BP_RC_PENDING')
-      expect(
-        failBranch,
-        'the pr-create failure branch returns neither FAILED nor PENDING — unclear contract',
-      ).toContain('BP_RC_FAILED')
+      if (kind === 'ts') {
+        expect(
+          failBranch,
+          "the branch is pushed and the PR failed, yet it returns codes.pending — 'filed' asserted while nothing was filed",
+        ).not.toContain('codes.pending')
+        expect(
+          failBranch,
+          'the pr-create failure branch returns neither codes.failed nor codes.pending — unclear contract',
+        ).toContain('codes.failed')
+      } else {
+        expect(
+          failBranch,
+          "the branch is pushed and the PR failed, yet it returns BP_RC_PENDING (3) — 'filed' asserted while nothing was filed",
+        ).not.toContain('BP_RC_PENDING')
+        expect(
+          failBranch,
+          'the pr-create failure branch returns neither FAILED nor PENDING — unclear contract',
+        ).toContain('BP_RC_FAILED')
+      }
     })
   })
 
@@ -232,15 +278,27 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
       // branch, which still returned BP_RC_PENDING (3). That is the COMMON path:
       // most environments without gh never reach the pr-create call. The first
       // fix corrected the rarer branch and left the bug where it bites most.
-      const noGh = await block(s, '/if ! command -v gh/,/^  fi/p')
+      const { path, kind } = await resolvedCli()
+      const noGh =
+        kind === 'ts'
+          ? await tsBlock(path, /commandExists\('gh'\)/, /return codes\.failed/)
+          : await block(s, path, '/if ! command -v gh/,/^  fi/p')
       expect(noGh, 'could not locate the missing-gh branch').not.toBe('')
-      expect(
-        noGh,
-        "gh is not installed, no PR can exist, yet it returns BP_RC_PENDING (3) — 'filed' asserted with no PR",
-      ).not.toContain('BP_RC_PENDING')
-      expect(noGh, 'the missing-gh branch returns neither FAILED nor PENDING').toContain(
-        'BP_RC_FAILED',
-      )
+      if (kind === 'ts') {
+        expect(
+          noGh,
+          "gh is not installed, no PR can exist, yet it returns codes.pending — 'filed' asserted with no PR",
+        ).not.toContain('codes.pending')
+        expect(noGh, 'the missing-gh branch returns neither codes.failed nor codes.pending').toContain('codes.failed')
+      } else {
+        expect(
+          noGh,
+          "gh is not installed, no PR can exist, yet it returns BP_RC_PENDING (3) — 'filed' asserted with no PR",
+        ).not.toContain('BP_RC_PENDING')
+        expect(noGh, 'the missing-gh branch returns neither FAILED nor PENDING').toContain(
+          'BP_RC_FAILED',
+        )
+      }
     })
   })
 
@@ -251,12 +309,18 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
       // filed" and returned 3 on the strength of an exit status alone. Same
       // boundary already defended for bp_file_existing_pr: when the OUTPUT is
       // the evidence, a success status is not a substitute for it.
-      const blk = await block(s, '/gh reported success but returned no usable PR URL/,/esac/p')
+      const { path, kind } = await resolvedCli()
+      const blk =
+        kind === 'ts'
+          ? await tsBlock(path, /gh reported success but returned no usable PR URL/, /return codes\.failed/)
+          : await block(s, path, '/gh reported success but returned no usable PR URL/,/esac/p')
       expect(
         blk,
         "no guard on gh pr create's output — a zero exit with an empty or 'null' URL still reports filed",
       ).not.toBe('')
-      expect(blk, 'the no-usable-URL path does not return BP_RC_FAILED').toContain('BP_RC_FAILED')
+      expect(blk, 'the no-usable-URL path does not return the FAILED code').toContain(
+        kind === 'ts' ? 'codes.failed' : 'BP_RC_FAILED',
+      )
     })
   })
 
@@ -276,7 +340,14 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
       // #5 green, because it also deletes the terminator of that suite's own sed
       // range. Same shape as BUG-074 — a range that fails OPEN when the thing it
       // measures goes missing.
-      const guard = await condition(s, /if \[ -n "\$existing" \]/)
+      //
+      // TASK-081: the ported guard is one plain JS `if`, no continuation
+      // backslash at all — `condition()`'s "stop at the first line that
+      // doesn't end in \\" already returns just that one line unchanged, so
+      // only the START pattern needs a second, kind-aware spelling.
+      const { path, kind } = await resolvedCli()
+      const startPattern = kind === 'ts' ? /if \(existing/ : /if \[ -n "\$existing" \]/
+      const guard = await condition(s, path, startPattern)
       expect(guard, "could not find the caller's guard on $existing").not.toBe('')
       expect(guard, "the caller's guard does not reject a literal 'null'").toContain('null')
     })

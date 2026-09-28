@@ -253,7 +253,6 @@ import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import type { RunResult } from '../harness/process.js'
 import { withCttyAnswer, withCttyNoStdin } from '../helpers/tty.js'
 
-const SHELL_CLI = join(REPO_ROOT, 'scripts/blueprint')
 const PORTED_CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 
 async function git(s: Scenario, cwd: string, args: string[]): Promise<RunResult> {
@@ -264,6 +263,66 @@ async function initRepo(s: Scenario, dir: string): Promise<void> {
   await git(s, dir, ['init', '-q', '-b', 'main', '.'])
   await git(s, dir, ['config', 'user.email', 't@local'])
   await git(s, dir, ['config', 'user.name', 't'])
+}
+
+// OLD's source (plan §5, "the port commit"): once scripts/blueprint IS the
+// exact two-line shim, REPO_ROOT's own scripts/blueprint is that shim, not
+// the pre-port shell CLI every OLD row in this file must run. Derived from
+// history instead, exactly as tests/managed-references #3 does: the commit
+// that first introduced the shim's own `exec` line, at its PARENT — the last
+// commit where scripts/blueprint was still the full shell CLI. Memoized:
+// every fixture builder below asks for the identical bytes.
+const SHIM_EXEC_LINE = 'exec node "$(dirname "$0")/blueprint.mts" "$@"'
+let preShimSource: Promise<string> | undefined
+
+async function preShimBlueprintSource(s: Scenario): Promise<string> {
+  if (preShimSource) return preShimSource
+  preShimSource = (async () => {
+    const found = await s.run(
+      'git',
+      ['-C', REPO_ROOT, 'log', '--reverse', '--format=%H', '-S', SHIM_EXEC_LINE, '--', 'scripts/blueprint'],
+      { cwd: s.workspace.root },
+    )
+    const shimCommit = found.stdout.split('\n')[0] ?? ''
+    if (!/^[0-9a-f]{40}$/.test(shimCommit)) {
+      throw new Error(
+        `no commit introduced the scripts/blueprint shim — is this a shallow clone? ` +
+          `(ts-tests needs fetch-depth: 0)\n${found.output}`,
+      )
+    }
+    const shown = await s.run('git', ['-C', REPO_ROOT, 'show', `${shimCommit}^:scripts/blueprint`], {
+      cwd: s.workspace.root,
+    })
+    if (shown.code !== 0) {
+      throw new Error(`cannot read the pre-shim scripts/blueprint at ${shimCommit}^\n${shown.output}`)
+    }
+    return shown.stdout
+  })()
+  return preShimSource
+}
+
+/** Writes the pre-shim scripts/blueprint into `dir/scripts` (created if
+ * needed) and marks it executable. Every fixture builder that used to
+ * `cp`/`copyFile` REPO_ROOT's own scripts/blueprint calls this instead, so
+ * OLD always runs the real shell CLI regardless of what REPO_ROOT's own
+ * scripts/blueprint currently is. */
+async function installShellCli(s: Scenario, dir: string): Promise<void> {
+  const target = join(dir, 'scripts/blueprint')
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, await preShimBlueprintSource(s), 'utf8')
+  await chmod(target, 0o755)
+}
+
+/** A standalone materialized copy for the handful of rows that run the shell
+ * CLI directly with no fixture `scripts/` dir at all — dispatch's `help`/
+ * `push`/unknown-subcommand rows and a2bp's `no files given` row, none of
+ * which source any `scripts/lib/*.sh`. */
+async function shellCliPath(s: Scenario): Promise<string> {
+  const dir = await s.workspace.dir('old-cli')
+  const path = join(dir, 'blueprint')
+  await writeFile(path, await preShimBlueprintSource(s), 'utf8')
+  await chmod(path, 0o755)
+  return path
 }
 
 /** Fixed so a commit built from identical content hashes to the identical
@@ -605,8 +664,7 @@ async function samePathTwice<F extends SamePathTwiceFixture>(
 async function seedFixtureRootPinned(s: Scenario, root: string): Promise<void> {
   await mkdir(join(root, 'scripts'), { recursive: true })
   await mkdir(join(root, 'docs'), { recursive: true })
-  await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
-  await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
+  await installShellCli(s, root)
   await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
   await writeFile(join(root, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
   await writeFile(join(root, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
@@ -628,7 +686,7 @@ async function seedBlueprintRepoPinned(s: Scenario, dir: string): Promise<string
 
 async function seedRegisteredProjectPinned(s: Scenario, dir: string, blueprintDir: string, bootstrapSha: string): Promise<void> {
   await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
-  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await installShellCli(s, dir)
   await mkdir(join(dir, '.githooks'), { recursive: true })
   await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
   await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
@@ -646,7 +704,7 @@ async function seedRegisteredProjectPinned(s: Scenario, dir: string, blueprintDi
  * config v1). */
 async function seedOverrideProjectPinned(s: Scenario, dir: string, bootstrapSha: string): Promise<void> {
   await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
-  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await installShellCli(s, dir)
   await mkdir(join(dir, '.githooks'), { recursive: true })
   await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
   await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
@@ -669,7 +727,7 @@ async function seedOverrideProjectPinned(s: Scenario, dir: string, bootstrapSha:
  * `origin` remote, matching this checkout's own shape. */
 async function seedBlueprintItselfPinned(s: Scenario, dir: string): Promise<void> {
   await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
-  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await installShellCli(s, dir)
   await mkdir(join(dir, '.githooks'), { recursive: true })
   await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
   await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
@@ -728,9 +786,9 @@ describe('blueprint-port differential — dispatch', () => {
             await mkdir(root, { recursive: true })
             return { root, proj: root, env: await rowEnv(root) }
           },
-          run: (s, fx, side) =>
+          run: async (s, fx, side) =>
             side === 'old'
-              ? s.run('bash', [SHELL_CLI, ...row.args], { cwd: fx.proj, env: fx.env })
+              ? s.run('bash', [await shellCliPath(s), ...row.args], { cwd: fx.proj, env: fx.env })
               : s.run(process.execPath, [PORTED_CLI, ...row.args], { cwd: fx.proj, env: fx.env }),
         })
       })
@@ -868,8 +926,7 @@ describe('blueprint-port differential — files', () => {
 // threshold regardless of what the test actually means to seed.
 async function seedCliOnly(s: Scenario, dir: string): Promise<void> {
   await mkdir(join(dir, 'scripts/lib'), { recursive: true })
-  await copyFile(SHELL_CLI, join(dir, 'scripts/blueprint'))
-  await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
+  await installShellCli(s, dir)
   await copyFile(PORTED_CLI, join(dir, 'scripts/blueprint.mts'))
   await cp(join(REPO_ROOT, 'scripts/lib'), join(dir, 'scripts/lib'), { recursive: true })
 }
@@ -1814,7 +1871,7 @@ describe('blueprint-port differential — pull', () => {
           await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
           await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
           await cp(join(REPO_ROOT, 'scripts'), join(bp, 'scripts'), { recursive: true })
-          await s.run('chmod', ['+x', join(bp, 'scripts/blueprint')], { cwd: bp })
+          await installShellCli(s, bp)
           await initRepo(s, bp)
           await commitAllPinned(s, bp, 'base')
           const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
@@ -1872,7 +1929,7 @@ describe('blueprint-port differential — pull', () => {
           await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
           await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
           await cp(join(REPO_ROOT, 'scripts'), join(bp, 'scripts'), { recursive: true })
-          await s.run('chmod', ['+x', join(bp, 'scripts/blueprint')], { cwd: bp })
+          await installShellCli(s, bp)
           await initRepo(s, bp)
           await commitAllPinned(s, bp, 'base')
           const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
@@ -1937,7 +1994,11 @@ describe('blueprint-port differential — pull', () => {
       // rebuilds), never only the directory samePathTwice happens to leave
       // on disk afterwards (the NEW side's).
       const sha256Of = async (p: string): Promise<string> => `sha256:${createHash('sha256').update(await readFile(p)).digest('hex')}`
-      const expectedCli = await sha256Of(join(REPO_ROOT, 'scripts/blueprint'))
+      const sha256OfString = (content: string): string => `sha256:${createHash('sha256').update(content).digest('hex')}`
+      // scripts/blueprint is now the shim, so the fixture's own copy (built
+      // by installShellCli, from history) is compared against that same
+      // pre-shim source, never against REPO_ROOT's live scripts/blueprint.
+      const expectedCli = sha256OfString(await preShimBlueprintSource(s))
       const expectedMts = await sha256Of(join(REPO_ROOT, 'scripts/blueprint.mts'))
       for (const [label, snap] of [
         ['OLD', oldSnapshot],
@@ -3695,7 +3756,7 @@ async function buildA2bpFixture(
   const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
   await cp(join(REPO_ROOT, 'scripts'), join(proj, 'scripts'), { recursive: true })
-  await s.run('chmod', ['+x', join(proj, 'scripts/blueprint')], { cwd: proj })
+  await installShellCli(s, proj)
   await mkdir(join(proj, '.githooks'), { recursive: true })
   await writeFile(join(proj, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
   await s.run('chmod', ['+x', join(proj, '.githooks/pre-push')], { cwd: proj })
@@ -4339,9 +4400,9 @@ describe('blueprint-port differential — a2bp / prs', () => {
           await mkdir(root, { recursive: true })
           return { root, proj: root, env: await rowEnv(root) }
         },
-        run: (s, fx, side) =>
+        run: async (s, fx, side) =>
           side === 'old'
-            ? s.run('bash', [SHELL_CLI, 'a2bp'], { cwd: fx.proj, env: fx.env })
+            ? s.run('bash', [await shellCliPath(s), 'a2bp'], { cwd: fx.proj, env: fx.env })
             : s.run(process.execPath, [PORTED_CLI, 'a2bp'], { cwd: fx.proj, env: fx.env }),
       })
       expect(oldResult.code).toBe(1)
@@ -4369,8 +4430,7 @@ describe('blueprint-port differential — a2bp / prs', () => {
       const { oldResult } = await samePathTwice<SamePathTwiceFixture>(s, 'missinglib', {
         build: async (s, root) => {
           await mkdir(join(root, 'scripts/lib'), { recursive: true })
-          await copyFile(SHELL_CLI, join(root, 'scripts/blueprint'))
-          await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
+          await installShellCli(s, root)
           await copyFile(PORTED_CLI, join(root, 'scripts/blueprint.mts'))
           for (const name of await readdir(join(REPO_ROOT, 'scripts/lib'))) {
             if (name === 'request-build.sh') continue

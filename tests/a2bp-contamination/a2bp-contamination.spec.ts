@@ -1347,7 +1347,12 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
       const copyCli = async (rel: string, drop?: string): Promise<string> => {
         const dir = await s.fs.mkdirp(rel)
-        for (const part of ['blueprint', 'lib']) {
+        // TASK-081: scripts/blueprint is now the two-line shim, so a copy of
+        // it alone is a shim with no target — its own `dirname "$0"` points
+        // INTO `dir`, which needs blueprint.mts sitting right beside it, or
+        // every run here dies of Node's "Cannot find module" instead of
+        // exercising the guard under test.
+        for (const part of ['blueprint', 'blueprint.mts', 'lib']) {
           const cp = await s.run('cp', ['-a', join(SUBJECT_ROOT, 'scripts', part), dir], {
             cwd: s.workspace.root,
           })

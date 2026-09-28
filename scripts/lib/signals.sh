@@ -12,11 +12,14 @@
 # pipefail`). EXIT still covers `die` and normal returns.
 #
 # SHARED, not copied (TASK-025). Callers:
-#   scripts/blueprint             drift and pull (PLAN-TASK-025 §1.4)
 #   scripts/install-toolchain.sh  --replace-blueprint-command (§8.1). Without it,
 #                                 an INT sent to the installer alone while it
 #                                 waited on a child was absorbed, and the swap
 #                                 completed (§R4 #2).
+# TASK-081: scripts/blueprint used to be the other caller (drift and pull,
+# PLAN-TASK-025 §1.4). It is the ported scripts/blueprint.mts now, which
+# cannot source a shell trap — plan §4 implements the same "clean up, clear,
+# die of the same signal" rule natively in TS instead (§3 P1).
 # a2bp still installs the resuming shape (BUG-116) and adopts this by replacing
 # `trap _a2bp_cleanup EXIT INT TERM` with `_bp_terminating_traps _a2bp_cleanup`.
 #

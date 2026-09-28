@@ -431,7 +431,7 @@ path belongs in the `project_config_*.md` files, never upstream.
 
 Nobody keeps a list of synced files. The managed set is **derived**: every file
 the blueprint's `git archive` ships at the commit sync reads, minus the
-project-owned seeds (`TEMPLATE_FILES` in `scripts/blueprint`), so bootstrap and
+project-owned seeds (`TEMPLATE_FILES` in `scripts/blueprint.mts`), so bootstrap and
 pull deliver the same set and `.gitattributes` alone decides what ships
 (TASK-021). Run `blueprint files` to print it. If you catch
 yourself adding a project-specific incident or path to a blueprint-managed

@@ -759,6 +759,14 @@ export function _setBlueprintRootForTests(root: string): void {
   SYNC.blueprintRoot = root
 }
 
+// Test-only: seed SYNC's cleanup-relevant fields directly, so a unit test can
+// exercise bpSyncCleanup's ordering (TASK-081 §8 slice 5, replacing
+// sync-by-address #20e's structural shell-text read) without a real P1
+// fetch. Never called from main().
+export function _setSyncStateForTests(fields: Partial<SyncGlobals>): void {
+  Object.assign(SYNC, fields)
+}
+
 // --- _bp_sync_cleanup (scripts/blueprint:707-722) — BUG-120 -----------------
 //
 // This is bash's EXIT trap AND its INT/TERM handler in one: `die()` and
@@ -773,7 +781,7 @@ export function _setBlueprintRootForTests(root: string): void {
 // token and sending the TERM — a syscall does not fork, so nothing runs in
 // that gap, same as bash's `: >` builtin. Part 2 is bash's `wait`. Part 3 is
 // the synchronous tail (`update-ref -d`, `rm -rf`).
-async function bpSyncCleanup(): Promise<void> {
+export async function bpSyncCleanup(): Promise<void> {
   if (SYNC.go) {
     try {
       writeFileSync(SYNC.go, '')

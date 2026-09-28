@@ -300,18 +300,35 @@ describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file',
       // every pull of the CLI took the fallback — and on the day its counts
       // happened to balance, the awk would have "merged" the CLI into itself.
       //
-      // TASK-081 §8 slice 0: once the port lands, scripts/blueprint is the
-      // two-line shim and this marker-grepping code moves to
+      // TASK-081 §8 slice 0 / slice 5: once the port lands, scripts/blueprint
+      // is the two-line shim and this marker-grepping code moves to
       // scripts/blueprint.mts. resolveConsumer follows the shim to find
       // where the code this case is ABOUT actually lives, so it keeps
       // testing the right file instead of a shim that mentions no markers at
-      // all. A no-op today: resolveConsumer returns scripts/blueprint
-      // unchanged (kind 'shell'), because no scripts/blueprint.mts exists yet.
+      // all.
+      //
+      // TASK-081 §9 D (founder decision, "Option 1"): scripts/blueprint.mts
+      // never spells the joined token `BLUEPRINT:` + `BEGIN` as one
+      // contiguous string — its marker-search regex is built from separate
+      // constants (BP_MARKER_LEAD/BP_MARKER_BEGIN_ERE) precisely so no
+      // shipped file can ever trip BUG-112's class of bug again. That makes
+      // the ORIGINAL sanity check (a literal `BLUEPRINT:BEGIN` substring)
+      // false for the ported file by design, not by accident — the
+      // regression is now structurally impossible for any shipped file
+      // rather than merely tested against. The kind-aware check below still
+      // proves the fixture is "code that deals with the markers", using
+      // whichever shape that code currently has.
       const consumer = resolveConsumer(REPO_ROOT, 'scripts/blueprint')
       expect(consumer, 'scripts/blueprint is missing from this checkout').toBeDefined()
       const rel = consumer?.rel ?? 'scripts/blueprint'
       const cli = consumer?.source ?? ''
-      expect(cli, 'the fixture is vacuous: the CLI no longer mentions the markers').toContain('BLUEPRINT:BEGIN')
+      if (consumer?.kind === 'ts') {
+        expect(cli, 'the fixture is vacuous: the ported CLI no longer deals with the markers at all').toContain(
+          'BP_MARKER_LEAD',
+        )
+      } else {
+        expect(cli, 'the fixture is vacuous: the CLI no longer mentions the markers').toContain('BLUEPRINT:BEGIN')
+      }
       const { proj } = await pair(s, 'c', rel, cli, cli + '# an older local copy\n')
 
       const r = await s.run(CLI, ['pull', rel, '--yes'], { cwd: proj })

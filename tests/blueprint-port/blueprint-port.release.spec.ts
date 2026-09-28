@@ -3614,15 +3614,36 @@ describe('blueprint-port differential — a2bp / prs', () => {
     })
   })
 
-  it('gh unavailable — pushed but no PR opened (BUG-011), exit 5', async () => {
-    await scenario('blueprint-port-a2bp-no-gh', async (s) => {
-      const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-nogh', ['CLAUDE.md'], {
-        env: async (_fx, side) => ({ PATH: await pathWithoutBin(s, 'gh', `nogh-${side}`) }),
+  // TASK-081 "drift/pull differential rows to completion" round — this row
+  // was seen flaky (green on a bare retry, red standalone). Root cause,
+  // measured directly (`vitest run -t "gh unavailable"` in isolation): the
+  // row genuinely costs ~5.2s — `a2bpSamePathTwice` builds the FULL fixture
+  // TWICE at the same path (git init/commit, a real gitleaks scan, a real
+  // push into a bare remote), which is plan §5's own "same path, twice"
+  // determinism contract (this file's header comment), not an accident this
+  // row could shed — and `pathWithoutBin` on top of that builds a symlink
+  // farm over the ENTIRE real PATH, twice (once per side). That total sits
+  // close enough to a bare 5000ms default (vitest's own, applied whenever
+  // this file runs outside `npm test`'s config-resolving entrypoint — e.g. a
+  // `vitest run <file> -t …` invoked directly, which is how the flake was
+  // reproduced) that ordinary system-load variance tips it over. The
+  // project's OWN testTimeout (320s, tests/vitest.config.ts) already covers
+  // this with room to spare; the explicit third argument here is a floor
+  // that holds regardless of how the file is invoked, not a raise of the
+  // real cost — the fixture-build-twice shape is correct and stays.
+  it(
+    'gh unavailable — pushed but no PR opened (BUG-011), exit 5',
+    async () => {
+      await scenario('blueprint-port-a2bp-no-gh', async (s) => {
+        const { oldResult } = await a2bpSamePathTwice(s, 'a2bp-nogh', ['CLAUDE.md'], {
+          env: async (_fx, side) => ({ PATH: await pathWithoutBin(s, 'gh', `nogh-${side}`) }),
+        })
+        expect(oldResult.code).toBe(5)
+        expect(oldResult.stdout).toContain('gh is not installed')
       })
-      expect(oldResult.code).toBe(5)
-      expect(oldResult.stdout).toContain('gh is not installed')
-    })
-  })
+    },
+    30_000,
+  )
 
   it('filed — pushed and a PR opened via a gh shim: exit 3 (BUG-011 happy path)', async () => {
     await scenario('blueprint-port-a2bp-filed', async (s) => {

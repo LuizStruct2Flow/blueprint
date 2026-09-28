@@ -470,6 +470,20 @@ describe('bpCliLibs / extractShLibNames — the closure with shim-follow (plan �
 })
 
 describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)', () => {
+  // `bpProspectiveFor(f, out)` reads `f` as the PROJECT path — relative to
+  // `process.cwd()`, not to the fixture root — so the two "new" branch tests
+  // below need an `f` that is guaranteed absent at whatever directory the
+  // suite happens to run from. `CLAUDE.md` (this repo's own file) used to
+  // fill that role and broke exactly this way: run from the blueprint's own
+  // root instead of `tests/` (the canonical `npm --prefix tests test`
+  // invocation), `existsSync('CLAUDE.md')` is TRUE, `bpProspectivePull` takes
+  // the "copy" branch instead of "new", and the assertion below sees
+  // `mode: 'copy'` — not a divergence from the shell, a fixture that
+  // collided with a real file outside its own control. A name no tracked
+  // file will ever have removes the collision instead of merely working
+  // around it from one cwd.
+  const NONEXISTENT_PROJECT_FILE = 'bp-port-prospective-fixture-does-not-exist.md'
+
   // The shell calls bp_prospective_pull / bp_prospective_for ONLY as an `if`
   // condition (scripts/blueprint:1394, :1572, :1639), so errexit is off for
   // its whole dynamic extent: an inner `cp` failing there does not abort
@@ -485,7 +499,8 @@ describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)
     const shimDir = mkFixtureDir('bp-port-prospective-bare-shim-')
     const savedPath = process.env.PATH
     try {
-      writeFileSync(join(root, 'CLAUDE.md'), 'blueprint content\n')
+      expect(existsSync(NONEXISTENT_PROJECT_FILE)).toBe(false)
+      writeFileSync(join(root, NONEXISTENT_PROJECT_FILE), 'blueprint content\n')
       _setBlueprintRootForTests(root)
       const fakeCp = join(shimDir, 'cp')
       writeFileSync(fakeCp, '#!/bin/sh\nexit 9\n')
@@ -496,7 +511,7 @@ describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)
       // The project file does not exist, so bpProspectivePull takes the
       // "new" branch: `await run('cp', [bp, out]); return {mode: 'new', ...}`
       // — a bare, unwrapped `run()` call, ambient errexit-on by default.
-      await expect(bpProspectiveFor('CLAUDE.md', out)).rejects.toBeInstanceOf(CommandFailedError)
+      await expect(bpProspectiveFor(NONEXISTENT_PROJECT_FILE, out)).rejects.toBeInstanceOf(CommandFailedError)
     } finally {
       process.env.PATH = savedPath
       rmSync(root, { recursive: true, force: true })
@@ -509,7 +524,8 @@ describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)
     const shimDir = mkFixtureDir('bp-port-prospective-unchecked-shim-')
     const savedPath = process.env.PATH
     try {
-      writeFileSync(join(root, 'CLAUDE.md'), 'blueprint content\n')
+      expect(existsSync(NONEXISTENT_PROJECT_FILE)).toBe(false)
+      writeFileSync(join(root, NONEXISTENT_PROJECT_FILE), 'blueprint content\n')
       _setBlueprintRootForTests(root)
       const fakeCp = join(shimDir, 'cp')
       writeFileSync(fakeCp, '#!/bin/sh\nexit 9\n')
@@ -517,7 +533,7 @@ describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)
       process.env.PATH = `${shimDir}:${savedPath}`
 
       const out = join(shimDir, 'out')
-      const p = await unchecked(() => bpProspectiveFor('CLAUDE.md', out))
+      const p = await unchecked(() => bpProspectiveFor(NONEXISTENT_PROJECT_FILE, out))
       // Reproduces the shell bug-for-bug: the function's own last statement
       // still returns {mode: 'new'} even though the cp inside it failed and
       // `out` was never written — this is what "an inner failure CONTINUES

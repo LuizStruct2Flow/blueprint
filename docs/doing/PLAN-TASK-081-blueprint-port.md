@@ -447,11 +447,11 @@ onward.
   driven by a PATH shim that fails on the named argv.
 - **Command-not-found rows:** an unguarded tool (`comm`, `cmp`) absent from
   PATH, once in `drift` and once in `pull`. Status must match exactly.
-- **Slices 2-4 prove the suites locally.** On the branch the suites run
-  against a working-tree-only shim that is never committed, so CI cannot
-  re-run them and a slice reviewer has to recreate the shim to do so. The
-  first CI run of the signal suites against the port is slice 5's. Each slice
-  review says this.
+- **Slices 2-4 prove the suites locally.** Between these commits on `main`
+  the suites run against a working-tree-only shim that is never committed
+  (§1's correction, 2026-09-28), so CI cannot re-run them and a slice
+  reviewer has to recreate the shim to do so. The first CI run of the signal
+  suites against the port is slice 5's. Each slice review says this.
 
 **The matrix, about 90 rows:**
 

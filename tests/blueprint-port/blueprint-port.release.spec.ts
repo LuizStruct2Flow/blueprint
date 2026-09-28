@@ -2786,101 +2786,106 @@ describe('blueprint-port differential — settings layer merge and legacy propos
  * every other override row in this file.
  */
 describe('blueprint-port differential — staleness states', () => {
-  async function seedUpstream(s: Scenario, tag: string): Promise<{ up: string; sha: string }> {
-    const up = await s.workspace.dir(`${tag}-up`)
-    await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
-    await initRepo(s, up)
-    await commitAll(s, up, 'base')
-    const sha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
-    return { up, sha }
+  interface StalenessFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
   }
 
-  async function cloneBp(s: Scenario, tag: string, up: string): Promise<string> {
-    const bp = s.workspace.path(`${tag}-bp`)
-    await git(s, s.workspace.root, ['clone', '-q', up, bp])
-    await git(s, bp, ['config', 'user.email', 't@local'])
-    await git(s, bp, ['config', 'user.name', 't'])
-    return bp
-  }
+  const runStaleness = (s: Scenario, fx: StalenessFixture, side: 'old' | 'new'): Promise<RunResult> =>
+    side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)
 
-  async function seedOverrideProject(s: Scenario, dir: string, bootstrapSha: string): Promise<void> {
-    await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
-    await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
-    await mkdir(join(dir, '.githooks'), { recursive: true })
-    await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
-    await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
-    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
-    await writeFile(
-      join(dir, '.blueprint-source'),
-      `bootstrap_sha    = ${bootstrapSha}\nbootstrap_date   = 2026-01-01\n`,
-      'utf8',
-    )
-    await initRepo(s, dir)
-    await commitAll(s, dir, 'init')
-  }
+  const stalenessSnapshotOpts = (fx: StalenessFixture): SnapshotOpts => ({ remoteRefsDir: fx.bp })
 
-  async function driftUnderOverride(
-    s: Scenario,
-    bp: string,
-    proj: string,
-  ): Promise<{ oldResult: RunResult; newResult: RunResult }> {
-    const env = { ...(await dateShimEnv(s)), BLUEPRINT_ROOT: bp, BP_NO_PROMPT: '1' }
-    const treeBefore = await walkFiles(proj)
-    const oldResult = await runOld(s, proj, ['drift'], env)
-    expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
-    await assertNoDriftPullScratch(s)
-    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-    const newResult = await runNew(s, proj, ['drift'], env)
-    expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
-    await assertNoDriftPullScratch(s)
-    return { oldResult, newResult }
+  async function stalenessEnv(s: Scenario, root: string, bp: string): Promise<Record<string, string>> {
+    const date = await s.shimDir('date-shim')
+    await date.add('date', 'echo 2026-01-01T00:00:00Z')
+    return { ...(await rowEnv(root)), PATH: date.path(), BLUEPRINT_ROOT: bp, BP_NO_PROMPT: '1' }
   }
 
   it('current — the local checkout is level with origin/main', async () => {
     await scenario('blueprint-port-staleness-current', async (s) => {
-      const { up, sha } = await seedUpstream(s, 'current')
-      const bp = await cloneBp(s, 'current', up)
-      const proj = await s.workspace.dir('current-proj')
-      await seedOverrideProject(s, proj, sha)
-      const { oldResult, newResult } = await driftUnderOverride(s, bp, proj)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<StalenessFixture>(s, 'root', {
+        build: async (s, root) => {
+          const up = join(root, 'up')
+          await mkdir(up, { recursive: true })
+          await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          await initRepo(s, up)
+          await commitAllPinned(s, up, 'base')
+          const sha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+          const bp = join(root, 'bp')
+          await git(s, root, ['clone', '-q', up, bp])
+          await git(s, bp, ['config', 'user.email', 't@local'])
+          await git(s, bp, ['config', 'user.name', 't'])
+          const proj = join(root, 'proj')
+          await seedOverrideProjectPinned(s, proj, sha)
+          return { root, proj, bp, env: await stalenessEnv(s, root, bp) }
+        },
+        run: runStaleness,
+        snapshotOpts: stalenessSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('local checkout is level with origin/main')
     })
   })
 
   it('ahead — the local checkout has an unpushed commit', async () => {
     await scenario('blueprint-port-staleness-ahead', async (s) => {
-      const { up, sha } = await seedUpstream(s, 'ahead')
-      const bp = await cloneBp(s, 'ahead', up)
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nlocal-only\n', 'utf8')
-      await commitAll(s, bp, 'local ahead commit')
-      const proj = await s.workspace.dir('ahead-proj')
-      await seedOverrideProject(s, proj, sha)
-      const { oldResult, newResult } = await driftUnderOverride(s, bp, proj)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<StalenessFixture>(s, 'root', {
+        build: async (s, root) => {
+          const up = join(root, 'up')
+          await mkdir(up, { recursive: true })
+          await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          await initRepo(s, up)
+          await commitAllPinned(s, up, 'base')
+          const sha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+          const bp = join(root, 'bp')
+          await git(s, root, ['clone', '-q', up, bp])
+          await git(s, bp, ['config', 'user.email', 't@local'])
+          await git(s, bp, ['config', 'user.name', 't'])
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nlocal-only\n', 'utf8')
+          await commitAllPinned(s, bp, 'local ahead commit')
+          const proj = join(root, 'proj')
+          await seedOverrideProjectPinned(s, proj, sha)
+          return { root, proj, bp, env: await stalenessEnv(s, root, bp) }
+        },
+        run: runStaleness,
+        snapshotOpts: stalenessSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('local checkout is ahead of origin/main (unpushed commits)')
     })
   })
 
   it('diverged — the local checkout and the remote each moved on their own', async () => {
     await scenario('blueprint-port-staleness-diverged', async (s) => {
-      const { up, sha } = await seedUpstream(s, 'diverged')
-      const bp = await cloneBp(s, 'diverged', up)
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nlocal-only\n', 'utf8')
-      await commitAll(s, bp, 'local commit')
-      await mkdir(join(up, 'docs'), { recursive: true })
-      await writeFile(join(up, 'docs/DoD.md'), '# DoD\nremote-only\n', 'utf8')
-      await commitAll(s, up, 'remote commit')
-      // bp_staleness_assess can only tell "diverged" from the ordinary,
-      // not-yet-fetched shape of "behind" when the remote's commit object is
-      // ALREADY present locally (staleness.sh:112-118, `have_remote`) — the
-      // exact fixture shape tests/staleness #5 uses.
-      await git(s, bp, ['fetch', '-q', 'origin', 'main'])
-      const proj = await s.workspace.dir('diverged-proj')
-      await seedOverrideProject(s, proj, sha)
-      const { oldResult, newResult } = await driftUnderOverride(s, bp, proj)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<StalenessFixture>(s, 'root', {
+        build: async (s, root) => {
+          const up = join(root, 'up')
+          await mkdir(up, { recursive: true })
+          await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          await initRepo(s, up)
+          await commitAllPinned(s, up, 'base')
+          const sha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+          const bp = join(root, 'bp')
+          await git(s, root, ['clone', '-q', up, bp])
+          await git(s, bp, ['config', 'user.email', 't@local'])
+          await git(s, bp, ['config', 'user.name', 't'])
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nlocal-only\n', 'utf8')
+          await commitAllPinned(s, bp, 'local commit')
+          await mkdir(join(up, 'docs'), { recursive: true })
+          await writeFile(join(up, 'docs/DoD.md'), '# DoD\nremote-only\n', 'utf8')
+          await commitAllPinned(s, up, 'remote commit')
+          // bp_staleness_assess can only tell "diverged" from the ordinary,
+          // not-yet-fetched shape of "behind" when the remote's commit
+          // object is ALREADY present locally (staleness.sh:112-118,
+          // `have_remote`) — the exact fixture shape tests/staleness #5
+          // uses.
+          await git(s, bp, ['fetch', '-q', 'origin', 'main'])
+          const proj = join(root, 'proj')
+          await seedOverrideProjectPinned(s, proj, sha)
+          return { root, proj, bp, env: await stalenessEnv(s, root, bp) }
+        },
+        run: runStaleness,
+        snapshotOpts: stalenessSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('local checkout has DIVERGED from origin/main')
       expect(oldResult.stdout).toContain('resolve by hand')
     })
@@ -2888,13 +2893,26 @@ describe('blueprint-port differential — staleness states', () => {
 
   it('unknown — origin is unreachable', async () => {
     await scenario('blueprint-port-staleness-unknown', async (s) => {
-      const { up, sha } = await seedUpstream(s, 'unknown')
-      const bp = await cloneBp(s, 'unknown', up)
-      await git(s, bp, ['remote', 'set-url', 'origin', s.workspace.path('unknown-does-not-exist')])
-      const proj = await s.workspace.dir('unknown-proj')
-      await seedOverrideProject(s, proj, sha)
-      const { oldResult, newResult } = await driftUnderOverride(s, bp, proj)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<StalenessFixture>(s, 'root', {
+        build: async (s, root) => {
+          const up = join(root, 'up')
+          await mkdir(up, { recursive: true })
+          await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          await initRepo(s, up)
+          await commitAllPinned(s, up, 'base')
+          const sha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+          const bp = join(root, 'bp')
+          await git(s, root, ['clone', '-q', up, bp])
+          await git(s, bp, ['config', 'user.email', 't@local'])
+          await git(s, bp, ['config', 'user.name', 't'])
+          await git(s, bp, ['remote', 'set-url', 'origin', join(root, 'unknown-does-not-exist')])
+          const proj = join(root, 'proj')
+          await seedOverrideProjectPinned(s, proj, sha)
+          return { root, proj, bp, env: await stalenessEnv(s, root, bp) }
+        },
+        run: runStaleness,
+        snapshotOpts: stalenessSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('? staleness unknown (unreachable)')
     })
   })
@@ -2926,49 +2944,36 @@ describe('blueprint-port differential — staleness states', () => {
  * it damaged (observed while writing sync-by-address #27a).
  */
 describe('blueprint-port differential — fetch failures', () => {
-  async function seedFetchBlueprint(s: Scenario, dir: string): Promise<string> {
-    await mkdir(join(dir, 'docs'), { recursive: true })
-    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-    await writeFile(join(dir, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-    await writeFile(join(dir, 'README.md'), '# fixture project\n', 'utf8')
-    await initRepo(s, dir)
-    await commitAll(s, dir, 'base')
-    return (await git(s, dir, ['rev-parse', 'HEAD'])).stdout.trim()
+  interface FetchFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly sha: string
+    readonly env: Record<string, string>
   }
 
-  async function runBoth(
-    s: Scenario,
-    proj: string,
-    args: string[],
-    env: Record<string, string>,
-  ): Promise<{ oldResult: RunResult; newResult: RunResult }> {
-    const treeBefore = await walkFiles(proj)
-    const oldResult = await runOld(s, proj, args, env)
-    expect(await walkFiles(proj), 'a fetch failure (OLD) must never write to the project tree').toEqual(treeBefore)
-    // Same reset `driftBoth` uses above: arm_gate's own git config writes
-    // (core.hooksPath, core.sshCommand) into the SHARED project directory,
-    // and a second run would otherwise see them already armed and print a
-    // different status line — a divergence the run ORDER causes, not drift.
-    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-    const newResult = await runNew(s, proj, args, env)
-    expect(await walkFiles(proj), 'a fetch failure (NEW) must never write to the project tree').toEqual(treeBefore)
-    return { oldResult, newResult }
+  async function buildRegistered(s: Scenario, root: string, blueprintSource?: (bp: string, sha: string) => string): Promise<FetchFixture> {
+    const bp = join(root, 'bp')
+    const proj = join(root, 'proj')
+    const sha = await seedBlueprintRepoPinned(s, bp)
+    await seedRegisteredProjectPinned(s, proj, bp, sha)
+    if (blueprintSource) await writeFile(join(proj, '.blueprint-source'), blueprintSource(bp, sha), 'utf8')
+    return { root, proj, bp, sha, env: await rowEnv(root) }
   }
+
+  const runFetch = (s: Scenario, fx: FetchFixture, side: 'old' | 'new'): Promise<RunResult> =>
+    side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)
 
   it('an unreachable remote exits 5, without ever calling it damaged', async () => {
     await scenario('blueprint-port-fetch-unreachable', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = ${s.workspace.path('no-such-remote')}\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<FetchFixture>(s, 'root', {
+        build: (s, root) =>
+          buildRegistered(
+            s,
+            root,
+            (_bp, sha) =>
+              `config_version   = 2\nblueprint_remote = ${join(root, 'no-such-remote')}\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+          ),
+        run: runFetch,
+      })
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain('could not read the blueprint')
       expect(oldResult.stderr).toContain('NOT a clean drift report')
@@ -2978,17 +2983,16 @@ describe('blueprint-port differential — fetch failures', () => {
 
   it("a reachable remote WITHOUT the branch exits 5, naming the branch — not a connection failure", async () => {
     await scenario('blueprint-port-fetch-missing-branch', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = nope\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<FetchFixture>(s, 'root', {
+        build: (s, root) =>
+          buildRegistered(
+            s,
+            root,
+            (bp, sha) =>
+              `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = nope\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+          ),
+        run: runFetch,
+      })
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain("no branch 'nope' on that remote")
       expect(oldResult.stderr).not.toMatch(/could not connect|unable to connect/i)
@@ -2997,17 +3001,21 @@ describe('blueprint-port differential — fetch failures', () => {
 
   it("no 'timeout' or 'gtimeout' on PATH: exits 5 before any fetch, no cache created", async () => {
     await scenario('blueprint-port-fetch-no-timeout', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
+      // Computed ONCE, outside `build` — `s.pathWithout` writes its mirror
+      // directory once per scenario (scenario-wide, not row-scoped) and
+      // errors EEXIST on a second call, so `build` (invoked once per side)
+      // must not call it itself.
       const path = await s.pathWithout(['timeout', 'gtimeout'])
-      const cacheRoot = join(s.workspace.path('cache-home'), 'struct2flow')
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {
-        PATH: path,
-        XDG_CACHE_HOME: s.workspace.path('cache-home'),
+      let cacheRoot = ''
+      const { oldResult } = await samePathTwice<FetchFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await buildRegistered(s, root)
+          const cacheHome = join(root, 'cache-home')
+          cacheRoot = join(cacheHome, 'struct2flow')
+          return { ...fx, env: { ...fx.env, PATH: path, XDG_CACHE_HOME: cacheHome } }
+        },
+        run: runFetch,
       })
-      expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain("no 'timeout' or 'gtimeout'")
       expect(existsSync(cacheRoot)).toBe(false)
@@ -3016,31 +3024,26 @@ describe('blueprint-port differential — fetch failures', () => {
 
   it('a HUNG remote is cut off at BP_FETCH_TIMEOUT and exits 5, naming the timeout', async () => {
     await scenario('blueprint-port-fetch-hung', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = ssh://git@127.0.0.1/blackhole.git\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      // An ssh shim that accepts the connection and never answers — the fetch
-      // it is wrapped in is what `timeout` cuts off, not ssh itself refusing.
-      const oldShims = await s.shimDir('old-hung')
-      await oldShims.add('ssh', 'sleep 999\n')
-      const newShims = await s.shimDir('new-hung')
-      await newShims.add('ssh', 'sleep 999\n')
-      const treeBefore = await walkFiles(proj)
       const began = Date.now()
-      const oldResult = await runOld(s, proj, ['drift'], { PATH: oldShims.path(), BP_FETCH_TIMEOUT: '2' })
-      expect(await walkFiles(proj), 'a hung fetch (OLD) must never write to the project tree').toEqual(treeBefore)
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-      const newResult = await runNew(s, proj, ['drift'], { PATH: newShims.path(), BP_FETCH_TIMEOUT: '2' })
-      expect(await walkFiles(proj), 'a hung fetch (NEW) must never write to the project tree').toEqual(treeBefore)
+      const { oldResult } = await samePathTwice<FetchFixture>(s, 'root', {
+        build: (s, root) =>
+          buildRegistered(
+            s,
+            root,
+            (_bp, sha) =>
+              `config_version   = 2\nblueprint_remote = ssh://git@127.0.0.1/blackhole.git\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+          ),
+        run: async (s, fx, side) => {
+          // An ssh shim that accepts the connection and never answers — the
+          // fetch it is wrapped in is what `timeout` cuts off, not ssh
+          // itself refusing.
+          const shims = await s.shimDir(`hung-${side}`)
+          await shims.add('ssh', 'sleep 999\n')
+          const env = { ...fx.env, PATH: shims.path(), BP_FETCH_TIMEOUT: '2' }
+          return side === 'old' ? runOld(s, fx.proj, ['drift'], env) : runNew(s, fx.proj, ['drift'], env)
+        },
+      })
       const elapsed = Date.now() - began
-      expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain('timed out after 2s')
       expect(elapsed, `a hung remote held both runs for ${elapsed}ms`).toBeLessThan(20_000)
@@ -3049,106 +3052,92 @@ describe('blueprint-port differential — fetch failures', () => {
 
   it('a scratch directory that cannot be created exits 5, with no cache and no project write', async () => {
     await scenario('blueprint-port-fetch-no-scratch', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // A regular file as TMPDIR: `mktemp -d` under it cannot succeed, and
-      // unlike a chmod'd directory this holds even when the suite runs as root.
-      await writeFile(s.workspace.path('not-a-directory'), 'x\n', 'utf8')
-      const cacheRoot = join(s.workspace.path('cache-home'), 'struct2flow')
-      const before = await readFile(join(proj, '.blueprint-source'), 'utf8')
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {
-        TMPDIR: s.workspace.path('not-a-directory'),
-        XDG_CACHE_HOME: s.workspace.path('cache-home'),
+      let cacheRoot = ''
+      let before = ''
+      const { oldResult } = await samePathTwice<FetchFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await buildRegistered(s, root)
+          // A regular file as TMPDIR: `mktemp -d` under it cannot succeed,
+          // and unlike a chmod'd directory this holds even when the suite
+          // runs as root.
+          const notADir = join(root, 'not-a-directory')
+          await writeFile(notADir, 'x\n', 'utf8')
+          const cacheHome = join(root, 'cache-home')
+          cacheRoot = join(cacheHome, 'struct2flow')
+          before = await readFile(join(fx.proj, '.blueprint-source'), 'utf8')
+          return { ...fx, env: { ...fx.env, TMPDIR: notADir, XDG_CACHE_HOME: cacheHome } }
+        },
+        run: runFetch,
       })
-      expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain('could not create a scratch directory')
       expect(existsSync(cacheRoot)).toBe(false)
-      expect(await readFile(join(proj, '.blueprint-source'), 'utf8')).toBe(before)
+      expect(before).not.toBe('')
     })
   })
 
   it('a damaged cache exits 5, naming the cache and how to remove it', async () => {
     await scenario('blueprint-port-fetch-damaged-cache', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      const cacheHome = s.workspace.path('cache-home')
+      let cacheHome = ''
+      const { oldResult } = await samePathTwice<FetchFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await buildRegistered(s, root)
+          cacheHome = join(root, 'cache-home')
+          return { ...fx, env: { ...fx.env, XDG_CACHE_HOME: cacheHome } }
+        },
+        run: async (s, fx, side) => {
+          // Warm the cache with a successful drift, then damage it exactly
+          // as sync-by-address #27a does, then drift again through the SAME
+          // cache.
+          const runDrift = () =>
+            side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)
+          const warm = await runDrift()
+          expect(warm.code, warm.output).toBe(0)
 
-      // Warm the cache with a successful drift, then damage it exactly as
-      // sync-by-address #27a does, then drift again through the SAME cache.
-      async function warmThenDamage(runDrift: (env: Record<string, string>) => Promise<RunResult>): Promise<RunResult> {
-        const env = { XDG_CACHE_HOME: cacheHome }
-        const warm = await runDrift(env)
-        expect(warm.code, warm.output).toBe(0)
-
-        const cacheParent = join(cacheHome, 'struct2flow')
-        const cacheNames = (await readdir(cacheParent).catch(() => [] as string[])).filter(
-          (n) => n.startsWith('blueprint-') && n.endsWith('.git'),
-        )
-        expect(cacheNames, 'expected exactly one blueprint cache').toHaveLength(1)
-        const cache = join(cacheParent, cacheNames[0]!)
-
-        // A leftover per-run ref at the tip is the condition, not decoration:
-        // with it present the next refresh trusts the tip and skips
-        // connectivity-checking objects it already "has"; without it git
-        // would notice the gap on its own and refetch, healing the cache.
-        await s.run('git', ['--git-dir', cache, 'update-ref', 'refs/bp-run/blueprint-sync.0', sha], {
-          cwd: s.workspace.root,
-        })
-
-        // Every packed object loose, so a single deletion can target the
-        // tip's root tree specifically.
-        const packDir = join(cache, 'objects/pack')
-        for (const name of await readdir(packDir).catch(() => [] as string[])) {
-          if (!name.endsWith('.pack')) continue
-          const moved = s.workspace.path(`loose-${name}`)
-          await rename(join(packDir, name), moved)
-          const unpack = await s.run(
-            'sh',
-            ['-c', 'git --git-dir="$1" unpack-objects -q < "$2"', 'sh', cache, moved],
-            { cwd: s.workspace.root },
+          const cacheParent = fx.env.XDG_CACHE_HOME ? join(fx.env.XDG_CACHE_HOME, 'struct2flow') : ''
+          const cacheNames = (await readdir(cacheParent).catch(() => [] as string[])).filter(
+            (n) => n.startsWith('blueprint-') && n.endsWith('.git'),
           )
-          expect(unpack.code, unpack.output).toBe(0)
-        }
-        for (const name of await readdir(packDir).catch(() => [] as string[])) {
-          if (name.endsWith('.idx') || name.endsWith('.rev')) await rm(join(packDir, name), { force: true })
-        }
+          expect(cacheNames, 'expected exactly one blueprint cache').toHaveLength(1)
+          const cache = join(cacheParent, cacheNames[0]!)
 
-        const treeR = await s.run('git', ['--git-dir', cache, 'rev-parse', `${sha}^{tree}`], {
-          cwd: s.workspace.root,
-        })
-        expect(treeR.code, treeR.output).toBe(0)
-        const tree = treeR.stdout.trim()
-        const object = join(cache, 'objects', tree.slice(0, 2), tree.slice(2))
-        expect(existsSync(object), 'the tree object is not loose, so deleting it proves nothing').toBe(true)
-        await rm(object)
+          // A leftover per-run ref at the tip is the condition, not
+          // decoration: with it present the next refresh trusts the tip and
+          // skips connectivity-checking objects it already "has"; without it
+          // git would notice the gap on its own and refetch, healing the
+          // cache.
+          await s.run('git', ['--git-dir', cache, 'update-ref', 'refs/bp-run/blueprint-sync.0', fx.sha], {
+            cwd: fx.root,
+          })
 
-        return runDrift(env)
-      }
+          // Every packed object loose, so a single deletion can target the
+          // tip's root tree specifically.
+          const packDir = join(cache, 'objects/pack')
+          for (const name of await readdir(packDir).catch(() => [] as string[])) {
+            if (!name.endsWith('.pack')) continue
+            const moved = join(fx.root, `loose-${name}`)
+            await rename(join(packDir, name), moved)
+            const unpack = await s.run(
+              'sh',
+              ['-c', 'git --git-dir="$1" unpack-objects -q < "$2"', 'sh', cache, moved],
+              { cwd: fx.root },
+            )
+            expect(unpack.code, unpack.output).toBe(0)
+          }
+          for (const name of await readdir(packDir).catch(() => [] as string[])) {
+            if (name.endsWith('.idx') || name.endsWith('.rev')) await rm(join(packDir, name), { force: true })
+          }
 
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await warmThenDamage((env) => runOld(s, proj, ['drift'], env))
-      // drift (successful OR failed) never writes the project tree — proven
-      // generically by driftBoth/runBoth elsewhere in this file — so this
-      // holds across BOTH the warm call and the damaged one, on both sides.
-      expect(await walkFiles(proj), 'warm-then-damage (OLD) must never write to the project tree').toEqual(treeBefore)
-      // Same reset `runBoth` uses above, plus resetting the cache directory
-      // itself so the NEW side gets its own independent warm-then-damage
-      // cycle through the identical cache PATH (same XDG_CACHE_HOME, same
-      // remote address), which is what lets a plain expectIdentical compare
-      // the two sides byte-for-byte despite the cache path being embedded in
-      // the error message.
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-      await rm(cacheHome, { recursive: true, force: true })
-      const newResult = await warmThenDamage((env) => runNew(s, proj, ['drift'], env))
-      expect(await walkFiles(proj), 'warm-then-damage (NEW) must never write to the project tree').toEqual(treeBefore)
+          const treeR = await s.run('git', ['--git-dir', cache, 'rev-parse', `${fx.sha}^{tree}`], { cwd: fx.root })
+          expect(treeR.code, treeR.output).toBe(0)
+          const tree = treeR.stdout.trim()
+          const object = join(cache, 'objects', tree.slice(0, 2), tree.slice(2))
+          expect(existsSync(object), 'the tree object is not loose, so deleting it proves nothing').toBe(true)
+          await rm(object)
 
-      expectIdentical(oldResult, newResult)
+          return runDrift()
+        },
+      })
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain(`cache ${join(cacheHome, 'struct2flow')}`)
       expect(oldResult.stderr).toContain('is damaged')
@@ -3183,32 +3172,12 @@ describe('blueprint-port differential — fetch failures', () => {
  * `a2bp` WRITES A REAL BRANCH to its (local, filesystem) remote when it gets
  * that far — the snapshot's `bpRefs` field is how that write is compared,
  * rather than reading it off stdout.
+ *
+ * `PINNED_GIT_DATE`/`pinnedGitEnv`/`commitAllPinned` moved to this file's
+ * shared-helpers section (near `commitAll`) so the drift/files/staleness/
+ * fetch-failure builders can reuse them too — this section still uses them
+ * unchanged, just defined earlier now.
  */
-
-const PINNED_GIT_DATE = '2026-01-01T00:00:00Z'
-
-function pinnedGitEnv(): Record<string, string> {
-  return {
-    GIT_AUTHOR_NAME: 't',
-    GIT_AUTHOR_EMAIL: 't@local',
-    GIT_AUTHOR_DATE: PINNED_GIT_DATE,
-    GIT_COMMITTER_NAME: 't',
-    GIT_COMMITTER_EMAIL: 't@local',
-    GIT_COMMITTER_DATE: PINNED_GIT_DATE,
-  }
-}
-
-/** Same shape as `commitAll` above, except every commit's author/committer
- * date and identity are pinned rather than left to the wall clock — the
- * precondition plan §5 states for "same path, twice": identical content,
- * built twice, must hash to the identical commit SHA. */
-async function commitAllPinned(s: Scenario, dir: string, message = 'init'): Promise<void> {
-  await git(s, dir, ['add', '-A'])
-  await s.run('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message], {
-    cwd: dir,
-    env: pinnedGitEnv(),
-  })
-}
 
 interface A2bpFixture {
   readonly root: string

@@ -818,60 +818,45 @@ async function substringFailShim(s: Scenario, tag: string, bin: string, needle: 
 }
 
 describe('blueprint-port differential — drift', () => {
-  // ONE project directory for both CLIs — run OLD, capture its report, then
-  // reset the gate/keepalive config it armed (so NEW sees the same "was
-  // unset" starting state) and run NEW. This is the same directory rather
-  // than one-per-side because `drift`'s own report prints `project: <cwd>`,
-  // and two distinct fixture directories can never agree on that line.
-  // Plan §5's full comparison, generalised for drift's ONE-shared-directory
-  // shape: drift never writes to the project tree, so `treeBefore` and the
-  // tree read back after EACH side's run must all three be identical —
-  // asserted explicitly rather than assumed, which is what would actually
-  // catch a port that (wrongly) touched a project file. The cache is shared
-  // too (same remote, same cache key on both sides), so its refs after OLD
-  // must equal its refs after NEW.
-  async function driftBoth(
-    s: Scenario,
-    proj: string,
-    env: Record<string, string>,
-  ): Promise<{ readonly oldResult: RunResult; readonly newResult: RunResult }> {
-    const remote = await readBlueprintRemote(proj)
-    const treeBefore = await walkFiles(proj)
-
-    const oldResult = await runOld(s, proj, ['drift'], env)
-    expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
-    await assertNoDriftPullScratch(s)
-    const cacheAfterOld = remote ? await bpCacheRefsOrSentinel(s, remote) : undefined
-
-    await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-    await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-
-    const newResult = await runNew(s, proj, ['drift'], env)
-    expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
-    await assertNoDriftPullScratch(s)
-    if (remote) {
-      const cacheAfterNew = await bpCacheRefsOrSentinel(s, remote)
-      expect(cacheAfterNew, "the cache's refs must match between OLD and NEW").toBe(cacheAfterOld)
-    }
-
-    return { oldResult, newResult }
+  interface DriftFixture extends SamePathTwiceFixture {
+    readonly bp?: string
+    readonly env: Record<string, string>
   }
+
+  /** The `date` shim + row-scoped HOME/XDG_CACHE_HOME/TMPDIR every row below
+   * needs, folded into one env object. `noPrompt` defaults on, since every
+   * row here exists to prove drift's REPORT, not the fast-forward prompt
+   * (that is the next describe's own subject). */
+  async function driftEnv(s: Scenario, root: string, noPrompt = true): Promise<Record<string, string>> {
+    const date = await s.shimDir('date-shim')
+    await date.add('date', 'echo 2026-01-01T00:00:00Z')
+    return { ...(await rowEnv(root)), PATH: date.path(), ...(noPrompt ? { BP_NO_PROMPT: '1' } : {}) }
+  }
+
+  const runDrift = (s: Scenario, fx: DriftFixture, side: 'old' | 'new'): Promise<RunResult> =>
+    side === 'old' ? runOld(s, fx.proj, ['drift'], fx.env) : runNew(s, fx.proj, ['drift'], fx.env)
+
+  const driftSnapshotOpts = (fx: DriftFixture): SnapshotOpts => (fx.bp ? { remote: fx.bp } : {})
 
   it('clean — a registered project fully synced', async () => {
     await scenario('blueprint-port-drift-clean', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // Fully synced: copy the blueprint's managed files into the project and
-      // commit, so nothing is drifted or missing.
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'sync')
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // Fully synced: copy the blueprint's managed files into the
+          // project and commit, so nothing is drifted or missing.
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
       expect(oldResult.code).toBe(0)
     })
@@ -879,17 +864,21 @@ describe('blueprint-port differential — drift', () => {
 
   it('drifted — a project file differs from the blueprint HEAD', async () => {
     await scenario('blueprint-port-drift-drifted', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'partial sync')
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'partial sync')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('Drifted (project ≠ blueprint HEAD): 1')
       expect(oldResult.stdout).toContain('~ CLAUDE.md')
     })
@@ -897,13 +886,17 @@ describe('blueprint-port differential — drift', () => {
 
   it('new in blueprint — a managed file the project never pulled', async () => {
     await scenario('blueprint-port-drift-new', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('New in blueprint (not in this project): 2')
       expect(oldResult.stdout).toContain('+ CLAUDE.md')
       expect(oldResult.stdout).toContain('+ docs/DoD.md')
@@ -912,30 +905,34 @@ describe('blueprint-port differential — drift', () => {
 
   it('refused — invalid marker structure in the project copy (BUG-034)', async () => {
     await scenario('blueprint-port-drift-refused', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      // Give the blueprint's CLAUDE.md a well-formed marker region.
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(
-        join(bp, 'CLAUDE.md'),
-        '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
-        'utf8',
-      )
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          // Give the blueprint's CLAUDE.md a well-formed marker region.
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(
+            join(bp, 'CLAUDE.md'),
+            '# CLAUDE\n<!-- BLUEPRINT:BEGIN -->\nmanaged content\n<!-- BLUEPRINT:END -->\nkeep\n',
+            'utf8',
+          )
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // An END with no open region: bp_marker_structure reports "bad …".
-      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'broken markers')
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // An END with no open region: bp_marker_structure reports "bad …".
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n<!-- BLUEPRINT:END -->\nbroken\n', 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'broken markers')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
       expect(oldResult.stdout).toContain("this project's markers are invalid")
     })
@@ -943,15 +940,18 @@ describe('blueprint-port differential — drift', () => {
 
   it('unregistered — three or more struct2flow marker files but no .blueprint-source', async () => {
     await scenario('blueprint-port-drift-unregistered', async (s) => {
-      const proj = await s.workspace.dir('proj')
-      await seedCliOnly(s, proj)
-      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
-      await writeFile(join(proj, 'AGENTS.md'), '# AGENTS\n', 'utf8')
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await writeFile(join(proj, 'docs/DoD.md'), '# DoD\n', 'utf8')
-      const env = await dateShimEnv(s)
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const proj = join(root, 'proj')
+          await seedCliOnly(s, proj)
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          await writeFile(join(proj, 'AGENTS.md'), '# AGENTS\n', 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await writeFile(join(proj, 'docs/DoD.md'), '# DoD\n', 'utf8')
+          return { root, proj, env: await driftEnv(s, root, false) }
+        },
+        run: runDrift,
+      })
       expect(oldResult.stderr).toContain('NEVER REGISTERED with blueprint sync')
       expect(oldResult.code).toBe(1)
     })
@@ -959,10 +959,14 @@ describe('blueprint-port differential — drift', () => {
 
   it('not a project — no .blueprint-source and fewer than three marker files', async () => {
     await scenario('blueprint-port-drift-not-a-project', async (s) => {
-      const proj = await s.workspace.dir('proj')
-      await seedCliOnly(s, proj)
-      const { oldResult, newResult } = await driftBoth(s, proj, {})
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const proj = join(root, 'proj')
+          await seedCliOnly(s, proj)
+          return { root, proj, env: await rowEnv(root) }
+        },
+        run: runDrift,
+      })
       expect(oldResult.stderr).toContain('not a struct2flow project')
       expect(oldResult.code).toBe(1)
     })
@@ -978,18 +982,22 @@ describe('blueprint-port differential — drift', () => {
 
   it('scripts/lib/gate.sh missing — refuses to report drift (TASK-029)', async () => {
     await scenario('blueprint-port-drift-gate-missing', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await rm(join(proj, 'scripts/lib/gate.sh'))
-      await commitAll(s, proj, 'sync, minus gate.sh')
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, proj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await rm(join(proj, 'scripts/lib/gate.sh'))
+          await commitAllPinned(s, proj, 'sync, minus gate.sh')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.code).not.toBe(0)
       expect(oldResult.stdout).toContain('gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed')
       expect(oldResult.stderr).toContain('refusing to report drift without scripts/lib/gate.sh')
@@ -998,79 +1006,68 @@ describe('blueprint-port differential — drift', () => {
 
   it('an exported GIT_DIR does not redirect drift to another repository (BUG-077)', async () => {
     await scenario('blueprint-port-drift-git-dir', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'sync')
-
-      const remote = await readBlueprintRemote(proj)
-      const treeBefore = await walkFiles(proj)
-
-      // A FRESH decoy repo PER SIDE — same reason verbFailShim rebuilds its
-      // shim per side (this file's own comment on that helper): a GIT_DIR
-      // pointed at one carrying state from the OLD run would make the NEW
-      // run's report ("already armed" vs "was unset") a fixture artefact of
-      // shared mutable state, not a genuine OLD-vs-NEW difference. `_bp_
-      // project_root`/`bp_state_root` never ask git (BUG-077's own fix, a
-      // pure filesystem walk) — this row's job is to prove the CLI's
-      // observable behaviour is identical under an exported GIT_DIR, not to
-      // assert where gate.sh's OWN `git -C` config calls land (shared,
-      // unported shell, identical on both sides either way).
-      const decoyOld = await s.workspace.dir('decoy-old')
-      await initRepo(s, decoyOld)
-      await commitAll(s, decoyOld, 'decoy base')
-      const envOld = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1', GIT_DIR: join(decoyOld, '.git') }
-      const oldResult = await runOld(s, proj, ['drift'], envOld)
-      expect(await walkFiles(proj), 'GIT_DIR (OLD) must never write to the project tree').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      const cacheAfterOld = remote ? await bpCacheRefsOrSentinel(s, remote) : undefined
-
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-
-      const decoyNew = await s.workspace.dir('decoy-new')
-      await initRepo(s, decoyNew)
-      await commitAll(s, decoyNew, 'decoy base')
-      const envNew = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1', GIT_DIR: join(decoyNew, '.git') }
-      const newResult = await runNew(s, proj, ['drift'], envNew)
-      expect(await walkFiles(proj), 'GIT_DIR (NEW) must never write to the project tree').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      if (remote) {
-        const cacheAfterNew = await bpCacheRefsOrSentinel(s, remote)
-        expect(cacheAfterNew, "the cache's refs must match between OLD and NEW").toBe(cacheAfterOld)
-      }
-
-      expectIdentical(oldResult, newResult)
+      // A FRESH decoy repo PER SIDE (built inside `run`, so `samePathTwice`'s
+      // own delete-and-rebuild between OLD and NEW gives each side its own)
+      // — a GIT_DIR pointed at one carrying state from the OLD run would make
+      // the NEW run's report ("already armed" vs "was unset") a fixture
+      // artefact of shared mutable state, not a genuine OLD-vs-NEW
+      // difference. `_bp_project_root`/`bp_state_root` never ask git
+      // (BUG-077's own fix, a pure filesystem walk) — this row's job is to
+      // prove the CLI's observable behaviour is identical under an exported
+      // GIT_DIR, not to assert where gate.sh's OWN `git -C` config calls
+      // land (shared, unported shell, identical on both sides either way).
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: async (s, fx, side) => {
+          const decoy = join(fx.root, `decoy-${side}`)
+          await mkdir(decoy, { recursive: true })
+          await initRepo(s, decoy)
+          await commitAllPinned(s, decoy, 'decoy base')
+          const env = { ...fx.env, GIT_DIR: join(decoy, '.git') }
+          return side === 'old' ? runOld(s, fx.proj, ['drift'], env) : runNew(s, fx.proj, ['drift'], env)
+        },
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
     })
   })
 
   it('a symlinked project directory — run from the symlink', async () => {
     await scenario('blueprint-port-drift-symlink', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedBlueprintRepo(s, bp)
-      const real = await s.workspace.dir('real-proj')
-      await seedRegisteredProject(s, real, bp, sha)
-      await copyFile(join(bp, 'CLAUDE.md'), join(real, 'CLAUDE.md'))
-      await mkdir(join(real, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(real, 'docs/DoD.md'))
-      await commitAll(s, real, 'sync')
-      // logicalPwd()/`$(pwd)` are what the CLI actually reads (both runOld and
-      // runNew inject PWD=cwd — see this file's own runOld/runNew comment), so
-      // running with `proj` itself set to the SYMLINK exercises the CLI as an
-      // operator standing inside it genuinely would, not merely a resolved
-      // physical path that happens to be reachable through one.
-      const symProj = join(s.workspace.root, 'proj-link')
-      await symlink(real, symProj)
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-      const { oldResult, newResult } = await driftBoth(s, symProj, env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const real = join(root, 'real-proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, real, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(real, 'CLAUDE.md'))
+          await mkdir(join(real, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(real, 'docs/DoD.md'))
+          await commitAllPinned(s, real, 'sync')
+          // logicalPwd()/`$(pwd)` are what the CLI actually reads (both
+          // runOld and runNew inject PWD=cwd — see this file's own
+          // runOld/runNew comment), so running with `proj` itself set to the
+          // SYMLINK exercises the CLI as an operator standing inside it
+          // genuinely would, not merely a resolved physical path that
+          // happens to be reachable through one.
+          const symProj = join(root, 'proj-link')
+          await symlink(real, symProj)
+          return { root, proj: symProj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
       expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
-      expect(oldResult.stdout).toContain(`project:    ${symProj}`)
     })
   })
 
@@ -1094,43 +1091,47 @@ describe('blueprint-port differential — drift', () => {
    * there is no `node <path>` invocation shape that accepts this path —
    * `bp_substitute_stream`'s own literal split-and-join (which this row
    * still exercises, for the CONTENT half — the `&` in the name) is not
-   * what fails.
+   * what fails. `compareRuns: false` — the two sides genuinely diverge by
+   * design, so this row asserts each side explicitly instead of the generic
+   * byte-equality `samePathTwice` otherwise enforces.
    */
   it('a project name holding & and \\ — exercises placeholder substitution, and Node’s own ESM limit on \\', async () => {
     await scenario('blueprint-port-drift-name-chars', async (s) => {
       const projName = 'a&b\\c'
-      const bp = await s.workspace.dir('bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nproject={{PROJECT_NAME}}\nupper={{PROJECT_NAME_UPPER}}\n', 'utf8')
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      const { oldResult, newResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nproject={{PROJECT_NAME}}\nupper={{PROJECT_NAME_UPPER}}\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      const proj = await s.workspace.dir(projName)
-      await seedRegisteredProject(s, proj, bp, sha)
-      // Hand-computed correct substitution: bp_placeholder_upper is
-      // `tr 'a-z-' 'A-Z_'`, which leaves `&` and `\` untouched.
-      await writeFile(join(proj, 'CLAUDE.md'), `# CLAUDE\nproject=${projName}\nupper=A&B\\C\n`, 'utf8')
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await commitAll(s, proj, 'sync')
-      const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
-
+          const proj = join(root, projName)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // Hand-computed correct substitution: bp_placeholder_upper is
+          // `tr 'a-z-' 'A-Z_'`, which leaves `&` and `\` untouched.
+          await writeFile(join(proj, 'CLAUDE.md'), `# CLAUDE\nproject=${projName}\nupper=A&B\\C\n`, 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+        compareRuns: false,
+      })
       // OLD: the shell CLI substitutes correctly and reports clean — proof
       // that the CONTENT-level substitution (the `&`/`\` literal split-and-
       // join this row means to exercise) is correct.
-      const oldResult = await runOld(s, proj, ['drift'], env)
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
-
       // NEW: Node refuses to even load scripts/blueprint.mts from inside a
       // `\`-bearing ancestor directory — the accepted deviation above.
-      const newResult = await runNew(s, proj, ['drift'], env)
       expect(newResult.code).not.toBe(0)
       expect(newResult.stderr).toContain('ERR_INVALID_MODULE_SPECIFIER')
-      await assertNoDriftPullScratch(s)
     })
   })
 })
@@ -1147,130 +1148,86 @@ describe('blueprint-port differential — drift', () => {
  * to prove the prompt is SUPPRESSED; these prove what happens when it fires.
  */
 describe("blueprint-port differential — drift's fast-forward prompt", () => {
-  /** A registered project whose `.blueprint-source` carries ONLY
-   * bootstrap_sha/bootstrap_date (config v1 shape, no blueprint_remote) —
-   * report_staleness is only reached via the BLUEPRINT_ROOT override branch
-   * of read_blueprint_source, which needs no remote field at all. */
-  async function seedOverrideProject(s: Scenario, dir: string, bootstrapSha: string): Promise<void> {
-    await cp(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true })
-    await s.run('chmod', ['+x', join(dir, 'scripts/blueprint')], { cwd: dir })
-    await mkdir(join(dir, '.githooks'), { recursive: true })
-    await writeFile(join(dir, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
-    await s.run('chmod', ['+x', join(dir, '.githooks/pre-push')], { cwd: dir })
-    await writeFile(join(dir, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
-    await writeFile(
-      join(dir, '.blueprint-source'),
-      `bootstrap_sha    = ${bootstrapSha}\nbootstrap_date   = 2026-01-01\n`,
-      'utf8',
-    )
-    await initRepo(s, dir)
-    await commitAll(s, dir, 'init')
+  interface FfFixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly firstSha: string
+    readonly headSha: string
   }
 
-  /** One shared upstream, cloned to `bp` at its FIRST commit, then advanced
-   * once — so a caller that clones `bp` again from the SAME `up` (the "y"
-   * row below, which needs two independent `bp` copies because fast-forward
-   * mutates one) gets the identical commit OBJECTS, not a second,
-   * independently-timestamped near-miss with a different sha. */
-  async function seedUpstream(s: Scenario, tag: string): Promise<{ up: string; firstSha: string }> {
-    const up = await s.workspace.dir(`${tag}-up`)
+  /** One upstream, one `bp` clone of it at its FIRST commit, then (always)
+   * advanced by one more commit — so `bp` is genuinely behind and the
+   * fast-forward prompt fires. Rebuilding this at the SAME `root` for both
+   * OLD and NEW (rather than the old code's two INDEPENDENT `bp`/`up` pairs)
+   * means every absolute path is identical on both sides, so no path-scrub
+   * normaliser is needed at all — plan §5 never allows one beyond its own
+   * three named exceptions. */
+  async function buildFastForward(s: Scenario, root: string): Promise<FfFixture> {
+    const up = join(root, 'up')
+    await mkdir(up, { recursive: true })
     await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
     await initRepo(s, up)
-    await commitAll(s, up, 'base')
+    await commitAllPinned(s, up, 'base')
     const firstSha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
-    return { up, firstSha }
-  }
 
-  async function cloneBp(s: Scenario, tag: string, up: string): Promise<string> {
-    const bp = s.workspace.path(`${tag}-bp`)
-    await git(s, s.workspace.root, ['clone', '-q', up, bp])
+    const bp = join(root, 'bp')
+    await git(s, root, ['clone', '-q', up, bp])
     await git(s, bp, ['config', 'user.email', 't@local'])
     await git(s, bp, ['config', 'user.name', 't'])
-    return bp
+
+    await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\nmore\n', 'utf8')
+    await commitAllPinned(s, up, 'ahead')
+    const headSha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
+
+    const proj = join(root, 'proj')
+    await seedOverrideProjectPinned(s, proj, firstSha)
+
+    return { root, proj, bp, firstSha, headSha }
+  }
+
+  function ffCommand(fx: FfFixture, side: 'old' | 'new'): string {
+    return side === 'old'
+      ? `BLUEPRINT_ROOT='${fx.bp}' bash '${join(fx.proj, 'scripts/blueprint')}' drift`
+      : `BLUEPRINT_ROOT='${fx.bp}' '${process.execPath}' '${join(fx.proj, 'scripts/blueprint.mts')}' drift`
   }
 
   it('y fast-forwards the local checkout to the (shared) remote tip', async () => {
     await scenario('blueprint-port-drift-ff-y', async (s) => {
-      const { up, firstSha } = await seedUpstream(s, 'ff-y')
-      const oldBp = await cloneBp(s, 'ff-y-old', up)
-      const newBp = await cloneBp(s, 'ff-y-new', up)
-      // Advance the SHARED upstream exactly once — both clones will later
-      // fetch this SAME commit object, not two independently-built ones.
-      await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\nmore\n', 'utf8')
-      await commitAll(s, up, 'ahead')
-      const headSha = (await git(s, up, ['rev-parse', 'HEAD'])).stdout.trim()
-
-      const oldProj = await s.workspace.dir('ff-y-old-proj')
-      const newProj = await s.workspace.dir('ff-y-new-proj')
-      await seedOverrideProject(s, oldProj, firstSha)
-      await seedOverrideProject(s, newProj, firstSha)
-
-      const oldResult = await withCttyAnswer(
-        s,
-        oldProj,
-        `BLUEPRINT_ROOT='${oldBp}' bash '${join(oldProj, 'scripts/blueprint')}' drift`,
-        'y\n',
-        { PWD: oldProj },
-      )
-      const newResult = await withCttyAnswer(
-        s,
-        newProj,
-        `BLUEPRINT_ROOT='${newBp}' '${process.execPath}' '${join(newProj, 'scripts/blueprint.mts')}' drift`,
-        'y\n',
-        { PWD: newProj },
-      )
-      // Every absolute fixture path differs between the two independent
-      // sides (bp AND proj alike — drift's own report prints `project:
-      // $(pwd)`), so both are scrubbed to a shared placeholder before
-      // comparing rather than only the one this row happens to mutate.
-      const scrub = (t: string) =>
-        t.split(oldBp).join('<bp>').split(newBp).join('<bp>').split(oldProj).join('<proj>').split(newProj).join('<proj>')
-      expect(scrub(newResult.output)).toBe(scrub(oldResult.output))
+      let headSha = ''
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<FfFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await buildFastForward(s, root)
+          headSha = fx.headSha
+          return fx
+        },
+        run: (s, fx, side) => withCttyAnswer(s, fx.proj, ffCommand(fx, side), 'y\n', { PWD: fx.proj }),
+        snapshotOpts: (fx) => ({ remoteRefsDir: fx.bp }),
+      })
       expect(oldResult.output).toContain('fast-forward it now?')
       expect(oldResult.output).toContain(`✓ fast-forwarded to ${headSha.slice(0, 7)}`)
-      // NON-VACUITY: the LOCAL CHECKOUT actually moved, on both sides, to the
-      // SAME shared commit object — not merely "some later commit".
-      expect((await git(s, oldBp, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headSha)
-      expect((await git(s, newBp, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headSha)
+      // NON-VACUITY: the LOCAL CHECKOUT actually moved, on both sides, to
+      // the SAME commit — not merely "some later commit".
+      expect(oldSnapshot.remoteRefs).toContain(headSha)
+      expect(newSnapshot.remoteRefs).toContain(headSha)
     })
   })
 
   it('N leaves the local checkout untouched', async () => {
     await scenario('blueprint-port-drift-ff-n', async (s) => {
-      // No mutation on a decline, so ONE shared bp/proj pair for OLD then NEW
-      // is safe — same shape as `driftBoth` above.
-      const { up, firstSha } = await seedUpstream(s, 'ff-n')
-      const bp = await cloneBp(s, 'ff-n', up)
-      await writeFile(join(up, 'CLAUDE.md'), '# CLAUDE\nmore\n', 'utf8')
-      await commitAll(s, up, 'ahead')
-      const proj = await s.workspace.dir('ff-n-proj')
-      await seedOverrideProject(s, proj, firstSha)
-
-      const oldResult = await withCttyAnswer(
-        s,
-        proj,
-        `BLUEPRINT_ROOT='${bp}' bash '${join(proj, 'scripts/blueprint')}' drift`,
-        'N\n',
-        { PWD: proj },
-      )
-      // Same reset as `driftBoth` above: arm_gate writes core.hooksPath /
-      // core.sshCommand into the project's own LOCAL git config, and a
-      // second run on the SAME directory would otherwise see them already
-      // armed and print a DIFFERENT status line — a divergence the run
-      // ORDER would cause, not the CLI under test.
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-      const newResult = await withCttyAnswer(
-        s,
-        proj,
-        `BLUEPRINT_ROOT='${bp}' '${process.execPath}' '${join(proj, 'scripts/blueprint.mts')}' drift`,
-        'N\n',
-        { PWD: proj },
-      )
-      expect(newResult.output).toBe(oldResult.output)
+      let firstSha = ''
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<FfFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await buildFastForward(s, root)
+          firstSha = fx.firstSha
+          return fx
+        },
+        run: (s, fx, side) => withCttyAnswer(s, fx.proj, ffCommand(fx, side), 'N\n', { PWD: fx.proj }),
+        snapshotOpts: (fx) => ({ remoteRefsDir: fx.bp }),
+      })
       expect(oldResult.output).toContain('fast-forward it now?')
       expect(oldResult.output).toContain('left alone')
-      expect((await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(firstSha)
+      // NON-VACUITY: the local checkout did NOT move, on either side.
+      expect(oldSnapshot.remoteRefs).toContain(firstSha)
+      expect(newSnapshot.remoteRefs).toContain(firstSha)
     })
   })
 })

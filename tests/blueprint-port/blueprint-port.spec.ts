@@ -535,11 +535,12 @@ describe('bpProspectiveFor callers (plan §2 rule 4 — Codex review finding #1)
       const out = join(shimDir, 'out')
       const p = await unchecked(() => bpProspectiveFor(NONEXISTENT_PROJECT_FILE, out))
       // Reproduces the shell bug-for-bug: the function's own last statement
-      // still returns {mode: 'new'} even though the cp inside it failed and
-      // `out` was never written — this is what "an inner failure CONTINUES
-      // and the function returns its last command's status" means in
-      // practice, not a claim that the write actually happened.
+      // is an explicit `return 0`, so it reports success even though the cp
+      // inside it failed and `out` was never written. This new-file branch is
+      // deliberately different from copy/backup-copy, where cp really is the
+      // last command and its failure becomes the function's status.
       expect(p.mode).toBe('new')
+      expect(p.ok).toBe(true)
       expect(existsSync(out)).toBe(false)
     } finally {
       process.env.PATH = savedPath

@@ -1507,12 +1507,17 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
       await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
       await commitAll(s, proj, 'partial sync')
 
+      const treeBefore = await walkFiles(proj)
       const oldEnv = { ...(await dateAndToolFailEnv(s, 'old-shims', 'cp')), BP_NO_PROMPT: '1' }
       const oldResult = await runOld(s, proj, ['drift'], oldEnv)
+      expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
       await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
       const newEnv = { ...(await dateAndToolFailEnv(s, 'new-shims', 'cp')), BP_NO_PROMPT: '1' }
       const newResult = await runNew(s, proj, ['drift'], newEnv)
+      expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
 
       expectIdentical(oldResult, newResult)
       // NON-VACUITY: a working `cp` here would report both files as cleanly
@@ -1556,6 +1561,10 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
       // EMPTY file rather than failing loudly. Both sides must agree this
       // is what happens, not just that they agree with each other.
       expect(oldClaude).toBe('')
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1597,6 +1606,10 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
       // otherwise hide.
       expect(oldClaude).toBe('# CLAUDE\nfixture\n')
       expect(oldClaude).not.toContain('own edit')
+      expect(await walkFiles(newProj), 'the two independently-pulled projects must end up byte-identical').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 
@@ -1648,6 +1661,10 @@ describe('blueprint-port differential — finding 1 (tool failures inside prospe
       // Refused: nothing written, the project's settings.json is untouched.
       const oldSettings = await readFile(join(oldProj, '.claude/settings.json'), 'utf8')
       expect(oldSettings).toBe(settingsJson([]))
+      expect(await walkFiles(newProj), 'the two independently-run refusals must leave byte-identical trees').toEqual(
+        await walkFiles(oldProj),
+      )
+      await assertNoDriftPullScratch(s)
     })
   })
 })
@@ -1712,8 +1729,12 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
     await scenario('blueprint-port-f4-retire-no-comm', async (s) => {
       const { proj } = await seedRetirementFixture(s, 'no-comm')
       const path = await s.pathWithout(['comm'])
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'comm-absent (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'comm-absent (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
       expect(newResult.stdout).toBe(oldResult.stdout)
       expect(newResult.code).toBe(oldResult.code)
@@ -1733,8 +1754,12 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
     await scenario('blueprint-port-f4-retire-no-cmp', async (s) => {
       const { proj } = await seedRetirementFixture(s, 'no-cmp')
       const path = await s.pathWithout(['cmp'])
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'cmp-absent (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'cmp-absent (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       // `cmp` is not only `_bp_retire`'s own call (:1500) — scripts/lib/
       // placeholders.sh:189's `bp_contains_nul` ALSO shells out to it
       // (`tr -d '\0' < "$1" | cmp -s - "$1"`), and BOTH CLIs bridge to that
@@ -1783,8 +1808,12 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
     await scenario('blueprint-port-f4-pull-no-diff', async (s) => {
       const proj = await seedSingleDriftFixture(s, 'no-diff')
       const path = await s.pathWithout(['diff'])
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'diff-absent (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'diff-absent (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       const strip = (t: string) => normalizeDiffHeaders(stripLinePrefix(t))
       expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
       expect(strip(newResult.stdout)).toBe(strip(oldResult.stdout))
@@ -1803,8 +1832,12 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       await writeFile(diffPath, '#!/bin/sh\necho fake\n', 'utf8')
       await chmod(diffPath, 0o644)
       const path = `${noExecDir}:${await s.pathWithout(['diff'])}`
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'diff-noexec (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await runNew(s, proj, ['pull'], { PATH: path })
+      expect(await walkFiles(proj), 'diff-noexec (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       // TWO named normalisations here, not one: the usual "line N: " prefix
       // (plan §6.5), plus the tool's own NAME vs the full RESOLVED PATH bash
       // reports for a found-but-non-executable file (measured directly —
@@ -1849,8 +1882,12 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       await commitAll(s, proj, 'has settings')
 
       const path = await s.pathWithout(['jq'])
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['pull', '.claude/settings.json'], { PATH: path })
+      expect(await walkFiles(proj), 'jq-missing (OLD) must write nothing').toEqual(treeBefore)
       const newResult = await runNew(s, proj, ['pull', '.claude/settings.json'], { PATH: path })
+      expect(await walkFiles(proj), 'jq-missing (NEW) must write nothing').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expectPullIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain('jq is not on PATH')
@@ -1972,8 +2009,12 @@ describe('blueprint-port differential — settings-layer refusals', () => {
 
         // Refusal writes nothing, so OLD then NEW share the same directory
         // (same idiom as the pull-refused / drift-refused rows above).
+        const treeBefore = await walkFiles(proj)
         const oldResult = await runOld(s, proj, ['pull', '.claude/settings.json', '--yes'])
+        expect(await walkFiles(proj), 'settings-shape refusal (OLD) must write nothing').toEqual(treeBefore)
         const newResult = await runNew(s, proj, ['pull', '.claude/settings.json', '--yes'])
+        expect(await walkFiles(proj), 'settings-shape refusal (NEW) must write nothing').toEqual(treeBefore)
+        await assertNoDriftPullScratch(s)
         expectPullIdentical(oldResult, newResult)
         expect(oldResult.code, oldResult.output).toBe(4)
         expect(oldResult.stdout, oldResult.output).not.toMatch(/not valid JSON/i)
@@ -2001,10 +2042,15 @@ describe('blueprint-port differential — settings-layer refusals', () => {
       const proj = await s.workspace.dir('proj')
       await seedShapeProject(s, proj, bp, sha, { settingsBody: settingsJson([]), layerBody: '[]\n' })
       const env = { ...(await dateShimEnv(s)), BP_NO_PROMPT: '1' }
+      const treeBefore = await walkFiles(proj)
       const oldResult = await runOld(s, proj, ['drift'], env)
+      expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
       await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
       const newResult = await runNew(s, proj, ['drift'], env)
+      expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
+      await assertNoDriftPullScratch(s)
       expectIdentical(oldResult, newResult)
       expect(oldResult.stdout).toContain('Cannot sync — pull refuses these until they are fixed: 1')
     })
@@ -2063,10 +2109,15 @@ describe('blueprint-port differential — staleness states', () => {
     proj: string,
   ): Promise<{ oldResult: RunResult; newResult: RunResult }> {
     const env = { ...(await dateShimEnv(s)), BLUEPRINT_ROOT: bp, BP_NO_PROMPT: '1' }
+    const treeBefore = await walkFiles(proj)
     const oldResult = await runOld(s, proj, ['drift'], env)
+    expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
+    await assertNoDriftPullScratch(s)
     await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
     await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
     const newResult = await runNew(s, proj, ['drift'], env)
+    expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
+    await assertNoDriftPullScratch(s)
     return { oldResult, newResult }
   }
 
@@ -2175,7 +2226,9 @@ describe('blueprint-port differential — fetch failures', () => {
     args: string[],
     env: Record<string, string>,
   ): Promise<{ oldResult: RunResult; newResult: RunResult }> {
+    const treeBefore = await walkFiles(proj)
     const oldResult = await runOld(s, proj, args, env)
+    expect(await walkFiles(proj), 'a fetch failure (OLD) must never write to the project tree').toEqual(treeBefore)
     // Same reset `driftBoth` uses above: arm_gate's own git config writes
     // (core.hooksPath, core.sshCommand) into the SHARED project directory,
     // and a second run would otherwise see them already armed and print a
@@ -2183,6 +2236,7 @@ describe('blueprint-port differential — fetch failures', () => {
     await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
     await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
     const newResult = await runNew(s, proj, args, env)
+    expect(await walkFiles(proj), 'a fetch failure (NEW) must never write to the project tree').toEqual(treeBefore)
     return { oldResult, newResult }
   }
 
@@ -2261,11 +2315,14 @@ describe('blueprint-port differential — fetch failures', () => {
       await oldShims.add('ssh', 'sleep 999\n')
       const newShims = await s.shimDir('new-hung')
       await newShims.add('ssh', 'sleep 999\n')
+      const treeBefore = await walkFiles(proj)
       const began = Date.now()
       const oldResult = await runOld(s, proj, ['drift'], { PATH: oldShims.path(), BP_FETCH_TIMEOUT: '2' })
+      expect(await walkFiles(proj), 'a hung fetch (OLD) must never write to the project tree').toEqual(treeBefore)
       await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
       await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
       const newResult = await runNew(s, proj, ['drift'], { PATH: newShims.path(), BP_FETCH_TIMEOUT: '2' })
+      expect(await walkFiles(proj), 'a hung fetch (NEW) must never write to the project tree').toEqual(treeBefore)
       const elapsed = Date.now() - began
       expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(5)
@@ -2357,7 +2414,12 @@ describe('blueprint-port differential — fetch failures', () => {
         return runDrift(env)
       }
 
+      const treeBefore = await walkFiles(proj)
       const oldResult = await warmThenDamage((env) => runOld(s, proj, ['drift'], env))
+      // drift (successful OR failed) never writes the project tree — proven
+      // generically by driftBoth/runBoth elsewhere in this file — so this
+      // holds across BOTH the warm call and the damaged one, on both sides.
+      expect(await walkFiles(proj), 'warm-then-damage (OLD) must never write to the project tree').toEqual(treeBefore)
       // Same reset `runBoth` uses above, plus resetting the cache directory
       // itself so the NEW side gets its own independent warm-then-damage
       // cycle through the identical cache PATH (same XDG_CACHE_HOME, same
@@ -2368,6 +2430,7 @@ describe('blueprint-port differential — fetch failures', () => {
       await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
       await rm(cacheHome, { recursive: true, force: true })
       const newResult = await warmThenDamage((env) => runNew(s, proj, ['drift'], env))
+      expect(await walkFiles(proj), 'warm-then-damage (NEW) must never write to the project tree').toEqual(treeBefore)
 
       expectIdentical(oldResult, newResult)
       expect(oldResult.code).toBe(5)

@@ -2265,8 +2265,12 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
       cliNeedsStr += `${lib} `
       if (!rest.includes(lib) && partial) files.push(lib)
     }
-    cliNeeds = libs
-    files.push(...rest, 'scripts/blueprint', 'scripts/blueprint.mts')
+    // The target is a dependency of the shim just like every sourced lib:
+    // land it first, and remember a refusal/skip so the shim is held back.
+    // Otherwise an interactive pull can accept the shim and refuse the .mts,
+    // leaving the project's public CLI path pointing at no runnable target.
+    cliNeeds = [...libs, 'scripts/blueprint.mts']
+    files.push(...rest, 'scripts/blueprint.mts', 'scripts/blueprint')
     if (partial && cliNeedsStr !== ' ') {
       process.stdout.write(`scripts/blueprint brings the libs it sources:${cliNeedsStr}\n`)
     }
@@ -2298,6 +2302,7 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     const bp = bpBlueprintPath(f)
     if (!existsSync(bp)) {
       process.stdout.write(`  ${C_RED}skip${C_RESET}  ${f}  (not in blueprint)\n`)
+      if (cliNeeds.includes(f)) cliUnmet.push(f)
       continue
     }
 

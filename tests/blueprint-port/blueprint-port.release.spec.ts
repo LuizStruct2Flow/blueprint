@@ -1901,11 +1901,12 @@ describe('blueprint-port differential — pull', () => {
       expect(oldNormalized).not.toContain('scripts/blueprint.mts')
       expect(oldNormalized).toMatch(/ {2}same {2}scripts\/blueprint\n/)
       // NEW's stdout is OLD's, plus exactly one extra "same" line for the
-      // .mts sibling it also considers, inserted right after scripts/
-      // blueprint's own "same" line (the order `cmdPull` iterates files in).
+      // .mts sibling it also considers, inserted immediately BEFORE scripts/
+      // blueprint: the target is installed before the shim so the public CLI
+      // path can never point at a target that was refused later in the pull.
       const expectedNewNormalized = oldNormalized.replace(
         /( {2}same {2}scripts\/blueprint\n)/,
-        '$1  same  scripts/blueprint.mts\n',
+        '  same  scripts/blueprint.mts\n$1',
       )
       expect(newNormalized).toBe(expectedNewNormalized)
       // Plan §5's tree comparison: the extra "same" line NEW prints is
@@ -1919,6 +1920,46 @@ describe('blueprint-port differential — pull', () => {
       expect(newSnapshot.scratch).toEqual(oldSnapshot.scratch)
       expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(newSnapshot.signal).toBe(oldSnapshot.signal)
+    })
+  })
+
+  it('ported pull holds the shim back when blueprint.mts is refused', async () => {
+    await scenario('blueprint-port-pull-cli-target-refused', async (s) => {
+      const root = await s.workspace.dir('root')
+      const bp = join(root, 'bp')
+      await cp(join(REPO_ROOT, 'scripts'), join(bp, 'scripts'), { recursive: true })
+      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+      await mkdir(join(bp, 'docs'), { recursive: true })
+      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+      await initRepo(s, bp)
+      await commitAllPinned(s, bp, 'base')
+      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const proj = join(root, 'proj')
+      await cp(join(REPO_ROOT, 'scripts'), join(proj, 'scripts'), { recursive: true })
+      // Model a ported CLI process updating a project whose public CLI path
+      // is still the pre-port shell. The local .mts remains runnable for this
+      // invocation, but its unmatched marker makes its prospective pull
+      // refuse. The shim must therefore remain the shell, never land first.
+      await installShellCli(s, proj)
+      const mtsPath = join(proj, 'scripts/blueprint.mts')
+      await writeFile(mtsPath, `${await readFile(mtsPath, 'utf8')}\n// BLUEPRINT:END\n`, 'utf8')
+      await writeFile(
+        join(proj, '.blueprint-source'),
+        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+        'utf8',
+      )
+      await initRepo(s, proj)
+      await commitAllPinned(s, proj, 'pre-port public path with ported runner')
+
+      const beforeShim = await readFile(join(proj, 'scripts/blueprint'), 'utf8')
+      const beforeMts = await readFile(mtsPath, 'utf8')
+      const result = await runNew(s, proj, ['pull', 'scripts/blueprint', '--yes'], await pullFixtureEnv(s, root))
+
+      expect(result.code).toBe(4)
+      expect(await readFile(mtsPath, 'utf8'), 'the refused target changed').toBe(beforeMts)
+      expect(await readFile(join(proj, 'scripts/blueprint'), 'utf8')).toBe(beforeShim)
     })
   })
 
@@ -1972,10 +2013,11 @@ describe('blueprint-port differential — pull', () => {
         // not "same" (the sibling row's clean-pull shape), since the SAME
         // broken lib holds `scripts/blueprint.mts` back too. Measured
         // directly against the real ported CLI (`.scratch/task081-gap4` in
-        // this worktree, not committed) before writing this row: NEW inserts
-        // exactly `MTS_SKIP_LINE` + a blank line right after the CLI's own
-        // "skipped scripts/blueprint — …" line + its blank line, nothing
-        // else differs. Asserted against the RAW `newSnapshot.stdout` BELOW,
+        // this worktree, not committed) before writing this row. NEW inserts
+        // exactly `MTS_SKIP_LINE` + a blank line before the shim's own skip:
+        // the target is ordered before the shim so a refused target cannot
+        // strand the public CLI path. Asserted against the RAW
+        // `newSnapshot.stdout` BELOW,
         // BEFORE this narrow strip runs — a blanket removal of any line
         // mentioning `scripts/blueprint.mts` (the prior shape) would let an
         // omission or a wrong message pass silently; this strip removes only

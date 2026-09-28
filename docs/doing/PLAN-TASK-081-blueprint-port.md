@@ -548,13 +548,10 @@ it."** The exact two-line shim stays; no shim variant, and no fallback in it.
   1. **The port commit's body** carries it verbatim.
   2. **The release announcement** carries it verbatim. HANDOVER records it for
      the three derived projects until each has done its full pull.
-  3. **What `drift` prints.** The ported `drift` adds one line to its `Next:`
-     block whenever `scripts/blueprint` or `scripts/blueprint.mts` is drifted
-     or new: *"scripts/blueprint and scripts/blueprint.mts travel together:
-     update with a full `blueprint pull`, not a single-file pull of the
-     CLI."* This is new behaviour, so it cannot be in the behaviour-identical
-     port commit. It is slice 5b: its own commit, reproducer first, in the
-     same push as slice 5, so no release carries the port without it.
+  3. ~~**What `drift` prints.**~~ **Dropped by the founder (§9 E).** The
+     proposed ported-`drift` line could only appear after a project had already
+     crossed the hazardous pre-port pull, so slice 5b is not built. The commit
+     body and release announcement are the two announcement surfaces.
 - **The honest limit of item 3.** The `drift` that runs in a derived project
   at the moment of risk is that project's pre-port CLI, which this work cannot
   change. It lists `~ scripts/blueprint` and `+ scripts/blueprint.mts`
@@ -704,7 +701,7 @@ pull would work. Correct, and no slice can fix it. The founder decided on
 2026-09-24: *"Accept, announce it."* §7 now records the decision, the
 announcement text and where it goes, and the backlog row's "Done when" is
 corrected in this commit. The exit status the plan gave for that failure was
-also wrong (127, not 1) and is corrected.
+also wrong (127); the measured missing-module failure exits 1 and is corrected.
 
 **Adopted:**
 - **Errexit context** (Markus). Confirmed at `:401`, `:595`, `:1394`,

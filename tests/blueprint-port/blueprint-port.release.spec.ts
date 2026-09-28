@@ -3412,17 +3412,22 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
 
   it('placeholder remote (blueprint_remote still FILL-ME-IN): exit 4, no remote contact', async () => {
     await scenario('blueprint-port-drift-config-placeholder', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = FILL-ME-IN\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await writeFile(
+            join(proj, '.blueprint-source'),
+            `config_version   = 2\nblueprint_remote = FILL-ME-IN\nblueprint_branch = main\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+            'utf8',
+          )
+          return { root, proj, bp, env: await rowEnv(root) }
+        },
+        run: runConfig,
+        snapshotOpts: configSnapshotOpts,
+      })
       expect(oldResult.code).toBe(4)
       expect(oldResult.stderr).toContain('still has the bootstrap placeholder')
     })
@@ -3430,17 +3435,22 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
 
   it("missing release branch (blueprint_release_branch names a branch the remote doesn't have): exit 5", async () => {
     await scenario('blueprint-port-drift-config-missing-release-branch', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nblueprint_release_branch = released\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], {})
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await writeFile(
+            join(proj, '.blueprint-source'),
+            `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nblueprint_release_branch = released\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+            'utf8',
+          )
+          return { root, proj, bp, env: await rowEnv(root) }
+        },
+        run: runConfig,
+        snapshotOpts: configSnapshotOpts,
+      })
       expect(oldResult.code).toBe(5)
       expect(oldResult.stderr).toContain("no branch 'released' on that remote")
     })
@@ -3448,36 +3458,42 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
 
   it('bootstrap_sha not in the fetched history: warned, not fatal', async () => {
     await scenario('blueprint-port-drift-config-sha-not-in-history', async (s) => {
-      // TWO UNRELATED repos: the actual fetch target (bp), and a second,
-      // independent one (other) whose HEAD sha is recorded as this project's
-      // bootstrap_sha — guaranteeing it is not an ancestor of bp's history
-      // without relying on any history-rewrite trick.
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      // Distinct content, not just a distinct directory — two commits built
-      // from byte-identical trees/messages/authors can hash to the SAME sha
-      // (observed directly: `seedFetchBlueprint` run twice in the same
-      // second produces two IDENTICAL commit objects), which would make
-      // `otherSha` accidentally equal `sha` and this row vacuous.
-      const other = await s.workspace.dir('other')
-      await mkdir(join(other, 'docs'), { recursive: true })
-      await writeFile(join(other, 'CLAUDE.md'), '# CLAUDE\na wholly unrelated repo\n', 'utf8')
-      await writeFile(join(other, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(other, 'README.md'), '# fixture project\n', 'utf8')
-      await initRepo(s, other)
-      await commitAll(s, other, 'unrelated base')
-      const otherSha = (await git(s, other, ['rev-parse', 'HEAD'])).stdout.trim()
-      expect(otherSha, 'the two fixtures must not accidentally share a commit sha').not.toBe(sha)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nbootstrap_sha    = ${otherSha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const env = await dateShimEnv(s)
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], env)
-      expectIdentical(oldResult, newResult)
+      let otherSha = ''
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          // TWO UNRELATED repos: the actual fetch target (bp), and a
+          // second, independent one (other) whose HEAD sha is recorded as
+          // this project's bootstrap_sha — guaranteeing it is not an
+          // ancestor of bp's history without relying on any
+          // history-rewrite trick. Distinct CONTENT (not just a distinct
+          // directory) so pinned-date commits built from otherwise
+          // identical trees/messages don't collide on the same sha.
+          const other = join(root, 'other')
+          await mkdir(join(other, 'docs'), { recursive: true })
+          await writeFile(join(other, 'CLAUDE.md'), '# CLAUDE\na wholly unrelated repo\n', 'utf8')
+          await writeFile(join(other, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(other, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, other)
+          await commitAllPinned(s, other, 'unrelated base')
+          otherSha = (await git(s, other, ['rev-parse', 'HEAD'])).stdout.trim()
+          expect(otherSha, 'the two fixtures must not accidentally share a commit sha').not.toBe(sha)
+
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await writeFile(
+            join(proj, '.blueprint-source'),
+            `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nbootstrap_sha    = ${otherSha}\nbootstrap_date   = 2026-01-01\n`,
+            'utf8',
+          )
+          const date = await s.shimDir('date-shim')
+          await date.add('date', 'echo 2026-01-01T00:00:00Z')
+          return { root, proj, bp, env: { ...(await rowEnv(root)), PATH: date.path() } }
+        },
+        run: runConfig,
+        snapshotOpts: configSnapshotOpts,
+      })
       expect(oldResult.code).toBe(0)
       expect(oldResult.stdout).toContain(`bootstrap_sha ${otherSha} is not in`)
       expect(oldResult.stdout).toContain('history.')
@@ -3486,19 +3502,24 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
 
   it('BLUEPRINT_ROOT override not a directory: dies before any fetch', async () => {
     await scenario('blueprint-port-drift-override-not-a-directory', async (s) => {
-      const proj = await s.workspace.dir('proj')
-      await seedCliOnly(s, proj)
-      await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await writeFile(join(proj, 'docs/DoD.md'), '# DoD\n', 'utf8')
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `bootstrap_sha    = 0000000000000000000000000000000000000000\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const notADir = s.workspace.path('not-a-real-checkout')
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], { BLUEPRINT_ROOT: notADir })
-      expectIdentical(oldResult, newResult)
+      let notADir = ''
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const proj = join(root, 'proj')
+          await seedCliOnly(s, proj)
+          await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\n', 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await writeFile(join(proj, 'docs/DoD.md'), '# DoD\n', 'utf8')
+          await writeFile(
+            join(proj, '.blueprint-source'),
+            `bootstrap_sha    = 0000000000000000000000000000000000000000\nbootstrap_date   = 2026-01-01\n`,
+            'utf8',
+          )
+          notADir = join(root, 'not-a-real-checkout')
+          return { root, proj, env: { ...(await rowEnv(root)), BLUEPRINT_ROOT: notADir } }
+        },
+        run: runConfig,
+      })
       expect(oldResult.code).toBe(1)
       expect(oldResult.stderr).toContain(`BLUEPRINT_ROOT is '${notADir}', which is not a directory`)
     })
@@ -3506,19 +3527,25 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
 
   it('the leftover blueprint_source line: warned once, every run, until deleted', async () => {
     await scenario('blueprint-port-drift-leftover-blueprint-source-line', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      const sha = await seedFetchBlueprint(s, bp)
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // TASK-025 — a config still naming the old, no-longer-read field.
-      await writeFile(
-        join(proj, '.blueprint-source'),
-        `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nblueprint_source = ${bp}\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
-        'utf8',
-      )
-      const env = await dateShimEnv(s)
-      const { oldResult, newResult } = await runBoth(s, proj, ['drift'], env)
-      expectIdentical(oldResult, newResult)
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // TASK-025 — a config still naming the old, no-longer-read field.
+          await writeFile(
+            join(proj, '.blueprint-source'),
+            `config_version   = 2\nblueprint_remote = ${bp}\nblueprint_branch = main\nblueprint_source = ${bp}\nbootstrap_sha    = ${sha}\nbootstrap_date   = 2026-01-01\n`,
+            'utf8',
+          )
+          const date = await s.shimDir('date-shim')
+          await date.add('date', 'echo 2026-01-01T00:00:00Z')
+          return { root, proj, bp, env: { ...(await rowEnv(root)), PATH: date.path() } }
+        },
+        run: runConfig,
+        snapshotOpts: configSnapshotOpts,
+      })
       expect(oldResult.code).toBe(0)
       expect(oldResult.stderr).toContain('still has blueprint_source, which is no longer read')
     })
@@ -3534,38 +3561,38 @@ describe('blueprint-port differential — drift config-shape refusals', () => {
    * asserted in prose. */
   it("missing in blueprint — committed at the blueprint's HEAD but absent from its working tree", async () => {
     await scenario('blueprint-port-drift-missing-in-blueprint', async (s) => {
-      const bp = await s.workspace.dir('bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
-      // Committed, then removed from the WORKING TREE only — no commit for
-      // the removal, so HEAD (and `git archive HEAD`) still lists it.
-      await rm(join(bp, 'docs/DoD.md'))
+      const { oldResult } = await samePathTwice<ConfigFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+          // Committed, then removed from the WORKING TREE only — no commit
+          // for the removal, so HEAD (and `git archive HEAD`) still lists
+          // it.
+          await rm(join(bp, 'docs/DoD.md'))
 
-      const proj = await s.workspace.dir('proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      // seedOverrideProject-equivalent inline: this row's project is judged
-      // through BLUEPRINT_ROOT (a local checkout), never the address path,
-      // because only a real working tree can be made to disagree with its
-      // own HEAD this way.
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await commitAll(s, proj, 'sync')
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // seedOverrideProjectPinned-equivalent inline: this row's project
+          // is judged through BLUEPRINT_ROOT (a local checkout), never the
+          // address path, because only a real working tree can be made to
+          // disagree with its own HEAD this way.
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await writeFile(join(proj, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await commitAllPinned(s, proj, 'sync')
 
-      const env = { ...(await dateShimEnv(s)), BLUEPRINT_ROOT: bp, BP_NO_PROMPT: '1' }
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['drift'], env)
-      expect(await walkFiles(proj), 'drift (OLD) must never write to the project tree').toEqual(treeBefore)
-      await s.run('git', ['config', '--unset', 'core.hooksPath'], { cwd: proj }).catch(() => {})
-      await s.run('git', ['config', '--unset', 'core.sshCommand'], { cwd: proj }).catch(() => {})
-      const newResult = await runNew(s, proj, ['drift'], env)
-      expect(await walkFiles(proj), 'drift (NEW) must never write to the project tree').toEqual(treeBefore)
-      expectIdentical(oldResult, newResult)
+          const date = await s.shimDir('date-shim')
+          await date.add('date', 'echo 2026-01-01T00:00:00Z')
+          return { root, proj, env: { ...(await rowEnv(root)), PATH: date.path(), BLUEPRINT_ROOT: bp, BP_NO_PROMPT: '1' } }
+        },
+        run: runConfig,
+      })
       expect(oldResult.stdout).toContain('Listed managed but missing in blueprint: 1')
       expect(oldResult.stdout).toContain('! docs/DoD.md')
       expect(oldResult.stdout).toContain("committed at the blueprint's HEAD but absent from its working tree")

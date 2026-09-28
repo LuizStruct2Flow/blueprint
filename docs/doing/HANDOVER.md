@@ -121,119 +121,62 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-27 cut. ONE agent is in flight: Matthias (Claude) on
-TASK-081's differential harness (plan §5) in `.scratch/task081-port` (slices 1-4 are
-committed: `9d672e8`, `1061dbb`, `951f80a`, `1dcb67a` a2bp + prs, and Codex's
-`97271c9`). The mic is with
-the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
+**State at the 2026-09-28 cut (~20:00Z). PAUSED by the founder for the
+night; nothing is running. The mic is with the Orchestrator. Resume TASK-081
+slice 5's last checks first.**
 
 **TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
-Matthias (Claude) per slice, a fresh agent each; Codex reviews the whole port
-before slice 5 lands (the row requires it, no waiver applies).
-- **Checkout:** `main`; slices 1-4 landed there as reviewed dark code. Slice 5
-  switches the exact shim on and is under final Codex review. The earlier
-  `task081-port` branch/worktree was a trunk-policy mistake; plan §1/§8 now
-  records that correction rather than describing it as the delivery path.
-- **Release announcement — keep verbatim until every derived project has done
-  its full pull:** After this release, update with a full `blueprint pull`, not
-  a single-file pull of the CLI (`blueprint pull scripts/blueprint`). A pre-port
-  CLI that pulls `scripts/blueprint` alone installs the shim without
-  `scripts/blueprint.mts`, and every `blueprint` command then fails with
-  `Cannot find module …/scripts/blueprint.mts`. To recover:
-  `git checkout -- scripts/blueprint`, then `blueprint pull`.
-- **Committed on the branch:** `9d672e8` slice 1 (skeleton; 8 differential
-  rows), `1061dbb` slice 2 (`drift` complete; P1 and P3 mutants caught; gap:
-  not every drift matrix row has a differential row, named in the release
-  spec's doc comment), `951f80a` slice 3 (`pull` complete: 20 unit tests, 6
-  pull differential rows, `tests/helpers/tty.ts` factored out of
-  pull-behaviour; P2 mutants caught exactly by `sync-by-address` #23/#23b/#23c;
-  under the working-tree shim `pull-behaviour`, `pull-exec-bit`,
-  `managed-references`, `suite-sync` green).
-- **Codex review (Andreas, 2026-09-27): NOT CLEAN, slice 5 blocked.** He fixed
-  the small findings in `97271c9` (output lost on `process.exit()` after
-  buffered writes; EXIT cleanup after success; logical PWD after `files`
-  chdir; a failed first shield step now fails the write; the JS sorts
-  replaced by `LC_ALL=C sort`; a2bp's PR body records the rebuilt base).
-  Still blocking, now with a fresh Matthias, who also four-eyes `97271c9`:
-  (1) `bpProspectiveFor`'s three callers bypass `unchecked()` (§2 rule 4), so
-  inner cp/awk/jq/merge failures do not reproduce bash's disabled-errexit
-  statuses; (2) a2bp swallows bridge failures the shell dies on
-  (`bp_file_base_content`, diff-stat); (3) missing `placeholders.sh` behaves
-  differently for a2bp; (4) the five TS git/gh wrappers go BACK to shell
-  bridges (Orchestrator's call: §4, libs stay shell); (5) no automated
-  "blueprint moved once/twice" a2bp cases; (6) no test of the BUG-116 resume
-  path; (7) ~29 of the plan's ~90 differential rows. After that round, the
-  changes go back to Codex for re-review. Codex's sandbox saw every NEW-side
-  release row return 0 with empty output, so its run was not evidence.
-  **Slice 5 additions from the review:** switch the differential to OLD =
-  parent shell, NEW = landed shim; remove the shell-inventory row; name the
-  pull-both-files deviation in plan §6; the exact shim, release announcement
-  and commit-body warning; every source-inspection test must resolve
-  `blueprint.mts`, not only a2bp-pr-filing and the marker-merge guard.
-- **Review rounds after Codex (2026-09-27/28), all on the branch, unpushed:**
-  `1ced574` + `b66d8f4` fixed Codex findings 1-6 (prospective callers through
-  `unchecked()`; a2bp's bare bridge steps die as in the shell; the
-  `placeholders.sh` fallback; the five git/gh helpers bridged back to shell,
-  which exposed a missing trailing newline in the unshipped-path list; a2bp-e2e
-  #12b "moved twice"; the BUG-116 resume unit test) and passed `97271c9`'s
-  four-eyes. `842e9e7` + `b09c202` added the differential rows for findings
-  1-3, which caught three REAL divergences, fixed: `markerAwareMerge` ignored
-  awk's status; `Prospective` had no success channel, so a failed `cp` read as
-  a clean result (now `Prospective.ok`, used at all three call sites);
-  `bpShouldSubstitute` swallowed the stderr the shell shows. 37 release rows +
-  32 unit; the rest of plan §5's matrix is covered by suites run under the
-  shim (`permission-policy`, `staleness`). One named normalisation: the
-  `<program>: line N:` prefix in the missing-`placeholders.sh` row. In flight:
-  the last three row groups (pull's and drift's interactive prompts under a
-  pty; 127/126 with `comm`/`cmp`/`diff` absent or non-executable; `jq`
-  missing). Then Codex re-reviews everything since `1dcb67a`.
-- **Codex re-reviews (Andreas):** round 2 closed findings 1-6 (his parity fix
-  `0815e44`, four-eyed correct). Rounds 2 and 3 kept finding 7 OPEN: the
-  differential harness did not implement plan §5 as written. §5 requires
-  "same path, twice" (build at one path with pinned dates, run OLD, snapshot,
-  delete, rebuild, run NEW), comparing the whole tree (path/bytes/mode),
-  `.blueprint-source`, cache refs, scratch leftovers and, for a2bp, remote
-  refs and the gh argv log, with only three named normalisations. The rows
-  had compared output and exit only, and normalised paths/SHAs/request keys.
-  Commits since: `7833f54` + `51258bd` (24 more rows, no divergence),
-  `6b50500` (a2bp/prs rebuilt on a same-path-twice helper; `scrubA2bp`
-  removed; 103/103). **In flight:** drift and pull moved onto that
-  comparison, plus their missing §5 rows (missing-in-blueprint as its own
-  row, gate.sh missing, v1 config, placeholder remote, override not a
-  directory, exported GIT_DIR, symlinked project, `&`/`\` project name,
-  numeric settings layer, retirement y/non-TTY/q, held file, unknown option,
-  refused lib skipping the CLI, ...). **Then:** a2bp/prs missing rows
-  (`--force`, unknown option, staging rc 3, GNU diff missing, unshipped path,
-  moved once/twice, draft PR, orphan branches), then Codex round 4.
-- **Slice 5 MUST handle, found by slice 3:**
-  (1) `marker-merge` BUG-112 #4 goes red under the shim: its sanity guard
-  `expect(cli).toContain('BLUEPRINT:BEGIN')` reads the file `resolveConsumer`
-  follows, and the `.mts` never spells that token whole (it splits it on
-  purpose to avoid self-detection). The behaviour the case tests still holds;
-  the guard needs updating when the shim really lands.
-  (2) `sync-by-address` #20e stays red under the shim until slice 5 replaces
-  it, as plan §3 P1 schedules.
-  (3) Add to plan §6 as a named deviation: `pull` naming either
-  `scripts/blueprint` or `scripts/blueprint.mts` brings both (plan §7), so a
-  `pull scripts/blueprint` differential cannot be byte-identical while the
-  `.mts` exists; the row asserts the one-line divergence explicitly.
-  (4) For the Codex review to judge: `bpRetire` and `bpCliLibs` sort in JS,
-  where plan §2 rule 3 keeps `sort` as an external tool. Equivalent for this
-  repo's ASCII paths, and no seam or row covers it.
-- **Traps the slice agents found, so nobody re-derives them:** a unit test
-  that calls `recordSignal` without `installSignals(handler, stubKill)` first
-  kills its own vitest worker; differential children get no `PWD`, so use
-  `runOld`/`runNew` (they pass `PWD: cwd`), and pass `env` to
-  `withCttyNoStdin` for the same reason; two fixture dirs never byte-match
-  because the report prints the path, so run OLD then NEW on one directory and
-  reset between; pin timestamps with a `date` shim; pull's `diff -u` preview
-  needs `normalizeDiffHeaders`; commit new test files BEFORE the full suite
-  (`manifest` #2b reads `git archive HEAD`); the `sync-by-address` seams match
-  each shielded step's own argv, so do not fold the steps into one subshell; a
-  bindingless `catch {}` needs a comment saying why (forbidden-idiom).
-- **Machine noise:** the founder hears the fans during full-suite runs (~1,270
-  tests across 32 cores). Brief every agent to iterate on named suites and run
-  the full suite at most twice.
+Matthias (Claude) per slice; reviewer Andreas (Codex), as the row requires.
+NO branch and NO worktree any more: the founder's rule is feature toggles,
+never feature branches (`CLAUDE.blueprint.md` §"The blueprint's `main` is its
+trunk"). The `task081-port` branch and `.scratch/task081-port` worktree are
+deleted.
+- **Released (dark):** the whole port, `scripts/blueprint.mts`, landed on
+  `main` at `1908dd1` after six Codex review rounds (the differential harness
+  was rebuilt to plan §5 exactly: one `samePathTwice` helper, full snapshot,
+  only the §5/§6 normalisations). `788f5ef` fixed a contamination BLOCK (the
+  a2bp fixture's planted host path is now built at runtime); CI green,
+  `released` = `788f5ef`. Nothing calls the .mts yet, so every derived project
+  still runs the shell CLI.
+- **Slice 5, the switch — COMMITTED ON `main`, NOT PUSHED:** `b2de45e`
+  (`scripts/blueprint` → the exact two-line shim; inventory row removed; the
+  harness takes OLD from history; source-inspection tests follow the shim;
+  CLAUDE.md `TEMPLATE_FILES` → `.mts`; plan §6 gains the two founder-accepted
+  deviations — pull naming either CLI file brings both, and a `\` project path
+  cannot run the CLI; plan §1/§8 say slices 1-4 belonged on main), `e08cb6a`,
+  `a1bde4f`, and Andreas's `3ef85dc` (a real finding: the ported pull could
+  land the shim before `blueprint.mts`, stranding a project with no CLI; the
+  target now lands first and a refused or missing .mts holds the shim back;
+  announcement docs corrected — the pre-port single-file pull exits 1, not
+  127).
+- **Where the four-eyes review of `3ef85dc` stopped (Vitali, Claude):** points
+  1-4 CLEAN — ordering holds in every pull path, the hold-back holds and keeps
+  `bootstrap_sha`, the test "ported pull holds the shim back when blueprint.mts
+  is refused" was proven red without the fix and green with it, the docs match.
+  Host runs done: blueprint-port 152/152, bootstrap-gate 8/8, a2bp-e2e 22/22.
+  **Still to run before pushing:** `npm --prefix tests test -- signal-dispatch`;
+  the full suite once (`npm --prefix tests test`);
+  `node scripts/shell-inventory-check.mts`; `npm --prefix tests run typecheck`.
+  If all green, push all five commits (b2de45e..3ef85dc plus this handover
+  commit) and watch CI: this is the push that switches every derived project to
+  the port on its next pull.
+- **Then slice 6** (plan §8 row 6), on `main`, reproducer first: a
+  `managed-references` case where a fixture blueprint's `scripts/lib/gate.sh`
+  is an adapter naming `gate.mts`, an old project pulls only
+  `scripts/blueprint`, and its own `drift` must exit 0; red, then the closure
+  fix, green. Codex reviews before push. Then TASK-081 moves to
+  waiting-acceptance.
+- **Traps for the next session:** the auto-mode classifier blocks `git merge`
+  and overwriting a tracked file in a worktree without an explicit founder yes
+  — ask, do not route around it; write agents' temp files in the project's
+  `.scratch/` only; agents have repeatedly reported work as done that was not —
+  verify each claim against the code (grep, counts) before sending anything to
+  Codex; brief agents to run the full suite at most twice (the founder hears
+  the fans).
+- **Litter the permission rules would not let agents remove** (gitignored,
+  harmless, for the founder): `.scratch/rc3-e2e`, `.scratch/run-*.sh`,
+  `.scratch/task081-port-work`; and ~33 old agent worktrees under
+  `.claude/worktrees/` (some may hold unlanded work; check before deleting).
 
 - **Waiting for the founder's acceptance:** BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
@@ -264,14 +207,14 @@ before slice 5 lands (the row requires it, no waiver applies).
   accordingly.
 
 **Next, in order:**
-1. **TASK-081's review round** (in flight), then the **Codex re-review**,
-   then **slices 5 and 6** on `main` (plan §8; slice 5b is dropped),
-   carrying the four slice-5 items above.
+1. **TASK-081 slice 5:** the four remaining host checks above, then push
+   b2de45e..HEAD and watch CI; then **slice 6** (reproducer first, Codex
+   review); then TASK-081 to waiting-acceptance.
 2. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
    `CLAUDE.md` → `AGENTS.md` consolidation, plan first, reviewed by all three
    providers before any file moves.
 3. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
-   `contamination.sh`, then its fix).
+   `contamination.sh`, then its fix) — both unblocked once TASK-081 lands.
 4. **BUG-146** on the next #20d hang.
 
 **The pre-push gate does not run the contamination push scan; only CI does.**

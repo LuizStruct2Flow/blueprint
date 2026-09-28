@@ -51,6 +51,11 @@ because another machine only sees what is pushed.
    commits on its own branch; collect it with `git cherry-pick`, or, if it
    stopped before committing, `git -C <worktree> add -A` then
    `git diff --cached --binary` into a patch and `git apply -3` here.
+   **A worktree is for parallel agents only, never a feature branch**
+   (founder, 2026-09-28; `CLAUDE.blueprint.md` §"The blueprint's `main` is
+   its trunk"): collect its commits to `main` when the agent's item ends,
+   then remove it. Multi-slice work lands each slice on `main` as dark code.
+   A real branch needs the founder told first.
 7. **BUG-152: a worktree agent un-arms the gate's own check, every time.**
    Launching a worktree-isolated agent rewrites `core.hooksPath` from
    `.githooks` to an ABSOLUTE path, and `session-start.sh` then reports *"the
@@ -126,7 +131,12 @@ the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
 Matthias (Claude) per slice, a fresh agent each; Codex reviews the whole port
 before slice 5 lands (the row requires it, no waiver applies).
 - **Worktree:** `.scratch/task081-port`, branch `task081-port` (local only,
-  never pushed). `tests/node_modules` is installed there. Its inner
+  never pushed). **This branch is a mistake the founder caught on 2026-09-28:
+  plan §8 said "branch" and nobody checked it against trunk-based.** Once the
+  in-flight test round ends and Codex has re-reviewed the commits since
+  `1dcb67a`, rebase it onto `main`, push through the gate, delete the branch
+  and the worktree. Slices 5 and 6 go straight to `main`, and plan §8 is
+  corrected to say so in the same push. `tests/node_modules` is installed there. Its inner
   `.scratch/` still holds `blueprint.orig`, `tmp/`, `smoke1/` from slice 1-2
   agents: `rm -rf` on them was refused by the permission rules, so they wait
   for the founder or the worktree's removal after the port lands.

@@ -315,13 +315,18 @@ async function installShellCli(s: Scenario, dir: string): Promise<void> {
 
 /** A standalone materialized copy for the handful of rows that run the shell
  * CLI directly with no fixture `scripts/` dir at all — dispatch's `help`/
- * `push`/unknown-subcommand rows and a2bp's `no files given` row, none of
- * which source any `scripts/lib/*.sh`. */
+ * `push`/unknown-subcommand rows and a2bp's `no files given` row. `scripts/lib`
+ * travels with it: `cmd_a2bp`'s required-libs check runs before its usage
+ * check, so a2bp's "no files given" row dies on a missing lib instead of the
+ * usage message it is actually proving unless the real libs (unaffected by
+ * this port — plan §4, libs stay shell) sit right beside it, exactly as they
+ * did when this row ran the real CLI in place at REPO_ROOT before TASK-081. */
 async function shellCliPath(s: Scenario): Promise<string> {
   const dir = await s.workspace.dir('old-cli')
   const path = join(dir, 'blueprint')
   await writeFile(path, await preShimBlueprintSource(s), 'utf8')
   await chmod(path, 0o755)
+  await cp(join(REPO_ROOT, 'scripts/lib'), join(dir, 'lib'), { recursive: true })
   return path
 }
 

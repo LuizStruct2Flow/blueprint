@@ -141,7 +141,14 @@
  *                  own libs, PLUS `pull scripts/blueprint` with one lib
  *                  REFUSED — the CLI itself is then skipped, never pulled
  *                  (scripts/blueprint's own "libs FIRST, CLI LAST" comment),
- *                  the y/N/q interactive prompt); 'pull matrix' (backup-copy
+ *                  asserting NEW's EXACT predicted `scripts/blueprint.mts`
+ *                  skip line against the RAW snapshot before the narrow
+ *                  (single-string, never blanket) strip that makes the
+ *                  byte-equal comparison possible, PLUS a content-hash check
+ *                  that neither CLI file changed on EITHER side (Codex
+ *                  round-5 gap: the prior blanket strip let an omission or a
+ *                  wrong message pass silently); the y/N/q interactive
+ *                  prompt); 'pull matrix' (backup-copy
  *                  — with an explicit `.bp-bak` bytes check, merge,
  *                  retirement — with an explicit kept-file bytes check, PLUS
  *                  retirement answered by a non-TTY (the "not interactive"
@@ -1855,7 +1862,9 @@ describe('blueprint-port differential — pull', () => {
 
   it('pull scripts/blueprint — a refused lib skips the CLI (libs first, CLI last)', async () => {
     await scenario('blueprint-port-pull-cli-libs-refused', async (s) => {
-      const { oldResult } = await samePathTwice<PullFixture>(s, 'root', {
+      const MTS_SKIP_LINE =
+        '  skipped scripts/blueprint.mts — it sources scripts/lib/gate.sh, which was not pulled, so it would refuse to run'
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<PullFixture>(s, 'root', {
         build: async (s, root) => {
           const bp = join(root, 'bp')
           await mkdir(join(bp, 'docs'), { recursive: true })
@@ -1897,29 +1906,48 @@ describe('blueprint-port differential — pull', () => {
         // Same plan §6 accepted deviation as the sibling row above (naming
         // EITHER CLI file brings both): NEW additionally considers
         // `scripts/blueprint.mts`, itself unaffected by the broken lib, so
-        // it reports one extra line about it OLD can never print — "same"
-        // when the lib pulls clean (the sibling row), "skipped" here since
-        // the SAME broken lib holds `scripts/blueprint.mts` back too.
-        // Stripped from whichever side has it (a no-op on OLD) rather than
-        // a second `compareRuns: false` — the round's own point is that
-        // this is now the ONLY shape of accepted-deviation handling left in
-        // the file.
+        // it reports one EXACT extra line OLD can never print — "skipped",
+        // not "same" (the sibling row's clean-pull shape), since the SAME
+        // broken lib holds `scripts/blueprint.mts` back too. Measured
+        // directly against the real ported CLI (`.scratch/task081-gap4` in
+        // this worktree, not committed) before writing this row: NEW inserts
+        // exactly `MTS_SKIP_LINE` + a blank line right after the CLI's own
+        // "skipped scripts/blueprint — …" line + its blank line, nothing
+        // else differs. Asserted against the RAW `newSnapshot.stdout` BELOW,
+        // BEFORE this narrow strip runs — a blanket removal of any line
+        // mentioning `scripts/blueprint.mts` (the prior shape) would let an
+        // omission or a wrong message pass silently; this strip removes only
+        // the one string just proven present.
         normalizeSnapshot: (snap) => ({
           ...snap,
-          stdout: snap.stdout.replace(/^.*\bscripts\/blueprint\.mts\b.*\n\n?/gm, ''),
+          stdout: snap.stdout.replace(`${MTS_SKIP_LINE}\n\n`, ''),
         }),
       })
+      expect(newSnapshot.stdout).toContain(MTS_SKIP_LINE)
+      // NON-VACUITY the other way: OLD never mentions the ported CLI at all.
+      expect(oldResult.stdout).not.toContain('scripts/blueprint.mts')
       expect(oldResult.stdout).toContain("this project's markers are invalid")
       expect(oldResult.stdout).toContain('skipped')
       expect(oldResult.stdout).toContain('scripts/blueprint — it sources')
       expect(oldResult.stdout).toContain('scripts/lib/gate.sh')
       expect(oldResult.stdout).toContain('was not pulled, so it would refuse to run')
-      // NON-VACUITY: the CLI file itself is untouched — "skipped", not
-      // "same" or "pulled".
-      const proj = join(s.workspace.path('root'), 'proj')
-      const cliAfter = await readFile(join(proj, 'scripts/blueprint'), 'utf8')
-      const cliBefore = await readFile(join(REPO_ROOT, 'scripts/blueprint'), 'utf8')
-      expect(cliAfter).toBe(cliBefore)
+      // NON-VACUITY: NEITHER CLI file changed, ON EITHER SIDE — "skipped",
+      // not "same" or "pulled" — read from each side's OWN tree snapshot
+      // (captured immediately after that side's run, before the other side
+      // rebuilds), never only the directory samePathTwice happens to leave
+      // on disk afterwards (the NEW side's).
+      const sha256Of = async (p: string): Promise<string> => `sha256:${createHash('sha256').update(await readFile(p)).digest('hex')}`
+      const expectedCli = await sha256Of(join(REPO_ROOT, 'scripts/blueprint'))
+      const expectedMts = await sha256Of(join(REPO_ROOT, 'scripts/blueprint.mts'))
+      for (const [label, snap] of [
+        ['OLD', oldSnapshot],
+        ['NEW', newSnapshot],
+      ] as const) {
+        const cli = snap.projTree.find((f) => f.path === 'scripts/blueprint')
+        const mts = snap.projTree.find((f) => f.path === 'scripts/blueprint.mts')
+        expect(cli?.content, `scripts/blueprint changed (${label})`).toBe(expectedCli)
+        expect(mts?.content, `scripts/blueprint.mts changed (${label})`).toBe(expectedMts)
+      }
     })
   })
 

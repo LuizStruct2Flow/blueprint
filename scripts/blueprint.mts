@@ -524,17 +524,27 @@ export async function run(cmd: string, args: readonly string[], opts: RunOptions
 // --- the shell-lib bridge (plan §4) -----------------------------------------
 //
 // Every request/staleness/gate lib stays shell — each has a still-shell
-// caller. `bashLib` is the one crossing: `bash -c '. "$1"; <snippet>' _ LIB
+// caller. `bashLib` is the one crossing: `bash -c '. "$1"; <snippet>' $0 LIB
 // ARGS…`, bash (not sh) because those libs use arrays. Stdout is captured
 // (like `$( )`, trailing newlines stripped); stderr is INHERITED unless the
 // caller overrides it — this bridge never swallows a lib's own diagnostics.
+//
+// The argv0 handed to every `bash -c` bridge call is `cliName()`, never the
+// literal `_`: an undefined function inside the sourced lib makes bash print
+// its own "$0: line N: NAME: command not found" for it (bash's normal
+// diagnostic for an unset function, same shape as a missing command), and
+// bash's $0 there is exactly the FIRST argument after the -c script — so a
+// bare `_` reports "_: line N: …" where the real, unbridged shell CLI would
+// have reported its own invoked path. Passing `cliName()` (== the shim's own
+// `$(dirname "$0")`-derived path, plan §2 rule 6) makes the bridge's diagnostic
+// read the same leading token the real CLI's own interpreter would have used.
 export async function bashLib(
   libPath: string,
   snippet: string,
   args: readonly string[] = [],
   opts: Omit<RunOptions, 'stdout' | 'stdin'> = {},
 ): Promise<{ readonly stdout: string; readonly status: number }> {
-  const r = await run('bash', ['-c', `. "$1"; ${snippet}`, '_', libPath, ...args], {
+  const r = await run('bash', ['-c', `. "$1"; ${snippet}`, cliName(), libPath, ...args], {
     ...opts,
     stdout: 'capture',
     stderr: opts.stderr ?? 'inherit',
@@ -560,7 +570,7 @@ export async function bashLibs(
   const preamble = libPaths.map((_, i) => `. "$${i + 1}"`).join('; ')
   const r = await run(
     'bash',
-    ['-c', `${preamble}; shift ${libPaths.length}; ${snippet}`, '_', ...libPaths, ...args],
+    ['-c', `${preamble}; shift ${libPaths.length}; ${snippet}`, cliName(), ...libPaths, ...args],
     { ...opts, stdout: 'capture', stderr: opts.stderr ?? 'inherit' },
   )
   return { stdout: stripTrailingNewlines(r.stdout), status: r.status }
@@ -872,7 +882,7 @@ export async function bpConfigLoad(file: string): Promise<BpConfig | null> {
     'out=$(bp_config_load "$2") || exit 1; eval "$out"; ' +
     'printf "%s\\0%s\\0%s\\0%s\\0" "$BP_CFG_VERSION" "$BP_CFG_REMOTE" "$BP_CFG_BRANCH" "$BP_CFG_READ_BRANCH"'
   const r = await unchecked(() =>
-    run('bash', ['-c', `. "$1"; ${snippet}`, '_', lib, file], { stdout: 'capture', stderr: 'inherit' }),
+    run('bash', ['-c', `. "$1"; ${snippet}`, cliName(), lib, file], { stdout: 'capture', stderr: 'inherit' }),
   )
   if (r.status !== 0) return null
   const parts = r.stdout.split('\0')
@@ -1219,12 +1229,14 @@ async function bpShouldSubstitute(f: string): Promise<boolean> {
   // leaves `bp_should_substitute` undefined, and bash's own "command not
   // found" line for it reaches the CLI's real stderr, once per file
   // processed. `stderr: 'ignore'` (this call's own earlier choice) swallowed
-  // that diagnostic entirely rather than merely losing its exact wording
-  // (which a bridged `bash -c` can never reproduce byte-for-byte — it
-  // reports "bash: line 1: …", never "scripts/blueprint: line 287: …", since
-  // it is a different bash process running an inline -c script, not the
-  // CLI's own interpreter). Silence was the wrong choice: CLAUDE.md's "no
-  // silent swallowing" rule, and blueprint-port's finding-3 row.
+  // that diagnostic entirely rather than merely losing its exact wording.
+  // Silence was the wrong choice: CLAUDE.md's "no silent swallowing" rule,
+  // and blueprint-port's finding-3 row. The leading token now matches too
+  // (argv0 is `cliName()`, not `_` — see `bashLib`'s header comment); only
+  // the LINE NUMBER can still differ, since this is a different bash process
+  // running a one-line inline `-c` script, never the CLI's own interpreter
+  // at its own line — the differential's shared `stripLinePrefix` already
+  // normalises exactly that (nothing else).
   //
   // The source itself is GUARDED (`[ -r "$1" ]`), exactly as the CLI's own
   // top-level source is (scripts/blueprint:55-58) — `bashLib`'s own
@@ -1232,7 +1244,7 @@ async function bpShouldSubstitute(f: string): Promise<boolean> {
   // "No such file or directory" for the missing lib first, a line the real
   // CLI never emits because it checks readability before ever sourcing.
   const r = await unchecked(() =>
-    run('bash', ['-c', 'if [ -r "$1" ]; then . "$1"; fi; bp_should_substitute "$2"', '_', lib, f], {
+    run('bash', ['-c', 'if [ -r "$1" ]; then . "$1"; fi; bp_should_substitute "$2"', cliName(), lib, f], {
       stdout: 'ignore',
       stderr: 'inherit',
     }),
@@ -1243,7 +1255,7 @@ async function bpShouldSubstitute(f: string): Promise<boolean> {
 async function bpSubstituteStream(srcFile: string, projName: string, outFile: string): Promise<boolean> {
   const lib = join(libDir(), 'placeholders.sh')
   const r = await unchecked(() =>
-    run('bash', ['-c', '. "$1"; bp_substitute_stream "$2" "$3"', '_', lib, srcFile, projName], {
+    run('bash', ['-c', '. "$1"; bp_substitute_stream "$2" "$3"', cliName(), lib, srcFile, projName], {
       stdout: { file: outFile },
       stderr: 'inherit',
     }),
@@ -1541,7 +1553,7 @@ async function reportStaleness(root: string, branchOverride?: string): Promise<v
   }
 
   const assessR = await unchecked(() =>
-    run('bash', ['-c', '. "$1"; bp_staleness_assess "$2" "$3"', '_', lib, root, branch], {
+    run('bash', ['-c', '. "$1"; bp_staleness_assess "$2" "$3"', cliName(), lib, root, branch], {
       stdout: 'capture',
       stderr: 'ignore',
     }),
@@ -1608,7 +1620,7 @@ async function reportStaleness(root: string, branchOverride?: string): Promise<v
     // operator's real terminal. 'ignore' here swallowed it (TASK-081,
     // differential row "y fast-forwards the local checkout").
     const ffR = await unchecked(() =>
-      run('bash', ['-c', '. "$1"; bp_staleness_fast_forward "$2" "$3" "$4"', '_', lib, root, branch, remote], {
+      run('bash', ['-c', '. "$1"; bp_staleness_fast_forward "$2" "$3" "$4"', cliName(), lib, root, branch, remote], {
         stdout: 'inherit',
         stderr: 'inherit',
       }),
@@ -1629,7 +1641,7 @@ async function bpProjectRoot(): Promise<string> {
   const lib = join(libDir(), 'state-dir.sh')
   if (existsSync(lib)) {
     const r = await unchecked(() =>
-      run('bash', ['-c', '. "$1"; BP_CODE_ROOT="$2"; bp_state_root 2>/dev/null', '_', lib, logicalPwd()], {
+      run('bash', ['-c', '. "$1"; BP_CODE_ROOT="$2"; bp_state_root 2>/dev/null', cliName(), lib, logicalPwd()], {
         stdout: 'capture',
         stderr: 'ignore',
       }),
@@ -1663,11 +1675,17 @@ async function armGate(root: string): Promise<void> {
       'refusing to report drift without scripts/lib/gate.sh. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/gate.sh',
     )
   }
-  await run('bash', ['-c', '. "$1"; arm_gate "$2"', '_', lib, root], { stdout: 'inherit', stderr: 'inherit' })
+  await run('bash', ['-c', '. "$1"; arm_gate "$2"', cliName(), lib, root], { stdout: 'inherit', stderr: 'inherit' })
   await unchecked(() =>
     run(
       'bash',
-      ['-c', '. "$1"; command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$2"', '_', lib, root],
+      [
+        '-c',
+        '. "$1"; command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$2"',
+        cliName(),
+        lib,
+        root,
+      ],
       { stdout: 'inherit', stderr: 'inherit' },
     ),
   )
@@ -2463,7 +2481,7 @@ async function reqLib(
     `${placeholdersFallbackSnippet(1)}; ` + libs.map((_, i) => `. "$${i + 2}"`).join('; ')
   const r = await run(
     'bash',
-    ['-c', `${preamble}; shift ${n + 1}; ${snippet}`, '_', placeholders, ...libs, ...args],
+    ['-c', `${preamble}; shift ${n + 1}; ${snippet}`, cliName(), placeholders, ...libs, ...args],
     { ...opts, stdout: 'capture', stderr: opts.stderr ?? 'inherit' },
   )
   return { stdout: stripTrailingNewlines(r.stdout), status: r.status }

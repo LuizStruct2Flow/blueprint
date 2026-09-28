@@ -2643,9 +2643,11 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
         // file (measured directly — bash: "<script>: line N:
         // /abs/path/to/diff: Permission denied"; Node's spawn EACCES
         // handler, run()'s own code, only ever has argv0, "diff", to name) —
-        // plan §6(a)'s own accepted divergence, same shape as the a2bp
-        // "finding 3" row's leading-token strip: not something run() can fix
-        // without duplicating bash's own PATH resolution.
+        // plan §6(a)'s own accepted divergence — this one is `run()` spawning
+        // `diff` directly, never through the `bash -c` lib bridge, so
+        // TASK-081 round D's `cliName()` argv0 fix (the a2bp "finding 3" row)
+        // does not reach it: not something `run()` can fix without
+        // duplicating bash's own PATH resolution.
         normalizeSnapshot: (snap) => ({
           ...snap,
           stdout: stripLinePrefix(snap.stdout),
@@ -4098,22 +4100,19 @@ describe('blueprint-port differential — a2bp / prs', () => {
    * FIXED, not just observed: `bpShouldSubstitute` used to pass
    * `stderr: 'ignore'`, silently swallowing this diagnostic outright — a
    * real divergence (CLAUDE.md's "no silent swallowing" rule), now
-   * `stderr: 'inherit'`. What remains a NAMED, ACCEPTED divergence (plan §6
-   * already has one of this shape) is the exact leading TOKEN — measured
-   * directly, neither side ever prints "line N:" here (the call sits where
-   * bash omits it, the same shape `_bp_retire`'s process-substitution rows
-   * hit), so the divergence is not finding-4's "line N:" at all: OLD's
-   * diagnostic names the real CLI path ("<proj>/scripts/blueprint: …"), bash
-   * reporting on itself, while the port's bridge invokes
-   * `bash -c '…' _ LIB ARGS…` (plan §4's own bridge shape) — bash's own
-   * convention for "no real $0 to give," so the bridge's inner "command not
-   * found" reads "_: …" verbatim, the literal placeholder, never something
-   * `run()` synthesizes or could teach the bridge the CLI's own path without
-   * reimplementing bash's diagnostic. Stdout, the exit code and every
-   * snapshotted byte are still compared exactly; only this one stderr line's
-   * leading token is normalised away — a second, row-specific normalisation
-   * on top of (not instead of) the file's shared `stripLinePrefix`, which
-   * stays narrow (line-N-only) here as everywhere else in this round.
+   * `stderr: 'inherit'`. TASK-081 round D fixed the SECOND divergence this
+   * row exposed rather than normalising it: every `bash -c` bridge call
+   * (`bashLib`, `bashLibs`, `reqLib` and the handful of direct bridges, e.g.
+   * this one) used to pass the literal `_` as bash's own argv0, so bash's
+   * "command not found" line read "_: line N: …" instead of the real CLI's
+   * own invoked path. The bridge now passes `cliName()` — exactly what the
+   * shim's `$(dirname "$0")`-derived path would be — so the LEADING TOKEN
+   * matches OLD's byte-for-byte; only the LINE NUMBER can still differ
+   * (OLD's interpreter is the real, multi-thousand-line CLI script at its
+   * own line; NEW's bridge is always a fresh one-line `-c` script, so it is
+   * always "line 1"), which is exactly what finding-4's shared
+   * `stripLinePrefix` already normalises — no row-specific normalisation on
+   * top of it any more.
    */
   it('finding 3 — scripts/lib/placeholders.sh missing, on a path that substitutes', async () => {
     await scenario('blueprint-port-a2bp-f3-no-placeholders', async (s) => {
@@ -4137,16 +4136,11 @@ describe('blueprint-port differential — a2bp / prs', () => {
       expect(newResult.stdout).toBe(oldResult.stdout)
       expect(newResult.code).toBe(oldResult.code)
       expect(newSnapshot).toEqual(oldSnapshot)
-      // Narrowed the same way as finding-4's own `stripLinePrefix` (TASK-081
-      // round C): strips ONLY "line N: ", never the leading program token —
-      // a no-op on this row's own stderr (neither side ever prints "line
-      // N:" here, see the block comment above), so the row's OWN divergence
-      // (the leading token itself, "_" vs the real CLI path) is stripped
-      // separately, right where it is used, rather than folded into the
-      // shared helper.
+      // Only the "line N: " normalisation remains (plan §6.5, the same
+      // shared shape used throughout this file) — the leading token is no
+      // longer normalised because it is no longer a divergence.
       const stripLinePrefix = (t: string) => t.replace(/^(\S+: )line \d+: /gm, '$1')
-      const stripLeadingToken = (t: string) => t.replace(/^\S+: /gm, '')
-      expect(stripLeadingToken(stripLinePrefix(newResult.stderr))).toBe(stripLeadingToken(stripLinePrefix(oldResult.stderr)))
+      expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
       expect(oldResult.stderr).toContain('bp_should_substitute: command not found')
       expect(newResult.stderr).toContain('bp_should_substitute: command not found')
     })

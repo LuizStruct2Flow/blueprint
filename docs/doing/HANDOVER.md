@@ -122,7 +122,7 @@ round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
 **State at the 2026-09-27 cut. ONE agent is in flight: Matthias (Claude) on
-TASK-081's last test rows in `.scratch/task081-port` (slices 1-4 are
+TASK-081's differential harness (plan §5) in `.scratch/task081-port` (slices 1-4 are
 committed: `9d672e8`, `1061dbb`, `951f80a`, `1dcb67a` a2bp + prs, and Codex's
 `97271c9`). The mic is with
 the Orchestrator. After TASK-081 lands, the founder's order is TASK-084.**
@@ -186,6 +186,24 @@ before slice 5 lands (the row requires it, no waiver applies).
   the last three row groups (pull's and drift's interactive prompts under a
   pty; 127/126 with `comm`/`cmp`/`diff` absent or non-executable; `jq`
   missing). Then Codex re-reviews everything since `1dcb67a`.
+- **Codex re-reviews (Andreas):** round 2 closed findings 1-6 (his parity fix
+  `0815e44`, four-eyed correct). Rounds 2 and 3 kept finding 7 OPEN: the
+  differential harness did not implement plan §5 as written. §5 requires
+  "same path, twice" (build at one path with pinned dates, run OLD, snapshot,
+  delete, rebuild, run NEW), comparing the whole tree (path/bytes/mode),
+  `.blueprint-source`, cache refs, scratch leftovers and, for a2bp, remote
+  refs and the gh argv log, with only three named normalisations. The rows
+  had compared output and exit only, and normalised paths/SHAs/request keys.
+  Commits since: `7833f54` + `51258bd` (24 more rows, no divergence),
+  `6b50500` (a2bp/prs rebuilt on a same-path-twice helper; `scrubA2bp`
+  removed; 103/103). **In flight:** drift and pull moved onto that
+  comparison, plus their missing §5 rows (missing-in-blueprint as its own
+  row, gate.sh missing, v1 config, placeholder remote, override not a
+  directory, exported GIT_DIR, symlinked project, `&`/`\` project name,
+  numeric settings layer, retirement y/non-TTY/q, held file, unknown option,
+  refused lib skipping the CLI, ...). **Then:** a2bp/prs missing rows
+  (`--force`, unknown option, staging rc 3, GNU diff missing, unshipped path,
+  moved once/twice, draft PR, orphan branches), then Codex round 4.
 - **Slice 5 MUST handle, found by slice 3:**
   (1) `marker-merge` BUG-112 #4 goes red under the shim: its sanity guard
   `expect(cli).toContain('BLUEPRINT:BEGIN')` reads the file `resolveConsumer`

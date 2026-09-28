@@ -832,6 +832,43 @@ async function realBinPath(s: Scenario, name: string): Promise<string> {
   return r.stdout.trim()
 }
 
+/** A symlink farm of every executable on PATH EXCEPT `name` (a2bp-e2e's own
+ * technique — a shim is useless here, since `command -v` finds it; the
+ * binary must be genuinely absent). `Scenario.pathWithout` always lands in
+ * the SAME `path-without/` workspace subdirectory, so a second call within
+ * one scenario (the "old" build, then the "new" rebuild) collides on its own
+ * already-planted symlinks — hence a distinct `dir` per call here, named by
+ * `tag` rather than reused. Hoisted here (originally local to the a2bp/prs
+ * describe) once finding 4's tool-absence rows needed the identical
+ * once-per-scenario workaround. */
+async function pathWithoutBin(s: Scenario, name: string, tag: string): Promise<string> {
+  const dir = await s.workspace.dir(tag)
+  const farm = await s.run(
+    'sh',
+    [
+      '-c',
+      'printf %s "$1" | tr : "\\n" | while IFS= read -r d; do\n' +
+        '  [ -d "$d" ] || continue\n' +
+        '  for exe in "$d"/*; do\n' +
+        '    [ -f "$exe" ] || continue\n' +
+        '    [ -x "$exe" ] || continue\n' +
+        '    n="${exe##*/}"\n' +
+        '    [ "$n" = "$2" ] && continue\n' +
+        '    [ -e "$3/$n" ] || ln -s "$exe" "$3/$n" 2>/dev/null\n' +
+        '  done\n' +
+        'done\n' +
+        'exit 0',
+      '_',
+      process.env.PATH ?? '',
+      name,
+      dir,
+    ],
+    { cwd: s.workspace.root },
+  )
+  expect(farm.code, farm.output).toBe(0)
+  return dir
+}
+
 /** A PATH shim for `bin` that fails only when some WHOLE argv element
  * exactly equals one of `verbs` — never a substring match, so a path or
  * file name that merely CONTAINS a verb (e.g. a file called "show.md") does
@@ -2190,47 +2227,64 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
   // strips both sides down to the tool name uniformly rather than only OLD's.
   const stripLinePrefix = (t: string): string => t.replace(/^\S+: (line \d+: )?/gm, '')
 
+  interface F4Fixture extends SamePathTwiceFixture {
+    readonly bp: string
+    readonly env: Record<string, string>
+  }
+
   /** A blueprint that SHIPPED `OLD-FILE.md` at its first commit and STOPPED
    * shipping it at its second — the shape `_bp_retire`'s own `comm -23 hist
    * cur` needs to name a retirement candidate at all. The project's own copy
    * is seeded byte-identical to what the blueprint shipped, so a WORKING
    * `cmp` would call it a clean, unedited retire candidate. */
-  async function seedRetirementFixture(s: Scenario, tag: string): Promise<{ proj: string }> {
-    const bp = await s.workspace.dir(`${tag}-bp`)
+  async function seedRetirementFixturePinned(s: Scenario, root: string): Promise<F4Fixture> {
+    const bp = join(root, 'bp')
     await mkdir(join(bp, 'docs'), { recursive: true })
     await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
     await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
     await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
     await writeFile(join(bp, 'OLD-FILE.md'), 'todo: retire me\n', 'utf8')
     await initRepo(s, bp)
-    await commitAll(s, bp, 'base')
+    await commitAllPinned(s, bp, 'base')
     await rm(join(bp, 'OLD-FILE.md'))
-    await commitAll(s, bp, 'retire old file')
+    await commitAllPinned(s, bp, 'retire old file')
     const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-    const proj = await s.workspace.dir(`${tag}-proj`)
-    await seedRegisteredProject(s, proj, bp, sha)
+    const proj = join(root, 'proj')
+    await seedRegisteredProjectPinned(s, proj, bp, sha)
     await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
     await mkdir(join(proj, 'docs'), { recursive: true })
     await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
     await writeFile(join(proj, 'OLD-FILE.md'), 'todo: retire me\n', 'utf8')
-    await commitAll(s, proj, 'sync')
-    return { proj }
+    await commitAllPinned(s, proj, 'sync')
+    return { root, proj, bp, env: await rowEnv(root) }
   }
 
   it('comm absent (127) — retirement never enumerates a candidate, on either CLI', async () => {
     await scenario('blueprint-port-f4-retire-no-comm', async (s) => {
-      const { proj } = await seedRetirementFixture(s, 'no-comm')
-      const path = await s.pathWithout(['comm'])
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'comm-absent (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'comm-absent (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expect(stripLinePrefix(newResult.stderr)).toBe(stripLinePrefix(oldResult.stderr))
-      expect(newResult.stdout).toBe(oldResult.stdout)
-      expect(newResult.code).toBe(oldResult.code)
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<F4Fixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await seedRetirementFixturePinned(s, root)
+          treeBefore = await walkFiles(fx.proj)
+          return fx
+        },
+        // `pathWithoutBin` cannot be built inside `build` (no `side` there,
+        // and `Scenario.pathWithout`'s farm is a once-per-scenario
+        // workspace subdirectory) — built here instead, tagged by `side`.
+        run: async (s, fx, side) => {
+          const path = await pathWithoutBin(s, 'comm', `f4-no-comm-${side}`)
+          const env = { ...fx.env, PATH: path }
+          return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
+        },
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+        compareRuns: false,
+      })
+      expect(oldSnapshot.projTree, 'comm-absent (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'comm-absent (NEW) must write nothing').toEqual(treeBefore)
+      expect(stripLinePrefix(newSnapshot.stderr)).toBe(stripLinePrefix(oldSnapshot.stderr))
+      expect(newSnapshot.stdout).toBe(oldSnapshot.stdout)
+      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.stderr).toContain('comm: command not found')
       expect(oldResult.stdout).toContain('✓ Nothing to pull. Project matches blueprint HEAD.')
       // NON-VACUITY: with a working `comm`, OLD-FILE.md is exactly the
@@ -2239,20 +2293,30 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       // never even enumerated (its process substitution feeds an empty loop,
       // silently — bash does not fail the surrounding `while` on it), so the
       // file survives, untouched, on both sides.
+      const proj = join(s.workspace.path('root'), 'proj')
       expect(await readFile(join(proj, 'OLD-FILE.md'), 'utf8')).toBe('todo: retire me\n')
     })
   })
 
   it('cmp absent (127) — every substitutable managed file misreads as binary, refusing the whole pull', async () => {
     await scenario('blueprint-port-f4-retire-no-cmp', async (s) => {
-      const { proj } = await seedRetirementFixture(s, 'no-cmp')
-      const path = await s.pathWithout(['cmp'])
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'cmp-absent (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'cmp-absent (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<F4Fixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await seedRetirementFixturePinned(s, root)
+          treeBefore = await walkFiles(fx.proj)
+          return fx
+        },
+        run: async (s, fx, side) => {
+          const path = await pathWithoutBin(s, 'cmp', `f4-no-cmp-${side}`)
+          const env = { ...fx.env, PATH: path }
+          return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
+        },
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+        compareRuns: false,
+      })
+      expect(oldSnapshot.projTree, 'cmp-absent (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'cmp-absent (NEW) must write nothing').toEqual(treeBefore)
       // `cmp` is not only `_bp_retire`'s own call (:1500) — scripts/lib/
       // placeholders.sh:189's `bp_contains_nul` ALSO shells out to it
       // (`tr -d '\0' < "$1" | cmp -s - "$1"`), and BOTH CLIs bridge to that
@@ -2270,47 +2334,57 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       // executes at all — OLD-FILE.md is neither retired NOR reclassified,
       // simply never reached, on either CLI.
       const stripScratch = (t: string) => t.replace(/blueprint-sync\.[A-Za-z0-9]+/g, 'blueprint-sync.<tmp>')
-      const strip = (t: string) => stripScratch(normalizeDiffHeaders(stripLinePrefix(t)))
-      expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
-      expect(strip(newResult.stdout)).toBe(strip(oldResult.stdout))
-      expect(newResult.code).toBe(oldResult.code)
+      const strip = (t: string) => stripScratch(stripLinePrefix(t))
+      expect(strip(newSnapshot.stderr)).toBe(strip(oldSnapshot.stderr))
+      expect(strip(newSnapshot.stdout)).toBe(strip(oldSnapshot.stdout))
+      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.code).toBe(7)
       expect(oldResult.stderr).toContain('cmp: command not found')
       expect(oldResult.stdout).toContain('not interactive')
       expect(oldResult.stdout).not.toContain('yours now')
       expect(oldResult.stdout).not.toContain('OLD-FILE.md')
+      const proj = join(s.workspace.path('root'), 'proj')
       expect(await readFile(join(proj, 'OLD-FILE.md'), 'utf8')).toBe('todo: retire me\n')
     })
   })
 
   /** One drifted managed file (CLAUDE.md), docs/DoD.md in sync — the shape
    * `cmd_pull`'s main loop needs to reach the PREVIEW step at all. */
-  async function seedSingleDriftFixture(s: Scenario, tag: string): Promise<string> {
-    const bp = await s.workspace.dir(`${tag}-bp`)
-    const sha = await seedBlueprintRepo(s, bp)
-    const proj = await s.workspace.dir(`${tag}-proj`)
-    await seedRegisteredProject(s, proj, bp, sha)
+  async function seedSingleDriftFixturePinned(s: Scenario, root: string): Promise<F4Fixture> {
+    const bp = join(root, 'bp')
+    const sha = await seedBlueprintRepoPinned(s, bp)
+    const proj = join(root, 'proj')
+    await seedRegisteredProjectPinned(s, proj, bp, sha)
     await mkdir(join(proj, 'docs'), { recursive: true })
     await writeFile(join(proj, 'CLAUDE.md'), '# CLAUDE\nan older, edited copy\n', 'utf8')
     await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-    await commitAll(s, proj, 'partial sync')
-    return proj
+    await commitAllPinned(s, proj, 'partial sync')
+    return { root, proj, bp, env: await rowEnv(root) }
   }
 
   it('diff absent (127) — pull\'s preview, no TTY to prompt (refused, exit 7)', async () => {
     await scenario('blueprint-port-f4-pull-no-diff', async (s) => {
-      const proj = await seedSingleDriftFixture(s, 'no-diff')
-      const path = await s.pathWithout(['diff'])
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'diff-absent (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'diff-absent (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      const strip = (t: string) => normalizeDiffHeaders(stripLinePrefix(t))
-      expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
-      expect(strip(newResult.stdout)).toBe(strip(oldResult.stdout))
-      expect(newResult.code).toBe(oldResult.code)
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<F4Fixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await seedSingleDriftFixturePinned(s, root)
+          treeBefore = await walkFiles(fx.proj)
+          return fx
+        },
+        run: async (s, fx, side) => {
+          const path = await pathWithoutBin(s, 'diff', `f4-no-diff-${side}`)
+          const env = { ...fx.env, PATH: path }
+          return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
+        },
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+        compareRuns: false,
+      })
+      expect(oldSnapshot.projTree, 'diff-absent (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'diff-absent (NEW) must write nothing').toEqual(treeBefore)
+      const strip = (t: string) => stripLinePrefix(t)
+      expect(strip(newSnapshot.stderr)).toBe(strip(oldSnapshot.stderr))
+      expect(strip(newSnapshot.stdout)).toBe(strip(oldSnapshot.stdout))
+      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.code).toBe(7)
       expect(oldResult.stderr).toContain('diff: command not found')
       expect(oldResult.stdout).toContain('not interactive')
@@ -2319,18 +2393,31 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
 
   it('diff present but not executable (126) — same shape, Permission denied', async () => {
     await scenario('blueprint-port-f4-pull-diff-noexec', async (s) => {
-      const proj = await seedSingleDriftFixture(s, 'diff-noexec')
-      const noExecDir = await s.workspace.dir('diff-noexec-bin')
-      const diffPath = join(noExecDir, 'diff')
-      await writeFile(diffPath, '#!/bin/sh\necho fake\n', 'utf8')
-      await chmod(diffPath, 0o644)
-      const path = `${noExecDir}:${await s.pathWithout(['diff'])}`
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'diff-noexec (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await runNew(s, proj, ['pull'], { PATH: path })
-      expect(await walkFiles(proj), 'diff-noexec (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
+      interface DiffNoexecFixture extends F4Fixture {
+        readonly noExecDir: string
+      }
+      let treeBefore: Array<{ path: string; mode: string; content: string }> = []
+      const { oldResult, oldSnapshot, newSnapshot } = await samePathTwice<DiffNoexecFixture>(s, 'root', {
+        build: async (s, root) => {
+          const fx = await seedSingleDriftFixturePinned(s, root)
+          const noExecDir = join(root, 'diff-noexec-bin')
+          await mkdir(noExecDir, { recursive: true })
+          const diffPath = join(noExecDir, 'diff')
+          await writeFile(diffPath, '#!/bin/sh\necho fake\n', 'utf8')
+          await chmod(diffPath, 0o644)
+          treeBefore = await walkFiles(fx.proj)
+          return { ...fx, noExecDir }
+        },
+        run: async (s, fx, side) => {
+          const withoutDiff = await pathWithoutBin(s, 'diff', `f4-diff-noexec-${side}`)
+          const env = { ...fx.env, PATH: `${fx.noExecDir}:${withoutDiff}` }
+          return side === 'old' ? runOld(s, fx.proj, ['pull'], env) : runNew(s, fx.proj, ['pull'], env)
+        },
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+        compareRuns: false,
+      })
+      expect(oldSnapshot.projTree, 'diff-noexec (OLD) must write nothing').toEqual(treeBefore)
+      expect(newSnapshot.projTree, 'diff-noexec (NEW) must write nothing').toEqual(treeBefore)
       // TWO named normalisations here, not one: the usual "line N: " prefix
       // (plan §6.5), plus the tool's own NAME vs the full RESOLVED PATH bash
       // reports for a found-but-non-executable file (measured directly —
@@ -2340,12 +2427,11 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       // a2bp "finding 3" row's stripLinePrefix — not something run() can fix
       // without duplicating bash's own PATH resolution.
       const strip = (t: string) => stripLinePrefix(t).replace(/\/\S*\/diff\b/g, 'diff')
-      expect(strip(newResult.stderr)).toBe(strip(oldResult.stderr))
-      expect(normalizeDiffHeaders(newResult.stdout)).toBe(normalizeDiffHeaders(oldResult.stdout))
-      expect(newResult.code).toBe(oldResult.code)
+      expect(strip(newSnapshot.stderr)).toBe(strip(oldSnapshot.stderr))
+      expect(newSnapshot.stdout).toBe(oldSnapshot.stdout)
+      expect(newSnapshot.code).toBe(oldSnapshot.code)
       expect(oldResult.code).toBe(7)
       expect(oldResult.stderr).toContain('Permission denied')
-      expect(newResult.stderr).toContain('Permission denied')
     })
   })
 
@@ -2354,38 +2440,44 @@ describe('blueprint-port differential — finding 4 (tool absence during pull)',
       const settingsJson = (allow: string[]) =>
         `${JSON.stringify({ permissions: { allow, ask: [], deny: [] } }, null, 2)}\n`
 
-      const bp = await s.workspace.dir('no-jq-bp')
-      await mkdir(join(bp, 'docs'), { recursive: true })
-      await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
-      await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
-      await mkdir(join(bp, '.claude'), { recursive: true })
-      await writeFile(join(bp, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
-      await initRepo(s, bp)
-      await commitAll(s, bp, 'base')
-      const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+      const { oldResult } = await samePathTwice<F4Fixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await mkdir(join(bp, '.claude'), { recursive: true })
+          await writeFile(join(bp, '.claude/settings.json'), settingsJson(['Bash(git status)']), 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      const proj = await s.workspace.dir('no-jq-proj')
-      await seedRegisteredProject(s, proj, bp, sha)
-      await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
-      await mkdir(join(proj, 'docs'), { recursive: true })
-      await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
-      await mkdir(join(proj, '.claude'), { recursive: true })
-      await writeFile(join(proj, '.claude/settings.json'), settingsJson([]), 'utf8')
-      await commitAll(s, proj, 'has settings')
+          const proj = join(root, 'proj')
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await mkdir(join(proj, '.claude'), { recursive: true })
+          await writeFile(join(proj, '.claude/settings.json'), settingsJson([]), 'utf8')
+          await commitAllPinned(s, proj, 'has settings')
 
-      const path = await s.pathWithout(['jq'])
-      const treeBefore = await walkFiles(proj)
-      const oldResult = await runOld(s, proj, ['pull', '.claude/settings.json'], { PATH: path })
-      expect(await walkFiles(proj), 'jq-missing (OLD) must write nothing').toEqual(treeBefore)
-      const newResult = await runNew(s, proj, ['pull', '.claude/settings.json'], { PATH: path })
-      expect(await walkFiles(proj), 'jq-missing (NEW) must write nothing').toEqual(treeBefore)
-      await assertNoDriftPullScratch(s)
-      expectPullIdentical(oldResult, newResult)
+          return { root, proj, bp, env: await rowEnv(root) }
+        },
+        run: async (s, fx, side) => {
+          const path = await pathWithoutBin(s, 'jq', `f4-no-jq-${side}`)
+          const env = { ...fx.env, PATH: path }
+          return side === 'old'
+            ? runOld(s, fx.proj, ['pull', '.claude/settings.json'], env)
+            : runNew(s, fx.proj, ['pull', '.claude/settings.json'], env)
+        },
+        snapshotOpts: (fx) => ({ remote: fx.bp }),
+      })
       expect(oldResult.code).toBe(4)
       expect(oldResult.stdout).toContain('jq is not on PATH')
       // Refused, not crashed: nothing written, the project's settings.json
       // is untouched.
+      const proj = join(s.workspace.path('root'), 'proj')
       const settingsAfter = await readFile(join(proj, '.claude/settings.json'), 'utf8')
       expect(settingsAfter).toBe(settingsJson([]))
     })
@@ -3670,41 +3762,6 @@ describe('blueprint-port differential — pull remaining rows', () => {
 })
 
 describe('blueprint-port differential — a2bp / prs', () => {
-  /** A symlink farm of every executable on PATH EXCEPT `name` (a2bp-e2e's own
-   * technique — a shim is useless here, since `command -v` finds it; the
-   * binary must be genuinely absent). `Scenario.pathWithout` always lands in
-   * the SAME `path-without/` workspace subdirectory, so a second call within
-   * one scenario (the "old" build, then the "new" rebuild) collides on its
-   * own already-planted symlinks — hence a distinct `dir` per call here,
-   * named by `tag` rather than reused. */
-  async function pathWithoutBin(s: Scenario, name: string, tag: string): Promise<string> {
-    const dir = await s.workspace.dir(tag)
-    const farm = await s.run(
-      'sh',
-      [
-        '-c',
-        'printf %s "$1" | tr : "\\n" | while IFS= read -r d; do\n' +
-          '  [ -d "$d" ] || continue\n' +
-          '  for exe in "$d"/*; do\n' +
-          '    [ -f "$exe" ] || continue\n' +
-          '    [ -x "$exe" ] || continue\n' +
-          '    n="${exe##*/}"\n' +
-          '    [ "$n" = "$2" ] && continue\n' +
-          '    [ -e "$3/$n" ] || ln -s "$exe" "$3/$n" 2>/dev/null\n' +
-          '  done\n' +
-          'done\n' +
-          'exit 0',
-        '_',
-        process.env.PATH ?? '',
-        name,
-        dir,
-      ],
-      { cwd: s.workspace.root },
-    )
-    expect(farm.code, farm.output).toBe(0)
-    return dir
-  }
-
   /** TASK-081 "a2bp/prs last rows" — the "remote moving" technique
    * `tests/a2bp-e2e` #12/#12b prove shell-side, adapted onto
    * `a2bpSamePathTwice`'s same-path-twice fixture: a `git` PATH shim that

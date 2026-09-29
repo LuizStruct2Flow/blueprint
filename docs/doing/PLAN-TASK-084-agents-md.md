@@ -197,13 +197,16 @@ ever raised. No other trimming is part of this item.
 
 ### The sentinels
 
-Every half-pulled state must fail loudly and name the file to pull (founder
-decision 2, §9). Four strings, each pinned by a test:
+Every incomplete single-file pull of the switch must fail loudly and name the
+file to pull (founder decision 2, §9). The completed slice-1 release is a
+supported additive intermediate, not a failed partial pull. Three sentinel
+values are pinned by tests; S1 is checked reciprocally as well as by both
+importers:
 
 | Sentinel | Lives in | Checked by | On mismatch |
 |---|---|---|---|
-| S1 `# Agent instructions — shared by the four CLI providers` | `AGENTS.md`, first heading | `CLAUDE.md` and `GEMINI.md` self-check lines | stop, tell the founder, run `blueprint pull AGENTS.md` |
-| S2 `# Agent Signal — the mic, rotation and four-eyes review` | `AGENT_SIGNAL.md`, first heading (lands in slice 1) | `AGENTS.md`'s coordination bullet (§"Agent Coordination") | stop, tell the founder, run `blueprint pull AGENT_SIGNAL.md` |
+| S1 `# Agent instructions — shared by the four CLI providers` | `AGENTS.md`, first heading | `CLAUDE.md`, `GEMINI.md` and `AGENT_SIGNAL.md` self-check lines | stop, tell the founder, run `blueprint pull AGENTS.md` |
+| S2 `# Agent Signal — the mic, rotation and four-eyes review` | `AGENT_SIGNAL.md`, first heading (lands in slice 1) | `AGENTS.md`'s coordination bullet (§"Agent Coordination"), which also requires `AGENT_SIGNAL.md`'s reciprocal S1 self-check | stop, tell the founder, run `blueprint pull AGENT_SIGNAL.md` |
 | S3 a plain last line, `End of the shared agent instructions.` | `AGENTS.md`, last line | the slice-2 probe | a provider that cannot quote it has a truncated file |
 
 S3 is plain text, not an HTML comment, so no loader drops it.
@@ -347,8 +350,10 @@ yours") apply. An untracked `AGENTS.md` there is not a pull failure.
 
 | State after a partial pull | Effect | Guard |
 |---|---|---|
-| new `AGENT_SIGNAL.md` (slice 1), old everything else | the coordination protocol exists twice, word for word | harmless: nothing contradicts. The blueprint freezes both copies until slice 2 |
+| new `AGENT_SIGNAL.md` (slice 1), old everything else | the coordination protocol exists twice, word for word. The pre-existing BUG-140 `User`/`Nobody` contradiction is now co-located rather than split across the two files | no migration content is lost; wake-time drift lists slice 2 once it exists. Slice 2 corrects BUG-140. This released intermediate state is not itself a sentinel mismatch |
 | new `AGENTS.md`, old `AGENT_SIGNAL.md` (slice 1 skipped) | Codex and Kimi get the shared rules but **no protocol**: `AGENTS.md` sends them to `AGENT_SIGNAL.md`, whose old text sends them back to `AGENTS.md` | **S2**: the coordination bullet requires `AGENT_SIGNAL.md`'s new heading, finds the old one, stops and names `blueprint pull AGENT_SIGNAL.md`. Also: slice 1 is released first, and wake-time `drift` lists the file |
+| new `AGENTS.md`, slice-1 `AGENT_SIGNAL.md` | S2's heading matches, but the protocol still has its pre-switch self-references and BUG-140's `or User` wording | **reciprocal S1 check**: `AGENTS.md` also requires `AGENT_SIGNAL.md` to check S1. The slice-1 file has no such check, so the agent stops and names `blueprint pull AGENT_SIGNAL.md` |
+| slice-2 `AGENT_SIGNAL.md`, old `AGENTS.md` | the protocol calls `AGENTS.md` the shared rules, but the old file is still the coordination protocol | **S1 in `AGENT_SIGNAL.md`**: its reciprocal self-check finds the old heading, stops and names `blueprint pull AGENTS.md` |
 | new `CLAUDE.md`, old `AGENTS.md` | **the dangerous one**: Claude imports the old coordination file and loses the shared rules | (1) the bytewise order lands `AGENTS.md` first in any uninterrupted pull; (2) **S1**: Claude sees the imported text lacks the heading, stops and names `blueprint pull AGENTS.md`; (3) `blueprint drift`, run by the `SessionStart` hook, lists `AGENTS.md` as drifted |
 | new `AGENTS.md`, old `CLAUDE.md` | Claude still reads its old full copy. Codex, Kimi and (with `GEMINI.md`) Gemini get the new rules | none needed: the text is the same, and Claude's copy is merely stale |
 | new `GEMINI.md`, old `AGENTS.md` | Gemini gets the coordination protocol, not the shared rules its entry point promises | **S1**: `GEMINI.md`'s self-check stops and names `blueprint pull AGENTS.md` |
@@ -579,6 +584,12 @@ covers.
   - `blueprint pull GEMINI.md`: a Gemini session stops and names
     `blueprint pull AGENTS.md` (quota permitting; otherwise recorded as
     unverified).
+  Two reciprocal-switch cases complete the matrix:
+  - a slice-1 fixture that pulls only slice-2 `AGENTS.md` finds that its
+    `AGENT_SIGNAL.md` lacks the reciprocal S1 self-check, stops and names
+    `blueprint pull AGENT_SIGNAL.md`;
+  - a pre-slice-1 fixture that pulls only slice-2 `AGENT_SIGNAL.md` finds the
+    old S1 heading in `AGENTS.md`, stops and names `blueprint pull AGENTS.md`.
 
 ### Slice 3: the reference sweep
 
@@ -606,12 +617,13 @@ is the founder's.
 1. **The coordination protocol merges into `AGENT_SIGNAL.md`.** No
    `AGENT_PROTOCOL.md`. All three reviewers recommended the same.
 2. **No hard gate between slice 1 and slice 2**, on Codex's condition, which
-   is therefore part of the plan: sentinels make every half-pulled state fail
-   loudly and name the file to pull. The new `AGENTS.md` checks S2 in
-   `AGENT_SIGNAL.md`; `CLAUDE.md` and `GEMINI.md` check S1 in the imported
+   is therefore part of the plan: sentinels make every incomplete
+   single-file pull of the switch fail loudly and name the file to pull. The
+   new `AGENTS.md` checks S2 and requires `AGENT_SIGNAL.md`'s reciprocal S1
+   self-check; `AGENT_SIGNAL.md`, `CLAUDE.md` and `GEMINI.md` check S1 in
    `AGENTS.md`; every sentinel is pinned by a test; and the migration proof
-   covers `pull AGENTS.md`, `pull CLAUDE.md` and `pull GEMINI.md` alone (§2,
-   §4, §8).
+   covers every one-file combination (§2, §4, §8). The fully landed additive
+   slice 1 remains a supported release boundary, not a half-applied switch.
 3. **Scope: the four autonomous CLI providers**, Claude Code, Codex, Kimi and
    Gemini. The notify-only GitHub Copilot is outside this item.
 
@@ -831,3 +843,13 @@ the per-provider probe, still to run.
   The `pull CLAUDE.md` fixture needs a location outside the blueprint tree to
   show Claude stopping; Codex, Kimi and Gemini stop at the fixture's own
   `.git` root and are unaffected.
+
+**Cross-provider review finding (Alexey, Codex).** S2's heading landed in slice
+1, but slice 2 also rewrites `AGENT_SIGNAL.md`. A project that had pulled slice
+1 could therefore accept the new `AGENTS.md` and decline the slice-2
+`AGENT_SIGNAL.md`; S2 still matched, leaving stale self-references and BUG-140's
+`or User` wording silently in force. The reverse named pull — slice-2
+`AGENT_SIGNAL.md` with old `AGENTS.md` — was also unguarded. The fix makes S1
+reciprocal: `AGENT_SIGNAL.md` checks the `AGENTS.md` heading, while `AGENTS.md`
+requires that reciprocal check as well as S2. `tests/instruction-files` pins
+both directions, and §4 now names both missing partial states explicitly.

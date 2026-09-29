@@ -121,9 +121,10 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-29 cut. Nothing is in flight; the mic is with the
-Orchestrator. TASK-081 is released and waits for the founder's acceptance;
-TASK-084 is next.**
+**State at the 2026-09-29 cut. TASK-084 is in flight: slice 1 is released;
+slice 2 is committed locally and its Codex four-eyes review found and fixed a
+partial-pull guard. The Orchestrator owns the final review and push. TASK-081
+is released and waits for the founder's acceptance.**
 
 **TASK-081 (the `scripts/blueprint` port) — RELEASED at `8893e14`, waiting for
 acceptance** (row and plan in `docs/waiting-acceptance/`). `scripts/blueprint`
@@ -179,9 +180,12 @@ no such cycle exists (checked 2026-09-29).
   accordingly.
 
 **Next, in order:**
-1. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
-   `CLAUDE.md` → `AGENTS.md` consolidation, plan first, reviewed by all three
-   providers before any file moves.
+1. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): slice 1 is
+   released at `a2e3bdf`. Slice 2's instruction-file switch is in `1dbfd5f`
+   and `aeaf755`; its Codex review fix is the current tip. The Orchestrator
+   reviews and pushes that range, waits for the release, then starts slice 3.
+   The slice log and remaining work are in
+   [`PLAN-TASK-084-agents-md.md`](PLAN-TASK-084-agents-md.md).
 2. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
    `contamination.sh`, then its fix) — both unblocked now that TASK-081 has
    landed; slice 6's closure brings a ported lib's `.mts` on a single-file pull.

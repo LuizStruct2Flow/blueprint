@@ -23,12 +23,27 @@ that lexical order was safe only for a same-stem pair and that only the CLI
 pair had refusal hold-back; its follow-up makes the closure dependency-first
 at every depth and propagates a refused or explicitly missing dependency to
 its depender, while keeping incidental textual mentions out of the hard-edge
-graph. Full suite (75 files / 1377
-tests), typecheck, and the release tier (`bootstrap-gate`, `a2bp-e2e`) all
-green before that follow-up. Claude's first re-review fixed full-pull ordering
-for present dependencies (`2a7d720`, `4247967`); Codex's round-2 review then
-found that an explicitly named dependency absent from the archive was still
-never attempted on a full pull, and fixed that in `1d6c2a3`, `8e81cf9`.
+graph — **at the time, only for the files `cmdPull` reaches when the CLI
+itself is one of the selected paths (`files.some(namesCli)`); the row
+originally stated the guarantee without that qualifier.** Full suite (75
+files / 1377 tests), typecheck, and the release tier (`bootstrap-gate`,
+`a2bp-e2e`) all green before that follow-up. Claude's first re-review fixed
+full-pull ordering for present dependencies (`2a7d720`, `4247967`); Codex's
+round-2 review then found that an explicitly named dependency absent from the
+archive was still never attempted on a full pull, and fixed that in `1d6c2a3`,
+`8e81cf9`. Vitali's round-2 review then found the qualifier itself was the
+remaining gap: the whole closure/hold-back block ran only inside
+`if (files.some(namesCli))`, so once a project's CLI is already
+byte-identical to the blueprint's (the steady state after any project has
+been ported once) a full or named pull selects no CLI file, `namesCli` is
+false throughout, and a lib that gained a dependency on something absent or
+refused landed with no check, no skip line, exit 0. Fixed by seeding the same
+fixed point (`bpLibClosureFromSeeds`, factored out of `bpCliLibClosure`) from
+whatever `scripts/lib/*` files a pull already selected — full or named — and
+running the reorder/hold-back unconditionally, not only when the CLI is
+selected; `bpCliLibClosure` itself is now that seeding plus a call into the
+same function, so there is still one scanner. The guarantee now genuinely
+holds at every depth, on every pull, with no `namesCli` qualifier left.
 Cross-provider re-review and the affected/full checks are pending before push.
 This item does not move to `waiting-acceptance/` until that review and the push
 land. |

@@ -489,4 +489,67 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       )
     })
   })
+
+  it('#8 a full pull holds a lib back when its explicit dependency is absent from the blueprint', async () => {
+    await scenario('pull-behaviour-8', async (s) => {
+      const bp = await s.workspace.dir('f8', 'bp')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(
+        join(bp, 'scripts/blueprint'),
+        ['#!/bin/sh', '# fixture cli shim (TASK-081 slice 6 missing-dependency reproducer)', 'lib="scripts/lib/a-adapter.sh"', '. "$lib"', ''].join(
+          '\n',
+        ),
+      )
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(
+        join(bp, 'scripts/lib/a-adapter.sh'),
+        [
+          '#!/bin/sh',
+          '# scripts/lib/a-adapter.sh — fixture adapter with an absent hard dependency',
+          'target="scripts/lib/z-missing.mts"',
+          '. "$target"',
+          'echo "a-adapter new"',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const p = await s.workspace.dir('f8', 'proj')
+      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(
+        await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
+        `a full pull landed a-adapter.sh even though its explicit dependency ` +
+          `does not exist in the blueprint:\n${r.output}`,
+      ).toContain('a-adapter old')
+      expect(r.output, 'the absent dependency was never attempted').toMatch(
+        /skip\s+scripts\/lib\/z-missing\.mts\s+\(not in blueprint\)/,
+      )
+      expect(r.output, 'no skip line named the held-back adapter').toMatch(
+        /skipped\s+scripts\/lib\/a-adapter\.sh.*scripts\/lib\/z-missing\.mts/,
+      )
+      expect(await shaOf(p), 'bootstrap_sha advanced despite an absent dependency').toBe(first)
+      expect(r.code, `a held-back file must still exit 4:\n${r.output}`).toBe(4)
+    })
+  })
 })

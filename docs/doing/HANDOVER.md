@@ -121,80 +121,36 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-29 cut. TASK-081 slice 6 and its Codex review fix are on
-`main`, not pushed. The mic is with the Orchestrator. Review the Codex fix,
-rerun the affected/full checks, then push.**
+**State at the 2026-09-29 cut. Nothing is in flight; the mic is with the
+Orchestrator. TASK-081 is released and waits for the founder's acceptance;
+TASK-084 is next.**
 
-**TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
-Matthias (Claude) per slice; reviewer Andreas (Codex), as the row requires.
-NO branch and NO worktree any more: the founder's rule is feature toggles,
-never feature branches (`CLAUDE.blueprint.md` §"The blueprint's `main` is its
-trunk"). The `task081-port` branch and `.scratch/task081-port` worktree are
-deleted.
-- **Released (dark):** the whole port, `scripts/blueprint.mts`, landed on
-  `main` at `1908dd1` after six Codex review rounds (the differential harness
-  was rebuilt to plan §5 exactly: one `samePathTwice` helper, full snapshot,
-  only the §5/§6 normalisations). `788f5ef` fixed a contamination BLOCK (the
-  a2bp fixture's planted host path is now built at runtime); CI green,
-  `released` = `788f5ef`. Nothing calls the .mts yet, so every derived project
-  still runs the shell CLI.
-- **Slice 5, the switch — COMMITTED ON `main`, NOT PUSHED:** `b2de45e`
-  (`scripts/blueprint` → the exact two-line shim; inventory row removed; the
-  harness takes OLD from history; source-inspection tests follow the shim;
-  CLAUDE.md `TEMPLATE_FILES` → `.mts`; plan §6 gains the two founder-accepted
-  deviations — pull naming either CLI file brings both, and a `\` project path
-  cannot run the CLI; plan §1/§8 say slices 1-4 belonged on main), `e08cb6a`,
-  `a1bde4f`, and Andreas's `3ef85dc` (a real finding: the ported pull could
-  land the shim before `blueprint.mts`, stranding a project with no CLI; the
-  target now lands first and a refused or missing .mts holds the shim back;
-  announcement docs corrected — the pre-port single-file pull exits 1, not
-  127).
-- **Where the four-eyes review of `3ef85dc` stopped (Vitali, Claude):** points
-  1-4 CLEAN — ordering holds in every pull path, the hold-back holds and keeps
-  `bootstrap_sha`, the test "ported pull holds the shim back when blueprint.mts
-  is refused" was proven red without the fix and green with it, the docs match.
-  Host runs done: blueprint-port 152/152, bootstrap-gate 8/8, a2bp-e2e 22/22.
-  **Still to run before pushing:** `npm --prefix tests test -- signal-dispatch`;
-  the full suite once (`npm --prefix tests test`);
-  `node scripts/shell-inventory-check.mts`; `npm --prefix tests run typecheck`.
-  If all green, push all five commits (b2de45e..3ef85dc plus this handover
-  commit) and watch CI: this is the push that switches every derived project to
-  the port on its next pull.
-- **Slices 1-6 landed on `main`, NOT PUSHED.** Slice 6 (plan §8 row 6):
-  reproducer `71227f6` (`managed-references` #6 — a fixture `scripts/lib/gate.sh`
-  adapter naming `gate.mts`, an old project pulling only `scripts/blueprint`,
-  red because `bpCliLibs` stopped after one hop), fix `265ff25` (`bpCliLibs`
-  walks a fixed point over every named lib's own text). Full suite (75/75,
-  1377 tests), typecheck, `bootstrap-gate` (8/8) and `a2bp-e2e` (22/22) all
-  green; a one-pass-cap mutant reddened the same assertion, reverted.
-  **Codex found one blocking gap:** the fixed point was lexically ordered and
-  only the CLI pair propagated refusal, so a differently named dependency
-  could land after its adapter and a refused/missing target could strand the
-  adapter. The review follow-up records dependency edges, orders them first at
-  every depth, and holds a depender back after a refused or explicitly missing
-  dependency. It also distinguishes broad membership discovery from hard
-  dependency shapes so strings that merely mention a real lib do not create a
-  false hold-back. Claude's first re-review added full-pull coverage and
-  reordered the selected closure members (`2a7d720`, `4247967`). Andreas's
-  round-2 review found one remaining case inside the same written contract: a
-  hard dependency absent from the blueprint archive never entered a full
-  pull's selected files, so it could not fail before its depender. Reproducer
-  `1d6c2a3`, fix `8e81cf9` enqueue only absent closure dependencies on full
-  pulls; host verification and a clean cross-provider review are pending.
-  Then TASK-081 moves to waiting-acceptance.
+**TASK-081 (the `scripts/blueprint` port) — RELEASED at `8893e14`, waiting for
+acceptance** (row and plan in `docs/waiting-acceptance/`). `scripts/blueprint`
+is the two-line shim over `scripts/blueprint.mts`; libraries under
+`scripts/lib/` are still shell, reached through the bridge. Every derived
+project switches on its next FULL `blueprint pull` (a pre-port CLI pulling
+`scripts/blueprint` alone gets a shim with no target and exits 1 until a full
+pull; the CLI now needs a Node with type stripping — both announced in
+`bf739cc`'s body and plan §7). Known limit, recorded in the row: two
+`scripts/lib/` files depending on each other could half-apply if one refuses;
+no such cycle exists (checked 2026-09-29).
 - **Traps for the next session:** the auto-mode classifier blocks `git merge`
   and overwriting a tracked file in a worktree without an explicit founder yes
   — ask, do not route around it; write agents' temp files in the project's
   `.scratch/` only; agents have repeatedly reported work as done that was not —
   verify each claim against the code (grep, counts) before sending anything to
-  Codex; brief agents to run the full suite at most twice (the founder hears
-  the fans).
+  Codex; judge each review finding against the founder's "needs a real
+  trigger" rule before dispatching work; brief agents to run the full suite at
+  most twice (the founder hears the fans); `gh run list --commit` needs the
+  FULL sha.
 - **Litter the permission rules would not let agents remove** (gitignored,
   harmless, for the founder): `.scratch/rc3-e2e`, `.scratch/run-*.sh`,
   `.scratch/task081-port-work`; and ~33 old agent worktrees under
-  `.claude/worktrees/` (some may hold unlanded work; check before deleting).
+  `.claude/worktrees/` (some may hold unlanded work; check before deleting —
+  an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
-- **Waiting for the founder's acceptance:** BUG-154 (released `bfe4984`),
+- **Waiting for the founder's acceptance:** TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.
@@ -223,15 +179,13 @@ deleted.
   accordingly.
 
 **Next, in order:**
-1. **TASK-081:** slices 1-6 and the Codex slice-6 review fix are on `main`;
-   Claude reviews the follow-up, reruns the affected/full checks, then pushes
-   and watches CI; then TASK-081 moves to waiting-acceptance.
-2. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
+1. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
    `CLAUDE.md` → `AGENTS.md` consolidation, plan first, reviewed by all three
    providers before any file moves.
-3. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
-   `contamination.sh`, then its fix) — both unblocked once TASK-081 lands.
-4. **BUG-146** on the next #20d hang.
+2. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
+   `contamination.sh`, then its fix) — both unblocked now that TASK-081 has
+   landed; slice 6's closure brings a ported lib's `.mts` on a single-file pull.
+3. **BUG-146** on the next #20d hang.
 
 **The pre-push gate does not run the contamination push scan; only CI does.**
 It turned `main` red twice today (`4a2b7e2`, `5966207`), both times on BUG-155's

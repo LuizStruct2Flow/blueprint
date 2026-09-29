@@ -446,3 +446,88 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
     })
   })
 })
+
+/**
+ * TASK-081 slice 6 (plan §7) — the closure is a FIXED POINT, not one hop.
+ * `#3` above proves the closure follows the CLI to a lib it names; this
+ * proves it also follows a LIB to a `.mts` sibling THAT LIB names, which is
+ * what BUG-152 needs once `scripts/lib/gate.sh` becomes a sourced adapter
+ * shaped like `scripts/lib/dod-gate.sh` (a non-comment line assigning its
+ * own bridge path). BUG-152 has not landed, so the fixture stands in for it:
+ * `gate.sh` here is a small adapter naming `gate.mts` and dying if that
+ * sibling is absent — exactly the `_dg_call` shape — so a closure that stops
+ * after one hop leaves the project with the adapter but not its target, and
+ * `arm_gate` (which `drift` always calls) reports the missing file.
+ */
+describe('TASK-081 slice 6 — the closure follows a lib to its own .mts sibling', () => {
+  it('#6 a single-file pull of the CLI brings a sourced-adapter libs own .mts, so drift exits 0', async () => {
+    await scenario('managed-references-6', async (s) => {
+      const tracked = (await s.run('git', ['-C', REPO_ROOT, 'ls-files', 'scripts'], { cwd: s.workspace.root })).stdout
+        .split('\n')
+        .filter(Boolean)
+
+      // The fixture adapter: same shape as scripts/lib/dod-gate.sh's bridge —
+      // a non-comment line naming its own `.mts` sibling by path, and a
+      // function that refuses when that sibling is missing.
+      const adapterGateSh = [
+        '#!/bin/sh',
+        '# scripts/lib/gate.sh — fixture sourced adapter (TASK-081 slice 6 reproducer,',
+        '# standing in for BUG-152s real port). Sources arm_gate from gate.mts.',
+        'arm_gate() {',
+        '  _gate_mts="$1/scripts/lib/gate.mts"',
+        '  if [ ! -f "$_gate_mts" ]; then',
+        '    echo "cannot find $_gate_mts" >&2',
+        '    return 2',
+        '  fi',
+        '  echo "gate armed via $_gate_mts"',
+        '}',
+        '',
+      ].join('\n')
+      const gateMts = '// fixture stub for BUG-152s gate.mts — not otherwise executed\n'
+
+      const bp = await s.workspace.dir('bp')
+      for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(bp, f))
+      await s.fs.write(join(bp, 'scripts/lib/gate.sh'), adapterGateSh)
+      await s.fs.write(join(bp, 'scripts/lib/gate.mts'), gateMts)
+      await s.fs.write(join(bp, 'docs/DoD.md'), '# DoD\nowner {{PROJECT_NAME}}\n')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await initRepo(s, bp)
+      const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
+
+      // The project: today's real scripts/, i.e. the still-shell gate.sh and
+      // no gate.mts at all — a project that predates BUG-152.
+      const proj = await s.workspace.dir('proj')
+      for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(proj, f))
+      expect(await s.fs.exists(join(proj, 'scripts/lib/gate.mts')), 'fixture broken: the project already has gate.mts').toBe(false)
+      await s.fs.write(join(proj, 'docs/DoD.md'), '# DoD\nowner proj\nedited here\n')
+      await s.fs.write(
+        join(proj, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${sha}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, proj)
+
+      const pulled = await s.run(CLI, ['pull', 'scripts/blueprint', '--yes'], { cwd: proj })
+      expect(pulled.code, pulled.output).toBe(0)
+      expect(await s.fs.read(join(proj, 'docs/DoD.md')), 'a partial pull of the CLI pulled an unrelated file').toBe(
+        '# DoD\nowner proj\nedited here\n',
+      )
+      expect(
+        await s.fs.exists(join(proj, 'scripts/lib/gate.mts')),
+        `the closure pulled the adapter (scripts/lib/gate.sh) but not the .mts it names — a one-hop closure\n${pulled.output}`,
+      ).toBe(true)
+
+      const own = await s.run(join(proj, 'scripts/blueprint'), ['drift'], { cwd: proj })
+      expect(
+        own.code,
+        `the project's own drift refused after pulling scripts/blueprint — arm_gate could not find its .mts sibling\n${pulled.output}\n---\n${own.output}`,
+      ).toBe(0)
+    })
+  })
+})

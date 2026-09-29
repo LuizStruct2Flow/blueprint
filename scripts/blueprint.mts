@@ -2392,7 +2392,12 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     let cliNeedsStr = ' '
     for (const lib of libs) {
       cliNeedsStr += `${lib} `
-      if (!rest.includes(lib) && partial) rest.push(lib)
+      // A full pull's managed-file scan cannot select a hard dependency that
+      // is absent from the blueprint archive. It must still be attempted so
+      // the miss enters `failedDependencies` before its depender; otherwise
+      // the depender lands even though the closure deliberately retained the
+      // absent name for hold-back. Named pulls already add every closure lib.
+      if (!rest.includes(lib) && (partial || !existsSync(bpBlueprintPath(lib)))) rest.push(lib)
     }
     // TASK-081 slice 6 (Vitali review) — the closure's dependency-first order
     // must land in `rest` for a FULL pull too, not only a partial one: on a

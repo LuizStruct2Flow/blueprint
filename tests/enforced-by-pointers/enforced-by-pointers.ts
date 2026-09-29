@@ -25,7 +25,7 @@
  * a title that never had a line break to begin with.
  *
  * WHAT IS NOT A POINTER. `docs/DoD.md:165` ("enforced by its own test
- * runner") and `AGENTS.md:142` ("enforced by the hook") name no
+ * runner") and `AGENT_SIGNAL.md:192` ("enforced by the hook") name no
  * `tests/<suite>`, so they do not match — correctly: there is nothing here to
  * resolve.
  *

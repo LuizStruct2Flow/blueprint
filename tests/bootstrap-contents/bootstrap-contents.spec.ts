@@ -251,6 +251,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       for (const f of [
         'CLAUDE.md',
         'AGENTS.md',
+        'GEMINI.md',
         'scripts/agent-activity.sh',
         '.githooks/pre-push',
         // A "did tests/ arrive downstream" probe, so any SHIPPING runner in
@@ -275,9 +276,10 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
 
       // The two halves of the contract, and they pull in opposite directions.
       // The IMPORT must arrive, because it is what makes a project-private file
-      // load without the project editing the managed CLAUDE.md.
-      const claudeMd = await readFile(join(derived, 'CLAUDE.md'), 'utf8')
-      expect(claudeMd, 'a derived project does not import claude.internal.md').toContain(
+      // load without the project editing the managed AGENTS.md (the import
+      // list moved there from CLAUDE.md with TASK-084).
+      const agentsMd = await readFile(join(derived, 'AGENTS.md'), 'utf8')
+      expect(agentsMd, 'a derived project does not import claude.internal.md').toContain(
         '@claude.internal.md',
       )
 
@@ -352,7 +354,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
-  it('#5c TASK-048: a fresh project TRACKS the six framework documents, and still ignores project_config_*.md', async () => {
+  it('#5c TASK-048: a fresh project TRACKS the seven framework documents, and still ignores project_config_*.md', async () => {
     await scenario('bootstrap-contents-5c', async (s) => {
       const { derived } = await build(s)
 
@@ -372,6 +374,8 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
         'CLAUDE.md',
         'AGENTS.md',
         'AGENT_SIGNAL.md',
+        // TASK-084: Gemini's entry point, so a clone without it loads nothing.
+        'GEMINI.md',
         'docs/DoD.md',
         'docs/PUBLISHING.md',
         'docs/doing/HANDOVER.md',
@@ -530,12 +534,12 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
 
       // Same mechanism as claude.internal.md (#3c): the import arrives, the file
       // does not, and Claude Code skips an import whose file is missing.
-      const claudeMd = await readFile(join(derived, 'CLAUDE.md'), 'utf8')
-      expect(claudeMd, 'CLAUDE.md does not import the blueprint-only file').toContain('@CLAUDE.blueprint.md')
+      const agentsMd = await readFile(join(derived, 'AGENTS.md'), 'utf8')
+      expect(agentsMd, 'AGENTS.md does not import the blueprint-only file').toContain('@CLAUDE.blueprint.md')
     })
   })
 
-  it('#12 TASK-021: every relative link in the delivered root CLAUDE.md, README.md and AGENT_SIGNAL.md resolves', async () => {
+  it('#12 TASK-021: every relative link in the delivered root instruction files and README.md resolves', async () => {
     await scenario('bootstrap-contents-12', async (s) => {
       const { derived } = await build(s)
 
@@ -543,8 +547,9 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       // checked nowhere. Judged where they are delivered: a real bootstrap.
       let examined = 0
       const broken: string[] = []
-      // AGENT_SIGNAL.md since TASK-084: it carries the coordination protocol.
-      for (const f of ['CLAUDE.md', 'README.md', 'AGENT_SIGNAL.md']) {
+      // TASK-084: AGENTS.md holds the shared rules, AGENT_SIGNAL.md the
+      // coordination protocol, and GEMINI.md is Gemini's entry point.
+      for (const f of ['CLAUDE.md', 'README.md', 'AGENT_SIGNAL.md', 'AGENTS.md', 'GEMINI.md']) {
         for (const target of relativeLinkTargets(await readFile(join(derived, f), 'utf8'))) {
           examined++
           if (target.startsWith('/') || !(await s.fs.exists(join(derived, target)))) broken.push(`${f} -> ${target}`)

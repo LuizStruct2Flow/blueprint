@@ -27,7 +27,7 @@ Three categories of leak we are preventing:
    allowlist, and the multi-AI review chain itself — the runtime handoff
    history in `logs/state/signal-history.log` and review records such as
    `docs/doing/SLICE-*/CODEX_REVIEW.md`. **Not** the framework's own
-   documents: `CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md` and
+   documents: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `AGENT_SIGNAL.md` and
    `docs/DoD.md` are tracked and publish with the repo (TASK-048,
    founder decision 2026-09-16).
 3. **Operational state**: ongoing plan decisions and codex run logs —
@@ -57,9 +57,9 @@ you've added in the project's `.gitignore` extension block. The rest of
 `docs/` (lifecycle artifacts) is PUBLIC and should NOT appear under
 `Ignored files`.
 
-**`CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md`, `docs/DoD.md`,
+**`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `AGENT_SIGNAL.md`, `docs/DoD.md`,
 `docs/PUBLISHING.md` and `docs/doing/HANDOVER.md` are NOT here any more**
-(TASK-048). They are tracked, so seeing them under `Ignored files` means
+(TASK-048; `GEMINI.md` since TASK-084). They are tracked, so seeing them under `Ignored files` means
 your `.gitignore` predates 2026-09-16 — CLAUDE.md §"Your project's
 `.gitignore` is yours" says what to run.
 
@@ -111,7 +111,7 @@ files (`project_config_*.md`, `scripts/signal-watch.sh`,
 prevents NEW additions. They will publish on a normal `git push` unless
 we explicitly close the gap.
 
-`CLAUDE.md`, `AGENTS.md`, `AGENT_SIGNAL.md`, `docs/DoD.md` and
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `AGENT_SIGNAL.md`, `docs/DoD.md` and
 `docs/PUBLISHING.md` are **not** in that list any more: they are tracked
 and publish deliberately (TASK-048). `docs/doing/HANDOVER.md` is tracked
 too, and §3a redacts it at publish time rather than untracking it.
@@ -137,6 +137,7 @@ PUBLIC_PATHS=(
   # ABSENCE from the fresh clone as the finding. —
   CLAUDE.md
   AGENTS.md
+  GEMINI.md
   AGENT_SIGNAL.md
   # — common project root files (adapt to your stack) —
   # package.json
@@ -240,7 +241,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Untrack ONLY the private files (keeps them on disk).
 # docs/ lifecycle artifacts stay tracked and public, and since TASK-048 so do
-# CLAUDE.md, AGENTS.md, AGENT_SIGNAL.md, docs/DoD.md and docs/PUBLISHING.md —
+# CLAUDE.md, AGENTS.md, GEMINI.md, AGENT_SIGNAL.md, docs/DoD.md and docs/PUBLISHING.md —
 # they are the framework's own documents. docs/doing/HANDOVER.md is tracked too,
 # so it is NOT untracked here — it is redacted in place below instead. Do not
 # expect §3a's scrub to cover you: that is a step of the fresh-repo flow and it
@@ -335,7 +336,7 @@ ls -la /tmp/pubclone-check
 # project_config_*.md, .claude/, .blueprint-source.
 # SHOULD see: src/, tests/, README.md, package.json (or your stack's
 # equivalent), config/<name>.example.* files — and, since TASK-048,
-# CLAUDE.md, AGENTS.md, AGENT_SIGNAL.md, docs/DoD.md and
+# CLAUDE.md, AGENTS.md, GEMINI.md, AGENT_SIGNAL.md, docs/DoD.md and
 # docs/PUBLISHING.md. Their ABSENCE from a fresh clone is now the
 # finding, not their presence.
 ```

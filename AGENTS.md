@@ -1,505 +1,480 @@
-# Agent Coordination Protocol
-
-Canonical rules for how the team agents — **Codex, Claude Code, Gemini, Kimi and
-GitHub Copilot** — coordinate in this repo. The live state is the slim baton in
-[AGENT_SIGNAL.md](AGENT_SIGNAL.md) (the protocol) and the LIVE baton at
-`logs/state/signal.md` (untracked, written only by `scripts/signal-set.sh` —
-BUG-019); **this file is the
-protocol** (how the radio works). `CLAUDE.md` points here rather than duplicating
-it.
-
-Watch every agent live in one place: `bash scripts/agent-activity.sh --daemon`,
-then `tail -F logs/agent-activity.log`. One tail-able
-`[Persona - model - effort]` feed (mic changes + each agent's actual work) written
-to `logs/agent-activity.log`. `--stop` ends it; `--status` reports whether it runs.
-
-## On wake — minimum read
-
-At the start of every session or after any "wake" prompt, read before doing
-substantive work:
-
-- `logs/state/signal.md` — the LIVE baton: current holder, state, handoff task.
-  **Untracked** per-checkout state, so a branch operation cannot rewrite it
-  under a running dispatch (BUG-019). Written ONLY via `scripts/signal-set.sh`.
-- `AGENT_SIGNAL.md` — the protocol itself. Tracked, and carries no live state.
-- `AGENTS.md` (this file) — the coordination protocol.
-- `CLAUDE.md` — shared project rules and delivery process.
-- `docs/config/*.md` — stable product, acceptance, and findings context.
-- `docs/doing/*.md` — active bugs, backlog items, and plans.
-- `docs/waiting-acceptance/*.md` — pushed work awaiting founder acceptance.
-
-The Claude Code prompt the founder talks to **directly** is the **Orchestrator** —
-the persona named in the `Orchestrator` row of your gitignored `AGENT_ROSTER.md`
-(template: [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)). **Read the name
-from that row rather than assuming it**; `bash scripts/agent-activity.sh --whoami`
-prints it. Rosters are per-engineer, so no name written here would be right for
-everyone. On wake it
-**adopts that persona** (its `Holder` value) and **ensures the live activity feed
-is running** — `bash scripts/agent-activity.sh --daemon` — which cleans the log and
-streams to `logs/agent-activity.log` (see [Watching it live](#watching-it-live));
-watch it with `tail -f`, it does not open a terminal for you. A kernel `flock` makes
-concurrent starts a no-op. **Spawned, non-primary personas must not start it** —
-they adopt their own assigned persona and participate. See `CLAUDE.md` §"On wake".
-
-## The mic (radio-over)
-
-Before substantive work, **read the signal first** and confirm the mic is
-available:
-
-- proceed if `State = IDLE`
-- proceed if `State = OVER_TO_<your agent>`
-- proceed if `Holder = <your agent>`
-- otherwise stop and report that another actor has the mic
-
-After confirming the mic is available, claim it by updating:
-
-- `Holder` — the **persona** that owns the mic: a `Name` cell from
-  your `AGENT_ROSTER.md` (template:
-  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)), or `User`. Use the
-  persona name, NOT the bare backing-agent type — that is what lets multiple
-  sessions on the same backing agent (e.g. several Claude Code personas) coexist
-  without colliding. Each session acts only when `Holder` is its own persona.
-- `State` — `ACTIVE` while working, `OVER_TO_<NAME>` when handing off to a specific
-  persona (e.g. `OVER_TO_KATHRIN`, `OVER_TO_CHRISTIAN`), `OVER_TO_USER`, or `IDLE`
-- **A handback to the BACKING-AGENT type — `OVER_TO_CLAUDE`, `OVER_TO_CODEX` —
-  is valid, not a defect.** It means "I am done, route this": the Orchestrator
-  picks it up and dispatches to the right persona, which is its job. A dispatched
-  agent often has no reason to know which persona should get the work next, and
-  guessing would be worse than handing back. Founder decision, 2026-08-02 —
-  recorded because the alternative reading (that a non-persona handback is a
-  roster bug, BUG-010's class) is plausible enough that it was raised once and
-  would be raised again.
-- `Task` — one short sentence naming the current work
-- `Last update` — absolute date
-
-Keep the live baton **slim**: the four rows above only. History lives in
-`logs/state/signal-history.log`, appended by `signal-set.sh` on every flip —
-it used to be `git log -p AGENT_SIGNAL.md`, and the journal is more accurate
-on one axis, because it also records flips that were never committed.
-Per-slice decisions live in the relevant
-`docs/doing/PLAN-*.md`.
-
-### Rules
-
-- **ACTIVE-on-claim — claiming the mic means setting `State = ACTIVE` (founder direction
- ).** The moment an agent takes the mic — whether the state was
-  `OVER_TO_<you>`, `IDLE`, or you are picking up open work — it **must** flip
-  `State` to `ACTIVE` (and set `Holder` to itself) *before* doing the work, not
-  after. Leaving the state at `OVER_TO_<you>` while you work hides that the work
-  has started, so others can't tell the mic is in use versus merely handed to
-  you. `ACTIVE` = "in use right now"; flip back to `OVER_TO_<target>` only when
-  you hand off.
-- The `ACTIVE` state locks WHO IS COORDINATING THE SIGNAL, not WHO MAY EDIT
-  FILES. While another agent is `ACTIVE`:
-  - **Always allowed**: investigative / read-only work (Read, Grep, log
-    lookups, AWS API queries), planning work (drafting `PLAN-*.md`, designing
-    approaches), and writing prompts for subagents.
-  - **Allowed in parallel**: implementation work on files outside the active
-    holder's declared `Task` scope. Surface what you did in your next signal
-    flip — don't silently land changes mid-handoff.
-  - **Blocked**: edits to files that overlap with the active holder's declared
-    `Task` scope, unless the founder explicitly interrupts or the signal is
-    clearly stale.
-- If the state is `OVER_TO_CODEX`, `OVER_TO_CLAUDE`, `OVER_TO_GEMINI`,
-  `OVER_TO_KIMI`, or `OVER_TO_COPILOT`, that agent may proceed directly with its review/fix without
-  waiting for the founder to ask again.
-- When handing off, update the state to the target actor and include `OVER` in
-  the state value, e.g. `OVER_TO_CODEX`.
-- Use `OVER_TO_USER` when founder acceptance, rejection, or product direction is
-  needed.
-- Before flipping to `OVER_TO_USER`, walk [docs/DoD.md](docs/DoD.md) §7. If
-  `ls docs/waiting-acceptance/` doesn't show the artefacts the `Task` field
-  claims are waiting, the handoff is not done.
-- **Every work item you name to the founder carries a link and a plain line.** A
-  bare ID (`BUG-012`, `TASK-034`, `#71`) is the agent's shorthand, not the
-  founder's memory: an agent that has been working autonomously and then asks
-  "approve TASK-034?" hands over a decision without its context. Wherever an item
-  is mentioned — a decision request, a handoff summary, the live baton's `Task` —
-  link the line that defines it (`docs/doing/BACKLOG.md:NN`,
-  `docs/doing/BUGS.md:NN`, `docs/doing/PLAN-*.md:NN`, or its current lifecycle
-  folder) and say in one sentence what it does. Look the line up; never guess it.
-
-**Agents stay active after a handoff** — after flipping the state to
-`OVER_TO_CODEX`, `OVER_TO_GEMINI`, `OVER_TO_KIMI`, `OVER_TO_COPILOT`, or
-`OVER_TO_USER`, an agent does NOT go silent waiting for a prompt. It keeps re-reading the live baton
-until the state advances (e.g. `OVER_TO_CLAUDE`), then claims the mic and
-continues. Stop only when there's genuinely nothing to do (signal `IDLE`, no open
-plans, all bugs in `done/`).
-
-## Who does the work — load balancing across providers
-
-**Founder rule, 2026-09-20.** Work is spread across every provider that has
-quota. Not "may be" — is. A provider sitting idle while another burns its
-allowance is the failure this rule exists to stop.
-
-| Kind of work | Who does it |
-|---|---|
-| **Plan review** | **All three providers, seeking consensus.** Not one reviewer — Claude, Codex and Kimi each review, and the plan advances on what they agree. |
-| **Writing code** | **The ROLE is chosen by the work. The PROVIDER is chosen by rotation within that role.** A back-end task goes to a back-end engineer — the next one in rotation among the back-end personas with quota. |
-| **Anything else** | Load-balanced the same way, inside the role the work belongs to. There is no category exempt from this. |
-| **Orchestration** | **Claude only.** The Orchestrator is the founder-facing session. |
-| **`git push`** | **Claude only.** Pushing is the one outward-facing act, and it stays with the founder-facing session. Every dispatch preamble says so. |
-| **`git add` / `git commit`** | **Every provider.** A dispatched agent commits its own work (founder, 2026-09-20). `.githooks/commit-msg` already refuses a subject that names no item, so the convention is enforced by the hook rather than by withholding the verb. |
-
-**A provider with zero quota leaves the rotation** for as long as its quota is
-unavailable, and rejoins when it returns. It is not skipped once and then
-retried on the next dispatch — it is out, and coming back is a state change.
-
-**A provider is routed only work it can VERIFY** (founder, 2026-09-21). Quota is
-not the only way a provider can be unable to do an item. Codex's
-`workspace-write` sandbox keeps every `.git` directory read-only, so it cannot
-run a suite that builds a fixture git repository. An item whose proof is such a
-suite, like a whole-file port of a script those suites drive, skips Codex and
-goes to the next persona in that role. That is a fact about the provider, not a
-preference: BUG-144's first attempt was written blind for exactly this reason,
-and 25 tests it could not run failed. Record a skip like this where the rotation
-is recorded, with its reason, so the capability gap is visible rather than a
-habit of avoiding one provider.
-
-**Why this is a rule and not a preference:** the cheapest provider to reach for
-is whichever one the Orchestrator is already running on, and that is Claude.
-Left to convenience, every dispatch lands on Claude, the other two subscriptions
-pay for nothing, and the cross-provider review that catches what one model's
-blind spot hides (see §"Four-eyes" below) never has a second opinion available.
-
-### Role first, provider second
-
-**Founder rule, 2026-09-20.** Load balancing never overrides competence. The
-work decides the **role** — a back-end change goes to a back-end engineer, an
-infra change to infra, a test to QA. Only then does the rotation choose **which**
-of that role's personas takes it, among those whose provider has quota.
-
-So the rotation is **per role family**, not one global queue. Back-End turning
-to Codex says nothing about whose turn it is in QA.
-
-**Roles are matched by family, ignoring the numeric suffix.** `Back-End-1`,
-`Back-End-2` and `Back-End-3` are one role with three representatives; the digit
-is which representative, not which job. That is already how
-`scripts/team-kickoff.sh` reads roles for its introductions, so the convention
-is not new here.
-
-**Check the coverage before relying on it.** The rule assumes each role has a
-representative per provider, and on a real roster that is often untrue — a role
-covered by two providers rotates between two, and a role covered by one does not
-rotate at all. **That is a roster gap, not a licence to cross roles**: a back-end
-task does not go to a front-end persona because the back-end rotation is
-exhausted. It waits, or the founder is told the role is short.
-
-`node scripts/rotation.mts coverage [<family>]` answers "who covers this role"
-in one command, rather than a thing to remember: `bp_roster_rows` plus a strip
-of the `-N` suffix, for every family or one.
-
-### The rotation turns per WORK ITEM, and the agent ends with it
-
-**Founder rule, 2026-09-20.** The rotation advances per **work item** — one
-`BUG-`/`TASK-`/`FEATURE-` number — not per dispatch. The item is assigned to the
-next provider with quota, and every slice of that item runs on it.
-
-**When the item is done, the agent shuts down.** It is not kept alive for the
-next item, and it is not resumed across an item boundary. The next item gets a
-fresh agent with a fresh context.
-
-**Both halves are about the same cost.** A resumed agent carries its whole
-transcript into work that has nothing to do with it, so it gets steadily more
-expensive while getting no better informed about the new task — and two such
-agents alive at once is the expensive case squared. Measured on TASK-063, where
-one agent was resumed three times across slices of the same item: 133k tokens,
-then 167k, then 328k for the same quality of answer. Ending it and briefing a
-fresh one costs a paragraph and resets the meter.
-
-**What this changes in practice, and it is not free.** Two specialists working
-different slices of one item in parallel now share a provider, because the
-provider is the item's. Cross-provider parallelism moves from *within* an item
-to *between* items. That is the trade the rule makes deliberately: predictable
-rotation and bounded context, against concurrency inside a single item.
-
-**A watcher is not an agent.** `start-<provider>-signal-watch.sh` is a stateless
-poller holding a lock — leave it running. What shuts down is the session or
-subagent that did the work and accumulated the context.
-
-### Two things this collides with, and how they resolve
-
-**Round-robin picks the AUTHOR. Four-eyes constrains the REVIEWER.** They
-compose: the rotation chooses who writes, and the review must then come from a
-provider that did not. No conflict unless the rotation has shrunk to one.
-`node scripts/rotation.mts next <family> --item <ID>` picks the author,
-`node scripts/rotation.mts review <family> --item <ID>` the reviewer.
-
-**When only one provider has quota, four-eyes cannot be satisfied.** That is a
-real state, not a hypothetical, and it must not be resolved by quietly letting a
-provider review itself — the rule's entire value is that the reviewer has a
-different blind spot. `review` exits 4 in exactly that state, naming the
-family and the one provider left. Hold the push and tell the founder, who
-decides whether to wait for quota or waive the review for that change. **A
-waiver is the founder's, never an agent's**, recorded as
-`node scripts/rotation.mts assign <persona> --item <ID> --reason "<founder's waiver>"`.
-
-### Defaults the Orchestrator applies until told otherwise
-
-These fill gaps the rule above does not decide. They are defaults, not founder
-decisions — correct them and they change.
-
-- **Consensus means the reviewers agree on what must change.** Where they
-  genuinely disagree, the Orchestrator does not cast a tie-breaking vote: it
-  reports the disagreement and what each provider argued, and the founder
-  decides. A reviewer's finding is input, not an order (DoD §1b rule 4), so
-  "two out of three" is not a verdict.
-- **Quota exhaustion is detected from the provider's own refusal**, not
-  predicted. The signal watcher records it automatically after every dispatch
-  (`node scripts/rotation.mts record`, wired into `scripts/signal-watch.mts`);
-  an agent that is not watcher-dispatched (a Claude subagent, an Ollama
-  junior) records its own with the same command.
-
-**This used to be prose, and prose is the weak form.** TASK-065 mechanised the
-rotation and the quota state: `node scripts/rotation.mts <next|review|assign|
-record|retry|coverage>` is now where this section's rules are enforced, not
-just written down — the direction TASK-062 sets for every rule in this repo.
-Its event log is `logs/state/rotation.log`, per-checkout state, exactly like
-the baton.
-
-## Four-eyes cross-provider review (mandatory before push)
-
-**Every change is reviewed by a DIFFERENT backing provider than the one that wrote
-it, before it is pushed.** Claude Code, Codex and Kimi (and Gemini / Copilot)
-cross-check each other — no provider both writes and blesses-for-push the same code. The loop:
-
-1. **Provider A implements and commits** its slice (`Holder` = an A persona).
-2. A **flips the mic to a Provider-B persona** (`OVER_TO_<B>`), naming the
-   commit(s) to review.
-3. **B reviews.** The reviewer's job is **both** code correctness **and** ensuring
-   the change honors the **blueprint rules and the DoD** (`docs/DoD.md` §7:
-   co-located tests, lint/format, two-commit reproducer for
-   bug-class fixes, doc-sync, etc.). A change that is "correct" but violates a
-   blueprint/DoD rule is **not** clean.
-4. If B needs **no changes** → **B is the only one allowed to `push`.**
-5. If B needs changes → **B makes the changes itself, commits, documents the
-   reasons** (commit message / plan file), and **flips back to A for review**.
-6. Repeat: each round the reviewer either pushes (zero changes) or becomes the new
-   writer (made changes) and hands back. **Push happens only from a clean
-   cross-provider review.**
-
-**Invariant:** the last agent to write/commit always hands to the OTHER provider;
-only a reviewer who needed zero changes pushes. Every line is seen by both
-providers before it reaches the remote.
-
-**Git-hand for sandboxed providers.** If a provider's sandbox cannot run `git`
-(e.g. Codex `workspace-write` blocks `.git`), the orchestrator (Claude Code
-primary) acts as the git-hand — committing / pushing on that provider's behalf
-with explicit attribution (`Co-Authored-By` + persona name in the message). The
-**review alternation is preserved exactly**: the provider that did NOT write the
-code is the one whose clean review authorizes the push.
-
-## Reactivity — three mechanisms (preferred order)
-
-1. **`Monitor`-based mtime poll (push-style, preferred).** Spawn a persistent
-   `Monitor` task at the start of any session where the signal is non-IDLE. The
-   script polls the live baton's mtime every 2 s and emits one stdout line per
-   change — each line arrives as a task notification that wakes the session
-   asynchronously, even between turns. Exact command:
-
-   ```bash
-   cd <project-root>
-   # RC-6: `stat -f %m` is macOS syntax; on GNU it means "filesystem status" and
-   # `%m` is invalid, printing a block to stdout while exiting 1. Probe once.
-   if stat -c %Y . >/dev/null 2>&1; then mt(){ stat -c %Y "$1"; }; else mt(){ stat -f %m "$1"; }; fi
-   # BUG-019: watch the LIVE baton, resolved through the same helper production
-   # uses. This recipe used to name AGENT_SIGNAL.md, which is now protocol prose
-   # — a monitor pointed there never fires, and the session that armed it goes
-   # blind exactly when it believes it is covered. Resolving rather than
-   # hardcoding means the recipe follows the baton if it ever moves again.
-   . scripts/lib/state-dir.sh
-   SIG=$(agent_signal_file "$PWD")
-   last=$(mt "$SIG")
-   while true; do
-     sleep 2
-     new=$(mt "$SIG" 2>/dev/null)
-     if [ -n "$new" ] && [ "$new" != "$last" ]; then
-       last=$new
-       holder=$(grep '^| Holder ' "$SIG" | head -1 | sed 's/^| Holder *| //; s/ *|$//')
-       state=$(grep '^| State ' "$SIG" | head -1 | sed 's/^| State *| //; s/ *|$//')
-       echo "[signal-change] Holder=$holder State=$state"
-     fi
-   done
-   ```
-
-   Invoke via the `Monitor` tool with `persistent: true`, `timeout_ms: 3600000`
-   (1 h — the tool's hard max), description `"live baton state-line change
-   watcher (Holder + State)"`. Latency ~2 s, zero token cost between events,
-   self-noise tolerable (fires on own writes too — just re-read and continue).
-
-   **1-hour cliff.** The Monitor tool caps `timeout_ms` at 3 600 000 (1 h). The
-   watcher dies silently at that point. Respawn it at the top of a new turn if
-   (a) state is non-IDLE and (b) the previous event hasn't arrived within ~45 min.
-   If unsure whether the old one is alive, it's cheaper to respawn than miss a
-   handoff.
-
-2. **`ScheduleWakeup` polling (fallback for `/loop` mode).** Every 15–30 min the
-   agent wakes, re-reads the signal, and either resumes (if state advanced) or
-   reschedules. Costs tokens per poll. Use when Monitor isn't available.
-
-3. **Turn-triggered read (passive fallback).** Always re-read the signal at the
-   start of every founder turn. Zero cost between turns, but only reacts when the
-   founder next sends a message.
-
-Default to (1). If the founder says "stop polling" / "just wait for my next
-message", cancel via `TaskStop` and rely on (3).
-
-## Dispatching Codex (signal-driven, not a direct CLI call)
-
-Claude Code does **not** invoke `codex` directly. Codex is woken by a
-signal-driven dispatcher that watches the live baton and runs the real Codex
-CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
-
-1. **The dispatcher (start once, leave running).** Launch
-   `scripts/start-codex-signal-watch.sh` (delegates to the shared,
-   provider-agnostic `scripts/signal-watch.sh`, TASK-063) via the **`Monitor` tool with
-   `persistent: true`** so it survives in the background and streams run markers
-   back as notifications:
-
-   ```
-   Monitor (persistent): cd <repo> && bash scripts/start-codex-signal-watch.sh 2>&1
-   ```
-
-   It polls every 2 s; on each poll where `State = OVER_TO_CODEX` with a
-   `Holder|State|Task` key it hasn't fired yet, it runs `codex exec` with the
-   verbatim `Task` field wrapped in the radio-over preamble. **The model is the
-   `Holder` persona's:** its roster `Model` cell resolves to
-   `-m <slug> -c model_reasoning_effort=<effort>` (`bp_roster_model_for_name`).
-   A cell that does not resolve refuses the dispatch in the run log and the feed;
-   a `Holder` that is not a Codex persona runs the codex default and says so.
-   So name the Codex persona in `--holder`, as below. **Trigger is
-   state-based:** starting the dispatcher while the signal is already
-   `OVER_TO_CODEX` fires it on the first poll — no re-flip needed.
-
-2. **Trigger Codex by flipping the signal, never by calling `codex`.** Write the
-   prompt into `Task` **first**, then set `State -> OVER_TO_CODEX` **last**. The
-   dispatcher polls every 2s and fires on the `State` edit, so flipping first
-   dispatches the *previous* round's Task — a real agent run against work that
-   is already finished. **The dispatcher must already be running before you
-   flip** — otherwise the trigger fires into the void (the #1 mistake).
-
-   **The supported way to hand off is `scripts/signal-set.sh`**, which composes
-   the whole baton and moves it into place in one atomic write:
-
-   ```sh
-   scripts/signal-set.sh --holder Jesko --state OVER_TO_CODEX --task-file prompt.md
-   ```
-
-   There is then no window in which the new `State` sits beside the previous
-   round's `Task`, at any pause length. Hand-editing the two rows still works
-   and the watcher additionally waits for the signal to stop changing
-   (`AGENT_SIGNAL_SETTLE`, default 6s) — but that is a **mitigation, not a
-   boundary**: pause longer than the settle value between the two edits and the
-   stale Task is dispatched anyway. `tests/signal-dispatch/` case #5
-   demonstrates that limit deliberately rather than describing it.
-
-   This exists because the rule was written down here and in HANDOVER and then
-   violated twice in one session by its own author — a rule you must remember
-   at the moment you are busy is the wrong kind of fix (the A-22 lesson). The
-   first attempt refused any `Task` byte-identical to the last dispatched one;
-   four-eyes rejected it, correctly, because task text is not a round identity,
-   identical instructions can legitimately recur, and that block lasted the
-   whole life of the watcher. Pinned by `tests/signal-dispatch/` (CI, ~80s).
-
-3. **Where output lands.** `logs/state/codex-runs.log` (full run log),
-   `logs/state/codex-last-message.md` (final message), `logs/state/signal.log`
-   (trigger log). Codex flips the signal back to
-   `Holder=<the Orchestrator's roster name> / State=OVER_TO_CLAUDE` itself,
-   resolved at dispatch time from the roster's `Orchestrator` row — never a
-   hardcoded name, since it varies project to project and engineer to
-   engineer. Keep a signal-change
-   `Monitor` (mechanism 1) armed so Claude Code wakes on the flip-back.
-
-**Claude personas (TASK-059).** Claude Code has no signal dispatcher: the
-Orchestrator spawns them. `scripts/claude-agents.sh`, run on every session start,
-writes `.claude/agents/<name-lowercase>.md` for each Claude Code persona except the
-Orchestrator, with `model:` and `effort:` from its `Model` cell. Dispatch a persona
-with `subagent_type: <name-lowercase>` so it runs on its own model; do not pass a
-`model` override, which would replace it.
-
-**Codex binary discovery** (in `start-codex-signal-watch.sh`): `$CODEX_BIN`, then
-`codex` on `PATH`, then `~/.vscode/extensions/*/bin/*/codex`. Set
-`CODEX_BIN=/path/to/codex` to override. **Common failure modes:** dispatcher not
-running when the signal flips; calling `codex` directly (bypasses the protocol);
-binary not found; wrong log path (it is `logs/state/` inside the project, not `~/`).
-
-## Dispatching Gemini (signal-driven)
-
-Mirror of the Codex dispatcher, for Gemini. `scripts/start-gemini-signal-watch.sh`
-(via the shared `signal-watch.sh` poller with `--state OVER_TO_GEMINI`) runs
-the headless Gemini CLI on each flip to `OVER_TO_GEMINI`. Use the headless CLI, not
-the interactive IDE agent (it stalls): `GOOGLE_GENAI_USE_GCA=true gemini
---skip-trust --yolo --prompt "..."`. Output lands in `logs/state/gemini-runs.log`
-and `logs/state/gemini-last-message.md`. **Caveat:** instruct Gemini to edit
-ONLY the `Holder`/`State`/`Task` fields on hand-back — it has flattened the whole
-signal table before; keep a git copy to restore.
-
-## Dispatching Kimi (signal-driven)
-
-The same mirror again, for Kimi. `scripts/start-kimi-signal-watch.sh` (via the
-shared `signal-watch.sh` poller with `--state OVER_TO_KIMI`) runs the
-headless Kimi CLI on each flip to `OVER_TO_KIMI`. Output lands in
-`logs/state/kimi-runs.log` and `logs/state/kimi-last-message.md`.
-
-**What is Kimi-specific and worth knowing before you dispatch one:**
-
-- The binary is `kimi` (`KIMI_BIN` overrides) and its home is `~/.kimi-code/`.
-  **`-p` / `--prompt` is the whole story, and it takes no autonomy flag.** The
-  interactive `--auto` and `-y/--yolo` modes exist, but kimi 2.0.2 refuses to
-  start when either is combined with `--prompt` (*"Cannot combine --prompt with
-  --auto"*) — prompt mode has nobody to ask, so it already never interrupts, and
-  it writes files with no approval step. Do not "harden" the dispatcher by adding
-  `--auto`: it turns every dispatch into an immediate CLI error. This is measured
-  on the binary, not read off `--help`, which does not say so.
-- **Kimi's efforts are `low`, `high`, `max` — there is no `medium`.** A roster
-  cell that names one is refused rather than silently substituted, which is why
-  the example roster's Kimi rows read `high` where their peers read `medium`
-  ([AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)).
-- The model ranking behind `frontier-N` comes from the roster's
-  `Kimi models, best first:` line, not from a provider cache. Kimi's own
-  `config.toml` lists the models it has but does not rank them, so the ordering
-  is a fleet decision and lives where fleet decisions live.
-
-## GitHub Copilot (notify-only)
-
-`GitHub Copilot` is a recognized team agent handed the mic via the live baton
-like the others. To hand off, set `Holder = GitHub Copilot` + `State =
-OVER_TO_COPILOT` with a one-line `Task`.
-
-Unlike Codex/Gemini/Kimi there is **no autonomous Copilot dispatcher**:
-`scripts/start-copilot-signal-watch.sh` is **notify-only** — it echoes signal
-changes and, on `OVER_TO_COPILOT`, prints the `Task` so a human operator (driving
-Copilot in the IDE) picks it up. It does not invoke any Copilot CLI. Copilot then
-does the work and flips the mic back per the rules above.
-
-## Watching it live
-
-**First agent to wake ENSURES the feed is running:** run
-`bash scripts/agent-activity.sh --daemon`. It is idempotent — a kernel `flock`,
-not a pidfile — so concurrent wakes cannot produce a second feed, and it returns
-immediately. `--stop` stops it; `--status` reports whether it is up.
-
-> **BUG-001:** the old guard was a pidfile + `kill -0` check, which is TOCTOU-racy
-> and whose EXIT trap unlinked the shared lock. Concurrent wakes all won, each
-> spawning immortal `tail -F` followers. Do not reintroduce "just run the script"
-> as the wake step — spawned personas must not start it at all.
-
-On start it:
-
-1. **cleans old entries** — truncates `logs/agent-activity.log` so it can't
-   explode across sessions (fresh log per session),
-2. **streams** a single `[Agent]`-prefixed feed of each agent's **actual work
-   output**, so you don't switch prompts:
-   - `[Claude Code]` — text + tool calls from the live session transcript
-     (`~/.claude/projects/.../<session>.jsonl`, via jq; private thinking excluded),
-   - `[<Persona> - <model> - <effort>]` for every Codex, Gemini and Kimi
-     dispatch — written by the provider's own **launcher**, which knows who holds
-     the mic, rather than pumped from a run log by the feed, which cannot
-     (BUG-021, TASK-063, BUG-141). The run logs still exist in `logs/state/` as
-     the full record; the feed simply does not read them,
-   - mic/state changes from the live baton.
-   Copilot is notify-only (it runs in the IDE; no log to tail).
-
-- `scripts/start-all-watchers.sh` — starts the autonomous dispatchers (Codex,
-  Gemini, Kimi) **and** the notify-only watcher (Copilot) in the background. Start
-  individual watchers by name when you don't want a specific dispatcher up.
+# Agent instructions — shared by the four CLI providers
+
+This file is the struct2flow **generic** agent protocol, and every provider
+works from it: Codex and Kimi read it natively, Claude Code through `CLAUDE.md`
+and Gemini through `GEMINI.md`, which each import it (TASK-084). Project rules
+belong in the files below, never in this one, because a pull replaces this file
+whole.
+
+## Read these first — this project's own configuration
+
+Claude Code and Gemini load the files below automatically, because they follow
+`@` imports. Codex, Kimi and every other agent: open each one that exists before
+substantive work. A missing file is normal, because `claude.internal.md` is
+optional and `CLAUDE.blueprint.md` exists only in the blueprint.
+
+- @project_config_overview.md
+- @project_config_paths.md
+- @project_config_dod.md
+- @project_config_security.md
+- @project_config_infra.md
+- @claude.internal.md
+- @CLAUDE.blueprint.md
+
+**`claude.internal.md` is the project's own file, and nothing in the blueprint
+ever writes it.** It is not managed, so `blueprint pull` cannot replace it, and
+no bootstrap seeds one — the import above names a file that does not exist until
+the project creates it. It is the place for agent context that belongs to this
+project rather than to the framework: house rules, local runbooks, notes a
+session should carry that no other project should inherit. Despite its name it
+is every provider's, not Claude's alone.
+
+**Whether it is tracked is the project's decision.** Commit it and the whole team
+gets it; add it to `.gitignore` and it stays on one machine. Nothing in the
+framework reads it or depends on the choice. This is what makes the split
+possible: the generic protocol can be tracked and public, because the private
+half has a home of its own.
+
+**`CLAUDE.blueprint.md` exists only in the blueprint.** It holds the rules for
+maintaining the blueprint itself: its trunk, implementing a back-propagation
+request, publishing the deck. It does not ship, so in a project the import is
+skipped exactly as a missing `claude.internal.md` is, and this file carries only
+what operates a project or asks the blueprint for a change (TASK-021).
+
+## Agent Coordination
+
+The agents on this project coordinate through the live baton at
+`logs/state/signal.md` — untracked per-checkout state, written only by
+`scripts/signal-set.sh` — the slim live "radio over" baton (Holder / State /
+Task / Last update; history in `logs/state/signal-history.log`, appended on
+every flip). **Do not hand-edit the baton rows** — one writer publishes the
+whole baton atomically, so no poller can sample a half-written state. `Holder`
+is a **persona name** from the team roster, not a bare agent type.
+
+- **`AGENT_ROSTER.md`** — the team (who's who): each persona, its role, and its
+  backing agent. **Per-engineer and gitignored, on the `.env` model**: the tracked
+  template is [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md); you copy it once
+  (`cp AGENT_ROSTER.example.md AGENT_ROSTER.md`) and edit your copy. Each engineer
+  runs a different fleet — different agents, subscriptions and quotas — so the live
+  roster is neither shared nor overwritten by a blueprint sync. The `Backing agent`
+  column is free text (Claude Code, Codex, Kimi, Gemini, Copilot, Qwen, …); only
+  autonomous dispatch needs a matching signal watcher.
+- **[AGENT_SIGNAL.md](AGENT_SIGNAL.md)** — the coordination protocol: mic states,
+  the ACTIVE-on-claim rule, rotation, four-eyes review, reactivity and how each
+  backing agent is dispatched. Read it before any coordinated work. Its first
+  heading must read "Agent Signal — the mic, rotation and four-eyes review". If
+  it does not, this project's `AGENT_SIGNAL.md` predates TASK-084: stop, tell
+  the founder and run `blueprint pull AGENT_SIGNAL.md`.
+
+Watch the whole team live in one terminal: `bash scripts/agent-activity.sh --daemon`
+then `tail -F logs/agent-activity.log` streams
+a single `[Persona - model - effort]` feed. `bash scripts/team-kickoff.sh` runs a
+round-robin kick-off to confirm the roster after editing it.
+
+**The Orchestrator is the Claude Code session the founder talks to**; its wake is
+in `CLAUDE.md` §"On wake". **Agents without Claude hooks (Codex, Gemini, Kimi)
+wake by hand:** run `bash scripts/blueprint drift` and report a non-zero exit as
+unknown, then `bash scripts/agent-activity.sh --daemon` regardless of the drift
+result.
+
+## Running commands — one per call, chains only when dependent
+
+**One command per tool call.** Do not join independent commands with `;`, `&&`
+or `||`: permission is granted per command pattern, and a compound string is
+matched as one unit, which also defeats the deny list. Chain only commands that
+genuinely depend on each other; a pipe qualifies. Never wrap a command until it
+stops matching its allowlist entry — run it plainly and let the prompt happen,
+or ask for it to be allowed.
+
+`scripts/no-chain-guard.sh` blocks chains, including operators inside quoted
+text and heredocs. Write a commit message or a snippet to `.scratch/`
+(in-project and gitignored) and run or reference the file:
+`git commit -F .scratch/msg`.
+
+**Everything temporary goes in `.scratch/`, including a tooling workspace** — a
+scratch clone, a worktree, a dispatch fixture. Create it with
+`mktemp -d -p .scratch` and remove it when done. This used to carve out
+workspaces "a tool will walk" and send them to a system temp dir, which was
+wrong on both halves (TASK-064):
+
+- **Nothing walks it.** `.scratch/` is gitignored, and the gate's scanners honour
+  that — measured, not assumed: the pre-push semgrep step scans 198 files here
+  and enters `.scratch/` for none of them. `gitleaks protect --staged` sees only
+  the index, and `blueprint files` is `git archive`, so an untracked workspace is
+  invisible to it by construction.
+- **`/tmp` is where cleanup fails.** `rm -rf .scratch/*` is an allowed command
+  and `rm -rf /tmp/...` is not, so an agent that follows the old advice cannot
+  remove what it made and leaves litter the founder deletes by hand. That is what
+  happened when a dispatcher fixture went to `mktemp -d` (2026-09-20).
+
+**Refused by the tools, not only stated here** (founder, 2026-09-25, after
+the rule was found broken by most of one session's agents):
+`.claude/settings.json` denies `Edit(//tmp/**)` (every Write and Edit into
+`/tmp`), Bash commands that name a `/tmp/` path, and `mktemp` without `-p`.
+It binds Claude Code only. Codex, Kimi and Gemini read no Claude settings, so
+for them the rule is still their brief.
+
+`.gitignore` already said so — *"Kept INSIDE the repo so the work is visible next
+to the code that prompted it, rather than hidden in a system temp dir"* — and
+this file contradicted it for long enough to send an agent the wrong way.
+
+**This governs what an AGENT creates, not the test suites.** A suite's fixture
+roots are governed by its own isolation contract and stay where that contract
+puts them; do not migrate them here on the strength of this rule.
+
+## Before Every Push
+
+The pre-push gate (`.githooks/pre-push`) blocks a failing push, and CI is the
+backstop. What it expects of you — never `--no-verify`, the lint ratchet, where
+project guards go — is [docs/DoD.md](docs/DoD.md) §4.
+
+## Definition of Done — read before every handoff
+
+[`docs/DoD.md`](docs/DoD.md) holds the lifecycle, the work-intake rules, bug
+management and the handoff checklist. Walk its §7 before flipping the baton.
+
+## Documentation Structure
+
+```
+docs/
+├── DoD.md                ← Definition of Done (read before every handoff)
+├── config/               ← stable reference (FEATURES.md, ACCEPTANCE_TESTS.md, findings.md)
+├── backlog/              ← parked work
+├── doing/                ← active work (BUGS.md, BACKLOG.md, PLAN-*.md, HANDOVER.md)
+├── waiting-acceptance/   ← landed on main, awaiting founder acceptance
+├── done/                 ← founder-accepted work
+├── requirements/         ← cross-cutting specs referenced by several plans
+└── mocks/                ← design mockups and throwaway prototypes
+```
+
+How an item moves between those folders is [docs/DoD.md](docs/DoD.md) §1, and
+bug numbering, regression tests and the plan-first process for a major bug are
+§2.
+
+## Team Workflow
+
+- Work as a team: delegate to specialized personas (backend, frontend, infra,
+  QA, design). How Claude Code spawns one is `CLAUDE.md` §"Spawning personas";
+  the others are dispatched through the mic (`AGENT_SIGNAL.md`)
+- Use agents for all non-trivial work — even small bug fixes should be
+  delegated rather than quick-fixed inline
+- **Spread the work across providers — [AGENT_SIGNAL.md](AGENT_SIGNAL.md)
+  §"Who does the work".** Plan review goes to all three seeking consensus. For everything else
+  **the work picks the ROLE and the rotation picks the PROVIDER within it** — a
+  back-end task goes to the next back-end engineer in rotation, never to another
+  role because that role's turn is inconvenient. **The rotation turns per WORK
+  ITEM**, so one item runs entirely on one persona, and a provider at zero quota
+  leaves the rotation until it returns. **Orchestration and `git push` are the
+  Claude session's alone — every provider commits its own work** (founder,
+  2026-09-20), because `.githooks/commit-msg` already enforces the subject
+  convention and withholding the verb enforces nothing extra. Reaching for the provider you are
+  already running on is the thing this rule forbids, because that is always the
+  cheapest move and always the same answer.
+- **An agent ends with its work item.** Do not resume one across an item
+  boundary — brief a fresh agent instead. A resumed agent drags its whole
+  transcript into work it has nothing to do with, so it costs more each time
+  while knowing no more about the new task, and two such agents at once is that
+  cost squared.
+- **Commits:** the subject starts with the item it serves (`BUG#20:`,
+  `FEATURE#3:`, `TASK#1:`), one item per commit, and the body says why
+  ([docs/DoD.md](docs/DoD.md) §1b rules 1 and 3). `.githooks/commit-msg` refuses
+  any other subject, and CI checks every commit of a push to `main`.
+- Trunk-based development: a maintainer pushes to `main` and uses feature
+  toggles, not branches. An external contribution is a pull request, which for
+  the blueprint is what `blueprint a2bp` files (§"Back-propagating").
+- Test layers, reproducer-first bug fixes, snapshots and the release tier:
+  [docs/DoD.md](docs/DoD.md) §3. Coverage thresholds are the project's, in
+  `project_config_dod.md`.
+
+## Quality is non-negotiable
+
+This product's value is the quality of what it delivers. Therefore:
+
+- **Quality is non-negotiable.** If a fix "works" but the approach is
+  ugly, brittle, or stitched from overlapping fallbacks, it is not a
+  fix — it is a deferred regression. Stop, step back, find the
+  solution that belongs in the codebase.
+- **Don't chase shortcuts.** Patch-on-patch stacks are a signal the
+  architecture is being worked around, not fixed. When you catch
+  yourself adding a third fallback layer to compensate for the second
+  one compensating for the first, escalate to team + Codex for a
+  clean redesign — don't keep patching.
+- **Pick the most evolutionary solution.** The right solution is the
+  one that the next person (or the next bug) will thank you for. It
+  composes well with the existing primitives, it survives adjacent
+  changes, and it removes surface area rather than adding it. Pay the
+  larger up-front cost when it eliminates a class of problems —
+  especially on the core USP paths named in `project_config_overview.md`.
+- **Delight the customer.** Acceptance is not "the test passes" — it
+  is "the founder and the customer would show this to someone else."
+  That's the bar. Anything short of that is unfinished work.
+
+When in doubt between a quick patch and a slower clean rewrite, pick
+the clean rewrite. Document why in the plan file and push for team +
+Codex alignment before committing.
+
+## Observability is a main concern
+
+Quality is how fast errors are found and fixed. Every project captures every
+error path (no silent fallback, no `try/catch` that returns success); makes every
+captured error agent-queryable, and the agent uses that path before asking the
+founder for logs; alerts when a shipped capability fails in production; and has
+the agent diagnose first, pinging a human only when it cannot resolve the problem.
+The mechanism is a recipe in [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md),
+declared in `project_config_overview.md` §"Observability stack".
+
+Of the capture rule, one syntactic form is checked and the rest is judgement
+(TASK-073, audit row C095): a bindingless `catch {}` under `scripts/` or
+`tests/` that neither rethrows nor carries a comment of at least two words in
+the block saying why swallowing is right there cannot land —
+enforced by: tests/forbidden-idiom "#live no bindingless catch under scripts/ or tests/ swallows without saying why".
+Whether those words are true, a bound `catch (e)` that never reads `e`, and a
+catch that logs and then returns success remain review questions.
+
+## Cost is a main concern
+
+Every billable path (LLM, paid API, metered storage or egress) is priced, capped
+and alertable **before** it is wired into a loop: a budget cap in code that halts
+rather than logs; structured spend per call (`{model, input_tokens,
+output_tokens, usd}`); a rising-edge alert when spend passes the cap; and backlog
+replay only behind an explicit operator flag (`--catch-up`,
+`--replay-since=…`), because a repaired path must never silently bill for the
+backlog that piled up while it was broken. Each path is declared in
+`project_config_overview.md` §"Cost stack".
+
+## Security is a main concern
+
+No secrets in code or git history, and a leaked one is rotated before it is
+investigated. Static analysis blocks OWASP top-10 patterns at `WARNING+`, and
+every suppression carries a justification naming the threat-model entry that
+makes it safe. Dependencies and infrastructure are scanned on every push and
+nightly. The agent triages and fixes findings itself, pulling the founder in only
+for a risk-acceptance decision or a supply-chain incident. The mechanism is a
+recipe in [docs/SECURITY.md](docs/SECURITY.md); the threat model and thresholds
+live in `project_config_security.md`.
+
+## Infrastructure as Code is a main concern
+
+Everything in prod is defined in code, and a resource created out of band is
+imported or deleted within the week. Every change is reviewed as its plan diff
+(`cdk diff`, `terraform plan`, `helm diff`), environments are parameters of the
+same code, and drift is detected nightly and resolved by codifying or reverting,
+never ignored; drift open over 24 h is a `findings.md` entry. The mechanism is a
+recipe in [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md); environments, cost
+ceilings and rollback live in `project_config_infra.md`.
+
+## Documentation is a main concern
+
+Stale documentation fails silently, so keeping it in sync is a rule:
+[docs/DoD.md](docs/DoD.md) §5. Recipes per project shape are in
+[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md), declared in
+`project_config_overview.md` §"Documentation stack".
+
+## Code Quality
+
+- Run periodic code reviews using multiple perspectives (reuse, quality, efficiency, junior comprehension)
+- Eliminate redundant DB reads — cache data in middleware, don't re-fetch
+- Remove dead code: unused imports, parameters, constants, state fields
+- Don't duplicate logic — extract shared helpers
+- **SonarQube** audits bugs, vulnerabilities, smells and coverage: `npm run sonar`
+  scans (`scripts/sonar.sh`) and `scripts/sonar-api.sh` queries the results. The
+  triage workflow is in the header of `scripts/sonar.sh`; a Quality Gate `ERROR`
+  blocks the handoff to the founder.
+
+## Shell to TypeScript, organically (TASK-067)
+
+**New code is TypeScript.** A new script, library or gate stage under
+`scripts/` is `.mts` (see `scripts/tsconfig.json`), not `.sh` — no big bang
+migration, but nobody adds a new shell script either.
+
+**A shell file you must change is migrated first, whole file — never a
+subcommand or a function.** The founder overruled the 2-to-1 majority that
+wanted a shrink-into-a-dispatcher middle ground, on cost, in front of him
+(docs/done/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis"): a
+one-line fix to `scripts/blueprint` means porting all 2,257 lines first, not
+extracting the one function that changed. The migration is its own commit,
+behaviour-identical, proven by the existing suites and by a mutant caught in
+the port; the change the item actually wanted comes after, so a reviewer can
+tell a port from a fix. **The shim is not an exception to whole-file
+migration — it is what whole-file migration LEAVES BEHIND.** A script's path
+is a public interface (hooks, allowlists, docs and CI all name it), so the
+migration moves the file's entire logic into a new `.mts` at the same stem
+and turns the OLD path into a fixed two-line shim
+(`#!/usr/bin/env bash` / `exec node "$(dirname "$0")/<basename>.mts" "$@"`)
+that keeps every caller working. Every whole-file migration ends this way;
+there is no smaller unit that also counts.
+
+**One narrow, file-specific ceiling on that rule: a sourced library a
+still-shell caller must keep SOURCING cannot use the exec shim** (BUG-147,
+`PLAN-BUG-147-dod-gate-port.md`, "Option C") — an exec shim
+replaces the process with `node`, which cannot hand shell functions back to a
+caller that sourced it. `scripts/lib/dod-gate.sh` is the one file this
+applies to today: it is sourced by `.githooks/pre-push-project` and by
+`.github/workflows/security.yml`, so its migration moved every policy branch
+into `scripts/lib/dod-gate.mts` and left a small, MECHANICALLY GENERATED
+sourced adapter behind — the same shell function names as before, each
+forwarding to the matching CLI subcommand. `scripts/shell-inventory-check.mts`
+recognises only this exact, file-specific shape: it parses the adapter's
+trailing `(function, subcommand)` forwarding pairs, RE-RENDERS the whole file
+from them, and requires byte equality against what is on disk — the same
+"trust the renderer, not the bytes" contract the ordinary two-line shim
+already uses. An executable always uses the ordinary shim; this sourced form
+is never a general escape hatch, and a second sourced library earns its own
+reviewed extension of the checker rather than broadening it by analogy.
+
+**Runtime: Node's own type stripping, no flag, no dependency.** `.mts` scripts
+run on an official Node build (`engines.node` in `tests/package.json`) with no
+`tsx`, `ts-node`, Bun or Deno — they must run before `npm ci` installs
+anything. `scripts/install-toolchain.sh` probes this as a CAPABILITY, not a
+version number: a Node whose version satisfies the range can still be a
+distro/vendored build with type stripping compiled out.
+
+**Closed exceptions that stay whole shell, stated so the list cannot silently
+grow:** `scripts/install-toolchain.sh` (and the libs it sources, while it
+sources them), `scripts/no-chain-guard.sh`, `scripts/run-ts-suites.sh` — each
+keeps the gate's toolchain-bootstrap or fail-closed-without-Node property that
+a `.mts` port cannot have (TASK-018 §3.3). `.githooks/pre-push` and
+`.githooks/pre-push-project` are NOT in this exception list: they are legacy
+shell files like any other, and the first change that actually touches either
+one migrates that WHOLE file behind a shim, same as `scripts/blueprint` or
+anything else — TASK-018 §3.3 only means the gate's ENTRY stays a shim that
+fails closed without Node, not that the file's logic may migrate gradually.
+Everything else is either unmigrated shell or a `.mts` port.
+
+**Enforcement is a committed inventory, judged against a BASE it cannot
+edit — not a diff heuristic, and not self-referential.** Currently **in this
+blueprint only** (a derived project's own shell is its own decision; its
+changes to managed scripts reach the blueprint through `a2bp`, where the gate
+applies). `scripts/shell-inventory.json` lists every shell file with its git
+blob sha; `scripts/shell-inventory-check.mts` reads that file at a BASE ref
+the pushed range cannot have edited (locally `@{u}`/`origin/main`, in CI
+`github.event.before`), never at the tip of the push itself — reading it from
+the pushed tree would let one commit patch a legacy file and update its own
+recorded sha in the same breath. Against that base it refuses: a shell file
+neither list covers, a legacy row HEAD adds or changes, an exempt entry HEAD
+grows, a legacy file whose blob changed to anything but the exact shim WITH A
+TRACKED `.mts` TARGET, and a row removed without its file becoming that valid
+shim or disappearing. Wired through `scripts/run-ts-suites.sh` (exempt), never
+by editing a legacy shell file to call it — that would force the migration the
+rule exists to phase in gradually.
+
+## Architecture Principles
+
+- No hardcoded configuration — everything configurable via admin UI and stored in the project's config store
+- Keep it simple — don't over-engineer
+- **DRY — reuse before you add. Avoid creating unnecessary routes/endpoints,
+  modals, or services when an existing one already does the job.** Before
+  adding a new API route or UI surface, check whether an existing flow
+  covers it. A new route is justified only when no existing path fits;
+  say why in the plan. Redundant routes/surfaces are a review-blocking
+  finding.
+- Preserve user work where applicable; show diffs so users can see exactly what changed
+
+## Blueprint sync (struct2flow framework)
+
+This file, with `CLAUDE.md`, `GEMINI.md` and `AGENT_SIGNAL.md`, is sourced from
+the struct2flow **blueprint** at `~/sources/struct2flow/blueprint/`.
+Project-specific extensions live in the five `project_config_*.md` files at the
+repo root, listed at the top of this file.
+
+Sync is driven by a single CLI — `blueprint`. Its per-machine command is
+written by `bash scripts/install-toolchain.sh` and runs the CLI of the project
+you are standing in, so it names no checkout. The agent uses it directly; do
+not hand-roll `diff -ru` invocations.
+
+### Drift and pull
+
+`blueprint drift` compares this project with the blueprint's fetched tip; every
+agent runs it at wake (§"Agent Coordination"). Exit 5 means the blueprint could not be
+read, which is **not** a clean report. After a non-empty `blueprint pull`
+(`--yes` only when the founder asks), review with `git diff` and commit;
+`.blueprint-source` is updated by the pull, never by hand.
+
+### Back-propagating (apply-to-blueprint)
+
+When you improve a generic rule in a blueprint-managed file, **offer to
+back-propagate it** rather than committing it only here: *"This change to
+`docs/DoD.md` looks generic — back-propagate it so other projects inherit it?"*
+If yes:
+
+```bash
+blueprint a2bp --dry-run docs/DoD.md   # show the request, push nothing
+blueprint a2bp docs/DoD.md             # file it
+blueprint prs                          # what is currently asked of the blueprint owner
+```
+
+`a2bp` pushes a branch to the blueprint's remote and opens a pull request. It
+lands nothing: a human merges. **Exit 3 means filed, not landed**, and no script
+may read it as "the blueprint has this". It refuses what must not travel
+(secrets, project config, a project name or host path left in the file) and says
+why; a contamination finding is fixed, or its line marked with a justified
+`a2bp-allow: <why it is safe>`. It is a convention the command implements, not a
+wall: an agent with push access could bypass it
+(`project_config_paths.md` §"Back-propagation trust boundary").
+
+**Propose what has held up**: "the next two bugs in this area didn't regress",
+not "it worked once". **A change is generic** if every struct2flow project would
+benefit. One that names this project, a customer, a local incident or a local
+path belongs in the `project_config_*.md` files, never upstream.
+
+### What blueprint sync covers
+
+Nobody keeps a list of synced files. The managed set is **derived**: every file
+the blueprint's `git archive` ships at the commit sync reads, minus the
+project-owned seeds (`TEMPLATE_FILES` in `scripts/blueprint.mts`), so bootstrap and
+pull deliver the same set and `.gitattributes` alone decides what ships
+(TASK-021). Run `blueprint files` to print it. If you catch
+yourself adding a project-specific incident or path to a blueprint-managed
+file, move it to the right `project_config_*.md` before committing.
+
+On the blueprint's own pushes this is scanned, not just advised — enforced by:
+tests/contamination-push-scan "TASK-079: a planted contaminated line fails the
+pushed-diff scan, and removing it passes", via the `contamination` job in
+`.github/workflows/security.yml`, which hands the pushed diff's added lines to
+`scripts/lib/contamination.sh`'s own checker — for the files that ship: a path
+whose `export-ignore` attribute is set reaches no project, and this repo's own
+incident records quote host paths on purpose. That is after-the-fact by design
+(TASK-079, founder decision 2026-09-22): once contamination lands on `main` it
+publishes to every downstream project on the next `blueprint pull`, and the CI
+scan detects it after the push — the release job's `needs` list is what keeps
+a red result from advancing `released`. The only pre-publication stop is still
+`a2bp`'s own scan at filing time.
+
+### Your project's `.gitignore` is yours (TASK-048)
+
+`.gitignore` is seeded at bootstrap and is **not** managed, so a
+blueprint change to it reaches NEW projects only. A project bootstrapped before
+2026-09-16 still excludes the framework's own documents, and every doc link into
+them is dead in a clone. To adopt the change:
+
+1. Delete these six lines from your `.gitignore`: `/CLAUDE.md`, `/AGENTS.md`,
+   `/AGENT_SIGNAL.md`, `docs/DoD.md`, `docs/PUBLISHING.md`,
+   `docs/doing/HANDOVER.md`.
+2. Run `git status`. Some of them may already be tracked — a project that
+   force-added one keeps it — so "nothing changed" here is a legitimate
+   outcome and not a failure.
+3. Track whatever is still untracked:
+
+```bash
+git add CLAUDE.md AGENTS.md AGENT_SIGNAL.md \
+        docs/DoD.md docs/PUBLISHING.md docs/doing/HANDOVER.md
+```
+
+Keep `project_config_*.md` ignored — A-27 put the threat model and the infra
+account IDs there. If your copy of any of the six has **diverged** from the
+blueprint's — a locally edited `AGENTS.md`, say — tracking it publishes that
+divergence: run `blueprint drift` and reconcile first, not after. And if you
+publish this repo publicly, re-read `docs/PUBLISHING.md` first: its preflight
+and its allowlist changed with this.
+
+**`.claude/settings.json` is managed, but a project's own permission rules are
+not lost.** Put them in `.claude/settings.project.json`: it is tracked and
+project-owned, and it holds only `permissions.allow`/`ask`/`deny`/`additionalDirectories`.
+`blueprint pull` lands `settings.json` as the blueprint's file with those lists
+merged in, and `drift` compares that merged result. The blueprint's `ask` and
+`deny` always win: a project `allow` naming one is dropped, so a rule the
+blueprint tightened (BUG-118) cannot be re-allowed from a project. Never
+hand-edit `settings.json` for a project rule — the next pull refuses it until
+the rule moves to the project file (TASK-042).
+
+End of the shared agent instructions.

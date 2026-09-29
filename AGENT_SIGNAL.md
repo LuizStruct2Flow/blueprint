@@ -493,7 +493,8 @@ headless Kimi CLI on each flip to `OVER_TO_KIMI`. Output lands in
 
 **What is Kimi-specific and worth knowing before you dispatch one:**
 
-- The binary is `kimi` (`KIMI_BIN` overrides) and its home is `~/.kimi-code/`.
+- The binary is `kimi` (`KIMI_BIN` overrides) and its home is `~/.kimi-code/`. <!-- a2bp-allow: the Kimi CLI's own home, a tool dotdir like ~/.codex, not a project path; BUG-155 adds it to the known list -->
+
   **`-p` / `--prompt` is the whole story, and it takes no autonomy flag.** The
   interactive `--auto` and `-y/--yolo` modes exist, but kimi 2.0.2 refuses to
   start when either is combined with `--prompt` (*"Cannot combine --prompt with

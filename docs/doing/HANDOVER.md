@@ -174,8 +174,14 @@ deleted.
   every depth, and holds a depender back after a refused or explicitly missing
   dependency. It also distinguishes broad membership discovery from hard
   dependency shapes so strings that merely mention a real lib do not create a
-  false hold-back. Claude re-review is pending before push. Then TASK-081 moves
-  to waiting-acceptance.
+  false hold-back. Claude's first re-review added full-pull coverage and
+  reordered the selected closure members (`2a7d720`, `4247967`). Andreas's
+  round-2 review found one remaining case inside the same written contract: a
+  hard dependency absent from the blueprint archive never entered a full
+  pull's selected files, so it could not fail before its depender. Reproducer
+  `1d6c2a3`, fix `8e81cf9` enqueue only absent closure dependencies on full
+  pulls; host verification and a clean cross-provider review are pending.
+  Then TASK-081 moves to waiting-acceptance.
 - **Traps for the next session:** the auto-mode classifier blocks `git merge`
   and overwriting a tracked file in a worktree without an explicit founder yes
   — ask, do not route around it; write agents' temp files in the project's

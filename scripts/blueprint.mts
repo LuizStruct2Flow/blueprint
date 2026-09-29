@@ -2386,21 +2386,44 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
   let libNeeds: ReadonlyMap<string, readonly string[]> = new Map()
   if (files.some(namesCli)) {
     const rest = files.filter((f) => !namesCli(f))
-    files = []
     const closure = await bpCliLibClosure()
     const libs = closure.files
     libNeeds = closure.needs
     let cliNeedsStr = ' '
     for (const lib of libs) {
       cliNeedsStr += `${lib} `
-      if (!rest.includes(lib) && partial) files.push(lib)
+      if (!rest.includes(lib) && partial) rest.push(lib)
+    }
+    // TASK-081 slice 6 (Vitali review) — the closure's dependency-first order
+    // must land in `rest` for a FULL pull too, not only a partial one: on a
+    // full pull `rest` is every differing file from the default scan, in
+    // bpManagedFiles()'s archive (alphabetical) order, which has no relation
+    // to which lib sources which. `libNeeds`'s hold-back only works if a
+    // dependency was already ATTEMPTED by the time its depender is reached
+    // (`failedDependencies.has(need)`, below) — alphabetically-first-but-
+    // dependent otherwise lands before a dependency that then refuses,
+    // stranding it. Reorder just the closure's own members into `libs`'
+    // dependency-first order (the one fixed point bpCliLibClosure already
+    // computed — reused, not re-derived) and leave every unrelated file
+    // exactly where the scan put it.
+    const closureRank = new Map(libs.map((lib, i) => [lib, i]))
+    const orderedRest: string[] = []
+    let libGroupInserted = false
+    for (const f of rest) {
+      if (!closureRank.has(f)) {
+        orderedRest.push(f)
+        continue
+      }
+      if (libGroupInserted) continue // already emitted with the group below
+      libGroupInserted = true
+      for (const lib of libs) if (rest.includes(lib)) orderedRest.push(lib)
     }
     // The target is a dependency of the shim just like every sourced lib:
     // land it first, and remember a refusal/skip so the shim is held back.
     // Otherwise an interactive pull can accept the shim and refuse the .mts,
     // leaving the project's public CLI path pointing at no runnable target.
     cliNeeds = [...libs, 'scripts/blueprint.mts']
-    files.push(...rest, 'scripts/blueprint.mts', 'scripts/blueprint')
+    files = [...orderedRest, 'scripts/blueprint.mts', 'scripts/blueprint']
     if (partial && cliNeedsStr !== ' ') {
       process.stdout.write(`scripts/blueprint brings the libs it sources:${cliNeedsStr}\n`)
     }

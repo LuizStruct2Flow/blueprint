@@ -1980,12 +1980,16 @@ export async function pullFile(f: string, out: string, p: Prospective): Promise<
 // .mts + the libs it names").
 const CLI_SHIM_SOURCE = '#!/usr/bin/env bash\nexec node "$(dirname "$0")/blueprint.mts" "$@"\n'
 
+// Matches both `.sh` and `.mts` lib names: slice 6 (plan §7) walks the same
+// text for either, so one scanner serves the whole closure — a shim names
+// its `.mts`, a sourced adapter (the dod-gate.sh shape) names its `.mts` in a
+// non-comment bridge-path assignment, an ordinary lib names another `.sh`.
 export function extractShLibNames(src: string): string[] {
   const names = new Set<string>()
   for (const line of src.split('\n')) {
     const trimmed = line.trimStart()
     if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue
-    for (const m of line.matchAll(/[A-Za-z0-9_-]+\.sh/g)) names.add(m[0])
+    for (const m of line.matchAll(/[A-Za-z0-9_-]+\.(?:sh|mts)/g)) names.add(m[0])
   }
   return [...names]
 }
@@ -2014,6 +2018,36 @@ export async function bpCliLibs(): Promise<string[]> {
     } catch {
       // No .mts sibling in the blueprint tree (a stripped or partial fixture)
       // — nothing more to add; the shim's own needs (none) stand.
+    }
+  }
+  // SLICE 6 (plan §7) — the closure is a FIXED POINT, not one hop: any lib
+  // already in the set may itself be a shim or a sourced adapter (the
+  // dod-gate.sh shape BUG-152 will give scripts/lib/gate.sh) naming its own
+  // `.sh`/`.mts` sibling in a non-comment bridge-path line, exactly the same
+  // textual shape the shim-follow above already reads. Scan every named
+  // lib's own text for more names, and repeat until a pass adds nothing.
+  // `scanned` guards a cycle (a names b, b names a) from looping forever.
+  const scanned = new Set<string>()
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const name of [...names]) {
+      if (scanned.has(name)) continue
+      scanned.add(name)
+      let libText: string
+      try {
+        libText = readFileSync(bpBlueprintPath(`scripts/lib/${name}`), 'utf8')
+      } catch {
+        // Named but not present in this blueprint tree — nothing to scan;
+        // the existence filter below already drops it from the result.
+        continue
+      }
+      for (const n of extractShLibNames(libText)) {
+        if (!names.has(n)) {
+          names.add(n)
+          grew = true
+        }
+      }
     }
   }
   const sortedR = await unchecked(() =>

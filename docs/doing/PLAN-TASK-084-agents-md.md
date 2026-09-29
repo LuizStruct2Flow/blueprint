@@ -3,8 +3,8 @@
 **Status: v2, revised to the three-provider review and the founder's decisions
 of 2026-09-29. Ready for implementation.** Written by Christian (Architect-1,
 Claude). Reviewed by Markus (Claude), Alexey (Codex) and Slava (Kimi), all
-APPROVE-WITH-CHANGES (§"Review synthesis"). Nothing has moved yet. Row:
-[TASK-084](BACKLOG.md).
+APPROVE-WITH-CHANGES (§"Review synthesis"). **Slice 1 is committed** (§8,
+§"Slice log"); slices 2 and 3 have not started. Row: [TASK-084](BACKLOG.md).
 
 The row asks for one thing: the providers work from the same rules. Today
 they do not. **Scope: the four autonomous CLI providers — Claude Code, Codex,
@@ -694,3 +694,47 @@ byte-identity with the old `AGENTS.md`.
 - Markus also advised against a pull-time `@`-edge closure and a mechanical
   self-check in `scripts/session-start.sh` (legacy shell, so a whole-file
   port). Neither was in the plan, and neither is added.
+
+---
+
+## Slice log
+
+### Slice 1 — 2026-09-29, `977ad7b` (Christian, Claude)
+
+**Layout of the merged `AGENT_SIGNAL.md`.** The S2 heading replaces both old
+first headings. `AGENTS.md`'s preamble follows it. `AGENT_SIGNAL.md`'s own
+sections keep their order, and every `AGENTS.md` section from "On wake" to
+the end sits, in its order, between §"The protocol" and §"History".
+
+**The deduplication**, the only text removed. §"The protocol" keeps what
+`AGENTS.md` does not say: `Holder` is a roster persona or `Nobody`, and
+BUG-140 refuses anything else. Three things went:
+
+- its `State` and ACTIVE-on-claim sentence, which `AGENTS.md`'s mic section
+  and §"Rules" already say;
+- "The full protocol is in AGENTS.md";
+- its "Before flipping the mic to `OVER_TO_USER`" paragraph, which is the
+  §"Rules" bullet of the same name, nearly word for word.
+
+**Byte identity.** `diff AGENTS.md AGENT_SIGNAL.md` shows exactly three
+hunks: `1c1` (the heading), `15a16,65` (added `AGENT_SIGNAL.md` text) and
+`505a556,567` (added §"History"). No `AGENTS.md` line is changed or
+removed.
+
+**Tests.** `enforced-by-pointers` REAL TREE scans `AGENT_SIGNAL.md`; a planted
+broken pointer there turned it red. `bootstrap-contents` #12 checks its links
+in a real bootstrap. The #12 fixture archives `HEAD`, so it judges the
+committed file, not the working tree.
+
+**Full suite at `977ad7b`:** 75 files, 1,384 tests, all green. That run
+included the whole release tier: `bootstrap-gate`, `a2bp-e2e`,
+`blueprint-port`, `signal-dispatch`, `agent-activity-bound` and
+`subagent-feed`.
+
+**Not anticipated by the plan.** The copied mic section says `Holder` may be
+`User`. §"The protocol" beside it, `scripts/signal-set.sh` and the gate
+(BUG-140) allow only a roster persona or `Nobody`. `--holder User` is refused
+unless the roster has a persona named `User`. The two files disagreed before
+this slice; the merge only puts both statements in one file. Byte identity
+kept it out of slice 1. Slice 2 should drop "or `User`" when it rewrites the
+self-references.

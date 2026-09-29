@@ -3,8 +3,9 @@
 **Status: v2, revised to the three-provider review and the founder's decisions
 of 2026-09-29. Ready for implementation.** Written by Christian (Architect-1,
 Claude). Reviewed by Markus (Claude), Alexey (Codex) and Slava (Kimi), all
-APPROVE-WITH-CHANGES (§"Review synthesis"). **Slice 1 is committed** (§8,
-§"Slice log"); slices 2 and 3 have not started. Row: [TASK-084](BACKLOG.md).
+APPROVE-WITH-CHANGES (§"Review synthesis"). **Slice 1 is released; slice 2 is
+committed** (§8, §"Slice log"), awaiting cross-provider review and the
+per-provider probe; slice 3 has not started. Row: [TASK-084](BACKLOG.md).
 
 The row asks for one thing: the providers work from the same rules. Today
 they do not. **Scope: the four autonomous CLI providers — Claude Code, Codex,
@@ -738,3 +739,95 @@ unless the roster has a persona named `User`. The two files disagreed before
 this slice; the merge only puts both statements in one file. Byte identity
 kept it out of slice 1. Slice 2 should drop "or `User`" when it rewrites the
 self-references.
+
+### Slice 2 — 2026-09-29, `1dbfd5f` (Christian, Claude)
+
+**The switch, in one commit** so `main` is green at every commit: the four
+instruction files, every test that reads them, and the §7 ripples.
+
+- **`AGENTS.md`** (27,418 bytes, cap 28,672) is today's `CLAUDE.md` body from
+  §"Running commands" on, unchanged, under a new head: S1, a two-sentence
+  preamble, §"Read these first" (the import block of §3), the
+  `claude.internal.md` / `CLAUDE.blueprint.md` paragraphs (now saying
+  `claude.internal.md` is every provider's), and §"Agent Coordination" with the
+  S2 bullet and the "wake by hand" paragraph. S3 is the last line. Four edits
+  inside the moved body: the Team Workflow `Agent`-tool bullet became a
+  provider-neutral line pointing at `CLAUDE.md` §"Spawning personas"; §"Who
+  does the work" points at `AGENT_SIGNAL.md`; §"Blueprint sync" says "this
+  file" instead of "This CLAUDE.md"; §"Drift and pull" says every agent runs
+  drift at wake instead of pointing at a hook only Claude has. **The first
+  growth lever (§2) was not pulled**: the file fits with 1,254 bytes to spare.
+- **`CLAUDE.md`** (2,725 bytes, cap 4,096): `@AGENTS.md`, the S1 self-check,
+  the redirect, then `## Claude Code only` → `### On wake — the primary session
+  is the Orchestrator` (unchanged text, H3, followed by `## Spawning personas`,
+  so `tests/roster` #11 passes unchanged) → `## Enforcement that binds Claude
+  Code only` (the `deny` list, the two `PreToolUse` hooks, the `Stop` link
+  guard).
+- **`GEMINI.md`** (263 bytes, cap 512): `@AGENTS.md` and the S1 self-check.
+- **`AGENT_SIGNAL.md`** (§5's four points): the preamble names `AGENTS.md` as
+  the shared rules; the on-wake list calls this file the protocol and
+  `AGENTS.md` the shared rules; `CLAUDE.md` §"On wake" is kept (Claude-only
+  target); the Kimi bullet on the invisible 32 KB warning is added. **The
+  slice-1 finding is fixed**: the mic section now says `Holder` is a roster
+  persona or `Nobody`, nothing else (§"The protocol", BUG-140), not "or
+  `User`".
+
+**Tests.** A new suite, `tests/instruction-files`, holds the three byte caps
+(each failing with the §2 remedy text), the S1/S2/S3 pins, and the
+stale-protocol-pointer case (both forms, `AGENTS.md#anchor` and
+`AGENTS.md §"<heading>"`, over the four root files, with an in-case planted
+pair so it cannot pass vacuously). A combined mutant (S1 quote drifted in
+`GEMINI.md`, `GEMINI.md` over 512 bytes, a stale pointer, text after S3, the
+S2 heading drifted) turned exactly those five cases red. `template-source`
+#import-1 now reads `AGENTS.md` and requires `CLAUDE.md` and `GEMINI.md` to
+import exactly `AGENTS.md`. `bootstrap-contents` #3b, #3c, #5c (seven
+documents), #11 and #12 (all five root files) follow. `enforced-by-pointers`'
+count comment and `codex-persona-label`'s TASK-061 case (reads
+`AGENT_SIGNAL.md`) follow. `UNREGISTERED_MARKERS` gains `GEMINI.md`.
+
+**Full suite once, at the first commit of the switch:** 76 files, 1,391
+tests, 1 failed; the release tier (`bootstrap-gate`, `a2bp-e2e`,
+`blueprint-port`, `signal-dispatch`, `agent-activity-bound`, `subagent-feed`)
+all green. The failure is the item below; after the fix, `csv-freshness`,
+`lifecycle-docs`, `doc-links`, `manifest` and `instruction-files` were rerun
+by name (112 tests, green). `npm --prefix tests run typecheck` is clean.
+`node scripts/contamination-push-scan.mts --before a2e3bdf --after 1dbfd5f`:
+PASS, no BLOCK findings (the moved `~/.kimi-code` line keeps its slice-1
+marker).
+
+**Migration fixtures.** A project bootstrapped from `a16a7ff` (pre-slice-1),
+copied three times, each pulling one file alone from `1dbfd5f` with
+`BLUEPRINT_ROOT` set:
+
+| Pull | File that checks | Sentinel it finds | Names |
+|---|---|---|---|
+| `pull AGENTS.md` | `AGENTS.md` (S2 bullet) | `# Agent Signal — the radio-over protocol` | `blueprint pull AGENT_SIGNAL.md` |
+| `pull CLAUDE.md` | `CLAUDE.md` (S1 self-check) | `# Agent Coordination Protocol` | `blueprint pull AGENTS.md` |
+| `pull GEMINI.md` | `GEMINI.md` (S1 self-check) | `# Agent Coordination Protocol` | `blueprint pull AGENTS.md` |
+
+That is the mechanical half: each state presents a mismatched sentinel to a
+check that names the right file. Whether each provider's session obeys it is
+the per-provider probe, still to run.
+
+**Not anticipated by the plan.**
+
+- **`tests/csv-freshness` depends on `CLAUDE.md` line numbers.** TASK-022's
+  audit CSV (`docs/done/TASK-022-anchor-rules/`) keeps a live
+  `CURRENT_LOCATION` column that a hard-failing case checks against the tree,
+  and 114 rows cited `CLAUDE.md` or `AGENTS.md` lines that moved (91 of them
+  now out of range). Only that column was re-pointed, mechanically, by unique
+  line content: old `CLAUDE.md` to `AGENTS.md` or `CLAUDE.md`, old `AGENTS.md`
+  to `AGENT_SIGNAL.md`. No judgement column changed. §5's "historical records
+  are not rewritten" still holds for the rest of the row.
+- **`README.md` listed `AGENT_SIGNAL.md` as project-owned** ("stamped at
+  bootstrap, then evolves"). It has been managed since BUG-019; the bullet is
+  gone and the managed top-level list names all four instruction files.
+- **Left alone:** `README.md`'s `{{REPO_PATH}}` line still says it is "used in
+  `AGENTS.md` example invocations"; nothing uses that placeholder, before or
+  after this slice. Slice 3 or its own row.
+- **A live Claude migration probe cannot run inside this checkout.** Claude
+  Code's ancestor walk loads the blueprint's own root `CLAUDE.md`, which
+  imports the new `AGENTS.md` and so satisfies S1 (the §1 method artefact).
+  The `pull CLAUDE.md` fixture needs a location outside the blueprint tree to
+  show Claude stopping; Codex, Kimi and Gemini stop at the fixture's own
+  `.git` root and are unaffected.

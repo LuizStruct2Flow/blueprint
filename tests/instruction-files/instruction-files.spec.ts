@@ -18,9 +18,12 @@
  *     files. S1 (AGENTS.md's first heading, quoted by both importers' self-
  *     checks) and S2 (AGENT_SIGNAL.md's first heading, quoted by AGENTS.md's
  *     coordination bullet) are how an agent notices an old counterpart and
- *     names the file to pull. S3 (AGENTS.md's last line) is how a provider
- *     probe notices a truncated file. A quoted sentinel that drifts from the
- *     heading it names would make every self-check fail, or none.
+ *     names the file to pull. The reciprocal S1 check in AGENT_SIGNAL.md is
+ *     also required by AGENTS.md: S2 already shipped in slice 1, so its heading
+ *     alone cannot distinguish slice 1 from the slice-2 switch. S3 (AGENTS.md's
+ *     last line) is how a provider probe notices a truncated file. A quoted
+ *     sentinel that drifts from the heading it names would make every self-
+ *     check fail, or none.
  *   - STALE PROTOCOL POINTERS. The coordination sections left AGENTS.md; a
  *     reference to one of them as `AGENTS.md#anchor` or `AGENTS.md §"…"` now
  *     points at a heading that is not there.
@@ -103,9 +106,17 @@ describe('TASK-084 — one instruction file for the four CLI providers', () => {
   })
 
   it('S2: AGENTS.md’s coordination bullet quotes AGENT_SIGNAL.md’s first heading', async () => {
-    expect(firstLine(await read('AGENT_SIGNAL.md'))).toBe(`# ${S2}`)
+    const signal = await read('AGENT_SIGNAL.md')
+    expect(firstLine(signal)).toBe(`# ${S2}`)
+    expect(quotedHeading(signal, /must begin with the heading/), 'AGENT_SIGNAL.md does not reject an old AGENTS.md').toBe(S1)
+    expect(signal, 'AGENT_SIGNAL.md no longer names the shared-rules file to pull').toContain('`blueprint pull AGENTS.md`')
+
     const agents = await read('AGENTS.md')
     expect(quotedHeading(agents, /first\s+heading must read/), 'AGENTS.md checks AGENT_SIGNAL.md against another heading').toBe(S2)
+    expect(
+      quotedHeading(agents, /self-check does not require `AGENTS\.md`'s heading/),
+      'AGENTS.md does not distinguish the slice-1 AGENT_SIGNAL.md from the slice-2 switch',
+    ).toBe(S1)
     expect(agents, 'the S2 check no longer names the file to pull').toContain('`blueprint pull AGENT_SIGNAL.md`')
   })
 

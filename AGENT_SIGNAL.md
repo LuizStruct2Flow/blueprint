@@ -6,6 +6,11 @@ GitHub Copilot** — coordinate in this repo. The live state is the LIVE baton a
 BUG-019); **this file is the protocol** (how the radio works). `AGENTS.md`, the
 shared rules every provider reads, points here rather than duplicating it.
 
+**Shared-rules self-check.** `AGENTS.md` must begin with the heading
+"Agent instructions — shared by the four CLI providers". If it does not, this
+project's `AGENTS.md` predates the TASK-084 switch: stop, tell the founder and
+run `blueprint pull AGENTS.md` before any coordinated work.
+
 Watch every agent live in one place: `bash scripts/agent-activity.sh --daemon`,
 then `tail -F logs/agent-activity.log`. One tail-able
 `[Persona - model - effort]` feed (mic changes + each agent's actual work) written

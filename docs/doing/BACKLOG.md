@@ -18,11 +18,16 @@ back until `scripts/blueprint.mts` itself lands, per §7's own rule). Slice 6,
 the closure as a fixed point (§7/§8 row 6): reproducer `71227f6`
 (`managed-references` #6, red on today's one-hop `bpCliLibs`), fix `265ff25`
 (`bpCliLibs` walks a lib's own text for a `.sh`/`.mts` it names too, repeating
-to a fixed point — the BUG-152 prerequisite). Full suite (75 files / 1377
+to a fixed point — the BUG-152 prerequisite). Codex's slice-6 review found
+that lexical order was safe only for a same-stem pair and that only the CLI
+pair had refusal hold-back; its follow-up makes the closure dependency-first
+at every depth and propagates a refused or explicitly missing dependency to
+its depender, while keeping incidental textual mentions out of the hard-edge
+graph. Full suite (75 files / 1377
 tests), typecheck, and the release tier (`bootstrap-gate`, `a2bp-e2e`) all
-green. **Codex review of slice 6 (and the whole diff) is pending before
-push** — this item does not move to `waiting-acceptance/` until that review
-and the push land. |
+green before that follow-up; Claude re-review and the affected/full checks are
+pending before push. This item does not move to `waiting-acceptance/` until
+that review and the push land. |
 
 ## TASK-012 — how to run it, and why not a fork
 

@@ -1994,7 +1994,48 @@ export function extractShLibNames(src: string): string[] {
   return [...names]
 }
 
-export async function bpCliLibs(): Promise<string[]> {
+function extractDependencyLibNames(src: string): string[] {
+  const names = new Set<string>()
+  for (const line of src.split('\n')) {
+    const trimmed = line.trimStart()
+    if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue
+    // A bare mention is enough to preserve the historical closure membership,
+    // but not enough to make one file block another: current libs contain
+    // messages and case patterns naming real peers they do not execute. Edges
+    // require an executable path-bearing shape used by sourced adapters and
+    // TS path construction/imports.
+    const dependencyShape =
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed) ||
+      /^(?:\.|source)\s/.test(trimmed) ||
+      /\b(?:join|resolve|import)\s*\(/.test(trimmed) ||
+      /\bfrom\s+['"]/.test(trimmed)
+    if (!dependencyShape) continue
+    for (const m of line.matchAll(/scripts\/lib\/([A-Za-z0-9_-]+\.(?:sh|mts))/g)) names.add(m[1]!)
+  }
+  return [...names]
+}
+
+export interface CliLibClosure {
+  /** Dependency-first, including an explicitly named dependency that is absent. */
+  readonly files: string[]
+  /** Direct edges, used by pull to hold a depender back after a dependency fails. */
+  readonly needs: ReadonlyMap<string, readonly string[]>
+}
+
+async function sortLibNames(names: Iterable<string>): Promise<string[]> {
+  const unique = new Set(names)
+  const sortedR = await unchecked(() =>
+    run('sort', ['-u'], {
+      env: { ...process.env, LC_ALL: 'C' },
+      stdin: unique.size > 0 ? `${[...unique].join('\n')}\n` : '',
+      stdout: 'capture',
+      stderr: 'ignore',
+    }),
+  )
+  return nonEmptyLines(sortedR.stdout)
+}
+
+export async function bpCliLibClosure(): Promise<CliLibClosure> {
   let text: string
   try {
     text = readFileSync(bpBlueprintPath('scripts/blueprint'), 'utf8')
@@ -2003,7 +2044,7 @@ export async function bpCliLibs(): Promise<string[]> {
     // never checked existence first) — every caller here already reads this
     // as "no libs to bring along", the same answer an empty scan would give,
     // so returning [] rather than throwing costs pull nothing.
-    return []
+    return { files: [], needs: new Map() }
   }
   const names = new Set(extractShLibNames(text))
   // THE ONE BEHAVIOUR THIS PORT ADDS (plan §7). When the pulled CLI IS the
@@ -2028,6 +2069,8 @@ export async function bpCliLibs(): Promise<string[]> {
   // lib's own text for more names, and repeat until a pass adds nothing.
   // `scanned` guards a cycle (a names b, b names a) from looping forever.
   const scanned = new Set<string>()
+  const needsByName = new Map<string, Set<string>>()
+  const dependencyNames = new Set<string>()
   let grew = true
   while (grew) {
     grew = false
@@ -2039,10 +2082,24 @@ export async function bpCliLibs(): Promise<string[]> {
         libText = readFileSync(bpBlueprintPath(`scripts/lib/${name}`), 'utf8')
       } catch {
         // Named but not present in this blueprint tree — nothing to scan;
-        // the existence filter below already drops it from the result.
+        // if another lib explicitly named it, it remains in the ordered result
+        // so pull can report the absence and hold that depender back.
         continue
       }
+      const needs = new Set(extractDependencyLibNames(libText))
+      // Existing files retain the shell closure's deliberately broad textual
+      // discovery. Only executable path-bearing forms above become ordering
+      // and hold-back edges; otherwise error strings and case patterns would
+      // turn incidental mentions into false hard dependencies.
       for (const n of extractShLibNames(libText)) {
+        if (existsSync(bpBlueprintPath(`scripts/lib/${n}`)) && !names.has(n)) {
+          names.add(n)
+          grew = true
+        }
+      }
+      needsByName.set(name, needs)
+      for (const n of needs) {
+        dependencyNames.add(n)
         if (!names.has(n)) {
           names.add(n)
           grew = true
@@ -2050,19 +2107,55 @@ export async function bpCliLibs(): Promise<string[]> {
       }
     }
   }
-  const sortedR = await unchecked(() =>
-    run('sort', ['-u'], {
-      env: { ...process.env, LC_ALL: 'C' },
-      stdin: names.size > 0 ? `${[...names].join('\n')}\n` : '',
-      stdout: 'capture',
-      stderr: 'ignore',
-    }),
-  )
-  const out: string[] = []
-  for (const name of nonEmptyLines(sortedR.stdout)) {
-    if (existsSync(bpBlueprintPath(`scripts/lib/${name}`))) out.push(`scripts/lib/${name}`)
+  // A lexical list is not dependency order except for a same-stem .mts/.sh
+  // pair. Walk the graph post-order so every acyclic dependency is attempted
+  // before the adapter/lib that needs it, at every depth.
+  const sortedNames = await sortLibNames(names)
+  const rank = new Map(sortedNames.map((name, index) => [name, index]))
+  const sortedNeeds = new Map<string, string[]>()
+  for (const [name, deps] of needsByName) {
+    sortedNeeds.set(
+      name,
+      [...deps].sort((a, b) => (rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER)),
+    )
   }
-  return out
+  const ordered: string[] = []
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (name: string): void => {
+    if (visited.has(name)) return
+    if (visiting.has(name)) return // textual cycles terminate deterministically
+    visiting.add(name)
+    for (const dep of sortedNeeds.get(name) ?? []) visit(dep)
+    visiting.delete(name)
+    visited.add(name)
+    ordered.push(`scripts/lib/${name}`)
+  }
+  for (const name of sortedNames) {
+    // Root-level incidental/missing names keep the historical existence
+    // filter. Missing *lib dependencies* were admitted above deliberately so
+    // pull can report them and hold their depender back.
+    if (existsSync(bpBlueprintPath(`scripts/lib/${name}`)) || dependencyNames.has(name)) visit(name)
+  }
+
+  const needs = new Map<string, readonly string[]>()
+  for (const name of needsByName.keys()) {
+    needs.set(
+      `scripts/lib/${name}`,
+      (sortedNeeds.get(name) ?? []).map((dep) => `scripts/lib/${dep}`),
+    )
+  }
+  return { files: ordered, needs }
+}
+
+export async function bpCliLibs(): Promise<string[]> {
+  const closure = await bpCliLibClosure()
+  // Preserve the public helper and pre-port shell contract: callers asking
+  // only for membership get the C-locale lexical list of files that exist.
+  const names = closure.files
+    .filter((file) => existsSync(bpBlueprintPath(file)))
+    .map((file) => file.slice('scripts/lib/'.length))
+  return (await sortLibNames(names)).map((name) => `scripts/lib/${name}`)
 }
 
 // --- TASK-021 §4.2, _bp_retire (scripts/blueprint:1477-1541) ----------------
@@ -2290,10 +2383,13 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
   const namesCli = (f: string): boolean => f === 'scripts/blueprint' || f === 'scripts/blueprint.mts'
   let cliNeeds: string[] = []
   let cliUnmet: string[] = []
+  let libNeeds: ReadonlyMap<string, readonly string[]> = new Map()
   if (files.some(namesCli)) {
     const rest = files.filter((f) => !namesCli(f))
     files = []
-    const libs = await bpCliLibs()
+    const closure = await bpCliLibClosure()
+    const libs = closure.files
+    libNeeds = closure.needs
     let cliNeedsStr = ' '
     for (const lib of libs) {
       cliNeedsStr += `${lib} `
@@ -2322,8 +2418,21 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
   let refusedGuard = false
   let refusedNoTty = false
   let aborted = false
+  const failedDependencies = new Set<string>()
 
   for (const f of files) {
+    const libUnmet = (libNeeds.get(f) ?? []).filter((need) => failedDependencies.has(need))
+    if (libUnmet.length > 0) {
+      process.stdout.write('\n')
+      process.stdout.write(
+        `  ${C_RED}skipped${C_RESET} ${f} — it needs${libUnmet.map((need) => ` ${need}`).join('')}, which was not pulled, so it would refuse to run\n`,
+      )
+      refusedGuard = true
+      held.push(f)
+      failedDependencies.add(f)
+      if (cliNeeds.includes(f)) cliUnmet.push(f)
+      continue
+    }
     if (namesCli(f) && cliUnmet.length > 0) {
       process.stdout.write('\n')
       process.stdout.write(
@@ -2336,6 +2445,7 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     const bp = bpBlueprintPath(f)
     if (!existsSync(bp)) {
       process.stdout.write(`  ${C_RED}skip${C_RESET}  ${f}  (not in blueprint)\n`)
+      failedDependencies.add(f)
       if (cliNeeds.includes(f)) cliUnmet.push(f)
       continue
     }
@@ -2366,6 +2476,7 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
         if (!ok) {
           refusedGuard = true
           held.push(f)
+          failedDependencies.add(f)
           if (cliNeeds.includes(f)) cliUnmet.push(f)
         }
         continue
@@ -2402,6 +2513,7 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
         } else {
           process.stdout.write(`  ${C_DIM}skipped${C_RESET}\n`)
           held.push(f)
+          failedDependencies.add(f)
           if (cliNeeds.includes(f)) cliUnmet.push(f)
           continue
         }
@@ -2416,6 +2528,7 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
         process.stdout.write(`  ${C_RED}skipped${C_RESET} ${f} (see warning above)\n`)
         refusedGuard = true
         held.push(f)
+        failedDependencies.add(f)
         if (cliNeeds.includes(f)) cliUnmet.push(f)
       }
     } finally {

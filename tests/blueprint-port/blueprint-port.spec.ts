@@ -24,6 +24,7 @@ import {
   CommandFailedError,
   HELP_TEXT,
   beginChild,
+  bpCliLibClosure,
   bpCliLibs,
   bpProspectiveFor,
   capture,
@@ -463,6 +464,34 @@ describe('bpCliLibs / extractShLibNames — the closure with shim-follow (plan �
       // The .mts sibling is NOT followed — the near-shim's own text names no
       // lib, so nothing is found (it does not accidentally match "blueprint.mts").
       expect(libs).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a lib closure is dependency-first across different stems and retains an explicit missing dependency for hold-back', async () => {
+    const root = mkFixtureDir('bp-port-clilibs-order-')
+    try {
+      mkdirSync(join(root, 'scripts/lib'), { recursive: true })
+      writeFileSync(join(root, 'scripts/blueprint'), SHIM_SOURCE)
+      writeFileSync(join(root, 'scripts/blueprint.mts'), "void 'scripts/lib/a-adapter.sh'\n")
+      writeFileSync(
+        join(root, 'scripts/lib/a-adapter.sh'),
+        '_target="$1/scripts/lib/z-target.mts"\n_missing="$1/scripts/lib/zz-missing.mts"\n',
+      )
+      writeFileSync(join(root, 'scripts/lib/z-target.mts'), '// target\n')
+      _setBlueprintRootForTests(root)
+
+      const closure = await bpCliLibClosure()
+      expect(closure.files).toEqual([
+        'scripts/lib/z-target.mts',
+        'scripts/lib/zz-missing.mts',
+        'scripts/lib/a-adapter.sh',
+      ])
+      expect(closure.needs.get('scripts/lib/a-adapter.sh')).toEqual([
+        'scripts/lib/z-target.mts',
+        'scripts/lib/zz-missing.mts',
+      ])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

@@ -252,7 +252,7 @@ rules are in AGENTS.md.
 ```
 
 That last bullet is also Slava's point: today's §"Agent Coordination" says
-"**[AGENTS.md](AGENTS.md)** — the coordination protocol" (`CLAUDE.md:58-61`).
+`**[AGENTS.md](AGENTS.md)** — the coordination protocol` (`CLAUDE.md:58-61`).
 Moved as-is it would point at itself. The redirect lines cover only external
 references, so slice 2 re-points it as part of the move, not slice 3.
 

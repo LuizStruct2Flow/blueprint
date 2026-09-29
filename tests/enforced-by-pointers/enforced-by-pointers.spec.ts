@@ -3,8 +3,8 @@
  *
  * See enforced-by-pointers.ts for the pattern and what counts as a pointer.
  * The fixture cases prove the scanner can tell a resolving pointer from a
- * broken one; THE REAL TREE case runs it over CLAUDE.md, docs/DoD.md and
- * AGENTS.md against this repo's own `tests/` — TASK-062's own goal-(d)
+ * broken one; THE REAL TREE case runs it over CLAUDE.md, docs/DoD.md,
+ * AGENTS.md and AGENT_SIGNAL.md against this repo's own `tests/` — TASK-062's own goal-(d)
  * deliverable, so it is fitting that this suite is itself the first thing
  * that would catch a stale one of its own pointers.
  */
@@ -133,7 +133,13 @@ describe('enforced-by pointers — every `enforced by: tests/<suite> "<title>"` 
     }
 
     const scan = await scanEnforcedByPointers(
-      [join(REPO_ROOT, 'CLAUDE.md'), join(REPO_ROOT, 'docs/DoD.md'), join(REPO_ROOT, 'AGENTS.md')],
+      // AGENT_SIGNAL.md since TASK-084: it now carries the coordination protocol.
+      [
+        join(REPO_ROOT, 'CLAUDE.md'),
+        join(REPO_ROOT, 'docs/DoD.md'),
+        join(REPO_ROOT, 'AGENTS.md'),
+        join(REPO_ROOT, 'AGENT_SIGNAL.md'),
+      ],
       join(REPO_ROOT, 'tests'),
     )
 

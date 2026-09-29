@@ -519,7 +519,12 @@ reddens `managed-references` #3 and strands every derived project that pulls
   `.sh` and `.mts` names. Every file in it is scanned, and every
   `scripts/lib/NAME.(sh|mts)` it names that exists in the blueprint joins it.
   So a sourced adapter (`gate.sh` after BUG-152, shaped like `dod-gate.sh`)
-  brings its `.mts`.
+  brings its `.mts`. The walk also records executable path-bearing references
+  as dependency edges: dependencies are attempted before their dependers at
+  every depth, and a refused or explicitly named missing dependency holds its
+  depender back. Bare textual mentions still expand membership only when the
+  named lib exists; they do not become hold-back edges, because current libs
+  contain messages and case patterns that name real peers they do not execute.
 
 **Not fixable in code, and accepted: the pre-port single-file pull.** A
 derived project whose OWN CLI is still the pre-port shell and pulls

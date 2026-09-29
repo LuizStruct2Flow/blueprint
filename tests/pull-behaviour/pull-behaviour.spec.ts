@@ -356,3 +356,137 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
     })
   })
 })
+
+/**
+ * TASK-081 slice 6 (Vitali review of e943ae5). `cmdPull` only spliced the
+ * closure's dependency-first order into `files` when `partial` is true
+ * (`if (!rest.includes(lib) && partial) files.push(lib)`); on a FULL pull
+ * (`blueprint pull`, no names) `files` kept `bpManagedFiles()`'s archive
+ * order — alphabetical by path — which has no relation to which lib sources
+ * which. `libNeeds` is built either way, but the hold-back
+ * (`failedDependencies.has(need)`) only works if the dependency was already
+ * ATTEMPTED by the time its depender is reached. Alphabetically,
+ * `scripts/lib/a-adapter.sh` sorts before `scripts/lib/z-target.mts`, so on a
+ * full pull the adapter lands before its target is even tried — and if the
+ * target then refuses (bad markers), the adapter is stranded: a new
+ * `a-adapter.sh` sourcing a `z-target.mts` the project never got.
+ */
+describe('TASK-081 slice 6 — a full pull orders a lib depender after its dependency, not archive order', () => {
+  it('#6 a full pull strands a lib adapter before its refused target', async () => {
+    await scenario('pull-behaviour-6', async (s) => {
+      const bp = await s.workspace.dir('f6', 'bp')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      // The shim: names the adapter directly, so bpCliLibClosure's first pass
+      // (extractShLibNames on scripts/blueprint) discovers it with no need to
+      // match the real CLI_SHIM_SOURCE constant or involve scripts/blueprint.mts.
+      await s.fs.write(
+        join(bp, 'scripts/blueprint'),
+        ['#!/bin/sh', '# fixture cli shim (TASK-081 slice 6 reproducer)', 'lib="scripts/lib/a-adapter.sh"', '. "$lib"', ''].join('\n'),
+      )
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      // The adapter: a non-comment assignment naming its target by literal
+      // path — the exact shape extractDependencyLibNames requires for a real
+      // edge (dod-gate.sh's own bridge shape, plan §7).
+      await s.fs.write(
+        join(bp, 'scripts/lib/a-adapter.sh'),
+        ['#!/bin/sh', '# scripts/lib/a-adapter.sh — fixture adapter (TASK-081 slice 6)', 'target="scripts/lib/z-target.mts"', '. "$target"', 'echo "a-adapter new"', ''].join(
+          '\n',
+        ),
+      )
+      await s.fs.write(join(bp, 'scripts/lib/z-target.mts'), '// z-target new\n')
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const p = await s.workspace.dir('f6', 'proj')
+      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
+      // An END with no open BEGIN: bp_marker_structure calls this `bad`, so
+      // the target refuses regardless of content diff (pull-behaviour #4's
+      // pattern) — this is the "unbalanced #BLUEPRINT:BEGIN marker" the
+      // review recipe names.
+      await s.fs.write(join(p, 'scripts/lib/z-target.mts'), '// z-target old\n// BLUEPRINT:END\n')
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(
+        await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
+        `a full pull landed a-adapter.sh sourcing a z-target.mts the project ` +
+          `never got — its dependency's own refusal must hold it back too:\n${r.output}`,
+      ).toContain('a-adapter old')
+      expect(r.output, 'no skip line named the held-back adapter').toMatch(
+        /skipped\s+scripts\/lib\/a-adapter\.sh.*scripts\/lib\/z-target\.mts/,
+      )
+      expect(await shaOf(p), 'bootstrap_sha advanced despite a refused dependency').toBe(first)
+      expect(r.code, `a held-back file must still exit 4:\n${r.output}`).toBe(4)
+    })
+  })
+
+  it('#7 two libs naming each other terminate the closure and both still pull', async () => {
+    await scenario('pull-behaviour-7', async (s) => {
+      const bp = await s.workspace.dir('f7', 'bp')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await s.fs.write(
+        join(bp, 'scripts/blueprint'),
+        ['#!/bin/sh', '# fixture cli shim (TASK-081 slice 6, cycle case)', 'lib="scripts/lib/lib-p.sh"', '. "$lib"', ''].join('\n'),
+      )
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(
+        join(bp, 'scripts/lib/lib-p.sh'),
+        ['#!/bin/sh', 'q="scripts/lib/lib-q.sh"', '. "$q"', 'echo "p new"', ''].join('\n'),
+      )
+      await s.fs.write(
+        join(bp, 'scripts/lib/lib-q.sh'),
+        ['#!/bin/sh', 'p="scripts/lib/lib-p.sh"', '. "$p"', 'echo "q new"', ''].join('\n'),
+      )
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      const p = await s.workspace.dir('f7', 'proj')
+      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(join(p, 'scripts/lib/lib-p.sh'), 'echo "p old"\n')
+      await s.fs.write(join(p, 'scripts/lib/lib-q.sh'), 'echo "q old"\n')
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(r.code, `a mutual pair with no refusal must still exit 0:\n${r.output}`).toBe(0)
+      expect(await readFile(join(p, 'scripts/lib/lib-p.sh'), 'utf8'), `lib-p.sh was dropped from the cycle:\n${r.output}`).toContain(
+        'p new',
+      )
+      expect(await readFile(join(p, 'scripts/lib/lib-q.sh'), 'utf8'), `lib-q.sh was dropped from the cycle:\n${r.output}`).toContain(
+        'q new',
+      )
+    })
+  })
+})

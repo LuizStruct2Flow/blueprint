@@ -553,3 +553,197 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
     })
   })
 })
+
+/**
+ * TASK-081 slice 6, round 2 (Vitali review of e943ae5/2a7d720/4247967/1d6c2a3).
+ * #6/#7/#8 above all reproduce with the CLI itself missing from the project
+ * (`scripts/blueprint` absent), which forces `files.some(namesCli)` true and
+ * therefore runs the whole closure/hold-back machinery. Once a project's CLI
+ * is byte-identical to the blueprint's — the steady state after any project
+ * has been ported once — the full-pull default scan never selects
+ * `scripts/blueprint` or `scripts/blueprint.mts`, `namesCli` is false for
+ * every file, and NONE of the dependency analysis in `cmdPull` ran: a lib
+ * that gained a dependency on something absent, refused, declined or failed
+ * landed with no skip line, exit 0, bootstrap_sha advanced.
+ */
+describe('TASK-081 slice 6 round 2 — the dependency analysis runs even when the CLI is already current', () => {
+  /** scripts/blueprint and scripts/blueprint.mts, byte-identical in bp and p, so a full pull never selects either. */
+  async function identicalCli(s: Scenario, bp: string, p: string) {
+    const shim = ['#!/bin/sh', '# fixture cli shim, already current on both sides', 'exit 0', ''].join('\n')
+    const mts = '// fixture mts placeholder, already current on both sides\n'
+    await s.fs.write(join(bp, 'scripts/blueprint'), shim)
+    await s.fs.write(join(bp, 'scripts/blueprint.mts'), mts)
+    await s.fs.write(join(p, 'scripts/blueprint'), shim)
+    await s.fs.write(join(p, 'scripts/blueprint.mts'), mts)
+  }
+
+  it('#9 a full pull with an already-current CLI still holds a lib back when its dependency is absent', async () => {
+    await scenario('pull-behaviour-9', async (s) => {
+      const bp = await s.workspace.dir('f9', 'bp')
+      const p = await s.workspace.dir('f9', 'proj')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await identicalCli(s, bp, p)
+      await s.fs.write(
+        join(bp, 'scripts/lib/a-adapter.sh'),
+        [
+          '#!/bin/sh',
+          '# scripts/lib/a-adapter.sh — fixture adapter with an absent hard dependency (round 2)',
+          'target="scripts/lib/z-missing.mts"',
+          '. "$target"',
+          'echo "a-adapter new"',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(
+        await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
+        `a full pull with an already-current CLI landed a-adapter.sh even ` +
+          `though its explicit dependency does not exist in the blueprint:\n${r.output}`,
+      ).toContain('a-adapter old')
+      expect(r.output, 'the absent dependency was never attempted').toMatch(
+        /skip\s+scripts\/lib\/z-missing\.mts\s+\(not in blueprint\)/,
+      )
+      expect(r.output, 'no skip line named the held-back adapter').toMatch(
+        /skipped\s+scripts\/lib\/a-adapter\.sh.*scripts\/lib\/z-missing\.mts/,
+      )
+      expect(await shaOf(p), 'bootstrap_sha advanced despite an absent dependency').toBe(first)
+      expect(r.code, `a held-back file must still exit 4:\n${r.output}`).toBe(4)
+    })
+  })
+
+  it('#10 a full pull with an already-current CLI strands a lib adapter before its refused target', async () => {
+    await scenario('pull-behaviour-10', async (s) => {
+      const bp = await s.workspace.dir('f10', 'bp')
+      const p = await s.workspace.dir('f10', 'proj')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      await identicalCli(s, bp, p)
+      await s.fs.write(
+        join(bp, 'scripts/lib/a-adapter.sh'),
+        [
+          '#!/bin/sh',
+          '# scripts/lib/a-adapter.sh — fixture adapter (round 2)',
+          'target="scripts/lib/z-target.mts"',
+          '. "$target"',
+          'echo "a-adapter new"',
+          '',
+        ].join('\n'),
+      )
+      await s.fs.write(join(bp, 'scripts/lib/z-target.mts'), '// z-target new\n')
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
+      // An END with no open BEGIN: the target refuses regardless of content
+      // diff (pull-behaviour #4's / #6's pattern).
+      await s.fs.write(join(p, 'scripts/lib/z-target.mts'), '// z-target old\n// BLUEPRINT:END\n')
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+
+      expect(
+        await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
+        `a full pull with an already-current CLI landed a-adapter.sh sourcing ` +
+          `a z-target.mts the project never got — its dependency's own refusal ` +
+          `must hold it back too:\n${r.output}`,
+      ).toContain('a-adapter old')
+      expect(r.output, 'no skip line named the held-back adapter').toMatch(
+        /skipped\s+scripts\/lib\/a-adapter\.sh.*scripts\/lib\/z-target\.mts/,
+      )
+      expect(await shaOf(p), 'bootstrap_sha advanced despite a refused dependency').toBe(first)
+      expect(r.code, `a held-back file must still exit 4:\n${r.output}`).toBe(4)
+    })
+  })
+
+  it('#11 a NAMED pull of only the depending lib holds it back when its dependency is absent, CLI untouched', async () => {
+    await scenario('pull-behaviour-11', async (s) => {
+      const bp = await s.workspace.dir('f11', 'bp')
+      const p = await s.workspace.dir('f11', 'proj')
+      await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
+      // The CLI is not named on the pull command line at all here — this
+      // case's point is that a NAMED pull of just the lib gets the same
+      // dependency check, with no CLI involvement whatsoever.
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
+      await s.fs.write(
+        join(bp, 'scripts/lib/a-adapter.sh'),
+        [
+          '#!/bin/sh',
+          '# scripts/lib/a-adapter.sh — fixture adapter with an absent hard dependency (named pull)',
+          'target="scripts/lib/z-missing.mts"',
+          '. "$target"',
+          'echo "a-adapter new"',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, bp)
+      await git(s, bp, ['add', '-A'])
+      await git(s, bp, ['commit', '-q', '-m', 'one'])
+      const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+      await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
+      await s.fs.write(
+        join(p, '.blueprint-source'),
+        [
+          'config_version   = 2',
+          `blueprint_remote = ${bp}`,
+          'blueprint_branch = main',
+          `bootstrap_sha    = ${first}`,
+          'bootstrap_date   = 2026-01-01',
+          '',
+        ].join('\n'),
+      )
+      await initRepo(s, p)
+      await git(s, p, ['add', '-A'])
+      await git(s, p, ['commit', '-q', '-m', 'init'])
+
+      const r = await s.run(CLI, ['pull', '--yes', 'scripts/lib/a-adapter.sh'], { cwd: p })
+
+      expect(
+        await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
+        `a named pull landed a-adapter.sh even though its explicit dependency ` +
+          `does not exist in the blueprint:\n${r.output}`,
+      ).toContain('a-adapter old')
+      expect(r.output, 'no skip line named the held-back adapter').toMatch(
+        /skipped\s+scripts\/lib\/a-adapter\.sh.*scripts\/lib\/z-missing\.mts/,
+      )
+      expect(r.code, `a held-back file must still exit 4:\n${r.output}`).toBe(4)
+    })
+  })
+})

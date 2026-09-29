@@ -535,7 +535,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
-  it('#12 TASK-021: every relative link in the delivered root CLAUDE.md and README.md resolves', async () => {
+  it('#12 TASK-021: every relative link in the delivered root CLAUDE.md, README.md and AGENT_SIGNAL.md resolves', async () => {
     await scenario('bootstrap-contents-12', async (s) => {
       const { derived } = await build(s)
 
@@ -543,7 +543,8 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       // checked nowhere. Judged where they are delivered: a real bootstrap.
       let examined = 0
       const broken: string[] = []
-      for (const f of ['CLAUDE.md', 'README.md']) {
+      // AGENT_SIGNAL.md since TASK-084: it carries the coordination protocol.
+      for (const f of ['CLAUDE.md', 'README.md', 'AGENT_SIGNAL.md']) {
         for (const target of relativeLinkTargets(await readFile(join(derived, f), 'utf8'))) {
           examined++
           if (target.startsWith('/') || !(await s.fs.exists(join(derived, target)))) broken.push(`${f} -> ${target}`)

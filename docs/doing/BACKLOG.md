@@ -25,9 +25,13 @@ at every depth and propagates a refused or explicitly missing dependency to
 its depender, while keeping incidental textual mentions out of the hard-edge
 graph. Full suite (75 files / 1377
 tests), typecheck, and the release tier (`bootstrap-gate`, `a2bp-e2e`) all
-green before that follow-up; Claude re-review and the affected/full checks are
-pending before push. This item does not move to `waiting-acceptance/` until
-that review and the push land. |
+green before that follow-up. Claude's first re-review fixed full-pull ordering
+for present dependencies (`2a7d720`, `4247967`); Codex's round-2 review then
+found that an explicitly named dependency absent from the archive was still
+never attempted on a full pull, and fixed that in `1d6c2a3`, `8e81cf9`.
+Cross-provider re-review and the affected/full checks are pending before push.
+This item does not move to `waiting-acceptance/` until that review and the push
+land. |
 
 ## TASK-012 — how to run it, and why not a fork
 

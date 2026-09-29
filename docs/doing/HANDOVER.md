@@ -121,10 +121,14 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-29 cut. TASK-084 is in flight: slice 1 is released;
-slice 2 is committed locally and its Codex four-eyes review found and fixed a
-partial-pull guard. The Orchestrator owns the final review and push. TASK-081
-is released and waits for the founder's acceptance.**
+**State at the 2026-09-29 evening pause (founder: "I want all activities
+paused in 60 minutes, please be sure that the handover is done"). Nothing is
+running: no agent is dispatched, the mic is with the Orchestrator, and every
+commit is pushed. TASK-084 slices 1 and 2 are on `main` (slice 2 ends at
+`416bcd1`, reviewed CLEAN-after-fix by Alexey, gate green; its CI run
+36607917937 was still in the suites at the pause — check it first, and check
+that `released` reached `416bcd1` or later). TASK-081 is released and waits for
+the founder's acceptance.**
 
 **TASK-081 (the `scripts/blueprint` port) — RELEASED at `8893e14`, waiting for
 acceptance** (row and plan in `docs/waiting-acceptance/`). `scripts/blueprint`
@@ -181,11 +185,22 @@ no such cycle exists (checked 2026-09-29).
 
 **Next, in order:**
 1. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): slice 1 is
-   released at `a2e3bdf`. Slice 2's instruction-file switch is in `1dbfd5f`
-   and `aeaf755`; its Codex review fix is the current tip. The Orchestrator
-   reviews and pushes that range, waits for the release, then starts slice 3.
-   The slice log and remaining work are in
-   [`PLAN-TASK-084-agents-md.md`](PLAN-TASK-084-agents-md.md).
+   released at `a2e3bdf`; slice 2 is pushed (`1dbfd5f`, `aeaf755`, `416bcd1`).
+   In this order:
+   - **If slice 2's CI is red**, fix that first; derived projects pull
+     `released`, so nothing reaches them meanwhile.
+   - **The per-provider live probe** (plan §"Slice log", slice 2): in a
+     project bootstrapped OUTSIDE the blueprint tree (Claude's ancestor walk
+     would otherwise load this repo's `CLAUDE.md`), ask each of Claude, Codex,
+     Kimi and Gemini to quote S1, S3 and one phrase that only a
+     `project_config_*.md` file holds; then repeat on the §4 half-pulled
+     fixtures and confirm each CLI stops and names the file to pull. Gemini
+     may be out of quota — record it, do not wait on it.
+   - **Slice 3**: the reference sweep, plus the founder's two renames
+     (plan §9 decision 4): `CLAUDE.blueprint.md` → `AGENTS.blueprint.md`, and
+     `claude.internal.md` → `agents.internal.md` with the old name still
+     imported for one release. Then the row moves to `waiting-acceptance/`.
+   Plan: [`PLAN-TASK-084-agents-md.md`](PLAN-TASK-084-agents-md.md).
 2. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
    `contamination.sh`, then its fix) — both unblocked now that TASK-081 has
    landed; slice 6's closure brings a ported lib's `.mts` on a single-file pull.

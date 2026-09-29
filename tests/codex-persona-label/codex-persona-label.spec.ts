@@ -318,12 +318,13 @@ describe('BUG-021 — Codex output carries the persona that produced it', () => 
     })
   })
 
+  // The dispatch protocol moved from AGENTS.md to AGENT_SIGNAL.md with TASK-084.
   it('AGENTS.md no longer documents a hardcoded Claude Code hand-back (TASK-061)', async () => {
-    const agentsMd = await code(join(SUBJECT, 'AGENTS.md'))
-    expect(agentsMd, 'AGENTS.md still says the hand-back Holder is literally "Claude Code"').not.toMatch(
+    const agentsMd = await code(join(SUBJECT, 'AGENT_SIGNAL.md'))
+    expect(agentsMd, 'AGENT_SIGNAL.md still says the hand-back Holder is literally "Claude Code"').not.toMatch(
       /Holder=Claude Code \/ State=OVER_TO_CLAUDE/,
     )
-    expect(agentsMd, 'AGENTS.md does not explain the Holder is the Orchestrator’s roster name').toMatch(
+    expect(agentsMd, 'AGENT_SIGNAL.md does not explain the Holder is the Orchestrator’s roster name').toMatch(
       /Orchestrator.{0,40}roster name/,
     )
   })

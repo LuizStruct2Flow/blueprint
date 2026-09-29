@@ -248,8 +248,9 @@ A configurable team of **named personas**, each backed by whichever agent you ac
 <!--
 Roster & identity: per-engineer `AGENT_ROSTER.md` (gitignored, copied from
 tracked `AGENT_ROSTER.example.md` on the `.env` model — your fleet is not your
-teammate's); coordinated via `AGENTS.md` + the live baton `logs/state/signal.md`
-(protocol in `AGENT_SIGNAL.md`). Every reader resolves identity through one
+teammate's); every CLI provider (Claude Code, Codex, Kimi, Gemini) works from
+the shared rules in `AGENTS.md`, and coordinates through the live baton
+`logs/state/signal.md` by the protocol in `AGENT_SIGNAL.md` (TASK-084). Every reader resolves identity through one
 parser (`scripts/lib/roster.sh`); `--whoami` prints who a session thinks it is
 and which roster said so. Until BUG-010 the names were literals inside the
 scripts, so renaming did nothing and one fleet's names shipped to every
@@ -466,16 +467,17 @@ cannot break it, and it never overwrites a command it did not write.
 What's managed, in detail: the managed set is derived from the blueprint's
 `git archive`, minus the seeds a project owns, so bootstrap and pull deliver
 the same files by construction and `.gitattributes` alone decides (TASK-021).
-That is `CLAUDE.md`, `DoD.md`, every recipe doc, the agent scripts, the
-pre-push hook, `AGENT_SIGNAL.md` — and the shipped `tests/` suites, because a
+That is `AGENTS.md` with its importers `CLAUDE.md` and `GEMINI.md`, `DoD.md`,
+every recipe doc, the agent scripts, the pre-push hook, `AGENT_SIGNAL.md` — and
+the shipped `tests/` suites, because a
 suite that guards managed machinery has to move forward with the machinery it
 guards. What maintains the blueprint itself — this deck, the brand, the a2bp
 implementer's playbook, `CLAUDE.blueprint.md` — does not ship.
 
 What's not managed, in detail: `project_config_*.md` are templates seeded
-once at bootstrap, then drift on purpose; `CLAUDE.md` `@`-imports all five, so
-project rules reach every Claude Code session — agents on other providers
-read them by instruction. Also not managed: `README.md`, `.gitignore`,
+once at bootstrap, then drift on purpose; `AGENTS.md` lists all five, so
+Claude Code and Gemini `@`-import them into every session and Codex and Kimi
+open them by instruction. Also not managed: `README.md`, `.gitignore`,
 `BUGS.md`, `HANDOVER.md`, all source code.
 
 Two things that only work together: sync creates and updates. The project
@@ -959,7 +961,8 @@ the same week one project learned it.
 # Where to read more
 
 - `README.md` — what's in the blueprint, how to spawn a project
-- `CLAUDE.md` — long-form agent protocol
+- `AGENTS.md` — the shared agent rules, read by every CLI provider
+- `AGENT_SIGNAL.md` — the coordination protocol: mic, rotation, four-eyes review
 - `docs/DoD.md` — Definition of Done (the handoff gate)
 - `STACK_DEFAULTS.md` — architecture + stack defaults
 - `docs/OBSERVABILITY.md` — MALT recipes per runtime

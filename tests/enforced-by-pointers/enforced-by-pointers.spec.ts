@@ -144,10 +144,11 @@ describe('enforced-by pointers — every `enforced by: tests/<suite> "<title>"` 
     )
 
     // Non-vacuity floor (BUG-005 shape): a scan that finds zero pointers
-    // proves nothing. Measured today (TASK-062 goal d): 9 — 2 in CLAUDE.md,
-    // 7 in docs/DoD.md, 0 in AGENTS.md (its one "enforced by" hit names no
-    // suite and is correctly not a pointer). Every wave-1 task this epic
-    // schedules adds one more.
+    // proves nothing. Measured 2026-09-29 (TASK-084 slice 2): 9 — 2 in
+    // AGENTS.md (moved there from CLAUDE.md with the shared rules), 7 in
+    // docs/DoD.md, 0 in CLAUDE.md, 0 in AGENT_SIGNAL.md (its one "enforced by"
+    // hit names no suite and is correctly not a pointer). Every wave-1 task
+    // this epic schedules adds one more.
     expect(
       scan.pointers.length,
       `only ${scan.pointers.length} pointer(s) found — the extractor is probably broken`,

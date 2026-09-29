@@ -24,8 +24,10 @@ upstream so every other project inherits it.
   identity — keyed by **role**, so renaming someone is one cell — and every
   script resolves through it; `scripts/agent-activity.sh --whoami` reports who
   a session is and which roster said so. The default team is 15 personas; edit
-  the roster to fit your agents and credits. See [AGENTS.md](AGENTS.md) for the
-  protocol and `scripts/agent-activity.sh` for a live `[Persona - Agent]` feed.
+  the roster to fit your agents and credits. See [AGENT_SIGNAL.md](AGENT_SIGNAL.md)
+  for the protocol, [AGENTS.md](AGENTS.md) for the shared rules every CLI
+  provider works from, and `scripts/agent-activity.sh` for a live
+  `[Persona - Agent]` feed.
 - **The blueprint evolves with every project.** Patterns proven in
   production travel back upstream via `blueprint a2bp`; every project —
   current *and* future — gets every improvement within the same week
@@ -44,7 +46,7 @@ upstream so every other project inherits it.
 | **Observability (MALT)** — Monitoring · Alerting · Logging · Tracing | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | — |
 | **Security** — secret-scan, SAST, SCA, IaC scan, DAST | [docs/SECURITY.md](docs/SECURITY.md) | gitleaks · semgrep · osv-scanner |
 | **Infrastructure as Code** — defined, reviewable, reproducible | [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | cdk synth / terraform / helm lint |
-| **Cost** — billable paths capped, logged, alerted; backlog-replay opt-in | [CLAUDE.md §"Cost is a main concern"](CLAUDE.md) | — |
+| **Cost** — billable paths capped, logged, alerted; backlog-replay opt-in | [AGENTS.md §"Cost is a main concern"](AGENTS.md) | — |
 | **Documentation** — internal + external, same-commit rule | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) + [docs/DoD.md §5](docs/DoD.md) | per-project grep hints in `pre-push-project` |
 
 ## Status
@@ -80,9 +82,10 @@ After bootstrap:
    `check` to report what is present without installing anything)
 4. Fill out `project_config_overview.md`, `project_config_paths.md`,
    `project_config_dod.md`, `project_config_security.md`,
-   `project_config_infra.md` (`CLAUDE.md` `@`-imports all five, so their content
-   is in every **Claude Code** session; agents on other providers read them by
-   instruction, not automatically)
+   `project_config_infra.md` (`AGENTS.md` lists all five: **Claude Code** and
+   **Gemini** `@`-import them into every session through `CLAUDE.md` and
+   `GEMINI.md`, while Codex and Kimi open them by instruction, not
+   automatically)
 5. Start adding code under `backend/`, `frontend/`, etc.
 6. Optional: **append** your project-specific guards to
    `.githooks/pre-push-project`, **after the `BLUEPRINT:END` marker**.
@@ -106,10 +109,11 @@ After bootstrap:
 ```
 blueprint/
 ├── README.md                       ← this file
-├── CLAUDE.md                       ← generic agent protocol (uses {{PROJECT_NAME}})
+├── AGENTS.md                       ← the shared agent rules all four CLI providers read
+├── CLAUDE.md                       ← imports AGENTS.md; plus Claude Code's own wake and hooks
+├── GEMINI.md                       ← imports AGENTS.md for Gemini
 ├── CLAUDE.blueprint.md             ← blueprint maintenance: trunk, a2bp integration, deck (not shipped)
-├── AGENTS.md                       ← Codex wake-up rules
-├── AGENT_SIGNAL.md                 ← signal template (Task field is a stub)
+├── AGENT_SIGNAL.md                 ← the coordination protocol: mic, rotation, four-eyes review
 ├── STACK_DEFAULTS.md               ← default tech stack for new struct2flow projects
 ├── project_config_overview.md      ← project-specific overview (stub)
 ├── project_config_paths.md         ← project-specific paths / URLs (stub)
@@ -332,7 +336,8 @@ Nobody keeps a list. The managed set is **derived**: every file the blueprint's
 and pull deliver the same set by construction, and `.gitattributes` alone
 decides what ships. Run `blueprint files` to print it. Current contents include:
 
-- **Top-level:** `CLAUDE.md`, `AGENTS.md`, `STACK_DEFAULTS.md`
+- **Top-level:** `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `AGENT_SIGNAL.md`,
+  `STACK_DEFAULTS.md`
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`
 - **`scripts/`:** `install-toolchain.sh`, `signal-watch.sh`,
@@ -373,7 +378,6 @@ decides what ships. Run `blueprint files` to print it. Current contents include:
   and survives every pull. It used to be excluded wholesale, which was right
   about the bottom and wrong about the top: the blueprint kept adding suites
   that no derived gate could invoke (BUG-029)
-- `AGENT_SIGNAL.md` — stamped at bootstrap, then evolves session-by-session
 - `docs/doing/HANDOVER.md`, `docs/backlog/BACKLOG.md`, `docs/backlog/BUGS.md` —
   seeded from `templates/` at bootstrap (the blueprint's own copies hold its
   real work and are export-ignore'd), then evolve session-by-session
@@ -393,8 +397,8 @@ placeholder, document it here AND extend the substitution loop in
 Current placeholders:
 - `{{PROJECT_NAME}}` — kebab-case project name, used in `~/.{{NAME}}/`
   log paths and protocol preambles.
-- `{{YYYY-MM-DD}}` — today's date, used in `AGENT_SIGNAL.md` and
-  `HANDOVER.md` "Last updated" lines.
+- `{{YYYY-MM-DD}}` — today's date, used in `HANDOVER.md` "Last updated"
+  lines.
 - `{{REPO_PATH}}` — absolute path to the project root, used in
   `AGENTS.md` example invocations. (Currently left as a placeholder
   string; the agent fills it on first session.)
@@ -450,6 +454,6 @@ hard-code such content will be asked to refactor.
   than blocking, so a green gate on an unprepared machine has checked less.
 - `.githooks/pre-push` to run the full gate locally (security +
   build + lint + format + tests + IaC validate).
-- For any change to [docs/DoD.md](docs/DoD.md), [CLAUDE.md](CLAUDE.md),
+- For any change to [docs/DoD.md](docs/DoD.md), [AGENTS.md](AGENTS.md),
   or a recipe doc, follow `CLAUDE.blueprint.md`: the deck and every other
   document that restates the rule move in the same commit.

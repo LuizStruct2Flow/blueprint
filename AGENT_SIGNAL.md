@@ -1,12 +1,10 @@
 # Agent Signal — the mic, rotation and four-eyes review
 
 Canonical rules for how the team agents — **Codex, Claude Code, Gemini, Kimi and
-GitHub Copilot** — coordinate in this repo. The live state is the slim baton in
-[AGENT_SIGNAL.md](AGENT_SIGNAL.md) (the protocol) and the LIVE baton at
+GitHub Copilot** — coordinate in this repo. The live state is the LIVE baton at
 `logs/state/signal.md` (untracked, written only by `scripts/signal-set.sh` —
-BUG-019); **this file is the
-protocol** (how the radio works). `CLAUDE.md` points here rather than duplicating
-it.
+BUG-019); **this file is the protocol** (how the radio works). `AGENTS.md`, the
+shared rules every provider reads, points here rather than duplicating it.
 
 Watch every agent live in one place: `bash scripts/agent-activity.sh --daemon`,
 then `tail -F logs/agent-activity.log`. One tail-able
@@ -71,9 +69,10 @@ substantive work:
 - `logs/state/signal.md` — the LIVE baton: current holder, state, handoff task.
   **Untracked** per-checkout state, so a branch operation cannot rewrite it
   under a running dispatch (BUG-019). Written ONLY via `scripts/signal-set.sh`.
-- `AGENT_SIGNAL.md` — the protocol itself. Tracked, and carries no live state.
-- `AGENTS.md` (this file) — the coordination protocol.
-- `CLAUDE.md` — shared project rules and delivery process.
+- `AGENT_SIGNAL.md` (this file) — the coordination protocol. Tracked, and
+  carries no live state.
+- `AGENTS.md` — shared project rules and delivery process, and the list of this
+  project's config files to open.
 - `docs/config/*.md` — stable product, acceptance, and findings context.
 - `docs/doing/*.md` — active bugs, backlog items, and plans.
 - `docs/waiting-acceptance/*.md` — pushed work awaiting founder acceptance.
@@ -105,7 +104,8 @@ After confirming the mic is available, claim it by updating:
 
 - `Holder` — the **persona** that owns the mic: a `Name` cell from
   your `AGENT_ROSTER.md` (template:
-  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)), or `User`. Use the
+  [AGENT_ROSTER.example.md](AGENT_ROSTER.example.md)), or `Nobody` when the
+  mic is free — nothing else (§"The protocol", BUG-140). Use the
   persona name, NOT the bare backing-agent type — that is what lets multiple
   sessions on the same backing agent (e.g. several Claude Code personas) coexist
   without colliding. Each session acts only when `Holder` is its own persona.
@@ -510,6 +510,9 @@ headless Kimi CLI on each flip to `OVER_TO_KIMI`. Output lands in
   `Kimi models, best first:` line, not from a provider cache. Kimi's own
   `config.toml` lists the models it has but does not rank them, so the ordering
   is a fleet decision and lives where fleet decisions live.
+- **Kimi's "AGENTS.md total exceeds 32 KB" warning never reaches a headless
+  agent** — it goes to a session-warnings channel `-p` does not show. The
+  byte cap on `AGENTS.md` (`tests/instruction-files`) is the guard that fires.
 
 ## GitHub Copilot (notify-only)
 

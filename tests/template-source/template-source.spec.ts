@@ -55,7 +55,7 @@ const CONFIGS = [
 ] as const
 
 /**
- * The sixth import, and the one file CLAUDE.md imports that bootstrap
+ * The sixth import, and the one file AGENTS.md imports that bootstrap
  * DELIBERATELY never seeds (TASK-046).
  *
  * It is project-owned: no bootstrap writes one, `blueprint pull` cannot replace
@@ -93,20 +93,30 @@ async function archiveListing(s: Scenario): Promise<string[]> {
   return r.stdout.split('\n').filter(Boolean)
 }
 
-describe('TASK-043 — CLAUDE.md imports the five project configs, and only those plus two', () => {
-  it('#import-1 the @-imports are the seeded configs plus the unseeded project-owned file and the blueprint-only one, and the root copies exist', async () => {
-    const doc = await readFile(join(REPO_ROOT, 'CLAUDE.md'), 'utf8')
-    // Claude Code ignores code blocks and code spans when it looks for imports, so this does too.
-    const prose = doc.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
-    const imports = [...prose.matchAll(/(?:^|\s)@([^\s\\]+)/g)].map((m) => m[1])
+/** The `@` imports of a root instruction file, as Claude Code and Gemini see them. */
+async function importsOf(file: string): Promise<string[]> {
+  const doc = await readFile(join(REPO_ROOT, file), 'utf8')
+  // Claude Code ignores code blocks and code spans when it looks for imports, so this does too.
+  const prose = doc.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+  return [...prose.matchAll(/(?:^|\s)@([^\s\\]+)/g)].map((m) => m[1] ?? '').sort()
+}
 
+// TASK-084 moved the import list from CLAUDE.md into AGENTS.md, so Gemini (via
+// GEMINI.md) gets it too and Codex/Kimi read it as an instruction.
+describe('TASK-043 — AGENTS.md imports the five project configs, and only those plus two', () => {
+  it('#import-1 the @-imports are the seeded configs plus the unseeded project-owned file and the blueprint-only one, and the root copies exist', async () => {
     // Exact equality, deliberately not a superset check. "imports ⊇ CONFIGS"
     // would stay green over a bootstrap that silently stopped seeding one, and
     // an unexplained sixth import is exactly what this case caught last time.
     expect(
-      imports.sort(),
-      `CLAUDE.md must import the five seeded configs plus ${UNSEEDED_IMPORT} and ${BLUEPRINT_ONLY_IMPORT}, and nothing else`,
+      await importsOf('AGENTS.md'),
+      `AGENTS.md must import the five seeded configs plus ${UNSEEDED_IMPORT} and ${BLUEPRINT_ONLY_IMPORT}, and nothing else`,
     ).toEqual([...CONFIGS, UNSEEDED_IMPORT, BLUEPRINT_ONLY_IMPORT].sort())
+    // The two importers carry nothing of their own: a second import there
+    // would load for one provider only, which is the split TASK-084 removed.
+    for (const importer of ['CLAUDE.md', 'GEMINI.md']) {
+      expect(await importsOf(importer), `${importer} must import exactly AGENTS.md`).toEqual(['AGENTS.md'])
+    }
     await expect(readFile(join(REPO_ROOT, BLUEPRINT_ONLY_IMPORT), 'utf8'), `${BLUEPRINT_ONLY_IMPORT} is missing`).resolves.toBeTruthy()
 
     // CONFIGS only: UNSEEDED_IMPORT has no root copy to require — whether this

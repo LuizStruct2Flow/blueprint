@@ -15,10 +15,11 @@ README, the lifecycle folders, `docs/config/**`), so the next such document need
 no new line. The managed set is the archive, so a file that stops shipping is
 offered for retirement to projects that hold an unedited copy.
 
-**Where a rule goes:** a rule a project follows goes in `CLAUDE.md`, `docs/DoD.md`
-or a recipe doc. A rule about maintaining the blueprint goes here. A shipped file
+**Where a rule goes:** a rule a project follows goes in `AGENTS.md`, `docs/DoD.md`
+or a recipe doc; `CLAUDE.md` takes only what binds Claude Code alone (TASK-084).
+A rule about maintaining the blueprint goes here. A shipped file
 must not link to anything that does not ship: `tests/bootstrap-contents` #12
-checks the root `CLAUDE.md` and `README.md` of a real bootstrap, and
+checks the root instruction files and `README.md` of a real bootstrap, and
 `tests/bootstrap-gate` runs `doc-links` over its `docs/`.
 
 **The root `project_config_*.md` files are THIS repo's own config and do not
@@ -164,7 +165,7 @@ is not regenerated per change. The concerns the deck mirrors:
 6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
 7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
 8. Documentation (`docs/DOCUMENTATION.md` + DoD §5)
-9. Persona team (radio-over — `AGENTS.md` protocol + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
+9. Persona team (radio-over — `AGENT_SIGNAL.md` protocol + the shared rules every CLI provider reads in `AGENTS.md` + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
 10. Blueprint sync (CLAUDE.md §"Blueprint sync" + this file + README.md §"The sync model" + `scripts/blueprint`)
 
 In the same commit as a concern change:

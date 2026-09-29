@@ -1704,6 +1704,7 @@ const UNREGISTERED_MARKERS: readonly string[] = [
   'AGENT_SIGNAL.md',
   'AGENTS.md',
   'CLAUDE.md',
+  'GEMINI.md',
   'STACK_DEFAULTS.md',
   'scripts/install-toolchain.sh',
   '.githooks/pre-push',

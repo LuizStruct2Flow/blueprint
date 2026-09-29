@@ -3,9 +3,10 @@
 **Status: v2, revised to the three-provider review and the founder's decisions
 of 2026-09-29. Ready for implementation.** Written by Christian (Architect-1,
 Claude). Reviewed by Markus (Claude), Alexey (Codex) and Slava (Kimi), all
-APPROVE-WITH-CHANGES (§"Review synthesis"). **Slice 1 is released; slice 2 is
-committed** (§8, §"Slice log"), awaiting cross-provider review and the
-per-provider probe; slice 3 has not started. Row: [TASK-084](BACKLOG.md).
+APPROVE-WITH-CHANGES (§"Review synthesis"). **Slices 1 and 2 are pushed**
+(§8, §"Slice log"); slice 2 passed Alexey's cross-provider review, and the
+per-provider live probe is still to run. Slice 3 has not started and now
+carries the two renames of §9 decision 4. Row: [TASK-084](BACKLOG.md).
 
 The row asks for one thing: the providers work from the same rules. Today
 they do not. **Scope: the four autonomous CLI providers — Claude Code, Codex,
@@ -461,6 +462,10 @@ only gain would be a name that no longer says "Claude". Not worth a slice.
 **Its export-ignore line and both halves of its contract are unchanged**
 (bootstrap-contents #11: the import arrives, the file does not).
 
+**Superseded by §9 decision 4 (founder, 2026-09-29): both are renamed in slice
+3.** The paragraphs above record the plan as reviewed; the decision below is
+what slice 3 implements.
+
 ---
 
 ## 7. Ripples (`CLAUDE.blueprint.md`'s deck rule)
@@ -594,6 +599,8 @@ covers.
 ### Slice 3: the reference sweep
 
 - Every slice-3 row of §5 and §7.
+- The two renames of §9 decision 4, including the one-release import of the
+  old `claude.internal.md` name.
 - **Proof:**
   - the full suite;
   - `git grep` finds no `CLAUDE.md §"<heading that moved>"` outside the
@@ -626,6 +633,17 @@ is the founder's.
    slice 1 remains a supported release boundary, not a half-applied switch.
 3. **Scope: the four autonomous CLI providers**, Claude Code, Codex, Kimi and
    Gemini. The notify-only GitHub Copilot is outside this item.
+4. **Both Claude-named companions are renamed in slice 3** (founder, asked
+   "we need a similar for agents, don't we?", then "yep"):
+   - `CLAUDE.blueprint.md` → `AGENTS.blueprint.md`. Blueprint-only: its
+     `.gitattributes` export-ignore line, the import in `AGENTS.md`, the
+     suites that name it (bootstrap-contents #11, template-source) and every
+     reference in this repo's docs move with it.
+   - `claude.internal.md` → `agents.internal.md`, **with the old name still
+     imported for one release** so a project that already created one is
+     not orphaned. `AGENTS.md` imports both, the new name first; the old
+     import and its note are removed in the release after. No project has
+     one today, but the contract does not rely on that (§6).
 
 ### Assumptions not verified
 

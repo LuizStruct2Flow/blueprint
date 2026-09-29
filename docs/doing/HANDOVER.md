@@ -121,9 +121,9 @@ to hold pushes until Codex returned or waive the review, the founder chose
 round-2 fixes instead. It is not a standing waiver, and it covered only that
 afternoon's batch.
 
-**State at the 2026-09-28 cut (~20:00Z). PAUSED by the founder for the
-night; nothing is running. The mic is with the Orchestrator. Resume TASK-081
-slice 5's last checks first.**
+**State at the 2026-09-29 cut. TASK-081 slice 6 landed on `main`, not pushed.
+The mic is with the Orchestrator. Get Codex review of the whole diff since
+`3ef85dc`, then push.**
 
 **TASK-081 (the `scripts/blueprint` port) — where it stands.** Author:
 Matthias (Claude) per slice; reviewer Andreas (Codex), as the row requires.
@@ -160,12 +160,15 @@ deleted.
   If all green, push all five commits (b2de45e..3ef85dc plus this handover
   commit) and watch CI: this is the push that switches every derived project to
   the port on its next pull.
-- **Then slice 6** (plan §8 row 6), on `main`, reproducer first: a
-  `managed-references` case where a fixture blueprint's `scripts/lib/gate.sh`
-  is an adapter naming `gate.mts`, an old project pulls only
-  `scripts/blueprint`, and its own `drift` must exit 0; red, then the closure
-  fix, green. Codex reviews before push. Then TASK-081 moves to
-  waiting-acceptance.
+- **Slices 1-6 landed on `main`, NOT PUSHED.** Slice 6 (plan §8 row 6):
+  reproducer `71227f6` (`managed-references` #6 — a fixture `scripts/lib/gate.sh`
+  adapter naming `gate.mts`, an old project pulling only `scripts/blueprint`,
+  red because `bpCliLibs` stopped after one hop), fix `265ff25` (`bpCliLibs`
+  walks a fixed point over every named lib's own text). Full suite (75/75,
+  1377 tests), typecheck, `bootstrap-gate` (8/8) and `a2bp-e2e` (22/22) all
+  green; a one-pass-cap mutant reddened the same assertion, reverted.
+  **Codex review of slice 6 (and the whole diff since `3ef85dc`) is pending
+  before push.** Then TASK-081 moves to waiting-acceptance.
 - **Traps for the next session:** the auto-mode classifier blocks `git merge`
   and overwriting a tracked file in a worktree without an explicit founder yes
   — ask, do not route around it; write agents' temp files in the project's
@@ -207,9 +210,9 @@ deleted.
   accordingly.
 
 **Next, in order:**
-1. **TASK-081 slice 5:** the four remaining host checks above, then push
-   b2de45e..HEAD and watch CI; then **slice 6** (reproducer first, Codex
-   review); then TASK-081 to waiting-acceptance.
+1. **TASK-081:** slices 1-6 all landed on `main`; get Codex review of slice 6
+   (and the whole diff since `3ef85dc`), then push and watch CI; then
+   TASK-081 to waiting-acceptance.
 2. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): the
    `CLAUDE.md` → `AGENTS.md` consolidation, plan first, reviewed by all three
    providers before any file moves.

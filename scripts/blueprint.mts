@@ -2035,16 +2035,20 @@ async function sortLibNames(names: Iterable<string>): Promise<string[]> {
   return nonEmptyLines(sortedR.stdout)
 }
 
-export async function bpCliLibClosure(): Promise<CliLibClosure> {
+// TASK-081 slice 6 round 2 (Vitali review) — the seeding half of
+// `bpCliLibClosure`, split out so the general dependency check in `cmdPull`
+// can seed the SAME fixed point from whatever libs a pull already selected,
+// without re-deriving the CLI's own sourced-lib scan (plan: reuse, not a
+// second scanner).
+function bpCliShimSeedNames(): Set<string> {
   let text: string
   try {
     text = readFileSync(bpBlueprintPath('scripts/blueprint'), 'utf8')
   } catch {
     // No scripts/blueprint at that path (a stripped fixture, or a caller that
     // never checked existence first) — every caller here already reads this
-    // as "no libs to bring along", the same answer an empty scan would give,
-    // so returning [] rather than throwing costs pull nothing.
-    return { files: [], needs: new Map() }
+    // as "no libs to bring along", the same answer an empty scan would give.
+    return new Set()
   }
   const names = new Set(extractShLibNames(text))
   // THE ONE BEHAVIOUR THIS PORT ADDS (plan §7). When the pulled CLI IS the
@@ -2061,6 +2065,17 @@ export async function bpCliLibClosure(): Promise<CliLibClosure> {
       // — nothing more to add; the shim's own needs (none) stand.
     }
   }
+  return names
+}
+
+// TASK-081 slice 6 round 2 — the fixed point itself, seeded from an arbitrary
+// set of lib basenames rather than always starting from the CLI's own
+// sourcing. `bpCliLibClosure` below seeds it from the CLI; `cmdPull` seeds it
+// from whatever `scripts/lib/*` files a pull (full or named) already
+// selected, so the SAME dependency-first ordering and absent/refused
+// hold-back apply whether or not the CLI itself is part of this pull.
+export async function bpLibClosureFromSeeds(seedNames: Iterable<string>): Promise<CliLibClosure> {
+  const names = new Set(seedNames)
   // SLICE 6 (plan §7) — the closure is a FIXED POINT, not one hop: any lib
   // already in the set may itself be a shim or a sourced adapter (the
   // dod-gate.sh shape BUG-152 will give scripts/lib/gate.sh) naming its own
@@ -2146,6 +2161,10 @@ export async function bpCliLibClosure(): Promise<CliLibClosure> {
     )
   }
   return { files: ordered, needs }
+}
+
+export async function bpCliLibClosure(): Promise<CliLibClosure> {
+  return bpLibClosureFromSeeds(bpCliShimSeedNames())
 }
 
 export async function bpCliLibs(): Promise<string[]> {
@@ -2381,48 +2400,68 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
   // (shim-follow) so does the .mts it names once scripts/blueprint IS the
   // shim: naming either alone brings both, never one without the other.
   const namesCli = (f: string): boolean => f === 'scripts/blueprint' || f === 'scripts/blueprint.mts'
+  const cliSelected = files.some(namesCli)
   let cliNeeds: string[] = []
   let cliUnmet: string[] = []
   let libNeeds: ReadonlyMap<string, readonly string[]> = new Map()
-  if (files.some(namesCli)) {
-    const rest = files.filter((f) => !namesCli(f))
-    const closure = await bpCliLibClosure()
-    const libs = closure.files
-    libNeeds = closure.needs
-    let cliNeedsStr = ' '
-    for (const lib of libs) {
-      cliNeedsStr += `${lib} `
-      // A full pull's managed-file scan cannot select a hard dependency that
-      // is absent from the blueprint archive. It must still be attempted so
-      // the miss enters `failedDependencies` before its depender; otherwise
-      // the depender lands even though the closure deliberately retained the
-      // absent name for hold-back. Named pulls already add every closure lib.
-      if (!rest.includes(lib) && (partial || !existsSync(bpBlueprintPath(lib)))) rest.push(lib)
+
+  // TASK-081 slice 6 round 2 (Vitali review) — this dependency analysis used
+  // to run ONLY when the CLI itself was selected (`if (files.some(namesCli))`
+  // guarded the whole block below). A full pull selects the CLI only when it
+  // differs from the project's copy, so once a project's CLI is already
+  // current — the steady state after any project has been ported once — a
+  // lib that gained a dependency on something absent, refused, declined or
+  // failed pulled through with no check at all. Seed the SAME fixed point
+  // (bpLibClosureFromSeeds, not a second scanner) from every `scripts/lib/*`
+  // file this pull already selected — full or named — plus, when the CLI IS
+  // selected, its own sourced-lib seed names, so the CLI still brings its
+  // whole closure along unconditionally (TASK-025). A pull with no lib
+  // dependency edges yields an empty closure and the loop below is a no-op,
+  // leaving `files`' order and every line of output exactly as before.
+  const rest = files.filter((f) => !namesCli(f))
+  const seedNames = new Set(
+    rest.filter((f) => f.startsWith('scripts/lib/')).map((f) => f.slice('scripts/lib/'.length)),
+  )
+  if (cliSelected) for (const n of bpCliShimSeedNames()) seedNames.add(n)
+  const closure = await bpLibClosureFromSeeds(seedNames)
+  const libs = closure.files
+  libNeeds = closure.needs
+  let cliNeedsStr = ' '
+  for (const lib of libs) {
+    if (cliSelected) cliNeedsStr += `${lib} `
+    // A full or named pull's file list cannot select a hard dependency that
+    // is absent from the blueprint archive, or that this pull didn't already
+    // name. It must still be attempted so the miss enters
+    // `failedDependencies` before its depender; otherwise the depender lands
+    // even though the closure deliberately retained the absent name for
+    // hold-back. A partial (named) pull already adds every closure lib.
+    if (!rest.includes(lib) && (partial || !existsSync(bpBlueprintPath(lib)))) rest.push(lib)
+  }
+  // TASK-081 slice 6 (Vitali review) — the closure's dependency-first order
+  // must land in `rest` for a FULL pull too, not only a partial one: on a
+  // full pull `rest` is every differing file from the default scan, in
+  // bpManagedFiles()'s archive (alphabetical) order, which has no relation
+  // to which lib sources which. `libNeeds`'s hold-back only works if a
+  // dependency was already ATTEMPTED by the time its depender is reached
+  // (`failedDependencies.has(need)`, below) — alphabetically-first-but-
+  // dependent otherwise lands before a dependency that then refuses,
+  // stranding it. Reorder just the closure's own members into `libs`'
+  // dependency-first order (the one fixed point bpLibClosureFromSeeds already
+  // computed — reused, not re-derived) and leave every unrelated file
+  // exactly where the scan put it.
+  const closureRank = new Map(libs.map((lib, i) => [lib, i]))
+  const orderedRest: string[] = []
+  let libGroupInserted = false
+  for (const f of rest) {
+    if (!closureRank.has(f)) {
+      orderedRest.push(f)
+      continue
     }
-    // TASK-081 slice 6 (Vitali review) — the closure's dependency-first order
-    // must land in `rest` for a FULL pull too, not only a partial one: on a
-    // full pull `rest` is every differing file from the default scan, in
-    // bpManagedFiles()'s archive (alphabetical) order, which has no relation
-    // to which lib sources which. `libNeeds`'s hold-back only works if a
-    // dependency was already ATTEMPTED by the time its depender is reached
-    // (`failedDependencies.has(need)`, below) — alphabetically-first-but-
-    // dependent otherwise lands before a dependency that then refuses,
-    // stranding it. Reorder just the closure's own members into `libs`'
-    // dependency-first order (the one fixed point bpCliLibClosure already
-    // computed — reused, not re-derived) and leave every unrelated file
-    // exactly where the scan put it.
-    const closureRank = new Map(libs.map((lib, i) => [lib, i]))
-    const orderedRest: string[] = []
-    let libGroupInserted = false
-    for (const f of rest) {
-      if (!closureRank.has(f)) {
-        orderedRest.push(f)
-        continue
-      }
-      if (libGroupInserted) continue // already emitted with the group below
-      libGroupInserted = true
-      for (const lib of libs) if (rest.includes(lib)) orderedRest.push(lib)
-    }
+    if (libGroupInserted) continue // already emitted with the group below
+    libGroupInserted = true
+    for (const lib of libs) if (rest.includes(lib)) orderedRest.push(lib)
+  }
+  if (cliSelected) {
     // The target is a dependency of the shim just like every sourced lib:
     // land it first, and remember a refusal/skip so the shim is held back.
     // Otherwise an interactive pull can accept the shim and refuse the .mts,
@@ -2432,6 +2471,8 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     if (partial && cliNeedsStr !== ' ') {
       process.stdout.write(`scripts/blueprint brings the libs it sources:${cliNeedsStr}\n`)
     }
+  } else {
+    files = orderedRest
   }
 
   process.stdout.write(

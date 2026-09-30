@@ -1,6 +1,6 @@
 // scripts/signal-watch.mts — TASK-067 port of scripts/signal-watch.sh (BUG-144),
 // the repo's first whole-file shell-to-TypeScript migration. scripts/signal-watch.sh
-// is now the fixed two-line shim CLAUDE.md's "Shell to TypeScript, organically"
+// is now the fixed two-line shim AGENTS.md's "Shell to TypeScript, organically"
 // requires; this file carries the whole implementation.
 //
 // Watch AGENT_SIGNAL.md and run a wake command when the mic flips to a given

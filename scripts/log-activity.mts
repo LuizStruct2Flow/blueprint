@@ -1,5 +1,5 @@
 // scripts/log-activity.mts — TASK-067 port of scripts/log-activity.sh.
-// scripts/log-activity.sh is now the fixed two-line exec shim CLAUDE.md's
+// scripts/log-activity.sh is now the fixed two-line exec shim AGENTS.md's
 // "Shell to TypeScript, organically" requires; this file carries the whole
 // implementation.
 //

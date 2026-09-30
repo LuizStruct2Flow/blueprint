@@ -274,7 +274,7 @@ it cost a review:**
 before that runs the old shell poller and does not recover the mic, so restart
 any you find with `pgrep -af '[s]ignal-watch.sh'`.
 
-**Shell to TypeScript is now a rule (TASK-067, `CLAUDE.md`).** Before editing any
+**Shell to TypeScript is now a rule (TASK-067, `AGENTS.md`).** Before editing any
 shell file, check `scripts/shell-inventory.json`. A legacy file is migrated
 whole to `.mts` behind the two-line shim first, and the gate refuses anything
 else. **Follow the port method** in

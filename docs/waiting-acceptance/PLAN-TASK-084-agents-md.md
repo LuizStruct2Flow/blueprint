@@ -1053,7 +1053,7 @@ wording is not pursued.
 
 ### Slice 3 — 2026-09-30 (Christian, Claude)
 
-**Sweep and renames, `5c688a7`.** Every live `CLAUDE.md §"<heading>"` whose
+**Sweep and renames, `b705d37`.** Every live `CLAUDE.md §"<heading>"` whose
 heading moved into `AGENTS.md` now names `AGENTS.md`, including the four recipe
 docs' opening links, the `.mts` comments, test comments, the
 `tests/forbidden-idiom` failure message and `scripts/no-chain-guard.sh`'s
@@ -1078,9 +1078,11 @@ the template that renders the exempt `scripts/lib/dod-gate.sh` adapter, and the
 checker requires byte equality with it, so it moves only when the adapter
 does. Inside the exempt shell files the same pattern matches 4 lines. Wrapped
 references (`CLAUDE.md` at a line end, `§` on the next) were checked
-separately and none is left.
+separately and none is left. Alexey's review found six possessive forms
+(`CLAUDE.md's "Shell to TypeScript…"`, `…"no silent swallowing"`) the pattern
+missed, in five `.mts` comments and `HANDOVER.md`; they now name `AGENTS.md`.
 
-**Proof, suite.** `npm --prefix tests test` at `f02818f`: 75 of 76 files and
+**Proof, suite.** `npm --prefix tests test` at `2c7d773` (worktree `f02818f`, same tree): 75 of 76 files and
 1390 of 1391 tests passed. The one failure was `tests/csv-freshness`: 16 live
 rows of TASK-022's audit CSV cited `CLAUDE.blueprint.md:<line>`. As in slice
 2, only the `CURRENT_LOCATION` cells were re-pointed (17 cells, the rename kept

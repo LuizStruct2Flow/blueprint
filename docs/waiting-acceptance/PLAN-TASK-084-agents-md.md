@@ -1080,6 +1080,13 @@ does. Inside the exempt shell files the same pattern matches 4 lines. Wrapped
 references (`CLAUDE.md` at a line end, `§` on the next) were checked
 separately and none is left.
 
+**Proof, suite.** `npm --prefix tests test` at `f02818f`: 75 of 76 files and
+1390 of 1391 tests passed. The one failure was `tests/csv-freshness`: 16 live
+rows of TASK-022's audit CSV cited `CLAUDE.blueprint.md:<line>`. As in slice
+2, only the `CURRENT_LOCATION` cells were re-pointed (17 cells, the rename kept
+every line number), and `npm --prefix tests test -- csv-freshness` then passed
+10 of 10.
+
 **Left alone, out of scope:** references to headings that exist in no file
 today (`§"Pre-push tolerance"`, `§"Work-item folder rule"`, `§"Test Layers"`),
 which predate this item.

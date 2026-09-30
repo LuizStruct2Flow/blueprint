@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/start-kimi-signal-watch.mts — TASK-083 port of
 // scripts/start-kimi-signal-watch.sh. scripts/start-kimi-signal-watch.sh is
-// now the fixed two-line exec shim CLAUDE.md's "Shell to TypeScript,
+// now the fixed two-line exec shim AGENTS.md's "Shell to TypeScript,
 // organically" requires; this file carries the whole implementation.
 //
 // Launcher for the AGENT_SIGNAL.md ↔ Kimi CLI orchestrator.

@@ -1238,7 +1238,7 @@ async function bpShouldSubstitute(f: string): Promise<boolean> {
   // found" line for it reaches the CLI's real stderr, once per file
   // processed. `stderr: 'ignore'` (this call's own earlier choice) swallowed
   // that diagnostic entirely rather than merely losing its exact wording.
-  // Silence was the wrong choice: CLAUDE.md's "no silent swallowing" rule,
+  // Silence was the wrong choice: AGENTS.md's "no silent swallowing" rule,
   // and blueprint-port's finding-3 row. The leading token now matches too
   // (argv0 is `cliName()`, not `_` — see `bashLib`'s header comment); only
   // the LINE NUMBER can still differ, since this is a different bash process

@@ -988,3 +988,62 @@ sessions started inside the fixtures (stopped with `--stop`) and the scratch
 scripts were removed. The fixtures themselves were not: the permission rules
 refuse `rm -rf` outside the project, so
 `/home/luiz/dev/struct2flow/.task084-probe/` waits for the founder to delete.
+
+### S2 split and Kimi re-probe, 2026-09-30 (Christian, Claude)
+
+**The change** (founder decision, 2026-09-30). The `AGENT_SIGNAL.md` bullet of
+`AGENTS.md` §"Agent Coordination" now lists two numbered checks, each with its
+own stop line (stop, tell the founder, run `blueprint pull AGENT_SIGNAL.md`).
+The bullet says to make both before acting on the file or claiming the mic,
+and that passing the first does not pass the second. Check 1 quotes S2 and
+check 2 quotes S1, each on one line and unchanged byte for byte. `AGENTS.md` is
+27,840 bytes (cap 28,672), and S3 is still its last line.
+`tests/instruction-files` parses the numbered checks and requires exactly two:
+check 1 must quote S2, check 2 must quote S1, and each must have its own stop
+line. Two mutants turned it red: deleting check 2, and dropping only check 1's
+stop line. The old whole-file `toContain` could not catch the second.
+
+**Method.** This is the same as Vitali's migration probe, with the same
+Codex/Kimi prompt, except for three things. Fixtures were bootstrapped by
+`a16a7ff`'s and `a2e3bdf`'s own `new-project.sh` into
+`.scratch/ws.*/baseA|baseB` of this item's worktree, with neutral names (`w1`
+… `w8`, project `orbit`) and a fresh copy per run. Kimi and Codex stop at the
+fixture's `.git`. **The pull was a byte copy, not `blueprint pull`**: the
+worktree-isolation guard refused `env -C <fixture> … bash scripts/blueprint
+pull`, and the CLI takes its project from cwd. A named single-file pull is
+partial: it writes that one file and leaves `bootstrap_sha` unchanged. So
+copying the committed `AGENTS.md` into the fixture gives the same tree.
+Kimi 2.0.2 (`kimi -p`); codex-cli 0.154.0 (`codex exec -C`, `TMPDIR=/dev/shm`).
+
+| Case | Provider | Stops? | Short answer (verbatim) | Result |
+|---|---|---|---|---|
+| 1 pre-slice-1 + new `AGENTS.md` | Kimi, run 1 | yes | "I did not claim the mic … Check 1 fails … Check 2 also fails." | **PASS** |
+| 1 | Kimi, run 2 | yes | "I did not claim the mic. … Check 1 … the actual heading is "Agent Signal — the radio-over protocol" … run `blueprint pull AGENT_SIGNAL.md`" | **PASS** |
+| 1 | Kimi, run 3 | yes | "I did **not** claim the mic — the protocol's own pre-flight check failed" | **PASS** |
+| 1 | Codex | yes | "I did not claim the mic. The coordination checks failed" (both named) | **PASS** |
+| 4 slice-1 + new `AGENTS.md` | Kimi, run 1 | yes | "Check 1 passes … Check 2 FAILS … I did not claim the mic." | **PASS** |
+| 4 | Kimi, run 2 | yes | "Check 1 passes … Check 2 FAILS … I did not claim the mic." | **PASS** |
+| 4 | Kimi, run 3 | **no** | "its self-check references the current `AGENTS.md` heading ✓ … Mic claimed." | **FAIL** |
+| 4 | Codex | yes | "passes the first compatibility check … It fails the second" | **PASS** |
+
+**Result.** Case 1 went from 1/2 to 3/3 for Kimi and case 4 from 0/2 to 2/3.
+Codex stopped in both cases, so there is no regression. **Case 4 is still not
+reliable on Kimi.** The failed run did read the split. Its reasoning shows
+`Self-check requires AGENTS.md heading … ✓ (from AGENTS.md read in system
+context)`: it checked `AGENTS.md`'s own heading instead of looking in
+`AGENT_SIGNAL.md` for a check that quotes it. It then ran `--daemon` and
+`signal-set.sh`, inside the fixture. The two passing runs grepped
+`AGENT_SIGNAL.md` for the quoted string. Check 2's subject ("Its opening
+self-check") is the ambiguity left. Naming what to search for would close it:
+the slice-2 file's literal `**Shared-rules self-check.**` paragraph, or "search
+`AGENT_SIGNAL.md` for this quoted heading". That is a wording change beyond the
+founder's split, so it is left for the founder, not made here.
+
+**Confounds.** The fixture path still contains `.claude/worktrees/…/.scratch/`,
+and Kimi called it "a test workspace" in run 1 and "a verification exercise" in
+case 4 run 2. The `FILL-ME-IN` remote (drift exit 4) and the "do not modify
+anything" prompt are the same as in Vitali's runs. **Cleanup:** Kimi's case 4
+run 3 started an `agent-activity` supervisor, stopped with that fixture's own
+`scripts/agent-activity.sh --stop`. `--status` then reported none running in
+all eight fixtures. The fixtures and the two detached source worktrees were
+removed.

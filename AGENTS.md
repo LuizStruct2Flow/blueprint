@@ -61,12 +61,17 @@ is a **persona name** from the team roster, not a bare agent type.
   autonomous dispatch needs a matching signal watcher.
 - **[AGENT_SIGNAL.md](AGENT_SIGNAL.md)** — the coordination protocol: mic states,
   the ACTIVE-on-claim rule, rotation, four-eyes review, reactivity and how each
-  backing agent is dispatched. Read it before any coordinated work. Its first
-  heading must read "Agent Signal — the mic, rotation and four-eyes review". If
-  it does not, or its opening self-check does not require `AGENTS.md`'s heading
-  "Agent instructions — shared by the four CLI providers", this project's
-  `AGENT_SIGNAL.md` predates the TASK-084 switch: stop, tell the founder and run
-  `blueprint pull AGENT_SIGNAL.md`.
+  backing agent is dispatched. Read it before any coordinated work, and make
+  both checks below before you act on it or claim the mic. Each is separate:
+  passing the first does not pass the second.
+  1. Its first heading must read
+     "Agent Signal — the mic, rotation and four-eyes review". If it does not,
+     `AGENT_SIGNAL.md` predates TASK-084: stop, tell the founder and run
+     `blueprint pull AGENT_SIGNAL.md`.
+  2. Its opening self-check must require `AGENTS.md`'s heading
+     "Agent instructions — shared by the four CLI providers". If it does not,
+     `AGENT_SIGNAL.md` predates the TASK-084 switch even when check 1 passed:
+     stop, tell the founder and run `blueprint pull AGENT_SIGNAL.md`.
 
 Watch the whole team live in one terminal: `bash scripts/agent-activity.sh --daemon`
 then `tail -F logs/agent-activity.log` streams

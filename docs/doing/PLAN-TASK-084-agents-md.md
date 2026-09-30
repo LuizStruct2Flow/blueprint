@@ -871,3 +871,120 @@ the per-provider probe, still to run.
 reciprocal: `AGENT_SIGNAL.md` checks the `AGENTS.md` heading, while `AGENTS.md`
 requires that reciprocal check as well as S2. `tests/instruction-files` pins
 both directions, and §4 now names both missing partial states explicitly.
+
+### Slice 2 — provider probe, 2026-09-30 (Vitali, Claude)
+
+The manual half of slice 2's proof: the per-provider live probe and the
+migration probe. Run on `820eca1`.
+
+**Method.** Fixtures were bootstrapped with each tree's own
+`scripts/new-project.sh` and sat OUTSIDE the blueprint tree, in
+`/home/luiz/dev/struct2flow/.task084-probe/` (no ancestor of it holds a
+`CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, checked with `ls`), so Claude Code's
+ancestor walk could not load this repo's own `CLAUDE.md` and satisfy S1
+falsely. Trees: slice 2 = `820eca1`, pre-slice-1 = `a16a7ff`, slice 1 =
+`a2e3bdf` (detached worktrees). Pulls were `blueprint pull --yes <file>` with
+`BLUEPRINT_ROOT` on the `820eca1` tree, run from inside each fixture. Nothing
+was pushed.
+
+Versions: Claude Code 2.1.215 (installed) and 2.1.285 (`npx
+@anthropic-ai/claude-code@latest`; §1 recorded 2.1.284), codex-cli 0.154.0,
+Kimi 2.0.2, Gemini 0.53.0.
+
+**User-level instruction files: all five are absent**, so none adds to any
+provider's budget on this machine: `~/.codex/AGENTS.md`,
+`~/.agents/AGENTS.md`, `~/.kimi-code/AGENTS.md`, `~/.gemini/GEMINI.md`,
+`~/.claude/CLAUDE.md`. (`/home/luiz/dev/.claude/settings.json` exists two
+levels up; it is settings, not instructions.)
+
+#### Per-provider probe, slice-2 fixture
+
+Prompt, no tools: give the first heading of `AGENTS.md` (S1), its last line
+(S3), and the heading line under which the phrase "Domain glossary" appears in
+loaded context (it occurs only in `project_config_overview.md`), or NONE /
+NOT LOADED.
+
+| Provider | S1 | S3 | "Domain glossary" | Expected | Result |
+|---|---|---|---|---|---|
+| Claude Code 2.1.215 | `# Agent instructions — shared by the four CLI providers` | `End of the shared agent instructions.` | `## Domain glossary` | all three | **PASS** |
+| Claude Code 2.1.285 | same | same | `## Domain glossary` | all three | **PASS** |
+| Gemini 0.53.0 | same | same | `## Domain glossary` | all three | **PASS** |
+| Codex 0.154.0 | same | same | `NONE` | S1 and S3 (no `@` follow) | **PASS** |
+| Kimi 2.0.2 | same | same | `NONE` | S1 and S3 (no `@` follow) | **PASS** |
+
+The Claude runs were `claude -p --tools ""`; in an untrusted directory Claude
+still loaded `CLAUDE.md` and its imports. Gemini logged two
+`[ERROR] [ImportProcessor] Failed to import claude.internal.md / CLAUDE.blueprint.md: ENOENT`
+lines on stderr and carried on: the missing optional imports are non-fatal but
+noisy, and unlike Claude Code Gemini does not skip them silently.
+
+**Second prompt, read tools allowed (Codex, Kimi):** "do exactly what this
+project's instructions say to do before substantive work; report the files you
+opened and the heading after `## Domain glossary`."
+
+| Provider | Opened | Answer | Result |
+|---|---|---|---|
+| Codex | `AGENTS.md`, all five `project_config_*.md`, tried the two absent optional files, `scripts/blueprint*`, `scripts/agent-activity.sh`; it ran neither `drift` nor `--daemon`, saying they write state | `## Customer-reference policy` | **PASS** (opens the config; skipped the wake commands unprompted) |
+| Kimi | all five `project_config_*.md`, tried the two absent files; ran `bash scripts/blueprint drift` (exit 4, the fixture's `blueprint_remote = FILL-ME-IN`, reported as unknown) and `--daemon` | `## Customer-reference policy` | **PASS** (also followed the by-hand wake paragraph) |
+
+#### Migration probe
+
+Prompt for the Codex and Kimi cases: "You are about to coordinate work with
+the other agents on this project: claim the mic. Follow the project
+instructions for coordination and report what you do and what you conclude. Do
+not modify anything." Prompt for the Claude and Gemini cases: "You have just
+woken on this project ... follow this project's instructions for a session
+start ... if they tell you to stop or run a command first, quote it."
+
+| # | Fixture (what was pulled) | Provider | Stops? | Names | Result |
+|---|---|---|---|---|---|
+| 1 | pre-slice-1 + slice-2 `AGENTS.md` | Codex | yes | `blueprint pull AGENT_SIGNAL.md` (old heading "the radio-over protocol") | **PASS** |
+| 1 | same | Kimi, run 1 | **no**: read `AGENT_SIGNAL.md`, never compared its heading, claimed the mic as `Sylvia` | none | **FAIL** |
+| 1 | same, fresh fixture | Kimi, run 2 | yes | `blueprint pull AGENT_SIGNAL.md` | PASS |
+| 2 | pre-slice-1 + slice-2 `CLAUDE.md` | Claude 2.1.215 | yes, at wake | `blueprint pull AGENTS.md` (found `# Agent Coordination Protocol`) | **PASS** |
+| 2 | same | Claude 2.1.285 | yes | `blueprint pull AGENTS.md` | **PASS** |
+| 3 | pre-slice-1 + slice-2 `GEMINI.md` | Gemini | unverified: repeated 503 "high demand", then `TerminalQuotaError` 429 (free tier, `gemini-3-flash`, limit 20) before it answered | n/a | **NOT VERIFIED** |
+| 4 | slice-1 + slice-2 `AGENTS.md` only | Codex | yes | `blueprint pull AGENT_SIGNAL.md` (heading right, reciprocal self-check missing) | **PASS** |
+| 4 | same | Kimi, run 1 | **no**: checked both headings, saw no problem, claimed the mic | none | **FAIL** |
+| 4 | same, fresh fixture | Kimi, run 2 | **no**: same | none | **FAIL** |
+| 5 | pre-slice-1 + slice-2 `AGENT_SIGNAL.md` only | Codex | yes | `blueprint pull AGENTS.md` (old heading, from the new self-check) | **PASS** |
+| 5 | same | Kimi | yes | `blueprint pull AGENTS.md` | PASS (see confound) |
+
+The Claude `CLAUDE.md` case (row 2), the one that could not run inside the
+blueprint checkout, now has a real result on both builds: Claude stops at wake
+on the S1 self-check and names the right pull.
+
+**Gaps, stated plainly.**
+
+- **Kimi does not reliably apply the S2 check.** Case 1 failed once in two
+  runs. Case 4 failed both runs, and its transcript shows why: Kimi verified
+  `AGENT_SIGNAL.md`'s first heading and `AGENTS.md`'s heading and stopped
+  there, skipping the second clause of the S2 bullet ("or its opening
+  self-check does not require `AGENTS.md`'s heading"). Codex applied both
+  clauses in every case. Nothing in this item changed to address it; whether
+  the S2 bullet should state the two conditions as separate steps is a
+  decision for the plan owner.
+- **Gemini's migration case is unverified**, on quota, not on behaviour. Its
+  per-provider probe passed the same day, so the gap is only case 3.
+- **Confounds in the fixtures.** Every fixture path contains `.task084-probe`
+  and the directories were named `pre-A`, `pre-S`, `s1`; Kimi quoted the
+  `pre-S` name as a hint in case 5, so that PASS is weaker than Codex's. Every
+  fixture's `.blueprint-source` still reads `blueprint_remote = FILL-ME-IN`, so
+  `drift` exited 4 in each (correctly reported as unknown), and the prompt's
+  "do not modify anything" made Kimi reason about whether claiming the mic was
+  allowed. Claude sessions ran without tools, so they could not run `drift`
+  themselves; the `SessionStart` hook ran it and its `UNKNOWN` line was in
+  their context.
+- **Side finding, Gemini:** its `read_file` refused the gitignored
+  `AGENT_ROSTER.md` and `logs/state/signal.md` ("ignored by configured ignore
+  patterns"). Not a TASK-084 regression, but the protocol tells every provider
+  to read the baton, and this one may not be able to with that tool.
+- **Side finding, `--whoami`:** in Kimi sessions it answers `Sylvia - Claude
+  Code` (it resolves the Orchestrator row), and Kimi claimed the mic as
+  `Sylvia` in the failing runs. Pre-existing, unrelated to the switch.
+
+**Cleanup.** The detached worktrees, the `agent-activity` supervisors that the
+sessions started inside the fixtures (stopped with `--stop`) and the scratch
+scripts were removed. The fixtures themselves were not: the permission rules
+refuse `rm -rf` outside the project, so
+`/home/luiz/dev/struct2flow/.task084-probe/` waits for the founder to delete.

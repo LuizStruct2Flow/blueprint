@@ -1,5 +1,5 @@
 // scripts/lib/shim.mts — the two-line exec-shim helpers TASK-067's migration
-// rule enforces (CLAUDE.md "Shell to TypeScript, organically"): what a valid
+// rule enforces (AGENTS.md "Shell to TypeScript, organically"): what a valid
 // shim's content looks like, where its `.mts` target lives, and whether a
 // tracked file actually is one.
 //

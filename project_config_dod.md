@@ -100,7 +100,7 @@ marker — the blueprint sync preserves your additions.
 | File / surface | Audience | Trigger | Sync rule |
 |---|---|---|---|
 | `README.md` | Visitor / prospective adopter | Architecture, bootstrap/install, or `blueprint` CLI surface change | Same commit |
-| `docs/way-of-working.md` | Customer / investor / hire — the canonical pitch deck | Any of the ten concerns it mirrors (`CLAUDE.blueprint.md` §"docs/way-of-working.md is the canonical pitch surface") | Same commit for the markdown; the PDF is deferred (`project_config_overview.md` §"Standing founder decisions") |
+| `docs/way-of-working.md` | Customer / investor / hire — the canonical pitch deck | Any of the ten concerns it mirrors (`AGENTS.blueprint.md` §"docs/way-of-working.md is the canonical pitch surface") | Same commit for the markdown; the PDF is deferred (`project_config_overview.md` §"Standing founder decisions") |
 | N/A — `docs/RELEASE-NOTES.md` | — | This repo has none; its own history is its `git log`. A project bootstrapped from `templates/` gets Recipe A's release-notes row — this repo does not inherit its own template's row | N/A |
 | N/A — `docs-site/content/features/*.md`, `pricing.md`, `api/*.md` + OpenAPI, `legal/*.md` | — | No docs-site exists; Recipe B/C do not apply to the blueprint itself | N/A |
 | N/A — `frontend/public/help.html` | — | No `frontend/` tree in this repo | N/A |
@@ -124,7 +124,7 @@ marker — the blueprint sync preserves your additions.
 | N/A — `project_config_infra.md` (rollback) | — | No `infra/` tree, no prod resource this repo owns (D086) | N/A |
 | N/A — `docs/architecture/ADR-*.md` | — | No `docs/architecture/` tree (Recipe C only) | N/A |
 | N/A — `docs/runbooks/*.md` | — | No `docs/runbooks/` tree, no alert wired (Recipe C only) | N/A |
-| N/A — `docs/config/FEATURES.md` | — | No such file; this repo's own concern-ripple list is `CLAUDE.blueprint.md`'s ten-concern list, already the deck row above | N/A |
+| N/A — `docs/config/FEATURES.md` | — | No such file; this repo's own concern-ripple list is `AGENTS.blueprint.md`'s ten-concern list, already the deck row above | N/A |
 | N/A — `docs/config/ACCEPTANCE_TESTS.md` | — | No such file; this repo's acceptance tests ARE its `tests/` vitest suites (catalogued by `scripts/lib/suites.sh`), not a separate prose list | N/A |
 
 **Promotion / removal** — see [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) §"Promotion criteria for the sync list". Changes to the lists above are committed as part of a doc-sync-list change PR, not silently.

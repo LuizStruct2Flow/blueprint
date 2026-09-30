@@ -82,8 +82,8 @@ it.** The tree stays flat.
 - **The audience split is `.gitattributes` directory rules.** `export-ignore`
   conventions (`docs/requirements/**`, `docs/assets/**`, `docs/way-of-working.*`,
   `docs/talk-*`) and a few named files decide what is blueprint-only. The
-  blueprint-only CLAUDE.md sections live in the export-ignored
-  `CLAUDE.blueprint.md`, which the shipped CLAUDE.md imports.
+  blueprint-only instruction sections live in the export-ignored
+  `AGENTS.blueprint.md`, which the shipped AGENTS.md imports.
 - **Retirement.** A path that leaves the archive, by deletion or a new
   `export-ignore`, is found from the fetched branch's history and offered for
   deletion downstream only when its bytes equal the last shipped version.

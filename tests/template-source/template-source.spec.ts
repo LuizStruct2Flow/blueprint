@@ -70,14 +70,21 @@ const CONFIGS = [
  * bootstrap rather than an archive listing. Repeating it here would be a
  * second, weaker copy of that assertion, and copies drift.
  */
-const UNSEEDED_IMPORT = 'claude.internal.md'
+const UNSEEDED_IMPORT = 'agents.internal.md'
+
+/**
+ * TASK-084 renamed UNSEEDED_IMPORT from this. The old name stays imported for
+ * one release so a project that already wrote one is not orphaned; delete this
+ * constant and its import together in the release after.
+ */
+const LEGACY_UNSEEDED_IMPORT = 'claude.internal.md'
 
 /**
  * TASK-021 Stage 2 — the blueprint's own maintenance rules. The mirror image of
  * UNSEEDED_IMPORT: the blueprint writes it and no project ever has it, because it
  * is export-ignored. `tests/bootstrap-contents` #11 proves that half.
  */
-const BLUEPRINT_ONLY_IMPORT = 'CLAUDE.blueprint.md'
+const BLUEPRINT_ONLY_IMPORT = 'AGENTS.blueprint.md'
 
 /**
  * What bootstrap actually ships.
@@ -110,8 +117,8 @@ describe('TASK-043 — AGENTS.md imports the five project configs, and only thos
     // an unexplained sixth import is exactly what this case caught last time.
     expect(
       await importsOf('AGENTS.md'),
-      `AGENTS.md must import the five seeded configs plus ${UNSEEDED_IMPORT} and ${BLUEPRINT_ONLY_IMPORT}, and nothing else`,
-    ).toEqual([...CONFIGS, UNSEEDED_IMPORT, BLUEPRINT_ONLY_IMPORT].sort())
+      `AGENTS.md must import the five seeded configs plus ${UNSEEDED_IMPORT} (and its old name ${LEGACY_UNSEEDED_IMPORT}) and ${BLUEPRINT_ONLY_IMPORT}, and nothing else`,
+    ).toEqual([...CONFIGS, UNSEEDED_IMPORT, LEGACY_UNSEEDED_IMPORT, BLUEPRINT_ONLY_IMPORT].sort())
     // The two importers carry nothing of their own: a second import there
     // would load for one provider only, which is the split TASK-084 removed.
     for (const importer of ['CLAUDE.md', 'GEMINI.md']) {

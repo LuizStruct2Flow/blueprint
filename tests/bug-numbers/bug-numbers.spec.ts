@@ -32,7 +32,7 @@
  * than assumed. Promotion is a MOVE of the row — backlog/ → doing/ →
  * waiting-acceptance/ → done/ — so a number in two lifecycle states is either
  * a half-completed move or a collision, and both want fixing. Nothing in
- * CLAUDE.md §"Documentation Structure" or docs/DoD.md §1 describes a window in
+ * AGENTS.md §"Documentation Structure" or docs/DoD.md §1 describes a window in
  * which a row is meant to exist in two places at once.
  *
  * NO ALLOCATOR SCRIPT WAS BUILT ALONGSIDE. Two agents can both run an

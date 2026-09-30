@@ -94,7 +94,7 @@ inside `AUDIT-TRIAGE`, a row of ~12 findings nobody had dispositioned. Klaus
 sampled it at random.
 
 Also live from the same row: **A-10** — the watcher replays the current baton at
-startup, an implicit billable replay, which is a direct violation of CLAUDE.md
+startup, an implicit billable replay, which is a direct violation of AGENTS.md
 §Cost capability 4.
 
 **Action:** raise A-11 as its own numbered bug today. Triage the rest of

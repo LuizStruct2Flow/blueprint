@@ -12,7 +12,7 @@
  * `scripts/shell-inventory-check.mts` itself, once that file gained an
  * entry-point guard and exported them. That typechecked here, in the
  * blueprint, but `scripts/shell-inventory-check.mts` is `export-ignore`d
- * (blueprint-only enforcement machinery, CLAUDE.md "Shell to TypeScript,
+ * (blueprint-only enforcement machinery, AGENTS.md "Shell to TypeScript,
  * organically") while this file ships to every derived project — so a fresh
  * bootstrap never has the module this file imported, and its typecheck (and
  * tests/bootstrap-gate's release check) went red. The helpers live in

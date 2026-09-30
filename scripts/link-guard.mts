@@ -52,7 +52,7 @@
 // any failure of the guard's OWN machinery (unreadable transcript, malformed
 // payload, unparseable lines) exits 0: a guard that blocks the session on
 // its own bug is worse than the miss it was built for. Every such swallow
-// says why, per CLAUDE.md §"Observability is a main concern" — a bindingless
+// says why, per AGENTS.md §"Observability is a main concern" — a bindingless
 // catch with no words fails tests/forbidden-idiom.
 //
 // Usage:

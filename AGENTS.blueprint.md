@@ -1,6 +1,6 @@
 # Blueprint maintenance
 
-This file is imported by [CLAUDE.md](CLAUDE.md) and exists **only in the
+This file is imported by [AGENTS.md](AGENTS.md) and exists **only in the
 blueprint**. It is `export-ignore`d, so no project receives it, and there the
 import is skipped because the file is missing. It holds what maintains the
 blueprint rather than what operates a project (TASK-021).
@@ -47,7 +47,7 @@ decision, and the reason is worth keeping because the rule was not silly:
   `git push` refused to let you skip. **Pull requests exist for external
   collaboration, which is what `blueprint a2bp` files.** That door still works
   exactly as before and is still the only way a derived project reaches this
-  repo (`CLAUDE.md` §"Back-propagating").
+  repo (`AGENTS.md` §"Back-propagating").
 - **The enforcement had become the problem.** A `pre-commit` hook refused the
   commit, `pre-push` refused the push, and `tests/branch-guard` pinned both. So
   the owner's ordinary workflow required disabling a guard, and a gate someone
@@ -82,7 +82,7 @@ loudly, they just quietly describe something that no longer happens.
 
 ## Implementing a back-propagation request
 
-`CLAUDE.md` §"Back-propagating" is the requester's side. This is the owner's:
+`AGENTS.md` §"Back-propagating" is the requester's side. This is the owner's:
 what `blueprint a2bp` filed is a proposal, and the owner **implements it in the
 blueprint** — merging it as-is, adapting it, or rewriting it.
 
@@ -160,13 +160,13 @@ is not regenerated per change. The concerns the deck mirrors:
 1. Architecture (DDD + Clean + Hexagonal — `STACK_DEFAULTS.md`)
 2. Lifecycle (four states — `docs/DoD.md` §1)
 3. Quality (DoD — `docs/DoD.md`)
-4. Observability / MALT (`docs/OBSERVABILITY.md` + CLAUDE.md §"Observability is a main concern")
-5. Security (`docs/SECURITY.md` + CLAUDE.md §"Security is a main concern")
-6. IaC (`docs/INFRASTRUCTURE.md` + CLAUDE.md §"Infrastructure as Code is a main concern")
-7. Cost (CLAUDE.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
+4. Observability / MALT (`docs/OBSERVABILITY.md` + AGENTS.md §"Observability is a main concern")
+5. Security (`docs/SECURITY.md` + AGENTS.md §"Security is a main concern")
+6. IaC (`docs/INFRASTRUCTURE.md` + AGENTS.md §"Infrastructure as Code is a main concern")
+7. Cost (AGENTS.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
 8. Documentation (`docs/DOCUMENTATION.md` + DoD §5)
-9. Persona team (radio-over — `AGENT_SIGNAL.md` protocol + the shared rules every CLI provider reads in `AGENTS.md` + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + CLAUDE.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
-10. Blueprint sync (CLAUDE.md §"Blueprint sync" + this file + README.md §"The sync model" + `scripts/blueprint`)
+9. Persona team (radio-over — `AGENT_SIGNAL.md` protocol + the shared rules every CLI provider reads in `AGENTS.md` + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + AGENTS.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
+10. Blueprint sync (AGENTS.md §"Blueprint sync" + this file + README.md §"The sync model" + `scripts/blueprint`)
 
 In the same commit as a concern change:
 

@@ -10,24 +10,28 @@ whole.
 
 Claude Code and Gemini load the files below automatically, because they follow
 `@` imports. Codex, Kimi and every other agent: open each one that exists before
-substantive work. A missing file is normal, because `claude.internal.md` is
-optional and `CLAUDE.blueprint.md` exists only in the blueprint.
+substantive work. A missing file is normal, because `agents.internal.md` is
+optional and `AGENTS.blueprint.md` exists only in the blueprint.
 
 - @project_config_overview.md
 - @project_config_paths.md
 - @project_config_dod.md
 - @project_config_security.md
 - @project_config_infra.md
+- @agents.internal.md
 - @claude.internal.md
-- @CLAUDE.blueprint.md
+- @AGENTS.blueprint.md
 
-**`claude.internal.md` is the project's own file, and nothing in the blueprint
+`claude.internal.md` is that file's old name, still imported for one release so
+an existing copy is not orphaned: rename yours to `agents.internal.md`.
+
+**`agents.internal.md` is the project's own file, and nothing in the blueprint
 ever writes it.** It is not managed, so `blueprint pull` cannot replace it, and
 no bootstrap seeds one — the import above names a file that does not exist until
 the project creates it. It is the place for agent context that belongs to this
 project rather than to the framework: house rules, local runbooks, notes a
-session should carry that no other project should inherit. Despite its name it
-is every provider's, not Claude's alone.
+session should carry that no other project should inherit. It is every
+provider's, not Claude's alone.
 
 **Whether it is tracked is the project's decision.** Commit it and the whole team
 gets it; add it to `.gitignore` and it stays on one machine. Nothing in the
@@ -35,10 +39,10 @@ framework reads it or depends on the choice. This is what makes the split
 possible: the generic protocol can be tracked and public, because the private
 half has a home of its own.
 
-**`CLAUDE.blueprint.md` exists only in the blueprint.** It holds the rules for
+**`AGENTS.blueprint.md` exists only in the blueprint.** It holds the rules for
 maintaining the blueprint itself: its trunk, implementing a back-propagation
 request, publishing the deck. It does not ship, so in a project the import is
-skipped exactly as a missing `claude.internal.md` is, and this file carries only
+skipped exactly as a missing `agents.internal.md` is, and this file carries only
 what operates a project or asks the blueprint for a change (TASK-021).
 
 ## Agent Coordination

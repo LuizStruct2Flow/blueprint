@@ -13,7 +13,7 @@ have a home:
 | what is open, and what to test | the four `docs/<state>/` folders |
 | what changed and why | `git log` — commit bodies carry the reasoning |
 | what a fix taught | the item's own row in `done/BUGS.md` |
-| the rules | `CLAUDE.md`, `docs/DoD.md` |
+| the rules | `AGENTS.md`, `docs/DoD.md` |
 | host quirks, standing founder decisions | `project_config_overview.md` |
 
 **Anything derivable from a command does not belong here.** If you catch

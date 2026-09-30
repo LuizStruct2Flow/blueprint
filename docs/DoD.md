@@ -253,8 +253,8 @@ Recipes per project shape, and the per-push checklist:
 
 ## §6 Quality and the engineering concerns
 
-The quality bar is `CLAUDE.md` §"Quality is non-negotiable". Each engineering
-concern's capabilities are in `CLAUDE.md`, and its per-push checklist is in its
+The quality bar is `AGENTS.md` §"Quality is non-negotiable". Each engineering
+concern's capabilities are in `AGENTS.md`, and its per-push checklist is in its
 recipe doc: [`OBSERVABILITY.md`](OBSERVABILITY.md), [`SECURITY.md`](SECURITY.md),
 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md) and
 [`DOCUMENTATION.md`](DOCUMENTATION.md). Cost is declared per billable path in

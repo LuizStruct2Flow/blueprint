@@ -16,11 +16,11 @@
 >
 > **Backing agents are open-ended.** The rows below use Claude Code, Codex and
 > Kimi because those are the ones the dispatchers in
-> [AGENTS.md](AGENTS.md) ship with, but the `Backing agent` column is free text
+> [AGENT_SIGNAL.md](AGENT_SIGNAL.md) ship with, but the `Backing agent` column is free text
 > — put `Gemini`, `GitHub Copilot`, `Qwen`, or anything else you actually run.
 > Only two things depend on the value: the live feed prints it as the label
 > `[Persona - model - effort]` once the persona has a `Model` cell, and any agent you want *dispatched autonomously*
-> needs a signal watcher (see [AGENTS.md](AGENTS.md) §Dispatching). An agent
+> needs a signal watcher (see [AGENT_SIGNAL.md](AGENT_SIGNAL.md) §Dispatching). An agent
 > with no watcher still works — you drive it yourself and it participates in the
 > baton normally.
 
@@ -85,7 +85,7 @@ rather than running at some silently-substituted setting.
 
 **Every delivery role carries one persona per provider**, because the rotation
 that spreads work is scoped to a ROLE — a back-end task goes to a back-end
-engineer, and only then does the rotation pick which one ([AGENTS.md](AGENTS.md)
+engineer, and only then does the rotation pick which one ([AGENT_SIGNAL.md](AGENT_SIGNAL.md)
 §"Who does the work"). A role missing a provider simply rotates across fewer,
 and never borrows from another role. The trailing digit is which representative,
 not which job; the ordering below (Claude, Codex, Kimi) is a convention for
@@ -97,7 +97,7 @@ judgement and coordination roles rather than delivery ones, and the Orchestrator
 is by rule the founder-facing session.
 
 Default backing-agent totals: **10 Claude Code, 7 Codex, 7 Kimi.** **Gemini and
-GitHub Copilot are also supported** (see [AGENTS.md](AGENTS.md)) but aren't in
+GitHub Copilot are also supported** (see [AGENT_SIGNAL.md](AGENT_SIGNAL.md)) but aren't in
 the default roster, because on many setups those are free-tier accounts with
 limited credits (Gemini throttles on quota; GitHub Copilot may have no headless
 CLI to dispatch). If you have paid Gemini / Copilot, give them personas.
@@ -130,7 +130,7 @@ the Orchestrator or by the founder as needed.
   meant for other personas, even ones on the same backing agent. This is what lets
   multiple same-backing personas coexist without colliding.
 - **ACTIVE-on-claim applies**: on claiming the mic, set `State = ACTIVE` and `Holder = <your
-  persona>` before working (see [AGENTS.md](AGENTS.md)).
+  persona>` before working (see [AGENT_SIGNAL.md](AGENT_SIGNAL.md)).
 
 ## Dispatch (backing agent → how the persona is launched)
 
@@ -152,7 +152,7 @@ the Orchestrator or by the founder as needed.
   label reflects that applied value, not the roster cell, or omits effort
   entirely when the config cannot be read (TASK-063 cross-provider review).
 - **GitHub Copilot** personas: notify-only unless a headless Copilot CLI is
-  installed — a human operator drives Copilot in the IDE (see AGENTS.md).
+  installed — a human operator drives Copilot in the IDE (see AGENT_SIGNAL.md).
 
 **Optional enhancement (not wired by default):** make the dispatchers roster-aware
 — fire on `OVER_TO_<persona>` (resolved to the backing agent via this table) and

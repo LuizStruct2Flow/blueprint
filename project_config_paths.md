@@ -2,7 +2,7 @@
 
 All project-specific paths, hosts, URLs, account IDs, and log locations.
 Generic struct2flow paths (`docs/`, `.githooks/`, `scripts/`) are in
-CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
+AGENTS.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 
 ## Repository layout
 
@@ -14,7 +14,7 @@ CLAUDE.md and the blueprint; everything here is unique to {{PROJECT_NAME}}.
 | `frontend/` | |
 | `infrastructure/` | |
 | `scripts/` | Project utility scripts (the agent-protocol scripts come from the blueprint) |
-| `docs/` | Project documentation, lifecycle-managed (see CLAUDE.md) |
+| `docs/` | Project documentation, lifecycle-managed (see AGENTS.md) |
 
 ## Regression test roots
 

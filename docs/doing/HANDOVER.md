@@ -12,7 +12,7 @@ because another machine only sees what is pushed.
 |---|---|
 | what is open, and what to test | the four `docs/<state>/` folders |
 | what changed and why | `git log`: commit bodies carry the reasoning |
-| the rules | `CLAUDE.md`, `docs/DoD.md`, `CLAUDE.blueprint.md` (blueprint only) |
+| the rules | `AGENTS.md`, `docs/DoD.md`, `AGENTS.blueprint.md` (blueprint only) |
 | cancelled work and accepted limits | `docs/config/findings.md` |
 | host quirks, standing founder decisions | `project_config_overview.md` |
 
@@ -52,7 +52,7 @@ because another machine only sees what is pushed.
    stopped before committing, `git -C <worktree> add -A` then
    `git diff --cached --binary` into a patch and `git apply -3` here.
    **A worktree is for parallel agents only, never a feature branch**
-   (founder, 2026-09-28; `CLAUDE.blueprint.md` §"The blueprint's `main` is
+   (founder, 2026-09-28; `AGENTS.blueprint.md` §"The blueprint's `main` is
    its trunk"): collect its commits to `main` when the agent's item ends,
    then remove it. Multi-slice work lands each slice on `main` as dark code.
    A real branch needs the founder told first.

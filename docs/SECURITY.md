@@ -1,6 +1,6 @@
 # Security — keep secrets out, find vulns fast, fix before deploy
 
-The principle lives in [CLAUDE.md](../CLAUDE.md) §"Security is a main
+The principle lives in [AGENTS.md](../AGENTS.md) §"Security is a main
 concern", and its per-push checklist closes this file. Both are
 runtime-agnostic. This file holds the **recipes** — concrete patterns per
 runtime so projects don't reinvent the wheel.

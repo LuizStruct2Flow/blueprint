@@ -63,6 +63,12 @@ function quotedHeading(text: string, lead: RegExp): string | undefined {
   return m?.[1] === undefined ? undefined : squash(m[1])
 }
 
+/** The numbered checks under AGENTS.md's `AGENT_SIGNAL.md` bullet, each squashed to one line. */
+function signalChecks(agents: string): string[] {
+  const bullet = /^- \*\*\[AGENT_SIGNAL\.md\][\s\S]*?(?=^\S)/m.exec(agents)?.[0] ?? ''
+  return bullet.split(/^ +\d+\. /m).slice(1).map(squash)
+}
+
 /** GitHub's heading anchor: lower-case, punctuation dropped, spaces to hyphens. */
 const slug = (h: string): string =>
   h.toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-')
@@ -111,13 +117,18 @@ describe('TASK-084 — one instruction file for the four CLI providers', () => {
     expect(quotedHeading(signal, /must begin with the heading/), 'AGENT_SIGNAL.md does not reject an old AGENTS.md').toBe(S1)
     expect(signal, 'AGENT_SIGNAL.md no longer names the shared-rules file to pull').toContain('`blueprint pull AGENTS.md`')
 
-    const agents = await read('AGENTS.md')
-    expect(quotedHeading(agents, /first\s+heading must read/), 'AGENTS.md checks AGENT_SIGNAL.md against another heading').toBe(S2)
+    // Two separately numbered checks, each with its own stop: Kimi applied only
+    // the first clause of the old one-sentence form (plan, slice-2 provider probe).
+    const [heading, selfCheck, ...extra] = signalChecks(await read('AGENTS.md'))
+    expect(extra, 'the AGENT_SIGNAL.md bullet must hold exactly two numbered checks').toEqual([])
+    expect(quotedHeading(heading ?? '', /first heading must read/), 'check 1 compares AGENT_SIGNAL.md against another heading').toBe(S2)
     expect(
-      quotedHeading(agents, /self-check does not require `AGENTS\.md`'s heading/),
-      'AGENTS.md does not distinguish the slice-1 AGENT_SIGNAL.md from the slice-2 switch',
+      quotedHeading(selfCheck ?? '', /self-check must require `AGENTS\.md`'s heading/),
+      'check 2 no longer distinguishes the slice-1 AGENT_SIGNAL.md from the slice-2 switch',
     ).toBe(S1)
-    expect(agents, 'the S2 check no longer names the file to pull').toContain('`blueprint pull AGENT_SIGNAL.md`')
+    for (const [n, check] of [[1, heading], [2, selfCheck]] as const) {
+      expect(check, `check ${n} no longer stops and names the file to pull`).toMatch(/stop, tell the founder and run `blueprint pull AGENT_SIGNAL\.md`/)
+    }
   })
 
   it('S3: AGENTS.md ends with the plain tail sentinel', async () => {

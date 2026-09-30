@@ -3,10 +3,9 @@
 **Status: v2, revised to the three-provider review and the founder's decisions
 of 2026-09-29. Ready for implementation.** Written by Christian (Architect-1,
 Claude). Reviewed by Markus (Claude), Alexey (Codex) and Slava (Kimi), all
-APPROVE-WITH-CHANGES (§"Review synthesis"). **Slices 1 and 2 are pushed**
-(§8, §"Slice log"); slice 2 passed Alexey's cross-provider review, and the
-per-provider live probe is still to run. Slice 3 has not started and now
-carries the two renames of §9 decision 4. Row: [TASK-084](BACKLOG.md).
+APPROVE-WITH-CHANGES (§"Review synthesis"). **All three slices have landed
+and the item waits for the founder's acceptance** (§8, §"Slice log"). Row:
+[TASK-084](BACKLOG.md).
 
 The row asks for one thing: the providers work from the same rules. Today
 they do not. **Scope: the four autonomous CLI providers — Claude Code, Codex,
@@ -1047,3 +1046,40 @@ run 3 started an `agent-activity` supervisor, stopped with that fixture's own
 `scripts/agent-activity.sh --stop`. `--status` then reported none running in
 all eight fixtures. The fixtures and the two detached source worktrees were
 removed.
+
+**Founder decision, 2026-09-30:** the S2 split ships as is, and Kimi's 2 of 3
+on case 4 is a known limit. The "name the Shared-rules self-check paragraph"
+wording is not pursued.
+
+### Slice 3 — 2026-09-30 (Christian, Claude)
+
+**Sweep and renames, `5c688a7`.** Every live `CLAUDE.md §"<heading>"` whose
+heading moved into `AGENTS.md` now names `AGENTS.md`, including the four recipe
+docs' opening links, the `.mts` comments, test comments, the
+`tests/forbidden-idiom` failure message and `scripts/no-chain-guard.sh`'s
+refusal text. Protocol pointers in `AGENT_ROSTER.example.md` and A2BP row F now
+name `AGENT_SIGNAL.md`. `.gitignore`'s framework-document comment names
+`GEMINI.md`. `CLAUDE.blueprint.md` is `AGENTS.blueprint.md` (export-ignore line,
+import, every live reference). `claude.internal.md` is `agents.internal.md`,
+and `AGENTS.md` imports both, new name first, with one sentence saying the old
+one goes after this release. `tests/template-source` #import-1 and
+`tests/bootstrap-contents` #3c pin both imports, and #11 pins the new
+blueprint-only name. `AGENTS.md` is 27,998 bytes (cap 28,672), and S3 is still
+its last line.
+
+**Proof, grep.** The command, with the §5 exempt set as pathspecs:
+
+```
+git grep -nE 'CLAUDE\.md(`|\]\([^)]*\))? *§? *"?(Quality|Observability|Security|Cost|Infrastructure|Documentation|Running commands|Before Every Push|Blueprint sync|Back-propagating|Team Workflow|Agent Coordination|Shell to TypeScript|Your project|Architecture|Drift and pull|What blueprint sync|Read these first|Definition of Done|Code Quality)' -- . ':!docs/done' ':!docs/waiting-acceptance' ':!docs/config' ':!.githooks/pre-push' ':!.githooks/pre-push-project' ':!scripts/lib/contamination.sh' ':!scripts/lib/gate.sh' ':!scripts/team-kickoff.sh' ':!scripts/signal-set.sh' ':!scripts/lib/dod-gate.sh'
+```
+
+It prints **1** line: `scripts/shell-inventory-check.mts:134`. That line is
+the template that renders the exempt `scripts/lib/dod-gate.sh` adapter, and the
+checker requires byte equality with it, so it moves only when the adapter
+does. Inside the exempt shell files the same pattern matches 4 lines. Wrapped
+references (`CLAUDE.md` at a line end, `§` on the next) were checked
+separately and none is left.
+
+**Left alone, out of scope:** references to headings that exist in no file
+today (`§"Pre-push tolerance"`, `§"Work-item folder rule"`, `§"Test Layers"`),
+which predate this item.

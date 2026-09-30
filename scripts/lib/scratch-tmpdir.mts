@@ -2,7 +2,7 @@
 //
 // Every dispatched agent (Codex, Gemini, Kimi, and the local Ollama juniors)
 // must write its temporary files under `<repo>/.scratch/tmp`, never `/tmp`
-// (CLAUDE.md "Running commands" — `.scratch/` is gitignored, scanned as part
+// (AGENTS.md "Running commands" — `.scratch/` is gitignored, scanned as part
 // of the repo, and cleanable with an allowed `rm -rf .scratch/*`; `/tmp` is
 // where cleanup fails and where most agents broke the rule on 2026-09-24/25).
 //

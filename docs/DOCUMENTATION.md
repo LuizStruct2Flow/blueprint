@@ -1,6 +1,6 @@
 # Documentation — internal + external, in sync with reality
 
-The principle lives in [CLAUDE.md](../CLAUDE.md) §"Documentation is a main
+The principle lives in [AGENTS.md](../AGENTS.md) §"Documentation is a main
 concern", and its per-push checklist closes this file. Both are
 runtime-agnostic. This file holds the **recipes** — concrete patterns per
 project shape so projects don't reinvent the wheel.

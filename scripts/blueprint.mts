@@ -1,6 +1,6 @@
 // scripts/blueprint.mts — TASK-081 whole-file port of scripts/blueprint (the
 // struct2flow sync CLI), grown one slice at a time on branch task081-port.
-// docs/doing/PLAN-TASK-081-blueprint-port.md is the plan; CLAUDE.md
+// docs/doing/PLAN-TASK-081-blueprint-port.md is the plan; AGENTS.md
 // "Shell to TypeScript, organically" is the migration rule this follows.
 //
 // scripts/blueprint (the shell CLI) is UNTOUCHED until slice 5 squashes this

@@ -1,6 +1,6 @@
 # Project Overview — {{PROJECT_NAME}}
 
-Project-specific overview. CLAUDE.md and docs/DoD.md hold the **generic**
+Project-specific overview. AGENTS.md and docs/DoD.md hold the **generic**
 struct2flow agent protocol; this file holds what's specific to
 {{PROJECT_NAME}}.
 
@@ -12,7 +12,7 @@ struct2flow agent protocol; this file holds what's specific to
 ## Core USP paths
 
 > List the code paths / user journeys where "quality is non-negotiable"
-> (CLAUDE.md §Quality, DoD §6). Anything that breaks here is a major bug
+> (AGENTS.md §Quality, DoD §6). Anything that breaks here is a major bug
 > by definition — plan first, no quick patches.
 >
 > Examples (delete and replace):
@@ -53,7 +53,7 @@ struct2flow agent protocol; this file holds what's specific to
 
 ## Observability stack
 
-Implements the blueprint's observability rule (CLAUDE.md
+Implements the blueprint's observability rule (AGENTS.md
 §"Observability is a main concern"). The four capabilities are
 non-negotiable; the mechanism below is this project's choice. Pick a
 recipe from [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) and fill in
@@ -66,7 +66,7 @@ the rows.
 | Agent-readable retrieval (MALT) | {{e.g. `GET /api/admin/debug/last-failures?since=30m` + `aws logs filter-log-events ...` / CLI `{{PROJECT_NAME}} --diagnose --last 20`}} |
 | Alert routing | {{e.g. CloudWatch alarm errors>N/5min → SNS topic `arn:...` → Slack `#alerts-prod` / Slack webhook from `project_config_paths.md` on crash}} |
 | Alert thresholds | {{e.g. error rate > 5/min for 5min; p99 latency > 2s for 10min — declare per service}} |
-| Diagnosis runbook | {{path — e.g. CLAUDE.md "Project-specific diagnosis" section / `docs/diagnosis.md` / memory entry name}} |
+| Diagnosis runbook | {{path — e.g. `agents.internal.md` "Project-specific diagnosis" section / `docs/diagnosis.md` / memory entry name}} |
 | Product analytics | {{e.g. Plausible site ID `myapp.com` + dashboard URL / N/A (local app)}} |
 
 **Reminder:** the agent uses the "Agent-readable retrieval (MALT)" entry
@@ -75,7 +75,7 @@ before asking the founder to paste logs (per memory
 
 ## Cost stack
 
-Implements the blueprint's cost rule (CLAUDE.md §"Cost is a main
+Implements the blueprint's cost rule (AGENTS.md §"Cost is a main
 concern"). The four capabilities are non-negotiable; the mechanism
 below is this project's choice. Fill one row per billable code path
 (LLM, paid external API, metered storage / egress).
@@ -94,7 +94,7 @@ flag (capability #4).
 
 ## Documentation stack
 
-Implements the blueprint's documentation rule (CLAUDE.md §"Documentation
+Implements the blueprint's documentation rule (AGENTS.md §"Documentation
 is a main concern"). The four capabilities are non-negotiable; the
 mechanism below is this project's choice. Pick a recipe from
 [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) and fill in the rows.

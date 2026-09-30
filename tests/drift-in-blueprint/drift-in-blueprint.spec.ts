@@ -110,7 +110,7 @@ async function createDerivedProject(
  *
  * BUG-056 — cases #1 and #1b used to run against REPO_ROOT, the developer's
  * actual checkout, and the header called that intentional. It was not safe:
- * `drift` arms the gate (CLAUDE.md §"Before Every Push"), `arm_gate` writes
+ * `drift` arms the gate (AGENTS.md §"Before Every Push"), `arm_gate` writes
  * `core.hooksPath` into `.git/config`, and so the case MUTATED THE REAL
  * REPOSITORY — which is BUG-047 exactly, the defect the real-state canary was
  * added to catch. It caught it.

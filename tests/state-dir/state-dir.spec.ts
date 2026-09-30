@@ -414,7 +414,7 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // directory (`links/`), never the real file's. The old, unmigrated
       // script survived this fixture by resolving its OWN physical root
       // through a 40-hop readlink walk before doing anything else; the shim
-      // has no such walk, by design (CLAUDE.md "Shell to TypeScript" fixes
+      // has no such walk, by design (AGENTS.md "Shell to TypeScript" fixes
       // its two lines byte-for-byte). So a migrated launcher's `.mts` sibling
       // has to be reachable from wherever `dirname "$0"` actually lands — the
       // same directory as the outermost symlink, not the real tree. This

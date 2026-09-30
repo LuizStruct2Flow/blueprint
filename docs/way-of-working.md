@@ -472,7 +472,7 @@ every recipe doc, the agent scripts, the pre-push hook, `AGENT_SIGNAL.md` — an
 the shipped `tests/` suites, because a
 suite that guards managed machinery has to move forward with the machinery it
 guards. What maintains the blueprint itself — this deck, the brand, the a2bp
-implementer's playbook, `CLAUDE.blueprint.md` — does not ship.
+implementer's playbook, `AGENTS.blueprint.md` — does not ship.
 
 What's not managed, in detail: `project_config_*.md` are templates seeded
 once at bootstrap, then drift on purpose; `AGENTS.md` lists all five, so

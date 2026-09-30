@@ -67,7 +67,7 @@ deliberate decision, not drift.
 ## Observability
 
 The four non-negotiable capabilities (capture, agent-query, alert,
-agent-diagnose-first) are defined in CLAUDE.md §"Observability is a main
+agent-diagnose-first) are defined in AGENTS.md §"Observability is a main
 concern", with its per-push checklist in the recipe doc. The mechanism is project-specific — pick one of
 the three recipes in [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md):
 

@@ -270,7 +270,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
     })
   })
 
-  it('#3c TASK-046: the claude.internal.md import ships, and no bootstrap seeds the file', async () => {
+  it('#3c TASK-046: the agents.internal.md import ships, and no bootstrap seeds the file', async () => {
     await scenario('bootstrap-contents-3c', async (s) => {
       const { derived } = await build(s)
 
@@ -279,16 +279,19 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       // load without the project editing the managed AGENTS.md (the import
       // list moved there from CLAUDE.md with TASK-084).
       const agentsMd = await readFile(join(derived, 'AGENTS.md'), 'utf8')
-      expect(agentsMd, 'a derived project does not import claude.internal.md').toContain(
-        '@claude.internal.md',
+      expect(agentsMd, 'a derived project does not import agents.internal.md').toContain(
+        '@agents.internal.md',
       )
+      // TASK-084: the pre-rename name stays imported for one release, so a
+      // project that already wrote claude.internal.md is not orphaned.
+      expect(agentsMd, 'the old claude.internal.md import was dropped early').toContain('@claude.internal.md')
 
       // The FILE must not, because the project owns it. Seeding one would make
       // the blueprint the author of a file it promises never to write, and the
       // first `blueprint pull` would then be expected to maintain it.
       expect(
-        await s.fs.exists(join(derived, 'claude.internal.md')),
-        'bootstrap seeded claude.internal.md — the project owns that file, not the blueprint',
+        await s.fs.exists(join(derived, 'agents.internal.md')),
+        'bootstrap seeded agents.internal.md — the project owns that file, not the blueprint',
       ).toBe(false)
 
       // HONEST LIMIT. That Claude Code SKIPS an import whose file is missing is a
@@ -513,7 +516,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       // playbook and this repo's own requirements are the blueprint's.
       const shipped: string[] = []
       for (const f of [
-        'CLAUDE.blueprint.md',
+        'AGENTS.blueprint.md',
         'docs/requirements/FIXTURE-999-SPEC.md',
         'docs/requirements/TASK-018-TARGET.md',
         'docs/talk-enforcing-agentic-quality.md',
@@ -532,10 +535,10 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       }
       expect(missing, 'protocol or a folder convention stopped shipping').toEqual([])
 
-      // Same mechanism as claude.internal.md (#3c): the import arrives, the file
+      // Same mechanism as agents.internal.md (#3c): the import arrives, the file
       // does not, and Claude Code skips an import whose file is missing.
       const agentsMd = await readFile(join(derived, 'AGENTS.md'), 'utf8')
-      expect(agentsMd, 'AGENTS.md does not import the blueprint-only file').toContain('@CLAUDE.blueprint.md')
+      expect(agentsMd, 'AGENTS.md does not import the blueprint-only file').toContain('@AGENTS.blueprint.md')
     })
   })
 

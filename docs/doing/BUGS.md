@@ -13,7 +13,7 @@ useful once already.
 
 **`BUG-XXX` / `FEATURE-XXX` / `TASK-XXX` are the lifecycle IDs.** They are what the
 commit convention, the regression-test naming rule and these lifecycle folders
-key off (CLAUDE.md §"Bug Management", §"Team Workflow").
+key off (docs/DoD.md §2, AGENTS.md §"Team Workflow").
 
 **`A-NN` is not a work item.** Those are findings from one audit — the
 2026-07-23 contamination sweep in

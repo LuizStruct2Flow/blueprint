@@ -1,6 +1,6 @@
 /**
  * tests/no-chain-guard/no-chain-guard.spec.ts — the PreToolUse guard that
- * enforces CLAUDE.md §"Running commands — one per call".
+ * enforces AGENTS.md §"Running commands — one per call".
  *
  * Parallelism hazard: none. Every case writes into its own scenario workspace
  * and spawns a short-lived `bash`; nothing global is read or written.

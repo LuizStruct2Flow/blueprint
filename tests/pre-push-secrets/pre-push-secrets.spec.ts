@@ -16,7 +16,7 @@
  *   gitleaks protect --staged        → 0 commits scanned, ~0 bytes, rc=0
  *   gitleaks detect --log-opts=range → 1 commit scanned, leaks found: 1
  *
- * So the gate CLAUDE.md §Security describes as "gitleaks blocks the push" was a
+ * So the gate AGENTS.md §Security describes as "gitleaks blocks the push" was a
  * no-op in the normal commit-then-push flow. It could only ever have fired for
  * someone who staged a secret and ran `git push` without committing it.
  *

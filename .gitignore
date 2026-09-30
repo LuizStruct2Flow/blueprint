@@ -80,8 +80,9 @@ tests/.timeout-dumps/
 # construction, since project specifics live in project_config_*.md. Excluding
 # them protected nothing project-specific and cost every doc link into them:
 # a link a clone cannot resolve, which is the limitation BUG-125 had to accept.
+# /GEMINI.md, added by TASK-084, is one of them too.
 #
-# What IS private now has a home of its own: claude.internal.md (TASK-046),
+# What IS private now has a home of its own: agents.internal.md (TASK-046),
 # which the project owns and may track or ignore as it chooses.
 #
 # The entries below stay private, and for unchanged reasons: review records,

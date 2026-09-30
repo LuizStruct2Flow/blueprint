@@ -60,7 +60,7 @@ you've added in the project's `.gitignore` extension block. The rest of
 **`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `AGENT_SIGNAL.md`, `docs/DoD.md`,
 `docs/PUBLISHING.md` and `docs/doing/HANDOVER.md` are NOT here any more**
 (TASK-048; `GEMINI.md` since TASK-084). They are tracked, so seeing them under `Ignored files` means
-your `.gitignore` predates 2026-09-16 — CLAUDE.md §"Your project's
+your `.gitignore` predates 2026-09-16 — AGENTS.md §"Your project's
 `.gitignore` is yours" says what to run.
 
 ```bash

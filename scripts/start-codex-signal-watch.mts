@@ -74,7 +74,7 @@ codex binary you trust, then re-run.`)
 // runs per dispatch.
 
 // TASK-083: every dispatched agent's temporary files land under
-// <repo>/.scratch/tmp, never /tmp (CLAUDE.md "Running commands" — most
+// <repo>/.scratch/tmp, never /tmp (AGENTS.md "Running commands" — most
 // agents broke that rule on 2026-09-24/25). TMPDIR is read by `mktemp`,
 // `os.tmpdir()` and most CLI tools before anything else, so setting it here
 // (unlike the state dir above) is safe to resolve once at launcher start: it

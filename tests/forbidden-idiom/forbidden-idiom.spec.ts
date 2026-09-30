@@ -168,7 +168,7 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
 /**
  * TASK-073 / audit row C095 — a swallowed error can never land silently.
  *
- * CLAUDE.md §"Observability is a main concern": every error path is captured,
+ * AGENTS.md §"Observability is a main concern": every error path is captured,
  * no silent fallback, no try/catch that returns success. Whole, that is
  * judgement. The Architects' review narrowed the audit row to the ONE syntactic
  * sub-rule a check can hold: a bindingless `catch {` whose block neither
@@ -287,7 +287,7 @@ describe('TASK-073 / C095 — a bindingless catch says why it swallows, or rethr
 
     expect(
       silent,
-      'a bindingless catch with no rethrow and no comment hides an error path — rethrow, report, or say in the block why swallowing is right (CLAUDE.md §"Observability is a main concern")',
+      'a bindingless catch with no rethrow and no comment hides an error path — rethrow, report, or say in the block why swallowing is right (AGENTS.md §"Observability is a main concern")',
     ).toEqual([])
 
     // Non-vacuity. 72 files and 41 clauses ship to a derived project, 48 clauses live here.

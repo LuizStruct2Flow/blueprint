@@ -1,6 +1,6 @@
 # Infrastructure as Code — defined, reviewable, reproducible
 
-The principle lives in [CLAUDE.md](../CLAUDE.md) §"Infrastructure as Code
+The principle lives in [AGENTS.md](../AGENTS.md) §"Infrastructure as Code
 is a main concern", and its per-push checklist closes this file. Both
 are runtime-agnostic. This file holds the **recipes** — concrete patterns
 per IaC stack so projects don't reinvent the wheel.

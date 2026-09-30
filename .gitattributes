@@ -86,9 +86,10 @@ scripts/new-project.sh             export-ignore
 LICENSE                            export-ignore
 
 # TASK-021 Stage 2 — the rules for maintaining the blueprint (its trunk,
-# integrating a2bp requests, the deck). CLAUDE.md imports it, and a project skips
-# the import because the file is missing, as it does claude.internal.md.
-CLAUDE.blueprint.md                export-ignore
+# integrating a2bp requests, the deck). AGENTS.md imports it, and a project skips
+# the import because the file is missing, as it does agents.internal.md. Named
+# CLAUDE.blueprint.md until TASK-084.
+AGENTS.blueprint.md                export-ignore
 
 # BUG-028 — blueprint-ONLY machinery must not ship, and the suites that test it
 # must not ship either.
@@ -103,7 +104,7 @@ CLAUDE.blueprint.md                export-ignore
 # These six are the exception. Each drives `scripts/new-project.sh`,
 # `templates/`, or `.blueprint-root` — things that exist ONLY in the blueprint,
 # because bootstrapping is the one thing a derived project never does
-# (CLAUDE.md §"blueprint-only machinery"). Downstream they did not merely fail;
+# (AGENTS.blueprint.md, "blueprint-only machinery"). Downstream they did not merely fail;
 # they could not have passed anywhere. `pull-exec-bit` was the honest one — it
 # reported itself VACUOUS, because it needs an unsubstituted placeholder-bearing
 # file and a bootstrapped project has none by construction.

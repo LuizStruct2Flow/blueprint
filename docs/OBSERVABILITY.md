@@ -1,6 +1,6 @@
 # Observability — capture, retrieve, alert, diagnose
 
-The principle lives in [CLAUDE.md](../CLAUDE.md) §"Observability is a main
+The principle lives in [AGENTS.md](../AGENTS.md) §"Observability is a main
 concern", and its per-push checklist closes this file. Both are
 runtime-agnostic. This file holds the **recipes** — concrete patterns per
 runtime so projects don't reinvent the wheel.
@@ -297,7 +297,7 @@ These are the things the **principle** demands regardless of mechanism:
    logger module ideally enforces this — a `redact: ['email', 'token']`
    passthrough is cheap and bulletproof.
 4. **Agent-first triage.** The agent has documented diagnosis steps for
-   the project's recurring error classes (cf. CLAUDE.md §"Observability"
+   the project's recurring error classes (cf. AGENTS.md §"Observability"
    capability #4). It checks them **before** asking the founder. If
    the agent can't resolve in a sensible number of steps, it surfaces
    the failure cleanly: "I ran these N retrieval queries, found these
@@ -327,8 +327,8 @@ For every new user-facing route, command, or job:
       `project_config_dod.md` §"Alerting". A capability live in
       production without an alarm is not done.
 - [ ] **Diagnosis runbook** — the agent has tried-and-true diagnosis
-      steps for this error class, documented in CLAUDE.md (project
-      section), a memory entry, or `docs/diagnosis.md`.
+      steps for this error class, documented in `agents.internal.md`,
+      a memory entry, or `docs/diagnosis.md`.
 
 What you don't ship:
 - Silent fallbacks that swallow errors with a default value.

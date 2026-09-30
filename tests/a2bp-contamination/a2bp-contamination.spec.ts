@@ -864,7 +864,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
   it('#14 a suppression without a justification does not suppress (F3)', async () => {
     await scenario('a2bp-contam-14', async (s) => {
-      // CLAUDE.md §Security requires suppressions to carry a reason; an
+      // AGENTS.md §Security requires suppressions to carry a reason; an
       // unenforced requirement is a comment, not a rule.
       const f = await fixture(s)
       await f.writeIn(f.proj, CARRIER, '# Mocks\nSee /home/someuser/x  a2bp-allow:\n')

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/no-chain-guard.sh — PreToolUse hook: refuse chained Bash commands.
 #
-# Enforces CLAUDE.md §"Running commands — one per call, chains only when
+# Enforces AGENTS.md §"Running commands — one per call, chains only when
 # dependent". Blocks `&&`, `||` and `;`. **Pipes are permitted** — a pipeline is
 # one operation whose filter cannot run without its producer, which is the
 # dependency test that section states.
@@ -116,6 +116,6 @@ BLOCKED: chained command (&& || ;). Run one command per tool call.
 Why: the permission allowlist matches one command PATTERN at a time. A compound
 string is matched as one unit, so an early permissive pattern silently carries
 everything joined to it — and that also defeats the deny list.
-CLAUDE.md §"Running commands — one per call, chains only when dependent".
+AGENTS.md §"Running commands — one per call, chains only when dependent".
 MSG
 exit 2

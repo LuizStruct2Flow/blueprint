@@ -31,7 +31,7 @@
 //      branch; a derived project's push publishes nothing (a2bp's own scan is
 //      its pre-publication stop).
 //
-//   2. ONLY FILES THAT SHIP ARE SCANNED. The rule this mechanises (CLAUDE.md
+//   2. ONLY FILES THAT SHIP ARE SCANNED. The rule this mechanises (AGENTS.md
 //      §"What blueprint sync covers") is about a blueprint-MANAGED file, and a
 //      path whose `export-ignore` attribute is set ships to nobody — it cannot
 //      contaminate anything. This repo's own records (`docs/done/**`,

@@ -112,7 +112,7 @@ blueprint/
 ├── AGENTS.md                       ← the shared agent rules all four CLI providers read
 ├── CLAUDE.md                       ← imports AGENTS.md; plus Claude Code's own wake and hooks
 ├── GEMINI.md                       ← imports AGENTS.md for Gemini
-├── CLAUDE.blueprint.md             ← blueprint maintenance: trunk, a2bp integration, deck (not shipped)
+├── AGENTS.blueprint.md             ← blueprint maintenance: trunk, a2bp integration, deck (not shipped)
 ├── AGENT_SIGNAL.md                 ← the coordination protocol: mic, rotation, four-eyes review
 ├── STACK_DEFAULTS.md               ← default tech stack for new struct2flow projects
 ├── project_config_overview.md      ← project-specific overview (stub)
@@ -431,7 +431,7 @@ different speeds:
   locally, so make sure `bash scripts/install-toolchain.sh` has been run
   and `.githooks/pre-push` passes before opening the PR.
 - **Slower track — new capabilities or new concerns.** The blueprint
-  is **derived, not designed** (`CLAUDE.blueprint.md` §"The
+  is **derived, not designed** (`AGENTS.blueprint.md` §"The
   blueprint is derived, not designed"): capabilities are admitted
   only after they have proven themselves in a real struct2flow
   project. If you want to propose a new recipe / gate / concern,
@@ -455,5 +455,5 @@ hard-code such content will be asked to refactor.
 - `.githooks/pre-push` to run the full gate locally (security +
   build + lint + format + tests + IaC validate).
 - For any change to [docs/DoD.md](docs/DoD.md), [AGENTS.md](AGENTS.md),
-  or a recipe doc, follow `CLAUDE.blueprint.md`: the deck and every other
+  or a recipe doc, follow `AGENTS.blueprint.md`: the deck and every other
   document that restates the rule move in the same commit.

@@ -2,7 +2,7 @@
  * tests/instruction-files/instruction-files.spec.ts — TASK-084: the four CLI
  * providers work from one instruction file, and every half-pulled state says so.
  *
- * The layout (docs/doing/PLAN-TASK-084-agents-md.md §2): `AGENTS.md` holds the
+ * The layout (docs/waiting-acceptance/PLAN-TASK-084-agents-md.md §2): `AGENTS.md` holds the
  * shared rules and Codex/Kimi read it natively; `CLAUDE.md` and `GEMINI.md`
  * import it; `AGENT_SIGNAL.md` holds the coordination protocol.
  *

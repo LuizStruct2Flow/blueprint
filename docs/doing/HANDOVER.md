@@ -184,23 +184,12 @@ no such cycle exists (checked 2026-09-29).
   accordingly.
 
 **Next, in order:**
-1. **TASK-084** (founder, 2026-09-27: "do 81 and after it 84"): slice 1 is
-   released at `a2e3bdf`; slice 2 is pushed (`1dbfd5f`, `aeaf755`, `416bcd1`).
-   In this order:
-   - **If slice 2's CI is red**, fix that first; derived projects pull
-     `released`, so nothing reaches them meanwhile.
-   - **The per-provider live probe** (plan §"Slice log", slice 2): in a
-     project bootstrapped OUTSIDE the blueprint tree (Claude's ancestor walk
-     would otherwise load this repo's `CLAUDE.md`), ask each of Claude, Codex,
-     Kimi and Gemini to quote S1, S3 and one phrase that only a
-     `project_config_*.md` file holds; then repeat on the §4 half-pulled
-     fixtures and confirm each CLI stops and names the file to pull. Gemini
-     may be out of quota — record it, do not wait on it.
-   - **Slice 3**: the reference sweep, plus the founder's two renames
-     (plan §9 decision 4): `CLAUDE.blueprint.md` → `AGENTS.blueprint.md`, and
-     `claude.internal.md` → `agents.internal.md` with the old name still
-     imported for one release. Then the row moves to `waiting-acceptance/`.
-   Plan: [`PLAN-TASK-084-agents-md.md`](PLAN-TASK-084-agents-md.md).
+1. **TASK-084** — all three slices landed; the row and plan are in
+   `docs/waiting-acceptance/` and **wait for the founder's acceptance**.
+   Gemini's migration case is **unverified**: its quota was out. Kimi's 2 of
+   3 on migration case 4 is a known limit the founder accepted (2026-09-30).
+   In the release after this one, remove the `@claude.internal.md` import.
+   Plan: [`PLAN-TASK-084-agents-md.md`](../waiting-acceptance/PLAN-TASK-084-agents-md.md).
 2. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
    `contamination.sh`, then its fix) — both unblocked now that TASK-081 has
    landed; slice 6's closure brings a ported lib's `.mts` on a single-file pull.

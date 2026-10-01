@@ -37,7 +37,20 @@ interface ProcRow {
   args: string
 }
 
-/** Parse `ps -eo pid,ppid,pgid,sid,stat,wchan:32,args` output into rows. */
+/**
+ * The `ps` arguments for this platform, always the seven columns `parsePs`
+ * reads. Darwin's `ps` refuses `sid` and `wchan:32` (TASK-087), so it gets its
+ * own keywords; its `sess` prints 0 for every process, kept for the column
+ * count, not the value. Every other platform keeps the Linux spelling. Only the
+ * tree comes across: the per-process `/proc` reads below stay Linux-only and
+ * report `<unreadable: …>` elsewhere.
+ */
+export function psArgs(platform: NodeJS.Platform = process.platform): string[] {
+  if (platform === 'darwin') return ['-eo', 'pid,ppid,pgid,sess,stat,wchan,args']
+  return ['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args']
+}
+
+/** Parse the output of `ps` run with `psArgs()` into rows. */
 function parsePs(output: string): ProcRow[] {
   const rows: ProcRow[] = []
   for (const line of output.trim().split('\n').slice(1)) {
@@ -217,7 +230,7 @@ export async function dumpProcessTree(
   ]
   let all: ProcRow[] = []
   try {
-    const { stdout } = await execFileAsync('ps', ['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args'])
+    const { stdout } = await execFileAsync('ps', psArgs())
     all = parsePs(stdout)
     const tree = rootPids.length > 0 ? withDescendants(all, rootPids) : []
     if (tree.length === 0) {

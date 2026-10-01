@@ -476,7 +476,12 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
     await scenario('install-toolchain-36', async (s) => {
       const m = await machine(s, 'a', await baseline(s))
       await install(s, m, [])
-      const touched = await s.run('touch', ['-d', '@0', m.target], { cwd: s.workspace.root })
+      // `touch -d @0` is GNU-only (BSD touch on macOS refuses it); `-t` with
+      // the zone pinned to UTC is the epoch on both.
+      const touched = await s.run('touch', ['-t', '197001010000.00', m.target], {
+        cwd: s.workspace.root,
+        env: { TZ: 'UTC' },
+      })
       expect(touched.code, touched.output).toBe(0)
       const again = await install(s, m, [])
       expect((await stat(m.target)).mtimeMs, `the command was rewritten:\n${again.output}`).toBe(0)

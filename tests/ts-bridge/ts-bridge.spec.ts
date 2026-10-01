@@ -1087,6 +1087,33 @@ describe('TASK-083 — ts_scrubbed redirects a TMPDIR the launchers plant inside
     })
   })
 
+  it('#13e ts_scrubbed leaves the CALLER shell TMPDIR as it found it, so a second call redirects again (TASK-087)', async () => {
+    // ts_scrubbed is sourced and runs in the caller's shell. Assigning TMPDIR
+    // there changed it for good: after the redirected dir was removed the
+    // caller held a TMPDIR naming nothing, and the next call, finding no
+    // marker above it, passed that on. The typecheck stage makes two calls.
+    await scenario('tsbridge-87a', async (s) => {
+      const dir = await scrubFixture(s, 'scrub-e')
+      await s.fs.write('scrub-e/.git', '')
+      const badTmp = await s.fs.mkdirp('scrub-e/scratch-tmp')
+      const probe = await s.fs.write('scrub-e-probe.sh', 'printf \'%s\\n\' "$TMPDIR"\n')
+      const driver = await s.fs.write(
+        'scrub-e-driver.sh',
+        `cd ${JSON.stringify(dir)}\n` +
+          `. ./run-ts-suites.sh\n` +
+          `ts_scrubbed sh ${JSON.stringify(probe)} >/dev/null\n` +
+          `printf 'caller=%s\\n' "$TMPDIR"\n` +
+          `ts_scrubbed sh ${JSON.stringify(probe)}\n`,
+      )
+      const r = await s.run('sh', [driver], { cwd: dir, env: { TMPDIR: badTmp }, timeoutMs: 60_000 })
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout, r.output).toContain(`caller=${badTmp}\n`)
+      const second = r.stdout.trim().split('\n').pop() as string
+      expect(second, r.output).not.toBe(badTmp)
+      expect(second, r.output).not.toBe('')
+    })
+  })
+
   // Elias (Codex), reviewing 3d81490: the traps in the redirect branch were
   // set and cleared in ts_scrubbed's OWN shell — but ts_scrubbed is SOURCED,
   // so that shell is the CALLER's, and a caller with its own INT/TERM/HUP

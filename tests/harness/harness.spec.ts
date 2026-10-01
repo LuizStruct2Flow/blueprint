@@ -19,7 +19,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { appendFile, chmod, readFile, readdir, rename, writeFile, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { scenario, REPO_ROOT } from './index.js'
-import { collectDumps } from './dump.js'
+import { collectDumps, psArgs } from './dump.js'
+import { skipVisibly } from '../helpers/project-config.js'
 import { RealStateCanary } from './canary.js'
 import { assertProcessEnvClean, fixtureEnv, FORBIDDEN_ENV } from './env.js'
 import { createWorkspace } from './workspace.js'
@@ -1680,7 +1681,23 @@ describe('harness — timeout evidence capture (BUG-146)', () => {
     })
   })
 
-  it('BUG-146: an orphan reparented past the tracked-roots walk is still named — the ppid walk alone cannot see it, but the pipe/env-marker nets do', async () => {
+  it('TASK-087: the dump asks ps for the same seven columns on Linux and Darwin, and Linux keeps its own spelling', () => {
+    // Pure, so each branch is pinned on whichever host runs the suite.
+    expect(psArgs('linux')).toEqual(['-eo', 'pid,ppid,pgid,sid,stat,wchan:32,args'])
+    expect(psArgs('darwin')).toEqual(['-eo', 'pid,ppid,pgid,sess,stat,wchan,args'])
+    expect(psArgs('freebsd')).toEqual(psArgs('linux'))
+    const columns = (p: NodeJS.Platform): number => (psArgs(p)[1] as string).split(',').length
+    expect(columns('darwin')).toBe(columns('linux'))
+  })
+
+  it('BUG-146: an orphan reparented past the tracked-roots walk is still named — the ppid walk alone cannot see it, but the pipe/env-marker nets do', async (ctx) => {
+    // TASK-087: both nets read /proc and the fixture uses util-linux `setsid`,
+    // so off Linux this case cannot judge anything and says so.
+    if (process.platform !== 'linux') {
+      skipVisibly(ctx, `the pipe and env-marker nets read /proc and the fixture needs setsid — this host is ${process.platform}`)
+      return
+    }
+
     // BUG-146's row, fifth and sixth CI occurrences (runs 36129880176,
     // 36166194863): both real dumps read "nothing found under the tracked
     // roots — every tracked process had already exited" while the wait they

@@ -187,14 +187,15 @@ ts_scrubbed(){
 # _ts_private_tmp_parent — print where a redirected TMPDIR is created when
 # there is no /dev/shm (TASK-087), or print nothing and return 1.
 #
-# ${XDG_CACHE_HOME:-$HOME/.cache}, the parent tests/harness/workspace.ts gives
+# ${XDG_CACHE_HOME:-$HOME/.cache} (a2bp-allow: the user's cache home, per-user, not per-project state),
+# the parent tests/harness/workspace.ts gives
 # its own private base: per-user, where /tmp is shared (BUG-121). Created 0700
 # if missing. Refused when it is not absolute or a project marker sits above it
 # (a home that is itself a checkout would hand back the very TMPDIR this
 # redirect replaces), checked on the path as named and again on the physical
 # one. Call it in a command substitution: it changes directory.
 _ts_private_tmp_parent(){
-  _tpp_dir=${XDG_CACHE_HOME:-${HOME:+$HOME/.cache}}
+  _tpp_dir=${XDG_CACHE_HOME:-${HOME:+$HOME/.cache}}  # a2bp-allow: the user's cache home, per-user, not per-project state
   case $_tpp_dir in
     (/*) ;;
     (*) return 1 ;;

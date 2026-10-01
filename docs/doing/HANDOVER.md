@@ -155,7 +155,7 @@ no such cycle exists (checked 2026-09-29).
   `.claude/worktrees/` (some may hold unlanded work; check before deleting —
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
-- **Waiting for the founder's acceptance:** TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
+- **Waiting for the founder's acceptance:** TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.

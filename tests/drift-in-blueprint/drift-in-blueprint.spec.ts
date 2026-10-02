@@ -49,6 +49,25 @@ async function run(s: Scenario, command: string, cwd: string) {
   return s.run('bash', ['-c', command], { cwd })
 }
 
+/**
+ * BUG-152 commit 1 — copy `scripts/lib/gate.sh` into a fixture root, and, in
+ * the same follow-the-shim shape copyCli uses for the CLI, its sourced
+ * adapter's `gate.mts` target once the port lands. Before the port the
+ * target does not exist and this is a plain gate.sh copy; after it, a
+ * fixture missing gate.mts would leave `arm_gate` dying on "cannot find
+ * …/gate.mts" instead of exercising the gate.
+ */
+async function copyGateLib(root: string) {
+  await copyFile(join(REPO_ROOT, 'scripts/lib/gate.sh'), join(root, 'scripts/lib/gate.sh'))
+  const target = join(REPO_ROOT, 'scripts/lib/gate.mts')
+  try {
+    await copyFile(target, join(root, 'scripts/lib/gate.mts'))
+  } catch {
+    // Pre-port tree: gate.mts does not exist yet, and gate.sh is the whole
+    // implementation — nothing to bring along.
+  }
+}
+
 async function git(s: Scenario, cwd: string, args: string[]) {
   return s.run('git', args, { cwd })
 }
@@ -130,7 +149,7 @@ async function createBlueprintCheckout(s: Scenario, root: string) {
   await mkdir(join(root, 'scripts/lib'), { recursive: true })
   await mkdir(join(root, '.githooks'), { recursive: true })
   await copyCli(s, root)
-  await copyFile(join(REPO_ROOT, 'scripts/lib/gate.sh'), join(root, 'scripts/lib/gate.sh'))
+  await copyGateLib(root)
   await copyFile(
     join(REPO_ROOT, 'scripts/lib/placeholders.sh'),
     join(root, 'scripts/lib/placeholders.sh'),
@@ -194,7 +213,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await writeFile(join(c, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
       await s.run('chmod', ['+x', join(c, '.githooks/pre-push')], { cwd: c })
       await copyCli(s, c)
-      await copyFile(join(REPO_ROOT, 'scripts/lib/gate.sh'), join(c, 'scripts/lib/gate.sh'))
+      await copyGateLib(c)
       await copyFile(
         join(REPO_ROOT, 'scripts/lib/placeholders.sh'),
         join(c, 'scripts/lib/placeholders.sh'),

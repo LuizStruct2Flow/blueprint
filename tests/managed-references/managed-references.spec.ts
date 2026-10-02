@@ -494,10 +494,13 @@ describe('TASK-081 slice 6 — the closure follows a lib to its own .mts sibling
       await initRepo(s, bp)
       const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
 
-      // The project: today's real scripts/, i.e. the still-shell gate.sh and
-      // no gate.mts at all — a project that predates BUG-152.
+      // The project: today's real scripts/ minus gate.mts (BUG-152 has since
+      // ported gate.sh for real, so it is left out here) — a project that
+      // predates the port and holds no gate.mts at all.
       const proj = await s.workspace.dir('proj')
-      for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(proj, f))
+      for (const f of tracked) {
+        if (f !== 'scripts/lib/gate.mts') await s.fs.copyIn(join(REPO_ROOT, f), join(proj, f))
+      }
       expect(await s.fs.exists(join(proj, 'scripts/lib/gate.mts')), 'fixture broken: the project already has gate.mts').toBe(false)
       await s.fs.write(join(proj, 'docs/DoD.md'), '# DoD\nowner proj\nedited here\n')
       await s.fs.write(

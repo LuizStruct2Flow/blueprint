@@ -56,16 +56,6 @@ because another machine only sees what is pushed.
    its trunk"): collect its commits to `main` when the agent's item ends,
    then remove it. Multi-slice work lands each slice on `main` as dark code.
    A real branch needs the founder told first.
-7. **BUG-152: a worktree agent un-arms the gate's own check, every time.**
-   Launching a worktree-isolated agent rewrites `core.hooksPath` from
-   `.githooks` to an ABSOLUTE path, and `session-start.sh` then reports *"the
-   struct2flow pre-push gate is NOT active"*. Reproduced four times on
-   2026-09-23. Hooks still fire (the path resolves and the gate ran its stages
-   on every push), so it is a false alarm — but re-arm before every push with
-   `git config --local core.hooksPath .githooks`, read the wake report, and
-   never push past that line. The fix is behind a `scripts/lib/gate.sh` port,
-   which is why BUG-152 is filed rather than patched.
-
 ---
 
 ## 1. OPEN, AND WHOSE CALL IT IS
@@ -190,8 +180,8 @@ no such cycle exists (checked 2026-09-29).
    3 on migration case 4 is a known limit the founder accepted (2026-09-30).
    In the release after this one, remove the `@claude.internal.md` import.
    Plan: [`PLAN-TASK-084-agents-md.md`](../waiting-acceptance/PLAN-TASK-084-agents-md.md).
-2. **BUG-152** (port `gate.sh`, then its fix), then **BUG-155** (port
-   `contamination.sh`, then its fix) — both unblocked now that TASK-081 has
+2. **BUG-155** (port
+   `contamination.sh`, then its fix) — unblocked now that TASK-081 has
    landed; slice 6's closure brings a ported lib's `.mts` on a single-file pull.
 3. **BUG-146** on the next #20d hang.
 

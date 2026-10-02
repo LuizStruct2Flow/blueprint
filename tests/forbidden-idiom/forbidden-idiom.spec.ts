@@ -54,7 +54,8 @@
  * MUTATION RECIPE (R6) — observed red, not predicted:
  *   Restore `_fl_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"` in
  *   scripts/lib/feed.sh, or the `${1:-$(git rev-parse --show-toplevel ...)}`
- *   default in scripts/lib/gate.sh.
+ *   default in scripts/lib/gate.sh (its `gate.mts` after BUG-152's port —
+ *   the adapter follow above is what keeps this recipe aimed at the policy).
  *   → this spec goes red naming the file and line. The pre-BUG-077 version
  *     stayed green on both, which is the whole reason this file changed.
  */
@@ -64,7 +65,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import ts from 'typescript'
 import { join } from 'node:path'
 import { REPO_ROOT } from '../harness/index.js'
-import { resolveConsumer } from '../helpers/shim.js'
+import { resolveConsumerOpts } from '../helpers/shim.js'
 
 /**
  * `git … rev-parse … --show-toplevel` on one line.
@@ -116,8 +117,14 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
       // idiom this case guards against moves with the logic, to the shim's
       // `.mts` target — the shim itself has nothing to scan. resolveConsumer
       // follows it, so the population keeps scanning where the code actually
-      // lives. A no-op today: every file here is still its own consumer.
-      const resolved = resolveConsumer(REPO_ROOT, rel)
+      // lives. BUG-152 commit 1 widens the same follow to a SOURCED ADAPTER
+      // (scripts/lib/gate.sh, the dod-gate.sh shape): the adapter keeps its
+      // function tail in shell, but the idiom this case bans lives wherever
+      // the gate policy now lives — `gate.mts` after the port, nothing today
+      // (gate.sh is still its own consumer, so the follow is a no-op until
+      // the port lands). Opt-in because adapter-following changes what other
+      // checks read; only a logic guard wants the target.
+      const resolved = resolveConsumerOpts(REPO_ROOT, rel, { followSourcedAdapters: true })
       if (resolved === undefined) continue
       const body = resolved.source
       // A 'ts' consumer's comments are `//`, not `#` — following the shim to

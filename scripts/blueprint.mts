@@ -1689,14 +1689,13 @@ async function armGate(root: string): Promise<void> {
       'refusing to report drift without scripts/lib/gate.sh. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/gate.sh',
     )
   }
-  // Both calls degrade rather than break drift: the adapter exits non-zero
-  // when gate.mts is absent (stale sync), and the gate contract is "never
-  // fails the caller" (BUG-004) — the keepalive call was always unchecked,
-  // and the arm call joins it now that a failed bridge is a real possibility.
+  // The arm call stays CHECKED, as it was before the port: arm_gate itself
+  // never fails (BUG-004), so a non-zero here means the bridge broke (gate.mts
+  // missing after a stale sync, node failing) and drift must refuse loudly,
+  // exactly as it does for a missing gate.sh (TASK-029) — never carry on and
+  // report a gate it did not arm. Only the keepalive is best-effort.
   const env = { ...process.env, BP_CODE_ROOT: dirname(cliDir()) }
-  await unchecked(() =>
-    run('bash', ['-c', '. "$1"; arm_gate "$2"', cliName(), lib, root], { stdout: 'inherit', stderr: 'inherit', env }),
-  )
+  await run('bash', ['-c', '. "$1"; arm_gate "$2"', cliName(), lib, root], { stdout: 'inherit', stderr: 'inherit', env })
   await unchecked(() =>
     run(
       'bash',

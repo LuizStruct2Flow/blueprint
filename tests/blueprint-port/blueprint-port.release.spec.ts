@@ -1339,6 +1339,35 @@ describe('blueprint-port differential — drift', () => {
     })
   })
 
+  it('scripts/lib/gate.mts missing while gate.sh is present — drift fails loudly, never reports armed (BUG-152)', async () => {
+    await scenario('blueprint-port-drift-gate-mts-missing', async (s) => {
+      const { newResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          const proj = join(root, 'proj')
+          const sha = await seedBlueprintRepoPinned(s, bp)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          await copyFile(join(bp, 'CLAUDE.md'), join(proj, 'CLAUDE.md'))
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await rm(join(proj, 'scripts/lib/gate.mts'))
+          await commitAllPinned(s, proj, 'sync, minus gate.mts')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+        // The archived shell CLI has no BP_CODE_ROOT, so its message names a
+        // cwd-relative path; only the live CLI's refusal is the subject.
+        compareRuns: false,
+      })
+      expect(newResult.code).not.toBe(0)
+      expect(newResult.stderr).toContain('cannot find')
+      expect(newResult.stderr).toContain('scripts/lib/gate.mts')
+      expect(newResult.stdout).not.toContain('gate: armed')
+      expect(newResult.stdout).not.toContain('gate: ARMED')
+    })
+  })
+
   it('an exported GIT_DIR does not redirect drift to another repository (BUG-077)', async () => {
     await scenario('blueprint-port-drift-git-dir', async (s) => {
       // A FRESH decoy repo PER SIDE (built inside `run`, so `samePathTwice`'s

@@ -1407,28 +1407,32 @@ describe('blueprint-port differential — drift', () => {
   })
 
   /**
-   * A project name holding `&` and `\` exercises placeholder substitution
-   * (scripts/lib/placeholders.sh's own header documents the sed/bash `${//}`
-   * bugs these two characters used to trigger). `&` alone is clean on both
-   * CLIs (verified while building this row). `\` is not: the project
+   * A project name holding `&` and `\` pins NODE'S OWN ESM LIMIT ON `\` —
+   * since BUG-152's port, on BOTH CLIs. `\` is not clean: the project
    * directory is the CLI's own ancestor (`scripts/blueprint.mts` lives
    * inside it), and NODE'S OWN ESM LOADER refuses an entry-point specifier
    * whose resolved path contains an encoded `\`
    * (`ERR_INVALID_MODULE_SPECIFIER: … must not include encoded "/" or "\"
-   * characters`) — enforced by Node before a single line of blueprint.mts
-   * runs. This is a PLATFORM CONSTRAINT of the port's own design (plan §2
-   * rule 1, "one file … run via `node`"), not a fixture artefact: the real
-   * shim (`exec node "$(dirname "$0")/blueprint.mts" "$@"`) hits the
-   * identical failure for a project actually checked out under such a path.
-   * ACCEPTED DEVIATION, extending plan §6's list: a project directory name
-   * containing a literal `\` cannot run the ported CLI at all, though the
-   * shell CLI runs it normally. Documented here rather than fixed, because
-   * there is no `node <path>` invocation shape that accepts this path —
-   * `bp_substitute_stream`'s own literal split-and-join (which this row
-   * still exercises, for the CONTENT half — the `&` in the name) is not
-   * what fails. `compareRuns: false` — the two sides genuinely diverge by
-   * design, so this row asserts each side explicitly instead of the generic
-   * byte-equality `samePathTwice` otherwise enforces.
+   * characters`) — enforced by Node before a single line of the module
+   * runs. There is no `node <path>` invocation shape that accepts this
+   * path, so the constraint is documented rather than fixed.
+   *
+   * This row used to be a ONE-SIDED accepted deviation (plan §6): the shell
+   * CLI survived, because only the ported CLI loaded a `.mts`. BUG-152
+   * changed the other half: `scripts/lib/gate.sh` is now a sourced adapter
+   * forwarding to `gate.mts` (the dod-gate.sh shape), and `cmd_drift` arms
+   * the gate before it does anything else — so the SHELL CLI sources the
+   * adapter too, and Node loads gate.mts from inside the project, hitting
+   * the identical error. No shell-only path arms the gate anymore: under a
+   * `\`-bearing directory both CLIs die the same way, which is what this
+   * row now pins.
+   *
+   * The CONTENT-level substitution these characters exist to exercise
+   * (`&` in the name — the sed/bash `${//}` bugs scripts/lib/placeholders.sh's
+   * own header documents) keeps its own differential row immediately below,
+   * under an `&`-only name where no loader constraint fires and the two
+   * CLIs must agree byte-for-byte. `compareRuns: false` here — the sides
+   * die identically but each is asserted explicitly, as before.
    */
   it('a project name holding & and \\ — exercises placeholder substitution, and Node’s own ESM limit on \\', async () => {
     await scenario('blueprint-port-drift-name-chars', async (s) => {
@@ -1458,28 +1462,68 @@ describe('blueprint-port differential — drift', () => {
         snapshotOpts: driftSnapshotOpts,
         compareRuns: false,
       })
-      // OLD: the shell CLI substitutes correctly and reports clean — proof
-      // that the CONTENT-level substitution (the `&`/`\` literal split-and-
-      // join this row means to exercise) is correct.
-      expect(oldResult.code).toBe(0)
-      expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
-      // NEW: Node refuses to even load scripts/blueprint.mts from inside a
-      // `\`-bearing ancestor directory — the accepted deviation above.
+      // BOTH sides now die before drift reports anything: whichever CLI
+      // drives it, gate arming loads a `.mts` from inside the `\`-bearing
+      // project — blueprint.mts directly for NEW, gate.mts through the
+      // sourced adapter for OLD (BUG-152).
+      expect(oldResult.code).not.toBe(0)
+      expect(oldResult.stderr).toContain('ERR_INVALID_MODULE_SPECIFIER')
       expect(newResult.code).not.toBe(0)
       expect(newResult.stderr).toContain('ERR_INVALID_MODULE_SPECIFIER')
       // Every OTHER field `samePathTwice`'s default `toEqual` would have
       // covered still has to match explicitly (TASK-081 round C) — the
       // deviation this row accepts is ONLY code/stdout/stderr (and, as a
       // direct consequence of Node dying before ever calling git,
-      // `cacheRefs`: NEW never creates one at all). Measured directly:
+      // `cacheRefs`: NEITHER side creates one at all). Measured directly:
       // `projTree`/`scratch`/`remoteRefs`/`ghLog` come out identical on
       // both sides regardless.
       expect(newSnapshot.projTree).toEqual(oldSnapshot.projTree)
       expect(newSnapshot.scratch).toEqual(oldSnapshot.scratch)
       expect(newSnapshot.remoteRefs).toEqual(oldSnapshot.remoteRefs)
       expect(newSnapshot.ghLog).toEqual(oldSnapshot.ghLog)
-      expect(oldSnapshot.cacheRefs).toBe('')
+      expect(oldSnapshot.cacheRefs).toBe('<no cache created>')
       expect(newSnapshot.cacheRefs).toBe('<no cache created>')
+    })
+  })
+
+  /**
+   * BUG-152 — the content half of the row above, under an `&`-only project
+   * name (`a&b`) where Node's ESM limit never fires. `&` is the sed
+   * substitution-metacharacter scripts/lib/placeholders.sh's own header
+   * documents; a wrong literal split-and-join would rewrite it in the
+   * pulled CLAUDE.md and drift would report a diff. Default `compareRuns`
+   * byte-equality applies: OLD and NEW must substitute identically and both
+   * report clean.
+   */
+  it('a project name holding & alone — content substitution stays clean on both CLIs (BUG-152)', async () => {
+    await scenario('blueprint-port-drift-name-amp', async (s) => {
+      const projName = 'a&b'
+      const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
+        build: async (s, root) => {
+          const bp = join(root, 'bp')
+          await mkdir(join(bp, 'docs'), { recursive: true })
+          await writeFile(join(bp, 'CLAUDE.md'), '# CLAUDE\nproject={{PROJECT_NAME}}\nupper={{PROJECT_NAME_UPPER}}\n', 'utf8')
+          await writeFile(join(bp, 'docs/DoD.md'), '# DoD\nfixture\n', 'utf8')
+          await writeFile(join(bp, 'README.md'), '# fixture project\n', 'utf8')
+          await initRepo(s, bp)
+          await commitAllPinned(s, bp, 'base')
+          const sha = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
+
+          const proj = join(root, projName)
+          await seedRegisteredProjectPinned(s, proj, bp, sha)
+          // Hand-computed correct substitution: bp_placeholder_upper is
+          // `tr 'a-z-' 'A-Z_'`, which leaves `&` untouched.
+          await writeFile(join(proj, 'CLAUDE.md'), `# CLAUDE\nproject=${projName}\nupper=A&B\n`, 'utf8')
+          await mkdir(join(proj, 'docs'), { recursive: true })
+          await copyFile(join(bp, 'docs/DoD.md'), join(proj, 'docs/DoD.md'))
+          await commitAllPinned(s, proj, 'sync')
+          return { root, proj, bp, env: await driftEnv(s, root) }
+        },
+        run: runDrift,
+        snapshotOpts: driftSnapshotOpts,
+      })
+      expect(oldResult.code).toBe(0)
+      expect(oldResult.stdout).toContain('✓ All blueprint-managed files match the blueprint HEAD.')
     })
   })
 })
@@ -1865,6 +1909,15 @@ describe('blueprint-port differential — pull', () => {
    * regardless of the project's name — it reports "same", one extra line,
    * asserted explicitly via `compareRuns: false` rather than papered over
    * with the default full-snapshot equality.
+   *
+   * SECOND DOCUMENTED DIVERGENCE (BUG-152): the port turned
+   * `scripts/lib/gate.sh` into a sourced adapter naming `gate.mts` (the
+   * dod-gate.sh shape), and slice 6's closure is a fixed point — so NEW also
+   * considers `scripts/lib/gate.mts` a lib the CLI brings, printing it in
+   * the header list and as one more "same" line (sorted before gate.sh).
+   * OLD's grep runs over the SHELL CLI text and cannot see a name that only
+   * exists in a lib's bridge line, so OLD never pulls it and the two trees
+   * differ by exactly that one file (asserted, not assumed, below).
    */
   it('pull scripts/blueprint — the real shell CLI and its real libs', async () => {
     await scenario('blueprint-port-pull-cli-libs', async (s) => {
@@ -1900,21 +1953,34 @@ describe('blueprint-port differential — pull', () => {
       expect(oldNormalized).toContain('scripts/blueprint brings the libs it sources:')
       expect(oldNormalized).not.toContain('scripts/blueprint.mts')
       expect(oldNormalized).toMatch(/ {2}same {2}scripts\/blueprint\n/)
-      // NEW's stdout is OLD's, plus exactly one extra "same" line for the
-      // .mts sibling it also considers, inserted immediately BEFORE scripts/
-      // blueprint: the target is installed before the shim so the public CLI
-      // path can never point at a target that was refused later in the pull.
-      const expectedNewNormalized = oldNormalized.replace(
+      // NEW's stdout is OLD's, plus exactly two extra "same" lines, both
+      // documented divergences above:
+      //  - scripts/lib/gate.mts — the BUG-152 adapter's own .mts, sorted
+      //    immediately BEFORE gate.sh (the closure is dependency-first and
+      //    alphabetical: a target lands before the file that names it);
+      //  - scripts/blueprint.mts — the mid-port sibling, inserted immediately
+      //    BEFORE scripts/blueprint: the target is installed before the shim
+      //    so the public CLI path can never point at a target that was
+      //    refused later in the pull.
+      const withGateMts = oldNormalized
+        .replace(
+          'scripts/lib/gate.sh ',
+          'scripts/lib/gate.mts scripts/lib/gate.sh ',
+        )
+        .replace(/( {2}same {2}scripts\/lib\/gate\.sh\n)/, '  same  scripts/lib/gate.mts\n$1')
+      const expectedNewNormalized = withGateMts.replace(
         /( {2}same {2}scripts\/blueprint\n)/,
         '  same  scripts/blueprint.mts\n$1',
       )
       expect(newNormalized).toBe(expectedNewNormalized)
-      // Plan §5's tree comparison: the extra "same" line NEW prints is
+      // Plan §5's tree comparison: the extra "same" lines NEW prints are
       // REPORTING-only (§6's own note — blueprint.mts substitutes to the
-      // identity), so once that ONE accepted deviation is accounted for, the
-      // two builds must land byte-identical — every other snapshot field
-      // asserted explicitly since `compareRuns: false` skipped the blanket
-      // toEqual.
+      // identity; gate.mts too, and both sides' fixtures are seeded from this
+      // tree, so the file is already in the project and reports "same" on
+      // NEW rather than arriving as a difference). Once the documented
+      // stdout deviations above are accounted for, the two builds land
+      // byte-identical — every other snapshot field asserted explicitly
+      // since `compareRuns: false` skipped the blanket toEqual.
       expect(newSnapshot.projTree).toEqual(oldSnapshot.projTree)
       expect(newSnapshot.cacheRefs).toEqual(oldSnapshot.cacheRefs)
       expect(newSnapshot.scratch).toEqual(oldSnapshot.scratch)
@@ -2022,9 +2088,19 @@ describe('blueprint-port differential — pull', () => {
         // mentioning `scripts/blueprint.mts` (the prior shape) would let an
         // omission or a wrong message pass silently; this strip removes only
         // the one string just proven present.
+        //
+        // BUG-152 adds a SECOND pair of accepted deviations, same class:
+        // the broken lib's adapter now names `scripts/lib/gate.mts`, so NEW
+        // also prints it in the header's lib list and as one extra "same"
+        // line (itself unaffected by the marker, pulled clean). OLD — its
+        // grep running over the shell CLI text — prints neither. Both strips
+        // are exact-string and no-ops on OLD's snapshot.
         normalizeSnapshot: (snap) => ({
           ...snap,
-          stdout: snap.stdout.replace(`${MTS_SKIP_LINE}\n\n`, ''),
+          stdout: snap.stdout
+            .replace(`${MTS_SKIP_LINE}\n\n`, '')
+            .replace(' scripts/lib/gate.mts', '')
+            .replace('  same  scripts/lib/gate.mts\n', ''),
         }),
       })
       expect(newSnapshot.stdout).toContain(MTS_SKIP_LINE)

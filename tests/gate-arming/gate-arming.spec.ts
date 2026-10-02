@@ -80,6 +80,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 /** `core.hooksPath` value that means "our gate is live". */
@@ -399,6 +400,61 @@ describe('BUG-004 — the gate arms itself on paths that already run', () => {
         'the config write failed but nothing said so — a silent non-arm reads as armed',
       ).toMatch(/could not set|NOT active/i)
       expect(await c.hooksPath(), 'the write was supposed to fail, yet the value landed').toBe('')
+    })
+  })
+})
+
+describe('BUG-152 — an absolute core.hooksPath resolving to our own .githooks is armed', () => {
+  // A worktree-isolated agent launch rewrites core.hooksPath from `.githooks`
+  // to an ABSOLUTE path (the worktree feature must make the value work from a
+  // linked worktree, and the local config is shared across them, so it
+  // absolutises). The hooks still fire — the path resolves to the same
+  // directory — but a literal string compare in arm_gate read the absolutised
+  // value as "someone else's hooks dir" and cried wolf on every wake. The fix
+  // compares RESOLVED paths, not strings. Both cases below drive arm_gate
+  // directly; the feed/CLI integration is #2/#7 and composes with these.
+
+  it("#11 BUG-152: an absolute core.hooksPath resolving to the repo's own .githooks reports ARMED", async () => {
+    await scenario('gate-arming-11', async (s) => {
+      const c = await mkClone(s, 'c11')
+      // Exactly what the worktree launch writes: the same directory, spelled
+      // absolutely (no symlink games — resolution, not string identity, is
+      // what the fix compares).
+      const abs = join(c.dir, '.githooks')
+      await s.run('git', ['-C', c.dir, 'config', 'core.hooksPath', abs], { cwd: c.dir })
+
+      const r = await callGate(s, c.dir, `arm_gate ${JSON.stringify(c.dir)}`)
+
+      expect(r.code, `arm_gate must never fail its caller\n${r.output}`).toBe(0)
+      expect(
+        r.output,
+        `an absolute hooksPath that resolves to our own .githooks read as foreign — the BUG-152 false alarm\n${r.output}`,
+      ).toMatch(/armed/i)
+      expect(r.output, 'a resolved-own path must not draw the foreign-path warning').not.toMatch(/NOT active/i)
+      // The value is LEFT alone: the worktree launch needs the absolute
+      // spelling, so "accept" means "report armed", never "rewrite to relative".
+      expect(await c.hooksPath()).toBe(abs)
+    })
+  })
+
+  it('#12 BUG-152: a foreign absolute core.hooksPath is still refused', async () => {
+    await scenario('gate-arming-12', async (s) => {
+      // The other half of the fix's contract: "accept what resolves to ours"
+      // must not become "accept anything absolute". Someone deliberately
+      // pointing at husky, a shared hooks dir, or a test rig keeps the
+      // BUG-004 non-clobber protection.
+      const c = await mkClone(s, 'c12')
+      const foreign = join(s.workspace.path('foreign-hooks'), 'hooks')
+      await s.fs.mkdirp('foreign-hooks/hooks')
+      await s.run('git', ['-C', c.dir, 'config', 'core.hooksPath', foreign], { cwd: c.dir })
+
+      const r = await callGate(s, c.dir, `arm_gate ${JSON.stringify(c.dir)}`)
+
+      expect(await c.hooksPath(), `CLOBBERED a deliberate foreign core.hooksPath\n${r.output}`).toBe(foreign)
+      expect(
+        r.output,
+        'a foreign absolute path was preserved silently — the operator must be told the gate is not ours',
+      ).toMatch(/leaving it alone|NOT active/i)
     })
   })
 })

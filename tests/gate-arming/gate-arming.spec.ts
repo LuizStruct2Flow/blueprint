@@ -176,7 +176,11 @@ async function callGate(
   )
   const r = await s.run('sh', [driver], {
     cwd: options.cwd ?? fixtureDir,
-    env: options.env ?? {},
+    // BP_CODE_ROOT is what both real callers (agent-activity.sh, blueprint.mts)
+    // set before sourcing: the adapter resolves gate.mts against it, and its
+    // `.` default is only the cwd. A case that runs from another cwd (#8) must
+    // still model a caller, not the missing-variable fallback.
+    env: { BP_CODE_ROOT: fixtureDir, ...options.env },
     timeoutMs: 60_000,
   })
   return { code: r.code, output: r.output }

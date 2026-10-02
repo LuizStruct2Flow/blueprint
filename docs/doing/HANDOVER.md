@@ -145,7 +145,7 @@ no such cycle exists (checked 2026-09-29).
   `.claude/worktrees/` (some may hold unlanded work; check before deleting —
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
-- **Waiting for the founder's acceptance:** TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
+- **Waiting for the founder's acceptance:** BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.
@@ -162,10 +162,15 @@ no such cycle exists (checked 2026-09-29).
   speculative change. Philipp's frequency finding (suite growth 61 → 73 spec
   files under `fileParallelism` plus the nested `bootstrap-gate` run, not
   TASK-083) is in the row, unproven.
-- **Providers:** Codex and Kimi were "unproven" on the morning of 2026-09-26
-  (quota likely reset, not yet exercised); Gemini back after 10:12Z. `node
+- **Providers:** Kimi hit its 5-hour limit at 07:34Z on 2026-10-02, in the
+  middle of BUG-152. Codex reviewed at 09:11Z the same day. `node
   scripts/rotation.mts coverage` shows the live state.
-- **The three watchers run with `nohup`.** Check with
+- **TASK-088 (backlog) waits for a founder decision:** retire a shell shim
+  once nothing names its path. The open question is whether that is a
+  standing rule (each port's follow-up removes the shim when its callers
+  allow) or a one-time sweep.
+- **The three watchers run with `nohup`**, restarted 2026-10-02 06:40Z (none
+  was running at wake). Check with
   `pgrep -af scripts/signal-watch.mts` (three lines). One activity-feed
   supervisor runs per project checkout (four), which is expected.
 - **Dispatched agents run the suites with a plain `npm --prefix tests test`**
@@ -220,11 +225,10 @@ committing here, check `git log origin/main..HEAD` for commits you did not make.
 A derived project reaches the blueprint through `blueprint a2bp`, not by
 committing into this checkout.
 
-**BUG-150 is open, and it is the common path:** the stranded-mic recovery
-matches on Holder AND Task, but an agent rewrites the Task when it claims
-ACTIVE, so recovery never fires for the failure it was built for. Until it is
-fixed, after every watcher dispatch read the run log for `FAILED` yourself — a
-stranded `State=ACTIVE` is not recovered.
+**BUG-150 is fixed and waits for acceptance:** the stranded-mic recovery no
+longer depends on the Task text. It worked on 2026-10-02: Kimi's dispatch died
+on quota and the mic came back to the Orchestrator by itself, with the reason
+in the Task field.
 **TASK-062 (the enforcement epic) has landed and waits for acceptance**, with
 its plan at
 [`../waiting-acceptance/PLAN-TASK-062.md`](../waiting-acceptance/PLAN-TASK-062.md).

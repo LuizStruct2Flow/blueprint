@@ -24,12 +24,13 @@
  * WHERE THE §3.3 LINE FALLS, AND IT IS THE CENTRAL QUESTION FOR THIS SUITE.
  * TASK-018-TARGET §3.3 exempts the pre-push hook's shell ENTRY POINT from the
  * TypeScript migration, because a TypeScript gate cannot report its own absence
- * when `npm ci` has not run. This suite does not port that entry point, and it
- * does not port `scripts/lib/gate.sh` either — `arm_gate` runs from inside
- * `scripts/agent-activity.sh` and `scripts/blueprint`, both shell, and the thing
- * it manipulates is `git config`. What is ported is the SUITE: the cases below
- * drive the real committed bytes of the real helper. The subject stays shell; its
- * test does not.
+ * when `npm ci` has not run. This suite does not port that entry point.
+ * BUG-152's port moved `scripts/lib/gate.sh` to `scripts/lib/gate.mts` behind
+ * a generated sourced adapter (the dod-gate.sh shape): the cases below still
+ * drive the real committed bytes through the SOURCED path — the adapter the
+ * feed and the CLI source, forwarding to the `.mts` — so what they prove
+ * about the gate policy is unchanged. The subject is TypeScript reached
+ * across the sourcing boundary; its test is the same either way.
  *
  * THE FIXTURE IS BUILT FROM `HEAD`, NOT FROM THE WORKING TREE. A clone carries
  * what is committed, so that is what a clone-shaped fixture must carry. The shell
@@ -38,8 +39,11 @@
  * uses the committed copy.
  *
  * EQUIVALENCE RECORD (R6). The retiring `tests/gate-arming/test.sh` and this spec
- * were run over the healthy repo plus one mutant of `scripts/lib/gate.sh` per
- * assertion, and the per-case verdict sets diffed mechanically. One deliberate
+ * were run over the healthy repo plus one mutant of the gate helper per
+ * assertion, and the per-case verdict sets diffed mechanically. The helper was
+ * `scripts/lib/gate.sh` then; it is `scripts/lib/gate.mts` now, reached through
+ * the sourced adapter, and the recipe below names the function and the
+ * behaviour rather than the file for exactly that reason. One deliberate
  * divergence, recorded rather than smoothed over:
  *
  *   #9 INJECTS THE FAILING CONFIG WRITE RATHER THAN REMOVING WRITE PERMISSION.
@@ -50,8 +54,8 @@
  *   the `config --local core.hooksPath` write reproduces the same condition
  *   deterministically for every uid, so the case now runs everywhere.
  *
- * MUTATION RECIPE (R6), each applied to `scripts/lib/gate.sh` and committed to a
- * fixture HEAD:
+ * MUTATION RECIPE (R6), each applied to the gate helper (gate.mts, through
+ * the adapter) and committed to a fixture HEAD:
  *
  *   M1  `arm_gate` arms unconditionally (drop the `-n "$_ag_cur"` branch)
  *       Red: #5.

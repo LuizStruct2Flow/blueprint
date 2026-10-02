@@ -1672,9 +1672,15 @@ async function bpIsBlueprintItself(): Promise<boolean> {
 }
 
 // --- gate arming (scripts/lib/gate.sh bridge) -------------------------------
-// stdout/stderr INHERITED, not captured — the bash lib's own `echo` lines are
+// stdout/stderr INHERITED, not captured — the lib's own echo lines are
 // the bytes this process emits, so there is no re-formatting seam for them to
 // drift from the shell CLI's.
+//
+// BUG-152: the lib is now a generated sourced adapter whose bridge resolves
+// gate.mts against BP_CODE_ROOT (the dod-gate.sh shape). drift runs with the
+// caller's cwd, which may be any subdirectory of the project, so the code
+// root is passed into the bridge explicitly — the same way the bp_state_root
+// bridge above already does — rather than left to the adapter's `.` default.
 async function armGate(root: string): Promise<void> {
   const lib = join(libDir(), 'gate.sh')
   if (!existsSync(lib)) {
@@ -1683,7 +1689,14 @@ async function armGate(root: string): Promise<void> {
       'refusing to report drift without scripts/lib/gate.sh. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/gate.sh',
     )
   }
-  await run('bash', ['-c', '. "$1"; arm_gate "$2"', cliName(), lib, root], { stdout: 'inherit', stderr: 'inherit' })
+  // Both calls degrade rather than break drift: the adapter exits non-zero
+  // when gate.mts is absent (stale sync), and the gate contract is "never
+  // fails the caller" (BUG-004) — the keepalive call was always unchecked,
+  // and the arm call joins it now that a failed bridge is a real possibility.
+  const env = { ...process.env, BP_CODE_ROOT: dirname(cliDir()) }
+  await unchecked(() =>
+    run('bash', ['-c', '. "$1"; arm_gate "$2"', cliName(), lib, root], { stdout: 'inherit', stderr: 'inherit', env }),
+  )
   await unchecked(() =>
     run(
       'bash',
@@ -1694,7 +1707,7 @@ async function armGate(root: string): Promise<void> {
         lib,
         root,
       ],
-      { stdout: 'inherit', stderr: 'inherit' },
+      { stdout: 'inherit', stderr: 'inherit', env },
     ),
   )
 }

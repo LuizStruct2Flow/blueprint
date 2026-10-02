@@ -13,16 +13,16 @@
 // and the wake report is built from these bytes — while moving it off shell;
 // it is not the place to relitigate any of those decisions.
 //
-// THE BUG-152 FIX lands in this file one commit after the port, per the
-// port method: port first (behaviour-identical, proven three ways), then the
-// absolute-hooksPath acceptance.
+// THE BUG-152 FIX (an absolute core.hooksPath that resolves to this repo's own
+// .githooks reads as armed) landed one commit after the port, per the port
+// method: port first (behaviour-identical, proven three ways), then the fix.
 //
 // Usage errors and internal failures exit >1 (2), never 1 — the same
 // convention scripts/lib/dod-gate.mts carries.
 
 import { execFileSync } from 'node:child_process'
-import { accessSync, constants, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { accessSync, constants, realpathSync, statSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 
 // gitConfig — `git -C root config …` with the shell's error posture: stdout
 // captured, stderr dropped, ANY non-zero exit (unset key, unreadable repo)
@@ -85,6 +85,17 @@ function isDirectory(path: string): boolean {
   }
 }
 
+// resolvesTo — both paths exist and are the same real path. A missing or
+// unreadable path is "not the same", which the caller treats as foreign.
+function resolvesTo(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b)
+  } catch {
+    // realpath throws on a missing path: nothing to resolve, so not ours.
+    return false
+  }
+}
+
 function isExecutable(path: string): boolean {
   try {
     accessSync(path, constants.X_OK)
@@ -126,6 +137,16 @@ function armGate(root: string): void {
 
   if (cur === '.githooks') {
     process.stdout.write('  ✓ gate: armed (core.hooksPath=.githooks)\n')
+    return
+  }
+
+  // BUG-152: a worktree-isolated launch rewrites core.hooksPath to the
+  // absolute spelling of this repository's own .githooks. That is the same
+  // gate, so report it armed — compared as RESOLVED real paths, never strings,
+  // and only for an absolute value (a relative one is resolved by git against
+  // somewhere else, so it stays foreign). The value is left alone.
+  if (isAbsolute(cur) && resolvesTo(cur, join(root, '.githooks'))) {
+    process.stdout.write(`  ✓ gate: armed (core.hooksPath=${cur}, this repository's own .githooks)\n`)
     return
   }
 

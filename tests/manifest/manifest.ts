@@ -848,7 +848,7 @@ export async function inspect(root: string, run: Runner): Promise<CheckResult[]>
   // =========================================================================
   // 7b. BUG-052 — THE MARKERS THAT MAKE A MANAGED FILE MERGEABLE ARE BALANCED.
   //
-  //     `marker_aware_merge` (scripts/blueprint) refuses to merge unless a
+  //     `marker_aware_merge` (scripts/blueprint.mts) refuses to merge unless a
   //     file's BEGIN and END counts are equal, and `pull_file` then falls back
   //     to a WHOLE-FILE COPY — which is exactly the data loss the markers exist
   //     to prevent. It warns and leaves a `.bp-bak`, and nobody reads either.

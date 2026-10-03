@@ -166,7 +166,7 @@ is not regenerated per change. The concerns the deck mirrors:
 7. Cost (AGENTS.md §"Cost is a main concern" + `project_config_overview.md` §"Cost stack")
 8. Documentation (`docs/DOCUMENTATION.md` + DoD §5)
 9. Persona team (radio-over — `AGENT_SIGNAL.md` protocol + the shared rules every CLI provider reads in `AGENTS.md` + `AGENT_ROSTER.example.md` team template, copied to a gitignored per-engineer `AGENT_ROSTER.md`, parsed by the one shared `scripts/lib/roster.sh` so identity resolves by **role** and a rename is one cell + `scripts/agent-activity.sh` live feed and `--whoami` + AGENTS.md §"Running commands — one per call, chains only when dependent", which is what keeps the per-command allowlist reviewable)
-10. Blueprint sync (AGENTS.md §"Blueprint sync" + this file + README.md §"The sync model" + `scripts/blueprint`)
+10. Blueprint sync (AGENTS.md §"Blueprint sync" + this file + README.md §"The sync model" + `scripts/blueprint.mts`)
 
 In the same commit as a concern change:
 

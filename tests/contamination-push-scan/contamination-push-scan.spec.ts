@@ -4,7 +4,7 @@
  *
  * THE FINDING. C168 was written as if `.githooks/pre-push` had a contamination
  * call site to extend. Measured, it has none: `contamination_scan`
- * (scripts/lib/contamination.sh) ran only from `scripts/blueprint`'s a2bp
+ * (scripts/lib/contamination.sh) ran only from `scripts/blueprint.mts`'s a2bp
  * path, so nothing scanned a push for the BUG-002 / A-09 shapes — a host home
  * path, a foreign per-project state dir, an operator's specifics landing in a
  * managed file and publishing to every downstream project on the next

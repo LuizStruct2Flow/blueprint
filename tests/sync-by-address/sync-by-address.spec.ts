@@ -203,12 +203,12 @@ async function commitAll(s: Scenario, dir: string, message: string) {
 
 /**
  * Copy the CLI and its libs to `<at>/scripts/`. Returns the CLI's path. Run it
- * as `bash <path>` so the copy needs no exec bit.
+ * as `node <path>` (the .mts has no exec bit).
  */
 async function cliCopy(s: Scenario, at: string): Promise<string> {
   const dest = s.workspace.path(at, 'scripts')
   await cp(join(REPO_ROOT, 'scripts'), dest, { recursive: true })
-  return join(dest, 'blueprint')
+  return join(dest, 'blueprint.mts')
 }
 
 const dodText = (who: string, line: string) => `# DoD\nowner ${who}\n${line}\n`
@@ -273,7 +273,7 @@ async function project(s: Scenario, remote: string, sha: string, dod: string, o:
 
 /** Run a CLI copy in the project. */
 function run(s: Scenario, cli: string, proj: string, args: string[], env: Record<string, string> = {}) {
-  return s.run('bash', [cli, ...args], { cwd: proj, env, timeoutMs: 60_000 })
+  return s.run('node', [cli, ...args], { cwd: proj, env, timeoutMs: 60_000 })
 }
 
 /**
@@ -474,7 +474,7 @@ interface Done {
 }
 
 function start(s: Scenario, cli: string, proj: string, args: string[], env: Record<string, string>) {
-  const child: ChildProcess = s.background('bash', [cli, ...args], { cwd: proj, env })
+  const child: ChildProcess = s.background('node', [cli, ...args], { cwd: proj, env })
   let stdout = ''
   let stderr = ''
   child.stdout?.on('data', (d: Buffer) => {
@@ -803,7 +803,7 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
       const proj = await project(s, remote.dir, head, 'v1')
       await cp(join(REPO_ROOT, 'scripts'), join(proj, 'scripts'), { recursive: true })
       await rm(join(proj, 'scripts/lib/request-config.sh'))
-      const own = join(proj, 'scripts/blueprint')
+      const own = join(proj, 'scripts/blueprint.mts')
 
       const told = await run(s, own, proj, ['drift'])
       expect(told.code, told.output).toBe(1)
@@ -1195,8 +1195,8 @@ describe('TASK-025 — drift and pull read the blueprint by its address', () => 
         )
         const env = { PATH: `${shims.dir}:${never.path}`, BP_FETCH_TIMEOUT: '3' }
         const child: ChildProcess = pin
-          ? s.background(pin, ['-c', '0', 'bash', cli, 'drift'], { cwd: proj, env })
-          : s.background('bash', [cli, 'drift'], { cwd: proj, env })
+          ? s.background(pin, ['-c', '0', 'node', cli, 'drift'], { cwd: proj, env })
+          : s.background('node', [cli, 'drift'], { cwd: proj, env })
         let out = ''
         child.stdout?.on('data', (b: Buffer) => (out += b.toString('utf8')))
         child.stderr?.on('data', (b: Buffer) => (out += b.toString('utf8')))

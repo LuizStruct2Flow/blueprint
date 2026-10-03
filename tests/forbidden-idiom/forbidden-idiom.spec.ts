@@ -95,8 +95,6 @@ async function population(): Promise<string[]> {
       if (n.endsWith('.sh') || n.endsWith('.mts')) out.push(`${dir}/${n}`)
     }
   }
-  // The sync CLI has no .sh suffix and is the most widely shipped script here.
-  out.push('scripts/blueprint')
   // The hooks are where the hazard is REAL rather than latent: git exports
   // GIT_DIR into exactly these processes.
   for (const n of await readdir(join(REPO_ROOT, '.githooks'))) {
@@ -113,8 +111,7 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
 
     for (const rel of files) {
       // TASK-088: a port deletes its shell file, so the population now lists
-      // the `.mts` files themselves (a ported script's idiom lives there), and
-      // the one shim left (scripts/blueprint) is followed to its target.
+      // the `.mts` files themselves (a ported script's idiom lives there).
       // resolveConsumerFile reads an `.mts` as TypeScript, whose comments are
       // `//`, and a shell path as shell.
       const resolved = resolveConsumerFile(REPO_ROOT, rel)
@@ -147,7 +144,7 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
     expect(count('scripts/lib/'), 'scripts/lib/ is not being scanned').toBeGreaterThanOrEqual(10)
     expect(count('scripts/'), 'scripts/ is not being scanned').toBeGreaterThanOrEqual(20)
     expect(count('.githooks/'), '.githooks/ is not being scanned').toBeGreaterThanOrEqual(3)
-    expect(files, 'the sync CLI dropped out of the population').toContain('scripts/blueprint')
+    expect(files, 'the sync CLI dropped out of the population').toContain('scripts/blueprint.mts')
   })
 
   it('#H2 the matcher fires on the command and not on the word "git"', async () => {

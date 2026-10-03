@@ -3,7 +3,7 @@
  * hook, to the contract in PLAN-TASK-022 §4.2.
  *
  * ONE case, and it runs the command exactly as `.claude/settings.json` declares
- * it, from a project whose `scripts/blueprint` behaves like an offline drift:
+ * it, from a project whose `scripts/blueprint.mts` behaves like an offline drift:
  * it waits out its fetch timeout, then exits 5. It fails if the feed is chained
  * on drift, if the unreachable result is hidden, or if drift is not bounded
  * well under its 30 s default.
@@ -36,10 +36,10 @@ describe('the SessionStart hook', () => {
       await s.fs.write('proj/scripts/agent-activity.sh', 'echo invoked "$@" > feed-invoked\n')
       // Offline drift: the real one waits out BP_FETCH_TIMEOUT (default 30 s).
       await s.fs.write(
-        'proj/scripts/blueprint',
-        'sleep "${BP_FETCH_TIMEOUT:-30}"\n' +
-          'echo "error: could not read the blueprint. This is NOT a clean drift report" >&2\n' +
-          'exit 5\n',
+        'proj/scripts/blueprint.mts',
+        'await new Promise((r) => setTimeout(r, Number(process.env.BP_FETCH_TIMEOUT ?? 30) * 1000))\n' +
+          'console.error("error: could not read the blueprint. This is NOT a clean drift report")\n' +
+          'process.exit(5)\n',
       )
 
       // Started from a SUBDIRECTORY, as a session opened in tests/ or src/ is.

@@ -48,14 +48,14 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
-import { resolveConsumer } from '../helpers/shim.js'
 
 const SUBJECT_ROOT = process.env.BP_SUBJECT_ROOT ?? REPO_ROOT
 const LIB = join(SUBJECT_ROOT, 'scripts/lib/request-file.sh')
-const CLI_REL = 'scripts/blueprint'
+const CLI_REL = 'scripts/blueprint.mts'
 
 /**
  * A `gh` whose `pr list` returns `json`.
@@ -119,14 +119,11 @@ function existingPr(s: Scenario, path: string): Promise<RunResult> {
   })
 }
 
-/** Resolves `scripts/blueprint` to whichever file the source-inspection
- * cases below should actually read: the shell CLI itself, or — once
- * TASK-081's shim lands — the `.mts` it points at (`resolveConsumer`
- * follows the shim, same mechanism `tests/marker-merge` uses). */
+/** The file the source-inspection cases below read: the `.mts` CLI. */
 async function resolvedCli(): Promise<{ path: string; kind: 'shell' | 'ts' }> {
-  const consumer = resolveConsumer(SUBJECT_ROOT, CLI_REL)
-  expect(consumer, `${CLI_REL} is missing from this checkout`).toBeDefined()
-  return { path: join(SUBJECT_ROOT, consumer?.rel ?? CLI_REL), kind: consumer?.kind ?? 'shell' }
+  const path = join(SUBJECT_ROOT, CLI_REL)
+  expect(existsSync(path),`${CLI_REL} is missing from this checkout`).toBe(true)
+  return { path, kind: 'ts' }
 }
 
 /** `sed -n '/start/,/end/p'` over the CLI — the shell suite's own selector. */
@@ -236,8 +233,7 @@ describe('BUG-011 — a2bp reports filed only when a PR actually exists', () => 
       expect(lib.code, 'BP_RC_FAILED is not 5 — the contract this asserts has moved').toBe(0)
 
       const { path, kind } = await resolvedCli()
-      // TASK-081: once scripts/blueprint is the shim, resolveConsumer follows
-      // it to scripts/blueprint.mts — no shell block syntax (`^  }`) there for
+      // scripts/blueprint.mts has no shell block syntax (`^  }`) for
       // sed's range to key on, so the ported file is read with tsBlock
       // instead, and BP_RC_FAILED/BP_RC_PENDING are its runtime-read
       // codes.failed/codes.pending (§3 P5: never a hardcoded TS constant).

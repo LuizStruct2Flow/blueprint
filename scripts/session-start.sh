@@ -30,9 +30,9 @@ else
 fi
 
 # 2. Drift, bounded. Its exit status decides only the verdict line below.
-if [ -f scripts/blueprint ]; then
+if [ -f scripts/blueprint.mts ]; then
   out="$(BP_FETCH_TIMEOUT="${BP_FETCH_TIMEOUT:-8}" BP_STALENESS_TIMEOUT="${BP_STALENESS_TIMEOUT:-4}" \
-    bash scripts/blueprint drift 2>&1 </dev/null)"
+    node scripts/blueprint.mts drift 2>&1 </dev/null)"
   rc=$?
   printf '%s\n' "$out" | head -40
   if [ "$rc" -eq 0 ]; then
@@ -41,7 +41,7 @@ if [ -f scripts/blueprint ]; then
     echo "drift: UNKNOWN — blueprint drift exited $rc (unreachable or failed). Do NOT report this project as in sync."
   fi
 else
-  echo "drift: UNKNOWN — scripts/blueprint not present, so nothing was compared."
+  echo "drift: UNKNOWN — scripts/blueprint.mts not present, so nothing was compared."
 fi
 
 # 3. Claude persona subagent definitions, from the roster's Model cells (TASK-059).

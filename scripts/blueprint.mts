@@ -34,12 +34,11 @@
 // placeholders.
 //
 // THE PLACEHOLDER HOLE (plan §9 D, decided: Option 1). `bp_should_substitute`
-// (scripts/lib/placeholders.sh) exempts `*scripts/blueprint` from project-name
-// substitution, and that pattern does not match this file's name — so a pull
-// or drift comparison substitutes scripts/blueprint.mts like any ordinary
-// managed file. The fix adopted is that THIS FILE NEVER SPELLS THE TOKEN, in
-// code or comment, so substituting a file with no token is the identity and
-// the missing exemption does no harm. Anywhere the shell said the literal
+// (scripts/lib/placeholders.sh) exempts `*scripts/blueprint.mts` from
+// project-name substitution (it named the deleted shell file until TASK-088;
+// a pull before that substituted this file like any managed one). THIS FILE
+// STILL NEVER SPELLS THE TOKEN, in code or comment, so substituting it is the
+// identity either way. Anywhere the shell said the literal
 // token, this file says "the project-name placeholder" instead.
 // tests/blueprint-port pins this with a grep case.
 
@@ -165,10 +164,18 @@ export const TEMPLATE_FILES: readonly string[] = [
 //
 // Bash's $PWD is a LOGICAL path — it survives a `cd` through a symlink
 // unmangled, unlike `process.cwd()`, which Node always resolves physically.
-// The shim exports the bash process's own $PWD before exec'ing node, so this
-// reads that value, never `process.cwd()`.
+// A shell exports its own $PWD to the node it runs, so this reads that value —
+// but, as bash itself does at startup, only when it names the current
+// directory. A node spawned by a non-shell parent inherits whatever PWD that
+// parent had (TASK-088 deleted the bash shim that used to reset it).
 export function logicalPwd(): string {
-  return process.env.PWD ?? process.cwd()
+  const pwd = process.env.PWD
+  try {
+    if (pwd !== undefined && realpathSync(pwd) === realpathSync(process.cwd())) return pwd
+  } catch {
+    // An unreadable or stale PWD names nothing, so the physical cwd stands.
+  }
+  return process.cwd()
 }
 
 // The CLI's own directory, resolved against logicalPwd() — never
@@ -1705,7 +1712,7 @@ const UNREGISTERED_MARKERS: readonly string[] = [
   'STACK_DEFAULTS.md',
   'scripts/install-toolchain.sh',
   '.githooks/pre-push',
-  'scripts/blueprint',
+  'scripts/blueprint.mts',
   'scripts/agent-activity.sh',
   'docs/DoD.md',
 ]
@@ -1970,18 +1977,11 @@ export async function pullFile(f: string, out: string, p: Prospective): Promise<
   return shieldedWrite(out, f, bp)
 }
 
-// --- _bp_cli_libs, with shim-follow (plan §7) -------------------------------
+// --- _bp_cli_libs (plan §7) -------------------------------------------------
 //
-// The exact two-line shim's text (scripts/lib/shim.mts's own shimContent for
-// "scripts/blueprint" — reproduced here, not imported: plan §2 rule 1 keeps
-// this file to one, with no local imports, so the CLI's closure stays "shim +
-// .mts + the libs it names").
-const CLI_SHIM_SOURCE = '#!/usr/bin/env bash\nexec node "$(dirname "$0")/blueprint.mts" "$@"\n'
-
 // Matches both `.sh` and `.mts` lib names: slice 6 (plan §7) walks the same
-// text for either, so one scanner serves the whole closure — a shim names
-// its `.mts`, a sourced shell adapter (a retired shape) names its `.mts` in a
-// non-comment bridge-path assignment, an ordinary lib names another `.sh`.
+// text for either, so one scanner serves the whole closure — a lib names
+// another `.mts` in a non-comment path assignment, or another `.sh`.
 export function extractShLibNames(src: string): string[] {
   const names = new Set<string>()
   for (const line of src.split('\n')) {
@@ -2038,32 +2038,15 @@ async function sortLibNames(names: Iterable<string>): Promise<string[]> {
 // can seed the SAME fixed point from whatever libs a pull already selected,
 // without re-deriving the CLI's own sourced-lib scan (plan: reuse, not a
 // second scanner).
-function bpCliShimSeedNames(): Set<string> {
-  let text: string
+function bpCliSeedNames(): Set<string> {
   try {
-    text = readFileSync(bpBlueprintPath('scripts/blueprint'), 'utf8')
+    return new Set(extractShLibNames(readFileSync(bpBlueprintPath('scripts/blueprint.mts'), 'utf8')))
   } catch {
-    // No scripts/blueprint at that path (a stripped fixture, or a caller that
-    // never checked existence first) — every caller here already reads this
-    // as "no libs to bring along", the same answer an empty scan would give.
+    // No scripts/blueprint.mts at that path (a stripped fixture, or a caller
+    // that never checked existence first) — every caller here already reads
+    // this as "no libs to bring along", the same answer an empty scan gives.
     return new Set()
   }
-  const names = new Set(extractShLibNames(text))
-  // THE ONE BEHAVIOUR THIS PORT ADDS (plan §7). When the pulled CLI IS the
-  // exact shim, its two lines name no lib at all — the file that actually
-  // sources them is its `.mts` sibling, so the closure follows it. A shell
-  // `scripts/blueprint` (today's shape, and every fixture's until slice 5)
-  // takes the `if` above only and reproduces the shell function exactly.
-  if (text === CLI_SHIM_SOURCE) {
-    try {
-      const mtsText = readFileSync(bpBlueprintPath('scripts/blueprint.mts'), 'utf8')
-      for (const n of extractShLibNames(mtsText)) names.add(n)
-    } catch {
-      // No .mts sibling in the blueprint tree (a stripped or partial fixture)
-      // — nothing more to add; the shim's own needs (none) stand.
-    }
-  }
-  return names
 }
 
 // TASK-081 slice 6 round 2 — the fixed point itself, seeded from an arbitrary
@@ -2162,7 +2145,7 @@ export async function bpLibClosureFromSeeds(seedNames: Iterable<string>): Promis
 }
 
 export async function bpCliLibClosure(): Promise<CliLibClosure> {
-  return bpLibClosureFromSeeds(bpCliShimSeedNames())
+  return bpLibClosureFromSeeds(bpCliSeedNames())
 }
 
 export async function bpCliLibs(): Promise<string[]> {
@@ -2394,10 +2377,8 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     return refusedNoTty ? 7 : 0
   }
 
-  // TASK-025 / plan §7 — the CLI travels with the libs it sources, and
-  // (shim-follow) so does the .mts it names once scripts/blueprint IS the
-  // shim: naming either alone brings both, never one without the other.
-  const namesCli = (f: string): boolean => f === 'scripts/blueprint' || f === 'scripts/blueprint.mts'
+  // TASK-025 — the CLI travels with the libs it sources.
+  const namesCli = (f: string): boolean => f === 'scripts/blueprint.mts'
   const cliSelected = files.some(namesCli)
   let cliNeeds: string[] = []
   let cliUnmet: string[] = []
@@ -2420,7 +2401,7 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
   const seedNames = new Set(
     rest.filter((f) => f.startsWith('scripts/lib/')).map((f) => f.slice('scripts/lib/'.length)),
   )
-  if (cliSelected) for (const n of bpCliShimSeedNames()) seedNames.add(n)
+  if (cliSelected) for (const n of bpCliSeedNames()) seedNames.add(n)
   const closure = await bpLibClosureFromSeeds(seedNames)
   const libs = closure.files
   libNeeds = closure.needs
@@ -2460,14 +2441,12 @@ export async function cmdPull(args: readonly string[]): Promise<number> {
     for (const lib of libs) if (rest.includes(lib)) orderedRest.push(lib)
   }
   if (cliSelected) {
-    // The target is a dependency of the shim just like every sourced lib:
-    // land it first, and remember a refusal/skip so the shim is held back.
-    // Otherwise an interactive pull can accept the shim and refuse the .mts,
-    // leaving the project's public CLI path pointing at no runnable target.
-    cliNeeds = [...libs, 'scripts/blueprint.mts']
-    files = [...orderedRest, 'scripts/blueprint.mts', 'scripts/blueprint']
+    // The CLI lands last, after every lib it sources; a refusal or skip of
+    // one holds it back.
+    cliNeeds = [...libs]
+    files = [...orderedRest, 'scripts/blueprint.mts']
     if (partial && cliNeedsStr !== ' ') {
-      process.stdout.write(`scripts/blueprint brings the libs it sources:${cliNeedsStr}\n`)
+      process.stdout.write(`scripts/blueprint.mts brings the libs it sources:${cliNeedsStr}\n`)
     }
   } else {
     files = orderedRest

@@ -74,11 +74,11 @@
 # closed for the classes it recognizes, and that stepping outside it leaves a
 # trail.
 #
-# Sourced by scripts/blueprint, which is the only caller: contamination_scan is
+# Sourced by scripts/blueprint.mts, which is the only caller: contamination_scan is
 # invoked once, from cmd_a2bp's staging loop. This header used to say the lib
 # was kept separate "so the gate and new-project.sh can reuse the same
 # patterns"; neither ever did. It stays a file rather than inline code because
-# scripts/blueprint is already ~1500 lines and this is a self-contained,
+# scripts/blueprint.mts is already ~1500 lines and this is a self-contained,
 # separately testable unit — not because a second consumer exists. Claiming a
 # reuse that is not there invites the next author to add a THIRD copy of these
 # patterns believing they are joining a shared mechanism.
@@ -194,7 +194,7 @@ _contamination_is_placeholder_email() {
 #
 # The caller owns the _should_substitute exemption (files that IMPLEMENT the
 # substitution carry the tokens as code — restoring placeholders in
-# scripts/blueprint would corrupt scripts/blueprint).
+# scripts/blueprint.mts would corrupt scripts/blueprint.mts).
 contamination_stage() {
   local pf="$1" bpf="$2" proj_name="$3" staged_out="$4"
 

@@ -63,7 +63,8 @@ belong to the project, not to a session.
   `~/.codex/models_cache.json` spams `failed to renew cache TTL: missing field
   supports_reasoning_summaries`. Root cause was two installs, with `~/.local/bin`
   shadowing `/usr/local/bin`.
-- **`blueprint` is not on PATH in this checkout** — use `bash scripts/blueprint …`.
+- **`blueprint` is on PATH here** — the v2 per-machine command
+  (`bash scripts/install-toolchain.sh`) runs `node scripts/blueprint.mts`.
 - **Node is the official v22.23.2 build**, unpacked in
   `~/.local/opt/node-v22.23.2-linux-x64` and linked into `~/.local/bin`, which
   shadows the distro `/usr/bin/node` (2026-09-21, TASK-067). The distro build was

@@ -354,7 +354,7 @@ BLUEPRINT_COMMAND_PATH="$BIN_DIR/blueprint"
 # The body, VERBATIM. Ownership is byte-exact equality with a body this installer
 # released (§R4 #1): the marker line proves nothing, since anyone can copy it.
 # The released set is v1 (superseded) and v2 (current). v1 runs only an
-# executable ./scripts/blueprint, which TASK-088 deletes in favour of
+# executable ./scripts/blueprint, which TASK-088 deleted in favour of
 # scripts/blueprint.mts; an owned v1 is replaced by v2 and `check` counts it
 # stale. v2 keeps `node` because the .mts is mode 100644, and falls back to an
 # executable scripts/blueprint for projects from before TASK-081.

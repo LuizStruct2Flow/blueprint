@@ -3,7 +3,7 @@
 // THE FINDING THIS CLOSES. C168 was written as if `.githooks/pre-push` had a
 // contamination call site that needed extending. It has none: measured, there
 // is no push-time contamination scan at all — `contamination_scan`
-// (scripts/lib/contamination.sh) runs only from `scripts/blueprint`'s a2bp
+// (scripts/lib/contamination.sh) runs only from `scripts/blueprint.mts`'s a2bp
 // path. The ABSENCE of a push-time call site is the finding. The founder chose
 // the CI-only route (PLAN-TASK-062.md §"Founder decisions" #3,
 // 2026-09-22): "The existing checker scans the pushed diff, with no duplicated
@@ -39,7 +39,7 @@
 //      DoD lifecycle re-adds those rows as added lines at every acceptance, so
 //      scanning them would go red on every push that moves a bug. The decision
 //      is `git archive` at the range tip, listed — the SAME command
-//      bp_managed_files (scripts/blueprint) derives the managed set with, so
+//      bp_managed_files (scripts/blueprint.mts) derives the managed set with, so
 //      no path list is kept here and no second reading of `.gitattributes`
 //      exists to disagree with it. NOT `git check-attr`: round 2 read that,
 //      and a trailing-slash directory rule (`tests/<suite>/  export-ignore`,

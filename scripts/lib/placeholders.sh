@@ -6,8 +6,8 @@
 # "Meaning under substitution" is only a meaningful phrase if there is exactly
 # one substitution semantics. There were three, and they disagreed:
 #
-#   scripts/blueprint substitute_placeholders    sed -e "s/{{PROJECT_NAME}}/${name}/g"
-#   scripts/blueprint substituted_blueprint_copy the same sed
+#   scripts/blueprint.mts substitute_placeholders    sed -e "s/{{PROJECT_NAME}}/${name}/g"
+#   scripts/blueprint.mts substituted_blueprint_copy the same sed
 #   contamination.sh  _contamination_subst_file  bash ${line//token/$name}
 #
 # a2bp's round-trip check — the load-bearing safety property since R4 — used
@@ -61,7 +61,7 @@ bp_placeholder_upper() {
 # is the primitive itself. Substituting it produces `local TL='acme-flow'` and
 # the tool silently stops recognising the token it exists to replace.
 #
-# `scripts/blueprint` and `scripts/new-project.sh` were already excluded for
+# `scripts/blueprint.mts` and `scripts/new-project.sh` were already excluded for
 # exactly this reason, and the list simply never grew when the logic moved into
 # libraries. The consequence was live: on a zero-second-old bootstrap `drift`
 # reported `scripts/lib/placeholders.sh` and `scripts/lib/contamination.sh` as
@@ -86,7 +86,7 @@ bp_placeholder_upper() {
 # `tests/` was unmanaged, and nothing about them changed when it stopped being.
 bp_should_substitute() {
   case "$1" in
-    *scripts/blueprint|*scripts/new-project.sh) return 1 ;;
+    *scripts/blueprint.mts|*scripts/new-project.sh) return 1 ;;
     *scripts/lib/placeholders.sh|*scripts/lib/contamination.sh) return 1 ;;
     tests/*) return 1 ;;
   esac

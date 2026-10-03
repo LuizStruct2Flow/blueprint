@@ -12,7 +12,7 @@
  * the bug to be RECORDED, and R1 puts a test's description in the test — so it
  * lives here rather than in the tier table that used to hold it.
  *
- *   Mutant: Make `_bp_is_blueprint_itself` (`scripts/blueprint`) always report false, so
+ *   Mutant: Make `_bp_is_blueprint_itself` (`scripts/blueprint.mts`) always report false, so
  * `drift` stops recognising the blueprint as itself and takes the derived-project
  * path.
  *   Turns red: `#1` goes red exactly where the shell runner did, on the BUG-007 assertion that
@@ -23,26 +23,13 @@ import { describe, it, expect } from 'vitest'
 import { copyFile, cp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { isValidShim, shimTargetPath } from '../helpers/shim.js'
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 
-/**
- * Copy `scripts/blueprint` into a fixture root, as the running CLI itself:
- * chmod +x, and, once TASK-081 lands, follow it as a shim to its `.mts`
- * target so a fixture that runs its own copy still has something to run. A
- * no-op today — `isValidShim` is false with no `scripts/blueprint.mts` in
- * this tree yet — so this changes nothing before the port and everything
- * after it.
- */
-async function copyCli(s: Scenario, root: string) {
+/** Copy `scripts/blueprint.mts` into a fixture root, as the running CLI itself. */
+async function copyCli(root: string) {
   await mkdir(join(root, 'scripts'), { recursive: true })
-  await copyFile(CLI, join(root, 'scripts/blueprint'))
-  await s.run('chmod', ['+x', join(root, 'scripts/blueprint')], { cwd: root })
-  if (isValidShim(REPO_ROOT, 'scripts/blueprint')) {
-    const target = shimTargetPath('scripts/blueprint')
-    await copyFile(join(REPO_ROOT, target), join(root, target))
-  }
+  await copyFile(CLI, join(root, 'scripts/blueprint.mts'))
 }
 
 async function run(s: Scenario, command: string, cwd: string) {
@@ -138,7 +125,7 @@ async function createDerivedProject(
 async function createBlueprintCheckout(s: Scenario, root: string) {
   await mkdir(join(root, 'scripts/lib'), { recursive: true })
   await mkdir(join(root, '.githooks'), { recursive: true })
-  await copyCli(s, root)
+  await copyCli(root)
   await copyGateLib(root)
   await copyFile(
     join(REPO_ROOT, 'scripts/lib/placeholders.sh'),
@@ -158,7 +145,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       const b = await s.workspace.dir('bp')
       await createBlueprintCheckout(s, b)
 
-      const r = await run(s, './scripts/blueprint drift 2>&1 </dev/null', b)
+      const r = await run(s, 'node scripts/blueprint.mts drift 2>&1 </dev/null', b)
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).not.toContain('not a struct2flow project')
@@ -170,7 +157,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       const b = await s.workspace.dir('bp')
       await createBlueprintCheckout(s, b)
 
-      const r = await run(s, './scripts/blueprint drift 2>&1 </dev/null', b)
+      const r = await run(s, 'node scripts/blueprint.mts drift 2>&1 </dev/null', b)
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).toMatch(/blueprint itself|is the blueprint|source of truth/i)
@@ -183,7 +170,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await createBlueprintCheckout(s, b)
       await git(s, b, ['config', '--unset', 'core.hooksPath'])
 
-      await run(s, './scripts/blueprint drift 2>&1 </dev/null', b)
+      await run(s, 'node scripts/blueprint.mts drift 2>&1 </dev/null', b)
       const armed = await git(s, b, ['config', '--get', 'core.hooksPath'])
 
       // drift arms the gate — that is the documented behaviour, and the point
@@ -202,7 +189,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await mkdir(join(c, 'scripts/lib'), { recursive: true })
       await writeFile(join(c, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
       await s.run('chmod', ['+x', join(c, '.githooks/pre-push')], { cwd: c })
-      await copyCli(s, c)
+      await copyCli(c)
       await copyGateLib(c)
       await copyFile(
         join(REPO_ROOT, 'scripts/lib/placeholders.sh'),
@@ -212,7 +199,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await commitAll(s, c)
       await git(s, c, ['config', '--unset', 'core.hooksPath'])
 
-      const drift = await run(s, './scripts/blueprint drift 2>&1 </dev/null', c)
+      const drift = await run(s, 'node scripts/blueprint.mts drift 2>&1 </dev/null', c)
       const armed = await git(s, c, ['config', '--get', 'core.hooksPath'])
 
       expect(armed.stdout.trim(), drift.output).toBe('.githooks')
@@ -224,7 +211,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       const n = await s.workspace.dir('notaproject')
       await initRepo(s, n)
 
-      const r = await s.run(CLI, ['drift'], { cwd: n })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: n })
 
       expect(r.code).not.toBe(0)
       expect(r.output).toContain('no .blueprint-source')
@@ -238,7 +225,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await createFixtureBlueprint(s, bp)
       await createDerivedProject(s, p, bp)
 
-      const r = await s.run(CLI, ['drift'], { cwd: p })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: p })
 
       // Drift is a report, not an error: differences are expected and rc=0.
       expect(r.code, r.output).toBe(0)
@@ -247,14 +234,14 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
     })
   })
 
-  it('#4b a derived project running its own scripts/blueprint still gets a real drift report', async () => {
+  it('#4b a derived project running its own scripts/blueprint.mts still gets a real drift report', async () => {
     await scenario('drift-in-blueprint-4b', async (s) => {
       const bp = await s.workspace.dir('bp')
       const p = await s.workspace.dir('derived-own-cli')
       await createFixtureBlueprint(s, bp)
       await createDerivedProject(s, p, bp, { ownCli: true })
 
-      const r = await run(s, 'bash scripts/blueprint drift 2>&1 </dev/null', p)
+      const r = await run(s, 'node scripts/blueprint.mts drift 2>&1 </dev/null', p)
 
       // The project's own copy has the same reporting contract: drift is rc=0.
       expect(r.code, r.output).toBe(0)
@@ -271,7 +258,7 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await createDerivedProject(s, p, bp)
       await rm(join(p, '.blueprint-source'), { force: true })
 
-      const r = await s.run(CLI, ['drift'], { cwd: p })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: p })
 
       expect(r.code).not.toBe(0)
     })
@@ -288,9 +275,9 @@ describe('BUG-007 — drift completes in the blueprint and still refuses non-pro
       await writeFile(join(u, 'STACK_DEFAULTS.md'), 'stack\n', 'utf8')
       await writeFile(join(u, 'scripts/install-toolchain.sh'), '#!/usr/bin/env bash\n', 'utf8')
       await writeFile(join(u, '.githooks/pre-push'), '#!/bin/sh\nexit 0\n', 'utf8')
-      await copyCli(s, u)
+      await copyCli(u)
 
-      const r = await s.run(CLI, ['drift'], { cwd: u })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: u })
 
       expect(r.code).not.toBe(0)
       expect(r.output).not.toContain('not a struct2flow project')

@@ -387,27 +387,21 @@ describe('shieldedWrite (plan §3 P2)', () => {
   })
 })
 
-describe('bpCliLibs / extractShLibNames — the closure with shim-follow (plan §7)', () => {
-  // UNIT ONLY (handover, slice 3): the shell has no notion of an `.mts`
-  // sibling, so a differential row comparing this against `_bp_cli_libs`
-  // would legitimately disagree once the CLI IS the shim — there is no OLD
-  // side for that case until slice 5. Before slice 5 (every fixture's
-  // scripts/blueprint is still real shell, never the shim), the non-shim
-  // branch below is what the differential rows in
-  // blueprint-port.release.spec.ts exercise instead.
-  const SHIM_SOURCE = '#!/usr/bin/env bash\nexec node "$(dirname "$0")/blueprint.mts" "$@"\n'
-
+describe('bpCliLibs / extractShLibNames — the closure (plan §7)', () => {
+  // UNIT ONLY: TASK-088 deleted the shell CLI and its shim, so the closure is
+  // seeded from scripts/blueprint.mts alone. The differential rows in
+  // blueprint-port.release.spec.ts still drive the historical shell CLI.
   it('extractShLibNames ignores names inside # and // comments', () => {
     const src = ['# see scripts/lib/commented-out.sh', '// also scripts/lib/js-style.sh', 'foo.sh bar.sh'].join('\n')
     expect(extractShLibNames(src)).toEqual(['foo.sh', 'bar.sh'])
   })
 
-  it('a non-shim CLI: names come from its own code, filtered to libs that exist', async () => {
+  it('names come from the CLI own code, filtered to libs that exist', async () => {
     const root = mkFixtureDir('bp-port-clilibs-plain-')
     try {
       mkdirSync(join(root, 'scripts/lib'), { recursive: true })
       writeFileSync(
-        join(root, 'scripts/blueprint'),
+        join(root, 'scripts/blueprint.mts'),
         'source scripts/lib/foo.sh\nsource scripts/lib/bar.sh\nsource scripts/lib/not-shipped.sh\n',
       )
       writeFileSync(join(root, 'scripts/lib/foo.sh'), '')
@@ -422,47 +416,13 @@ describe('bpCliLibs / extractShLibNames — the closure with shim-follow (plan �
     }
   })
 
-  it('the EXACT shim: follows into scripts/blueprint.mts for its lib names', async () => {
-    const root = mkFixtureDir('bp-port-clilibs-shim-')
+  it('no scripts/blueprint.mts in the blueprint tree: nothing to bring along, so the result is empty', async () => {
+    const root = mkFixtureDir('bp-port-clilibs-nomts-')
     try {
       mkdirSync(join(root, 'scripts/lib'), { recursive: true })
-      writeFileSync(join(root, 'scripts/blueprint'), SHIM_SOURCE)
-      writeFileSync(join(root, 'scripts/blueprint.mts'), "bashLib('scripts/lib/gate.sh', ...)\n")
       writeFileSync(join(root, 'scripts/lib/gate.sh'), '')
       _setBlueprintRootForTests(root)
       const libs = await bpCliLibs()
-      expect(libs).toEqual(['scripts/lib/gate.sh'])
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('the exact shim with NO .mts sibling: the shim itself names nothing, so the result is empty', async () => {
-    const root = mkFixtureDir('bp-port-clilibs-shim-nomts-')
-    try {
-      mkdirSync(join(root, 'scripts/lib'), { recursive: true })
-      writeFileSync(join(root, 'scripts/blueprint'), SHIM_SOURCE)
-      writeFileSync(join(root, 'scripts/lib/gate.sh'), '')
-      _setBlueprintRootForTests(root)
-      const libs = await bpCliLibs()
-      expect(libs).toEqual([])
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('a NEAR-shim (one byte off) is NOT treated as the shim: it is scanned like ordinary shell', async () => {
-    const root = mkFixtureDir('bp-port-clilibs-nearshim-')
-    try {
-      mkdirSync(join(root, 'scripts/lib'), { recursive: true })
-      // Missing the trailing newline the real shim has.
-      writeFileSync(join(root, 'scripts/blueprint'), SHIM_SOURCE.slice(0, -1))
-      writeFileSync(join(root, 'scripts/blueprint.mts'), "bashLib('scripts/lib/gate.sh', ...)\n")
-      writeFileSync(join(root, 'scripts/lib/gate.sh'), '')
-      _setBlueprintRootForTests(root)
-      const libs = await bpCliLibs()
-      // The .mts sibling is NOT followed — the near-shim's own text names no
-      // lib, so nothing is found (it does not accidentally match "blueprint.mts").
       expect(libs).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -473,7 +433,6 @@ describe('bpCliLibs / extractShLibNames — the closure with shim-follow (plan �
     const root = mkFixtureDir('bp-port-clilibs-order-')
     try {
       mkdirSync(join(root, 'scripts/lib'), { recursive: true })
-      writeFileSync(join(root, 'scripts/blueprint'), SHIM_SOURCE)
       writeFileSync(join(root, 'scripts/blueprint.mts'), "void 'scripts/lib/a-adapter.sh'\n")
       writeFileSync(
         join(root, 'scripts/lib/a-adapter.sh'),

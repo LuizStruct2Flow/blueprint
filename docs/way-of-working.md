@@ -970,7 +970,7 @@ the same week one project learned it.
 - `docs/SECURITY.md` — security recipes per runtime
 - `docs/INFRASTRUCTURE.md` — IaC recipes per runtime
 - `docs/DOCUMENTATION.md` — doc-sync recipes (internal + external)
-- `scripts/blueprint` — sync CLI: `drift` / `pull` / `a2bp` / `files`
+- `scripts/blueprint.mts` — sync CLI: `drift` / `pull` / `a2bp` / `files`
 - `project_config_*.md` — per-project overrides
 
 All open source at:

@@ -11,7 +11,7 @@
  * TEN trees — eight perturbed, a healthy baseline, and the real repository —
  * were built once and BOTH implementations run over each: the retiring
  * `tests/env-namespace/test.sh`, copied into the fixture with a stub
- * `scripts/blueprint` whose `files` verb prints the fixture's managed list, and
+ * `scripts/blueprint` (the shell CLI then) whose `files` verb prints the fixture's managed list, and
  * `scanEnvNamespace()`. The per-case verdicts (#1, #2, #3) were compared
  * mechanically. **They agreed on all ten inputs**, and the `checked` count
  * matched on every one where the shell printed it.
@@ -291,7 +291,7 @@ describe('BUG-006 — no managed file carries a project-specific env namespace',
       // success (BUG-029 R4). And the pipeline had to go with it: in `$(a | b)`
       // the status is b's, so `sed` would have reported success whatever the CLI
       // did.
-      const listed = await s.run('bash', [join(REPO_ROOT, 'scripts/blueprint'), 'files'], {
+      const listed = await s.run('node', [join(REPO_ROOT, 'scripts/blueprint.mts'), 'files'], {
         cwd: REPO_ROOT,
       })
       expect(

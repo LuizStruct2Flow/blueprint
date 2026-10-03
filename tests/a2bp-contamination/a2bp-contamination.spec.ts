@@ -69,7 +69,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
 
 const SUBJECT_ROOT = process.env.BP_SUBJECT_ROOT ?? REPO_ROOT
-const CLI = join(SUBJECT_ROOT, 'scripts/blueprint')
+const CLI = join(SUBJECT_ROOT, 'scripts/blueprint.mts')
 const PLACEHOLDERS = join(SUBJECT_ROOT, 'scripts/lib/placeholders.sh')
 
 /** A real MANAGED_FILES entry with low-stakes content. */
@@ -268,7 +268,11 @@ async function fixture(s: Scenario, projectName = 'acme-flow'): Promise<Fixture>
     const refsBefore = await a2bpRefs()
 
     const path = opts.pathPrefix ? `${opts.pathPrefix}:${ghPath}` : ghPath
-    const r = await s.run(opts.cli ?? CLI, ['a2bp', ...args], {
+    // The real CLI (or a copy of it) is a .mts run with node; the rogue
+    // stand-in of #0 is an executable shell script run directly.
+    const cli = opts.cli ?? CLI
+    const [cmd, ...pre] = cli.endsWith('.mts') ? ['node', cli] : [cli]
+    const r = await s.run(cmd!, [...pre, 'a2bp', ...args], {
       cwd: dir,
       env: { PATH: path },
     })
@@ -344,7 +348,7 @@ async function fixture(s: Scenario, projectName = 'acme-flow'): Promise<Fixture>
       await bpRepo.git(['commit', '-q', '-m', 'base', '--allow-empty'])
       const push = await bpRepo.git(['push', '-q', '-f', 'origin', 'main'])
       expect(push.code, push.output).toBe(0)
-      return s.run(CLI, ['pull', ...args], { cwd: dir, env: { PATH: ghPath } })
+      return s.run('node', [CLI, 'pull', ...args], { cwd: dir, env: { PATH: ghPath } })
     },
   }
 }
@@ -580,7 +584,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
   it('#6 substitution-implementing files are exempt from reverse-substitution', async () => {
     await scenario('a2bp-contam-6', async (s) => {
-      // scripts/blueprint and the placeholder libs carry the placeholder tokens
+      // scripts/blueprint.mts and the placeholder libs carry the placeholder tokens
       // as CODE; the CLI already exempts them on the pull side via
       // _should_substitute. The a2bp side must honour the SAME exemption, or
       // back-propagating the CLI corrupts the CLI.
@@ -595,7 +599,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       // of the project's line 2; its extra final line is what "was this filed at
       // all?" reads.
       const f = await fixture(s)
-      const rel = 'scripts/blueprint'
+      const rel = 'scripts/blueprint.mts'
       await f.writeBp(
         rel,
         '#!/bin/bash\n' +
@@ -613,7 +617,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
       const r = await f.a2bp(f.proj, [rel])
       const copy = await f.readBp(rel)
-      expect(copy, `scripts/blueprint was not filed\n${r.out}`).not.toMatch(/^SENTINEL/m)
+      expect(copy, `scripts/blueprint.mts was not filed\n${r.out}`).not.toMatch(/^SENTINEL/m)
       expect(
         copy,
         'BUG-064: it WAS reverse-substituted — the pull-side _should_substitute exemption is not mirrored on the a2bp side, so back-propagating the CLI would corrupt it',
@@ -1347,12 +1351,10 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
 
       const copyCli = async (rel: string, drop?: string): Promise<string> => {
         const dir = await s.fs.mkdirp(rel)
-        // TASK-081: scripts/blueprint is now the two-line shim, so a copy of
-        // it alone is a shim with no target — its own `dirname "$0"` points
-        // INTO `dir`, which needs blueprint.mts sitting right beside it, or
-        // every run here dies of Node's "Cannot find module" instead of
-        // exercising the guard under test.
-        for (const part of ['blueprint', 'blueprint.mts', 'lib']) {
+        // The copy needs its lib tree beside it (the CLI resolves libs from
+        // its own directory), or every run here dies on a missing lib instead
+        // of exercising the guard under test.
+        for (const part of ['blueprint.mts', 'lib']) {
           const cp = await s.run('cp', ['-a', join(SUBJECT_ROOT, 'scripts', part), dir], {
             cwd: s.workspace.root,
           })
@@ -1366,7 +1368,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
           })
           expect(gone.code, `${drop} is still present — this case would be vacuous`).not.toBe(0)
         }
-        return join(dir, 'blueprint')
+        return join(dir, 'blueprint.mts')
       }
 
       // NON-VACUITY: the same copied CLI, complete, must reach the scan and

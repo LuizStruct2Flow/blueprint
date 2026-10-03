@@ -69,7 +69,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { withCttyNoStdin } from '../helpers/tty.js'
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 
 async function git(s: Scenario, cwd: string, args: string[]) {
   return s.run('git', args, { cwd })
@@ -164,13 +164,13 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
       const p = await newProject(s, 'a', 'p18', f)
 
       // The real CLI, not a copy inside the fixture. The shell suite copied
-      // `scripts/blueprint` into its fixture blueprint; both spellings run the
+      // the CLI into its fixture blueprint; both spellings run the
       // same bytes, and not copying means a mutant applied to the checkout
       // reaches this case the same way it reaches #1b/#2/#3.
       const r = await withCttyNoStdin(
         s,
         p,
-        `bash '${CLI}' pull docs/DoD.md </dev/null 2>&1`,
+        `node '${CLI}' pull docs/DoD.md </dev/null 2>&1`,
       )
 
       // THREE INDEPENDENT PROPERTIES, because each previous fix satisfied some
@@ -198,9 +198,9 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
       const f = await fixtureBlueprint(s, 'b')
       const p = await newProject(s, 'b', 'p18b', f)
 
-      const first = await s.run(CLI, ['pull', '--yes', 'docs/DoD.md'], { cwd: p })
+      const first = await s.run('node', [CLI, 'pull', '--yes', 'docs/DoD.md'], { cwd: p })
       expect(first.code, first.output).toBe(0)
-      const second = await s.run(CLI, ['pull', '--yes', 'docs/DoD.md'], { cwd: p })
+      const second = await s.run('node', [CLI, 'pull', '--yes', 'docs/DoD.md'], { cwd: p })
       expect(
         second.code,
         `an in-sync pull exited ${second.code} — the non-zero refusal was ` +
@@ -214,7 +214,7 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
       const f = await fixtureBlueprint(s, 'c')
       const p = await newProject(s, 'c', 'p16', f)
 
-      const r = await s.run(CLI, ['pull', '--yes', 'docs/DoD.md'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes', 'docs/DoD.md'], { cwd: p })
       expect(r.code, r.output).toBe(0)
 
       // THE FIXTURE'S OWN PREMISE, FIRST. If CLAUDE.md were not behind there
@@ -245,7 +245,7 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
       const f = await fixtureBlueprint(s, 'd')
       const p = await newProject(s, 'd', 'pfull', f)
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(0)
       expect(await shaOf(p), 'a full pull did NOT advance bootstrap_sha — the #2 fix broke normal syncing').toBe(
         f.head,
@@ -261,7 +261,7 @@ describe('BUG-016 / BUG-018 — pull records only what it synced, and survives h
       // refuses docs/DoD.md while CLAUDE.md, which is behind, still gets pulled.
       await s.fs.write(join(p, 'docs/DoD.md'), '# DoD\n<!-- BLUEPRINT:END -->\n')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       // The fixture's premise: one file pulled, one refused. Without the pull
       // there is no advance to wrongly make; without the refusal, #3's case.
       expect(r.output, 'fixture broken — nothing was pulled').toMatch(/pulled CLAUDE\.md/)
@@ -332,7 +332,7 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(0)
 
       expect(await s.fs.exists(join(p, 'scripts/gone.sh')), `an unedited deleted file was not retired:\n${r.output}`).toBe(false)
@@ -349,7 +349,7 @@ describe('TASK-021 §4.2 — a full pull retires what the blueprint stopped ship
       expect(r.output, 'the README seed was treated as a candidate').not.toContain('README.md')
 
       // A second pull has nothing left to offer, and still says the edited copy is kept.
-      const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const again = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(again.code, again.output).toBe(0)
       expect(again.output).not.toMatch(/retired/)
       expect(again.output).toMatch(/yours now\s+docs\/edited\.md/)
@@ -376,14 +376,13 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
     await scenario('pull-behaviour-6', async (s) => {
       const bp = await s.workspace.dir('f6', 'bp')
       await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
-      // The shim: names the adapter directly, so bpCliLibClosure's first pass
-      // (extractShLibNames on scripts/blueprint) discovers it with no need to
-      // match the real CLI_SHIM_SOURCE constant or involve scripts/blueprint.mts.
+      // The fixture CLI names the adapter directly, so the closure's first
+      // pass (extractShLibNames on scripts/blueprint.mts) discovers it. The
+      // project has no CLI yet, so the pull selects it.
       await s.fs.write(
-        join(bp, 'scripts/blueprint'),
-        ['#!/bin/sh', '# fixture cli shim (TASK-081 slice 6 reproducer)', 'lib="scripts/lib/a-adapter.sh"', '. "$lib"', ''].join('\n'),
+        join(bp, 'scripts/blueprint.mts'),
+        ['// fixture cli (TASK-081 slice 6 reproducer)', 'const lib = "scripts/lib/a-adapter.sh"', ''].join('\n'),
       )
-      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
       // The adapter: a non-comment assignment naming its target by literal
       // path — the exact shape extractDependencyLibNames requires for a real
       // edge (dod-gate.sh's own bridge shape, plan §7).
@@ -400,7 +399,6 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
       const p = await s.workspace.dir('f6', 'proj')
-      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
       await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
       // An END with no open BEGIN: bp_marker_structure calls this `bad`, so
       // the target refuses regardless of content diff (pull-behaviour #4's
@@ -422,7 +420,7 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(
         await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
@@ -442,10 +440,9 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       const bp = await s.workspace.dir('f7', 'bp')
       await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
       await s.fs.write(
-        join(bp, 'scripts/blueprint'),
-        ['#!/bin/sh', '# fixture cli shim (TASK-081 slice 6, cycle case)', 'lib="scripts/lib/lib-p.sh"', '. "$lib"', ''].join('\n'),
+        join(bp, 'scripts/blueprint.mts'),
+        ['// fixture cli (TASK-081 slice 6, cycle case)', 'const lib = "scripts/lib/lib-p.sh"', ''].join('\n'),
       )
-      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
       await s.fs.write(
         join(bp, 'scripts/lib/lib-p.sh'),
         ['#!/bin/sh', 'q="scripts/lib/lib-q.sh"', '. "$q"', 'echo "p new"', ''].join('\n'),
@@ -460,7 +457,6 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
       const p = await s.workspace.dir('f7', 'proj')
-      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
       await s.fs.write(join(p, 'scripts/lib/lib-p.sh'), 'echo "p old"\n')
       await s.fs.write(join(p, 'scripts/lib/lib-q.sh'), 'echo "q old"\n')
       await s.fs.write(
@@ -478,7 +474,7 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(r.code, `a mutual pair with no refusal must still exit 0:\n${r.output}`).toBe(0)
       expect(await readFile(join(p, 'scripts/lib/lib-p.sh'), 'utf8'), `lib-p.sh was dropped from the cycle:\n${r.output}`).toContain(
@@ -495,12 +491,9 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       const bp = await s.workspace.dir('f8', 'bp')
       await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
       await s.fs.write(
-        join(bp, 'scripts/blueprint'),
-        ['#!/bin/sh', '# fixture cli shim (TASK-081 slice 6 missing-dependency reproducer)', 'lib="scripts/lib/a-adapter.sh"', '. "$lib"', ''].join(
-          '\n',
-        ),
+        join(bp, 'scripts/blueprint.mts'),
+        ['// fixture cli (TASK-081 slice 6 missing-dependency reproducer)', 'const lib = "scripts/lib/a-adapter.sh"', ''].join('\n'),
       )
-      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
       await s.fs.write(
         join(bp, 'scripts/lib/a-adapter.sh'),
         [
@@ -518,7 +511,6 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       const first = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
       const p = await s.workspace.dir('f8', 'proj')
-      await s.fs.write(join(p, 'scripts/blueprint.mts'), '// fixture mts placeholder\n')
       await s.fs.write(join(p, 'scripts/lib/a-adapter.sh'), ['#!/bin/sh', '# old project copy', 'echo "a-adapter old"', ''].join('\n'))
       await s.fs.write(
         join(p, '.blueprint-source'),
@@ -535,7 +527,7 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(
         await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
@@ -557,23 +549,20 @@ describe('TASK-081 slice 6 — a full pull orders a lib depender after its depen
 /**
  * TASK-081 slice 6, round 2 (Vitali review of e943ae5/2a7d720/4247967/1d6c2a3).
  * #6/#7/#8 above all reproduce with the CLI itself missing from the project
- * (`scripts/blueprint` absent), which forces `files.some(namesCli)` true and
+ * (`scripts/blueprint.mts` absent), which forces `files.some(namesCli)` true and
  * therefore runs the whole closure/hold-back machinery. Once a project's CLI
  * is byte-identical to the blueprint's — the steady state after any project
  * has been ported once — the full-pull default scan never selects
- * `scripts/blueprint` or `scripts/blueprint.mts`, `namesCli` is false for
+ * `scripts/blueprint.mts`, `namesCli` is false for
  * every file, and NONE of the dependency analysis in `cmdPull` ran: a lib
  * that gained a dependency on something absent, refused, declined or failed
  * landed with no skip line, exit 0, bootstrap_sha advanced.
  */
 describe('TASK-081 slice 6 round 2 — the dependency analysis runs even when the CLI is already current', () => {
-  /** scripts/blueprint and scripts/blueprint.mts, byte-identical in bp and p, so a full pull never selects either. */
+  /** scripts/blueprint.mts, byte-identical in bp and p, so a full pull never selects it. */
   async function identicalCli(s: Scenario, bp: string, p: string) {
-    const shim = ['#!/bin/sh', '# fixture cli shim, already current on both sides', 'exit 0', ''].join('\n')
     const mts = '// fixture mts placeholder, already current on both sides\n'
-    await s.fs.write(join(bp, 'scripts/blueprint'), shim)
     await s.fs.write(join(bp, 'scripts/blueprint.mts'), mts)
-    await s.fs.write(join(p, 'scripts/blueprint'), shim)
     await s.fs.write(join(p, 'scripts/blueprint.mts'), mts)
   }
 
@@ -615,7 +604,7 @@ describe('TASK-081 slice 6 round 2 — the dependency analysis runs even when th
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(
         await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
@@ -675,7 +664,7 @@ describe('TASK-081 slice 6 round 2 — the dependency analysis runs even when th
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(
         await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),
@@ -733,7 +722,7 @@ describe('TASK-081 slice 6 round 2 — the dependency analysis runs even when th
       await git(s, p, ['add', '-A'])
       await git(s, p, ['commit', '-q', '-m', 'init'])
 
-      const r = await s.run(CLI, ['pull', '--yes', 'scripts/lib/a-adapter.sh'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes', 'scripts/lib/a-adapter.sh'], { cwd: p })
 
       expect(
         await readFile(join(p, 'scripts/lib/a-adapter.sh'), 'utf8'),

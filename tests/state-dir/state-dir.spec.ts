@@ -680,11 +680,11 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       // working copy, so the placeholder stayed literal and every derived
       // checkout's dispatcher wrote into one shared directory.
       files[DISPATCHERS[0]] =
-        `${TS_CONSUMER}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n`
+        `${TS_CONSUMER}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n` // a2bp-allow: a planted fixture this case proves the state-dir scan refuses
       // #5b catches the same line from the other direction (shell consumers
       // only — it is a shell-syntax rule), which is the belt-and-braces the two
       // rules are for.
-      files[CONSUMERS[0]] = `${real}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n`
+      files[CONSUMERS[0]] = `${real}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n` // a2bp-allow: a planted fixture this case proves the state-dir scan refuses
 
       const scan = await writeAndScan(s, 'bp', files)
 

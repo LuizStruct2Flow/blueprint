@@ -335,6 +335,8 @@ describe('TASK-067 — the shell inventory gate', () => {
       kept?: string[]
       /** judge a later push: BASE is the edit commit, with the row still at the old sha */
       secondPush?: boolean
+      /** the added .mts files are committed executable (100755) */
+      execMts?: boolean
     }
 
     async function refEdit(s: Scenario, o: RefEdit) {
@@ -355,7 +357,10 @@ describe('TASK-067 — the shell inventory gate', () => {
         await s.fs.rm(`repo/${p}`)
         delete legacy[p]
       }
-      for (const m of o.mts) await s.fs.write(`repo/${m}`, 'console.log("stub")\n')
+      for (const m of o.mts) {
+        await s.fs.write(`repo/${m}`, 'console.log("stub")\n')
+        if (o.execMts) await s.fs.chmod(`repo/${m}`, 0o755)
+      }
       await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], legacy))
       await repo.commitAll('repoint the caller, delete the ported shell files')
       if (o.secondPush) {
@@ -609,6 +614,45 @@ esac
       })
       await scenario('shell-inventory-n17b', async (s) => {
         const r = await refEdit(s, { caller: 'scripts/caller.sh', base: '#!/bin/sh\n# see scripts/foo.sh.\n', head: '#!/bin/sh\n# see scripts/foo.mts.\n', ...ported })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    // The real shape that the slice 7 gate refused: a path in backticks inside a
+    // comment (lib/commit-subject.sh:6).
+    const FOO = { ported: ['scripts/foo.sh'], mts: ['scripts/foo.mts'] }
+    const callerWith = (line: string) => `#!/bin/sh\n${line}\n`
+
+    it('N19a a path in backticks inside a comment is repointed', async () => {
+      await scenario('shell-inventory-n19a', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: callerWith('# `scripts/foo.sh` (which items a push serves)'), head: callerWith('# `scripts/foo.mts` (which items a push serves)'), ...FOO })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N19b command substitution naming the path is repointed when the .mts is executable', async () => {
+      await scenario('shell-inventory-n19b', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: callerWith('v=`scripts/foo.sh --version`'), head: callerWith('v=`scripts/foo.mts --version`'), ...FOO, execMts: true })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N19c the same command substitution is refused when the .mts is not executable', async () => {
+      await scenario('shell-inventory-n19c', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: callerWith('v=`scripts/foo.sh --version`'), head: callerWith('v=`scripts/foo.mts --version`'), ...FOO })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/caller\.sh/)
+      })
+    })
+
+    it('N19d a bare run in command position needs an executable .mts too, and node X.mts never does', async () => {
+      await scenario('shell-inventory-n19d1', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: callerWith('scripts/foo.sh --go'), head: callerWith('scripts/foo.mts --go'), ...FOO })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/caller\.sh/)
+      })
+      await scenario('shell-inventory-n19d2', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: callerWith('scripts/foo.sh --go'), head: callerWith('node scripts/foo.mts --go'), ...FOO })
         expect(r.code, r.output).toBe(0)
       })
     })

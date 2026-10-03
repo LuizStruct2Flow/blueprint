@@ -3,7 +3,7 @@
 #
 # The feed (logs/agent-activity.log) is the single tail-able stream of what every
 # agent is doing. Several producers write to it: scripts/agent-activity.sh (the
-# supervisor), scripts/log-activity.sh (Claude subagent hooks), scripts/watch-ci.sh
+# supervisor), scripts/log-activity.mts (Claude subagent hooks), scripts/watch-ci.sh
 # (post-push CI), and the pre-push gate via scripts/lib/pipeline.sh.
 #
 # Each of those had — or was about to get — its own copy of "work out the path,

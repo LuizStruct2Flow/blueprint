@@ -161,7 +161,7 @@ have_gnu_diff() {
     /dev/null /dev/null >/dev/null 2>&1
 }
 
-# flock(1) is what bounds the subagent-bookend deferral in scripts/log-activity.sh
+# flock(1) is what bounds the subagent-bookend deferral in scripts/log-activity.mts
 # (BUG-124). Without it that hook cannot enforce its cap, so it does not defer at
 # all and every subagent bookend is labelled by agent TYPE rather than by
 # persona — which is the symptom BUG-124 was filed for, reappearing on the one

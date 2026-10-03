@@ -40,7 +40,7 @@ export interface FeedFixtureOptions {
   /** Baton fields. Omitted → an ACTIVE baton, which is the quiet default. */
   readonly holder?: string
   readonly state?: string
-  /** Also copy `scripts/log-activity.sh` (the hook). */
+  /** Also copy `scripts/log-activity.mts` (the hook). */
   readonly withHook?: boolean
   /** Further `scripts/`-relative files to copy in (`team-kickoff.sh`, …). */
   readonly extraScripts?: readonly string[]
@@ -169,10 +169,6 @@ export async function feedFixture(
   await s.fs.write(`${name}/.blueprint-source`, '')
   await s.fs.copyIn(join(source, 'scripts', 'agent-activity.sh'), `${name}/scripts/agent-activity.sh`)
   if (options.withHook) {
-    await s.fs.copyIn(join(source, 'scripts', 'log-activity.sh'), `${name}/scripts/log-activity.sh`)
-    // TASK-067: the hook is now a two-line exec shim — its logic (and what the
-    // shim actually execs) lives in the sibling .mts, which has to travel with
-    // it or the shim finds nothing beside it.
     await s.fs.copyIn(join(source, 'scripts', 'log-activity.mts'), `${name}/scripts/log-activity.mts`)
   }
   for (const extra of options.extraScripts ?? []) {

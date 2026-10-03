@@ -657,6 +657,15 @@ esac
       })
     })
 
+    // The real shape slice 8's gate refused: a case pattern with a glob star in
+    // front of the path (lib/placeholders.sh bp_should_substitute).
+    it('N20 a glob star before the path is a boundary: a case pattern is repointed', async () => {
+      await scenario('shell-inventory-n20', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: callerWith('    *scripts/foo.sh|*scripts/other.sh) return 1 ;;'), head: callerWith('    *scripts/foo.mts|*scripts/other.sh) return 1 ;;'), ...FOO })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
     // The case labels of main()'s switch only: comments and strings do not count.
     function mainSwitchBody(src: string): string {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')

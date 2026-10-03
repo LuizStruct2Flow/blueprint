@@ -456,9 +456,10 @@ function tokenRegex(d: PortedSet, side: 'base' | 'head'): { re: RegExp; byName: 
   // The plan's boundary `(?![-\w.])`, relaxed only for a sentence-ending dot.
   const tail = String.raw`(?![-\w]|\.(?!\s|$))`
   // A path token is a WHOLE path: at a start, whitespace, quote, `=`, `(`, `:`,
-  // a backtick (command substitution in code, a code span in a comment), or
-  // after a `$VAR/` or `./` prefix — never after another `/segment`.
-  const start = String.raw`(?:(?<=^|[\s"'=(:\x60])|(?<=\$\{?\w+\}?/)|(?<=(?:^|[\s"'=(:\x60])\./))`
+  // a backtick (command substitution in code, a code span in a comment), a glob
+  // star (`*scripts/x`, a case pattern), or after a `$VAR/` or `./` prefix —
+  // never after another `/segment`.
+  const start = String.raw`(?:(?<=^|[\s"'=(:\x60*])|(?<=\$\{?\w+\}?/)|(?<=(?:^|[\s"'=(:\x60*])\./))`
   const re = new RegExp(
     String.raw`${start}(${alt(byName.keys())})${tail}` +
       (byBase.size > 0 ? String.raw`|(?<![-\w/])(${alt(byBase.keys())})${tail}` : ''),

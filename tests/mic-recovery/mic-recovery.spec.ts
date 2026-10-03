@@ -980,7 +980,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
   })
 
   it('BUG-144 F1 (Thomas/Kimi review): the wake command runs under bash, so a roster MISS inside it does not abort', async () => {
-    // All three launchers (start-codex/kimi/gemini-signal-watch.sh) build
+    // All three launchers (start-codex/kimi/gemini-signal-watch.mts) build
     // their own AGENT_WAKE_COMMAND string and source scripts/lib/roster.sh
     // INSIDE it to resolve the hand-back Orchestrator name — this is a
     // SEPARATE roster lookup from recoverStrandedMic's own (which already

@@ -245,7 +245,7 @@ describe('TASK-065 rotation event log', () => {
       // of its own; the assignment lives in its `.mts` target's
       // AGENT_WAKE_COMMAND body instead. resolveConsumer follows the shim,
       // same as tests/state-dir.
-      const rel = `scripts/start-${provider}-signal-watch.sh`
+      const rel = `scripts/start-${provider}-signal-watch.mts`
       const target = resolveConsumer(root, rel)?.rel ?? rel
       const launcher = await readFile(join(root, target), 'utf8')
       expect(launcher).toContain(`RUN_LOG="$STATE_DIR/${provider}-runs.log"`)

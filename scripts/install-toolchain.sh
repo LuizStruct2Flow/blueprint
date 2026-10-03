@@ -353,10 +353,12 @@ BLUEPRINT_COMMAND_PATH="$BIN_DIR/blueprint"
 
 # The body, VERBATIM. Ownership is byte-exact equality with a body this installer
 # released (§R4 #1): the marker line proves nothing, since anyone can copy it.
-# At v1 the released set is this one body. When a v2 ships, v1 joins the set
-# with its "identical to an earlier body -> replaced" case; that code is not
-# written now, because there is no earlier body for it to act on.
-read -r -d '' BLUEPRINT_COMMAND_BODY <<'BODY'
+# The released set is v1 (superseded) and v2 (current). v1 runs only an
+# executable ./scripts/blueprint, which TASK-088 deletes in favour of
+# scripts/blueprint.mts; an owned v1 is replaced by v2 and `check` counts it
+# stale. v2 keeps `node` because the .mts is mode 100644, and falls back to an
+# executable scripts/blueprint for projects from before TASK-081.
+read -r -d '' BLUEPRINT_COMMAND_V1 <<'BODY'
 #!/usr/bin/env bash
 # struct2flow-blueprint-command v1: written by scripts/install-toolchain.sh (TASK-025).
 # Runs THIS project's own blueprint CLI. The blueprint is read by its address,
@@ -369,15 +371,37 @@ echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checko
 exit 1
 BODY
 
-# bc_owned PATH — this installer's current body: a REGULAR file, never a symlink
-# (the symlink test comes first), byte-identical to it.
-bc_owned() {
-  [ ! -L "$1" ] && [ -f "$1" ] && printf '%s\n' "$BLUEPRINT_COMMAND_BODY" | cmp -s - "$1"
+read -r -d '' BLUEPRINT_COMMAND_BODY <<'BODY'
+#!/usr/bin/env bash
+# struct2flow-blueprint-command v2: written by scripts/install-toolchain.sh (TASK-088).
+# Runs THIS project's own blueprint CLI. The blueprint is read by its address,
+# so no checkout path belongs in this file. Edit the installer, not this copy.
+for c in ./scripts/blueprint.mts ./scaffolding/scripts/blueprint.mts; do
+  [ -f "$c" ] && exec node "$c" "$@"
+done
+for c in ./scripts/blueprint ./scaffolding/scripts/blueprint; do
+  [ -x "$c" ] && exec "$c" "$@"
+done
+echo "blueprint: no scripts/blueprint.mts (or executable scripts/blueprint) in $PWD. Run from a project root," >&2
+echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts" >&2
+exit 1
+BODY
+
+# bc_is PATH BODY — a REGULAR file, never a symlink (the symlink test comes
+# first), byte-identical to BODY.
+bc_is() {
+  [ ! -L "$1" ] && [ -f "$1" ] && printf '%s\n' "$2" | cmp -s - "$1"
 }
 
-# bc_foreign PATH — something is there, and it is not ours.
+# bc_owned PATH — this installer's current body.
+bc_owned() { bc_is "$1" "$BLUEPRINT_COMMAND_BODY"; }
+
+# bc_v1 PATH — a superseded body this installer released: ours, so replaceable.
+bc_v1() { bc_is "$1" "$BLUEPRINT_COMMAND_V1"; }
+
+# bc_foreign PATH — something is there, and it is neither of ours.
 bc_foreign() {
-  { [ -L "$1" ] || [ -e "$1" ]; } && ! bc_owned "$1"
+  { [ -L "$1" ] || [ -e "$1" ]; } && ! bc_owned "$1" && ! bc_v1 "$1"
 }
 
 bc_foreign_warning() {
@@ -590,15 +614,18 @@ if [ "$MODE" = "check" ]; then
     missing=$((missing + 1))
   fi
 
-  # The command is reported, never counted: nothing in the gate calls
-  # `blueprint`, and install does not fail on it either, so check and install
-  # still report the same set.
+  # Missing or a stale v1 body counts (install replaces both, so check and
+  # install agree); a foreign body is only reported, install leaves it alone.
   if bc_foreign "$BLUEPRINT_COMMAND_PATH"; then
     note "⚠ $BLUEPRINT_COMMAND_PATH was not written by this installer, so it is left alone."
   elif bc_owned "$BLUEPRINT_COMMAND_PATH"; then
     note "✓ blueprint command ($BLUEPRINT_COMMAND_PATH)"
+  elif bc_v1 "$BLUEPRINT_COMMAND_PATH"; then
+    note "✗ blueprint command STALE (v1 cannot run scripts/blueprint.mts; run: bash scripts/install-toolchain.sh)"
+    missing=$((missing + 1))
   else
     note "✗ blueprint command MISSING (run: bash scripts/install-toolchain.sh)"
+    missing=$((missing + 1))
   fi
 
   if [ "$missing" -eq 0 ]; then

@@ -292,8 +292,8 @@ describe('TASK-027 — check derives the Node requirement from tests/package.jso
 
 // --- TASK-025 commit 4: the per-machine `blueprint` command (PLAN §8.1) -------
 
-/** PLAN-TASK-025 §8.1's body, verbatim. The second copy is the point: the case pins the plan's bytes. */
-const BODY = [
+/** The superseded v1 body, verbatim: still ours, so replaced, and counted stale by check. */
+const V1_BODY = [
   '#!/usr/bin/env bash',
   '# struct2flow-blueprint-command v1: written by scripts/install-toolchain.sh (TASK-025).',
   "# Runs THIS project's own blueprint CLI. The blueprint is read by its address,",
@@ -303,6 +303,24 @@ const BODY = [
   'done',
   'echo "blueprint: no scripts/blueprint in $PWD. Run from a project root," >&2',
   'echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/blueprint" >&2',
+  'exit 1',
+  '',
+].join('\n')
+
+/** The v2 body, verbatim (TASK-088 §3(a)). The second copy is the point: the case pins the bytes. */
+const BODY = [
+  '#!/usr/bin/env bash',
+  '# struct2flow-blueprint-command v2: written by scripts/install-toolchain.sh (TASK-088).',
+  "# Runs THIS project's own blueprint CLI. The blueprint is read by its address,",
+  '# so no checkout path belongs in this file. Edit the installer, not this copy.',
+  'for c in ./scripts/blueprint.mts ./scaffolding/scripts/blueprint.mts; do',
+  '  [ -f "$c" ] && exec node "$c" "$@"',
+  'done',
+  'for c in ./scripts/blueprint ./scaffolding/scripts/blueprint; do',
+  '  [ -x "$c" ] && exec "$c" "$@"',
+  'done',
+  'echo "blueprint: no scripts/blueprint.mts (or executable scripts/blueprint) in $PWD. Run from a project root," >&2',
+  'echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts" >&2',
   'exit 1',
   '',
 ].join('\n')
@@ -465,9 +483,9 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
       await s.fs.write('none/.keep', '')
       const none = await s.run(m.target, ['drift'], { cwd: s.workspace.path('none'), env: { HOME: m.home, PATH: m.path } })
       expect(none.code, none.output).toBe(1)
-      expect(none.stderr).toContain('blueprint: no scripts/blueprint in ')
+      expect(none.stderr).toContain('blueprint: no scripts/blueprint.mts (or executable scripts/blueprint) in ')
       expect(none.stderr).toContain(
-        'or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/blueprint',
+        'or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts',
       )
     })
   })
@@ -675,6 +693,74 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
         })
       })
     }
+  })
+
+  it('#42 TASK-088: an owned v1 body is replaced by v2; a foreign body is kept', async () => {
+    await scenario('install-toolchain-42', async (s) => {
+      const base = await baseline(s)
+      const m = await machine(s, 'a', base)
+      await s.fs.write(m.targetRel, V1_BODY, { mode: 0o755 })
+      const r = await install(s, m, [])
+      expect(await readFile(m.target, 'utf8'), `v1 was not replaced:\n${r.output}`).toBe(BODY)
+      expect(r.output).toContain(`✓ blueprint command installed (${m.target})`)
+      expect(r.output).not.toContain(FOREIGN[0])
+
+      const f = await machine(s, 'f', base)
+      const foreign = `${V1_BODY}# hand-edited\n`
+      await s.fs.write(f.targetRel, foreign, { mode: 0o755 })
+      const rf = await install(s, f, [])
+      expect(await readFile(f.target, 'utf8'), `a foreign body was replaced:\n${rf.output}`).toBe(foreign)
+      expect(rf.output).toContain(`⚠ ${f.target} ${FOREIGN[0]}`)
+    })
+  })
+
+  it('#43 TASK-088: v2 runs scripts/blueprint.mts with node, and falls back to an executable scripts/blueprint', async () => {
+    await scenario('install-toolchain-43', async (s) => {
+      const m = await machine(s, 'a', await baseline(s))
+      await install(s, m, [])
+      const env = { HOME: m.home, PATH: m.path }
+
+      // 100644 on purpose: the body must run it through `node`, not exec it.
+      await s.fs.write('mts/scripts/blueprint.mts', 'console.log("MTS", process.argv.slice(2).join(","))\n')
+      await s.fs.write('mts/scripts/blueprint', '#!/usr/bin/env bash\necho SHELL\n', { mode: 0o755 })
+      const mts = await s.run(m.target, ['a', 'b'], { cwd: s.workspace.path('mts'), env })
+      expect(mts.code, mts.output).toBe(0)
+      expect(mts.stdout.trim(), 'the .mts did not win over the shell file').toBe('MTS a,b')
+
+      await s.fs.write('scaf/scaffolding/scripts/blueprint.mts', 'console.log("SCAF-MTS")\n')
+      const scaf = await s.run(m.target, [], { cwd: s.workspace.path('scaf'), env })
+      expect(scaf.stdout.trim()).toBe('SCAF-MTS')
+
+      await stub(s, 'old/scripts/blueprint', 'SHELL-ONLY')
+      const old = await s.run(m.target, [], { cwd: s.workspace.path('old'), env })
+      expect(old.code, old.output).toBe(0)
+      expect(old.stdout.trim()).toBe('SHELL-ONLY')
+    })
+  })
+
+  it('#44 TASK-088: check exits 1 on an owned v1 body and 0 on v2; a foreign body only warns', async () => {
+    await scenario('install-toolchain-44', async (s) => {
+      const m = await machine(s, 'a', await baseline(s))
+      // Every other tool `check` probes is a stub, so the command is the only variable.
+      const tools = await s.shimDir('tools-44')
+      for (const t of ['gitleaks', 'semgrep', 'osv-scanner', 'jq', 'shellcheck']) await tools.add(t, `echo ${t}`)
+      const path = `${tools.dir}:${m.path}`
+      await s.fs.write('bp-a/tests/package.json', await readFile(join(REPO_ROOT, 'tests/package.json'), 'utf8'))
+      await install(s, m, [], { path })
+      const ok = await install(s, m, ['check'], { path })
+      expect(ok.output).toContain(`✓ blueprint command (${m.target})`)
+      expect(ok.code, `check on a v2 body is not 0:\n${ok.output}`).toBe(0)
+
+      await s.fs.write(m.targetRel, V1_BODY, { mode: 0o755 })
+      const stale = await install(s, m, ['check'], { path })
+      expect(stale.output).toContain('✗ blueprint command STALE')
+      expect(stale.code, `check ignored a v1 body:\n${stale.output}`).toBe(1)
+
+      await s.fs.write(m.targetRel, `${V1_BODY}# edited\n`, { mode: 0o755 })
+      const foreign = await install(s, m, ['check'], { path })
+      expect(foreign.output).toContain(`⚠ ${m.target} ${FOREIGN[0]}`)
+      expect(foreign.code, `a foreign body was counted:\n${foreign.output}`).toBe(0)
+    })
   })
 
   it('#38 a blueprint earlier on PATH is named', async () => {

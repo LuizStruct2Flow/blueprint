@@ -31,6 +31,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { scenario, REPO_ROOT, type Scenario } from '../harness/index.js'
+import { SOURCED_LIBS } from '../../scripts/shell-inventory-check.mts'
 
 const CHECKER = `${REPO_ROOT}/scripts/shell-inventory-check.mts`
 
@@ -602,6 +603,279 @@ describe('TASK-067 — the shell inventory gate', () => {
         expect(r.code).not.toBe(0)
         expect(r.output).toMatch(/CHANGED:.*scripts\/lib\/third\.sh/)
       })
+    })
+  })
+
+  // TASK-088 — a ported script's shell file is deleted, and a legacy shell
+  // caller is repointed at the .mts. The fixtures below are the REAL caller
+  // shapes (PLAN-TASK-088-no-shims.md §1.4), not single-token lines.
+  describe('TASK-088 — the reference-only edit of a legacy shell caller', () => {
+    interface RefEdit {
+      caller: string
+      base: string
+      head: string
+      /** shell files that exist at BASE and are deleted in HEAD (unless kept) */
+      ported: string[]
+      /** the .mts files HEAD adds */
+      mts: string[]
+      kept?: string[]
+      /** judge a later push: BASE is the edit commit, with the row still at the old sha */
+      secondPush?: boolean
+    }
+
+    async function refEdit(s: Scenario, o: RefEdit) {
+      const repo = await s.gitRepo('repo')
+      const kept = o.kept ?? []
+      await s.fs.write(`repo/${o.caller}`, o.base)
+      for (const p of o.ported) await s.fs.write(`repo/${p}`, '#!/bin/sh\n:\n')
+      await repo.commitAll('seed')
+      const legacy: Record<string, string> = { [o.caller]: await blobShaOf(repo, o.caller) }
+      for (const p of o.ported) legacy[p] = await blobShaOf(repo, p)
+      await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], legacy))
+      await repo.commitAll('seed inventory')
+      let base = await repo.head()
+
+      await s.fs.write(`repo/${o.caller}`, o.head)
+      for (const p of o.ported) {
+        if (kept.includes(p)) continue
+        await s.fs.rm(`repo/${p}`)
+        delete legacy[p]
+      }
+      for (const m of o.mts) await s.fs.write(`repo/${m}`, 'console.log("stub")\n')
+      await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], legacy))
+      await repo.commitAll('repoint the caller, delete the ported shell files')
+      if (o.secondPush) {
+        base = await repo.head()
+        await s.fs.write('repo/docs-note.md', 'an unrelated change\n')
+        await repo.commitAll('unrelated change')
+      }
+      return runChecker(s, repo.dir, base, [o.caller, ...kept])
+    }
+
+    // start-all-watchers.sh:21 — three basenames on one line, and a name that
+    // merely ENDS in a ported basename (agent-activity.sh:110's shape).
+    const WATCHERS = ['scripts/start-codex-signal-watch.sh', 'scripts/start-gemini-signal-watch.sh', 'scripts/start-kimi-signal-watch.sh', 'scripts/signal-watch.sh']
+    const WATCHERS_MTS = WATCHERS.map((p) => p.replace(/\.sh$/, '.mts'))
+    const N1_BASE = '#!/bin/bash\ndispatchers=(start-codex-signal-watch.sh start-gemini-signal-watch.sh start-kimi-signal-watch.sh codex-signal-watch.sh)\n'
+    const N1_HEAD = '#!/bin/bash\ndispatchers=(start-codex-signal-watch.mts start-gemini-signal-watch.mts start-kimi-signal-watch.mts codex-signal-watch.sh)\n'
+
+    // new-project.sh:111
+    const N2_BASE = '#!/bin/bash\n_files_raw="$(mktemp)"\nif ! bash "$BLUEPRINT_ROOT/scripts/blueprint" files >"$_files_raw" 2>&1; then\n  echo "failed" >&2\nfi\n'
+    const N2_HEAD = N2_BASE.replace('bash "$BLUEPRINT_ROOT/scripts/blueprint"', 'node "$BLUEPRINT_ROOT/scripts/blueprint.mts"')
+
+    // .githooks/pre-push-project:447-470
+    const DOD_ENV = 'DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" '
+    const DOD_CALL = (sub: string, pfx = '$BP_CODE_ROOT/') => `${DOD_ENV}node "${pfx}scripts/lib/dod-gate.mts" ${sub}`
+    const N3_BASE = `#!/bin/sh
+if [ -f "$BP_CODE_ROOT/scripts/lib/dod-gate.sh" ]; then
+  # shellcheck source=scripts/lib/dod-gate.sh
+  . "$BP_CODE_ROOT/scripts/lib/dod-gate.sh"
+  _dod_ranges="$(push_log_opts)"
+
+  AGENT_FEED_TAG="DoD-Gate"
+
+  _st_dod_rows(){ dod_stage_rows "$_dod_ranges"; }
+  pipe_stage "§1b·1 every item has a backlog row" _st_dod_rows
+
+  _st_dod_bugtests(){ dod_stage_bugtests "$_dod_ranges"; }
+  pipe_stage "§2 every BUG has a regression test" _st_dod_bugtests
+
+  _st_dod_signal(){ dod_stage_signal; }
+  pipe_stage "§7G the live baton is well-formed" _st_dod_signal
+
+  _st_dod_judgement(){ dod_stage_judgement; }
+  pipe_stage "§D·F·H judgement — printed, not verified" _st_dod_judgement
+
+  AGENT_FEED_TAG="GATE"
+else
+  pipe_skip "DoD checklist" "scripts/lib/dod-gate.sh absent — run: blueprint pull scripts/lib/dod-gate.sh"
+fi
+`
+    const n3Head = (rowsSub = 'rows', pfx = '$BP_CODE_ROOT/') => `#!/bin/sh
+if [ -f "$BP_CODE_ROOT/scripts/lib/dod-gate.mts" ]; then
+  _dod_ranges="$(push_log_opts)"
+
+  AGENT_FEED_TAG="DoD-Gate"
+
+  _st_dod_rows(){ ${DOD_CALL(rowsSub, pfx)} "$_dod_ranges"; }
+  pipe_stage "§1b·1 every item has a backlog row" _st_dod_rows
+
+  _st_dod_bugtests(){ ${DOD_CALL('bugtests', pfx)} "$_dod_ranges"; }
+  pipe_stage "§2 every BUG has a regression test" _st_dod_bugtests
+
+  _st_dod_signal(){ ${DOD_CALL('signal', pfx)}; }
+  pipe_stage "§7G the live baton is well-formed" _st_dod_signal
+
+  _st_dod_judgement(){ ${DOD_CALL('judgement', pfx)}; }
+  pipe_stage "§D·F·H judgement — printed, not verified" _st_dod_judgement
+
+  AGENT_FEED_TAG="GATE"
+else
+  pipe_skip "DoD checklist" "scripts/lib/dod-gate.mts absent — run: blueprint pull scripts/lib/dod-gate.mts"
+fi
+`
+    const DOD_FILES = { ported: ['scripts/lib/dod-gate.sh'], mts: ['scripts/lib/dod-gate.mts'] }
+
+    // scripts/agent-activity.sh:766-791
+    const GATE_SOURCE = '# shellcheck source=scripts/lib/gate.sh\n[ -r "$repo_root/scripts/lib/gate.sh" ] && . "$repo_root/scripts/lib/gate.sh"\n'
+    const N4_BASE = `#!/bin/bash
+${GATE_SOURCE}
+case "\${1:-}" in
+  --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$BP_STATE_ROOT"
+               command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$BP_STATE_ROOT"
+               cmd_daemon ;;
+  "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$BP_STATE_ROOT"
+               AGENT_FEED_FOREGROUND=1 supervise ;;
+esac
+`
+    const gateCall = (sub: string, pfx = '$repo_root/') => `[ -r "${pfx}scripts/lib/gate.mts" ] && node "${pfx}scripts/lib/gate.mts" ${sub} "$BP_STATE_ROOT"`
+    const n4Head = (head = '', pfx = '$repo_root/') => `#!/bin/bash
+${head}
+case "\${1:-}" in
+  --daemon)    ${gateCall('arm-gate', pfx)}
+               ${gateCall('arm-push-keepalive', pfx)}
+               cmd_daemon ;;
+  "")          ${gateCall('arm-gate', pfx)}
+               AGENT_FEED_FOREGROUND=1 supervise ;;
+esac
+`
+    const GATE_FILES = { ported: ['scripts/lib/gate.sh'], mts: ['scripts/lib/gate.mts'] }
+
+    it('N1 R1: three basenames on one line are repointed, a name merely ending in one is left alone', async () => {
+      await scenario('shell-inventory-n1', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/start-all-watchers.sh', base: N1_BASE, head: N1_HEAD, ported: WATCHERS, mts: WATCHERS_MTS })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N2 R2: bash "$ROOT/scripts/blueprint" becomes node "$ROOT/scripts/blueprint.mts"', async () => {
+      await scenario('shell-inventory-n2', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/new-project.sh', base: N2_BASE, head: N2_HEAD, ported: ['scripts/blueprint'], mts: ['scripts/blueprint.mts'] })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N3 R3+R4: a sourced lib becomes node calls inside one-line function bodies, with its ENV', async () => {
+      await scenario('shell-inventory-n3', async (s) => {
+        const r = await refEdit(s, { caller: '.githooks/pre-push-project', base: N3_BASE, head: n3Head(), ...DOD_FILES })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N4 R3+R5+R4: guard, source line and calls of gate.sh become node calls', async () => {
+      await scenario('shell-inventory-n4', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base: N4_BASE, head: n4Head(), ...GATE_FILES })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N10 a second push is judged against BASE\'s old blob, the row still at the old sha', async () => {
+      await scenario('shell-inventory-n10', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base: N4_BASE, head: n4Head(), ...GATE_FILES, secondPush: true })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N5 a reference edit plus one unrelated byte, or one extra trailing newline, is refused', async () => {
+      await scenario('shell-inventory-n5a', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/new-project.sh', base: N2_BASE, head: N2_HEAD.replace(' files ', ' filez '), ported: ['scripts/blueprint'], mts: ['scripts/blueprint.mts'] })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/new-project\.sh/)
+      })
+      await scenario('shell-inventory-n5b', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/new-project.sh', base: N2_BASE, head: `${N2_HEAD}\n`, ported: ['scripts/blueprint'], mts: ['scripts/blueprint.mts'] })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/new-project\.sh/)
+      })
+    })
+
+    it('N6 a rename to an .mts whose .sh still exists is refused', async () => {
+      await scenario('shell-inventory-n6', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/new-project.sh', base: N2_BASE, head: N2_HEAD, ported: ['scripts/blueprint'], mts: ['scripts/blueprint.mts'], kept: ['scripts/blueprint'] })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/new-project\.sh/)
+      })
+    })
+
+    it('N7 the right function mapped to the wrong subcommand is refused', async () => {
+      await scenario('shell-inventory-n7', async (s) => {
+        const r = await refEdit(s, { caller: '.githooks/pre-push-project', base: N3_BASE, head: n3Head('bugtests'), ...DOD_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*pre-push-project/)
+      })
+    })
+
+    it('N8 a node call with a prefix BASE\'s own source lines never used is refused', async () => {
+      await scenario('shell-inventory-n8', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base: N4_BASE, head: n4Head('', '$other_root/'), ...GATE_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*agent-activity\.sh/)
+      })
+    })
+
+    it('N11 an inserted source line (another path ending in scripts/lib/gate.sh) is refused', async () => {
+      await scenario('shell-inventory-n11', async (s) => {
+        const inserted = '[ -r "tests/x/scripts/lib/gate.sh" ] && . "tests/x/scripts/lib/gate.sh"\n'
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base: N4_BASE, head: n4Head(inserted), ...GATE_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*agent-activity\.sh/)
+      })
+    })
+
+    it('N12 a BASE source line kept in HEAD is refused', async () => {
+      await scenario('shell-inventory-n12', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base: N4_BASE, head: n4Head(GATE_SOURCE), ...GATE_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*agent-activity\.sh/)
+      })
+    })
+
+    it('N13 guard swapped and source dropped while the bare function call stays is refused', async () => {
+      await scenario('shell-inventory-n13', async (s) => {
+        const head = N4_BASE.replace(GATE_SOURCE, '').replace(/command -v (arm_\w+) >\/dev\/null 2>&1 && /g, '[ -r "$repo_root/scripts/lib/gate.mts" ] && ')
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base: N4_BASE, head, ...GATE_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*agent-activity\.sh/)
+      })
+    })
+
+    it('N13b a source line dropped with no node call left to replace it is refused (coupling)', async () => {
+      await scenario('shell-inventory-n13b', async (s) => {
+        const base = `#!/bin/bash\n${GATE_SOURCE}echo ready\n`
+        const r = await refEdit(s, { caller: 'scripts/agent-activity.sh', base, head: '#!/bin/bash\necho ready\n', ...GATE_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*agent-activity\.sh/)
+      })
+    })
+
+    it('N14 bash X becoming a bare X.mts is refused while the .mts is not executable', async () => {
+      await scenario('shell-inventory-n14', async (s) => {
+        const head = N2_BASE.replace('bash "$BLUEPRINT_ROOT/scripts/blueprint"', '"$BLUEPRINT_ROOT/scripts/blueprint.mts"')
+        const r = await refEdit(s, { caller: 'scripts/new-project.sh', base: N2_BASE, head, ported: ['scripts/blueprint'], mts: ['scripts/blueprint.mts'] })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/new-project\.sh/)
+      })
+    })
+
+    it('N15 a bare basename that two ported files share is not a token and is refused', async () => {
+      await scenario('shell-inventory-n15', async (s) => {
+        const r = await refEdit(s, {
+          caller: 'scripts/caller.sh',
+          base: '#!/bin/sh\nnode_run x.sh\n',
+          head: '#!/bin/sh\nnode_run x.mts\n',
+          ported: ['scripts/x.sh', 'scripts/lib/x.sh'],
+          mts: ['scripts/x.mts', 'scripts/lib/x.mts'],
+        })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/caller\.sh/)
+      })
+    })
+
+    it('the function table names only subcommands the .mts main() switch has', () => {
+      for (const lib of SOURCED_LIBS) {
+        const src = readFileSync(`${REPO_ROOT}/${lib.mts}`, 'utf8')
+        for (const sub of Object.values(lib.fns)) expect(src, `${lib.mts} case '${sub}'`).toContain(`case '${sub}':`)
+      }
     })
   })
 })

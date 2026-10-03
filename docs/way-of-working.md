@@ -710,8 +710,9 @@ No big-bang rewrite. Instead:
   no runtime dependency, so it still runs before `npm ci`).
 - **A shell file you must change migrates first, whole file** — never a
   subcommand or a function, its own commit, proven behaviour-identical — then
-  the change the item wanted. The old path becomes a fixed two-line shim; no
-  file is exempt from this once it's touched, git hooks included.
+  the change the item wanted. The shell file is deleted; callers name the
+  `.mts` (a Git hook keeps a two-line `exec` entry); no file is exempt from
+  this once it's touched.
 - A **committed inventory** (path → git blob sha) is the enforcement, judged
   against a BASE ref the push cannot edit — not the pushed tree's own copy of
   itself, which one commit could patch alongside the file it describes.

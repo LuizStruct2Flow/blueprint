@@ -209,7 +209,7 @@ a guessed SHA watches nothing.
 **The watchers and the feed do not survive a reboot.** The founder plans one to
 clear `/tmp`. Afterwards the next Claude session's start hook restarts the feed,
 but the watchers must be restarted by hand, one per provider:
-`nohup scripts/start-codex-signal-watch.sh >> logs/start-codex-signal-watch.sh.log 2>&1 &`,
+`nohup node scripts/start-codex-signal-watch.mts >> logs/start-codex-signal-watch.mts.log 2>&1 &`,
 and the same for `kimi` and `gemini`. Check with
 `pgrep -af scripts/signal-watch.mts`. A watcher left running from before a code
 change runs the old code: restart it after pulling watcher changes (that is why

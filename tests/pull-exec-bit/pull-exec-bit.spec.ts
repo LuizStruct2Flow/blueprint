@@ -115,9 +115,9 @@ describe('BUG-008 — pull preserves executable bits during substitution', () =>
       // moment a file on it is ported.
       const managed = [
         '.githooks/pre-push',
-        'scripts/start-codex-signal-watch.sh',
-        'scripts/start-kimi-signal-watch.sh',
-        'scripts/start-gemini-signal-watch.sh',
+        'scripts/start-codex-signal-watch.mts',
+        'scripts/start-kimi-signal-watch.mts',
+        'scripts/start-gemini-signal-watch.mts',
       ]
       let checked = 0
 

@@ -1009,7 +1009,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       const stderrPath = s.workspace.path('mic-recovery-6', 'roster-stderr')
       const donePath = s.workspace.path('mic-recovery-6', 'done')
 
-      // Verbatim shape of start-codex-signal-watch.sh:159-166 (and its Kimi
+      // Verbatim shape of start-codex-signal-watch.mts:159-166 (and its Kimi
       // and Gemini mirrors): source the lib, guard with `command -v`, resolve
       // in a command substitution. The only difference is the role
       // ("BUG144-F1-Missing-Role" instead of "Orchestrator") and that stderr

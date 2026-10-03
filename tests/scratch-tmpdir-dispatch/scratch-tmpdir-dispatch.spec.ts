@@ -27,11 +27,9 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { shimTargetPath } from '../helpers/shim.js'
 
 /** Same invented fixture roster shape as the other launcher suites. */
 const FIXTURE_ROSTER = `# Roster
@@ -92,12 +90,6 @@ async function buildFixture(
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
     await s.fs.chmod(rel(script), 0o755)
   }
-  for (const script of [launcherRel]) {
-    const target = shimTargetPath(script)
-    if (existsSync(join(REPO_ROOT, target))) {
-      await s.fs.copyIn(join(REPO_ROOT, target), rel(target))
-    }
-  }
   for (const lib of ['scripts/lib/spawn-bounded.mts', 'scripts/lib/find-bin.mts', 'scripts/lib/scratch-tmpdir.mts']) {
     await s.fs.copyIn(join(REPO_ROOT, lib), rel(lib))
   }
@@ -129,7 +121,7 @@ async function runProbe(
   const mktempFile = join(s.workspace.root, 'probe-mktemp.out')
   const tmpdirFile = join(s.workspace.root, 'probe-tmpdir.out')
 
-  const r = await s.run('bash', [join(f.repo, launcherRel), '--poll', '1', '--once'], {
+  const r = await s.run('node', [join(f.repo, launcherRel), '--poll', '1', '--once'], {
     cwd: f.repo,
     timeoutMs: 60_000,
     env: {
@@ -154,8 +146,8 @@ async function runProbe(
 describe('TASK-083 — every provider dispatch redirects TMPDIR to .scratch/tmp', () => {
   it('Codex: the dispatched CLI sees TMPDIR under .scratch/tmp', async () => {
     await scenario('scratch-tmpdir-codex', async (s) => {
-      const f = await buildFixture(s, 'proj', 'scripts/start-codex-signal-watch.sh', 'OVER_TO_CODEX')
-      const { mktempOut, tmpdirOut } = await runProbe(s, f, 'scripts/start-codex-signal-watch.sh', 'CODEX_BIN')
+      const f = await buildFixture(s, 'proj', 'scripts/start-codex-signal-watch.mts', 'OVER_TO_CODEX')
+      const { mktempOut, tmpdirOut } = await runProbe(s, f, 'scripts/start-codex-signal-watch.mts', 'CODEX_BIN')
 
       expect(mktempOut.startsWith(f.scratchTmp), `mktemp -p "$TMPDIR" landed at: ${mktempOut}`).toBe(true)
       expect(tmpdirOut.startsWith(f.scratchTmp), `os.tmpdir() reported: ${tmpdirOut}`).toBe(true)
@@ -164,8 +156,8 @@ describe('TASK-083 — every provider dispatch redirects TMPDIR to .scratch/tmp'
 
   it('Kimi: the dispatched CLI sees TMPDIR under .scratch/tmp', async () => {
     await scenario('scratch-tmpdir-kimi', async (s) => {
-      const f = await buildFixture(s, 'proj', 'scripts/start-kimi-signal-watch.sh', 'OVER_TO_KIMI')
-      const { mktempOut, tmpdirOut } = await runProbe(s, f, 'scripts/start-kimi-signal-watch.sh', 'KIMI_BIN')
+      const f = await buildFixture(s, 'proj', 'scripts/start-kimi-signal-watch.mts', 'OVER_TO_KIMI')
+      const { mktempOut, tmpdirOut } = await runProbe(s, f, 'scripts/start-kimi-signal-watch.mts', 'KIMI_BIN')
 
       expect(mktempOut.startsWith(f.scratchTmp), `mktemp -p "$TMPDIR" landed at: ${mktempOut}`).toBe(true)
       expect(tmpdirOut.startsWith(f.scratchTmp), `os.tmpdir() reported: ${tmpdirOut}`).toBe(true)
@@ -174,8 +166,8 @@ describe('TASK-083 — every provider dispatch redirects TMPDIR to .scratch/tmp'
 
   it('Gemini: the dispatched CLI sees TMPDIR under .scratch/tmp', async () => {
     await scenario('scratch-tmpdir-gemini', async (s) => {
-      const f = await buildFixture(s, 'proj', 'scripts/start-gemini-signal-watch.sh', 'OVER_TO_GEMINI')
-      const { mktempOut, tmpdirOut } = await runProbe(s, f, 'scripts/start-gemini-signal-watch.sh', 'GEMINI_BIN')
+      const f = await buildFixture(s, 'proj', 'scripts/start-gemini-signal-watch.mts', 'OVER_TO_GEMINI')
+      const { mktempOut, tmpdirOut } = await runProbe(s, f, 'scripts/start-gemini-signal-watch.mts', 'GEMINI_BIN')
 
       expect(mktempOut.startsWith(f.scratchTmp), `mktemp -p "$TMPDIR" landed at: ${mktempOut}`).toBe(true)
       expect(tmpdirOut.startsWith(f.scratchTmp), `os.tmpdir() reported: ${tmpdirOut}`).toBe(true)

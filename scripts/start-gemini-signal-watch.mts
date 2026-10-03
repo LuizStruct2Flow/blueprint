@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-// scripts/start-gemini-signal-watch.mts — TASK-083 port of
-// scripts/start-gemini-signal-watch.sh. scripts/start-gemini-signal-watch.sh
-// is now the fixed two-line exec shim AGENTS.md's "Shell to TypeScript,
-// organically" requires; this file carries the whole implementation.
+// scripts/start-gemini-signal-watch.mts — TASK-083 port of the shell
+// start-gemini-signal-watch.mts, which TASK-088 deleted; this file is the launcher.
 //
 // Launcher for the AGENT_SIGNAL.md ↔ Gemini CLI orchestrator.
 //
-// Mirror of start-codex-signal-watch.sh, but for Gemini. Watches
+// Mirror of start-codex-signal-watch.mts, but for Gemini. Watches
 // AGENT_SIGNAL.md (via the shared scripts/signal-watch.mts polling
 // engine) and, every time the mic flips to `OVER_TO_GEMINI`, invokes the
 // real Gemini CLI in non-interactive (-p) YOLO mode with the current `Task`
@@ -16,7 +14,7 @@
 // and `<repo>/logs/state/gemini-runs.log` by default).
 //
 // Usage:
-//   scripts/start-gemini-signal-watch.sh
+//   node scripts/start-gemini-signal-watch.mts
 //
 // The Gemini CLI is `@google/gemini-cli` (npm global) or whatever
 // `GEMINI_BIN` points at. Auth reuses ~/.gemini/oauth_creds.json (the

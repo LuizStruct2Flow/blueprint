@@ -36,7 +36,7 @@
 
 # The thread id from the FIRST `thread.started` event in a captured copy of
 # `codex exec --json`'s raw stdout (the launcher `tee`s it there before
-# filtering — see start-codex-signal-watch.sh). rc 1 if no such event was
+# filtering — see start-codex-signal-watch.mts). rc 1 if no such event was
 # seen, no jq, or the file is unreadable: the caller reports "unknown", never
 # invents an id.
 bp_codex_thread_id_from_stream(){

@@ -406,13 +406,13 @@ signal-driven dispatcher that watches the live baton and runs the real Codex
 CLI whenever the mic flips to `OVER_TO_CODEX`. Three pieces:
 
 1. **The dispatcher (start once, leave running).** Launch
-   `scripts/start-codex-signal-watch.sh` (delegates to the shared,
+   `scripts/start-codex-signal-watch.mts` (delegates to the shared,
    provider-agnostic `scripts/signal-watch.mts`, TASK-063) via the **`Monitor` tool with
    `persistent: true`** so it survives in the background and streams run markers
    back as notifications:
 
    ```
-   Monitor (persistent): cd <repo> && bash scripts/start-codex-signal-watch.sh 2>&1
+   Monitor (persistent): cd <repo> && node scripts/start-codex-signal-watch.mts 2>&1
    ```
 
    It polls every 2 s; on each poll where `State = OVER_TO_CODEX` with a
@@ -472,7 +472,7 @@ Orchestrator, with `model:` and `effort:` from its `Model` cell. Dispatch a pers
 with `subagent_type: <name-lowercase>` so it runs on its own model; do not pass a
 `model` override, which would replace it.
 
-**Codex binary discovery** (in `start-codex-signal-watch.sh`): `$CODEX_BIN`, then
+**Codex binary discovery** (in `start-codex-signal-watch.mts`): `$CODEX_BIN`, then
 `codex` on `PATH`, then `~/.vscode/extensions/*/bin/*/codex`. Set
 `CODEX_BIN=/path/to/codex` to override. **Common failure modes:** dispatcher not
 running when the signal flips; calling `codex` directly (bypasses the protocol);
@@ -480,7 +480,7 @@ binary not found; wrong log path (it is `logs/state/` inside the project, not `~
 
 ## Dispatching Gemini (signal-driven)
 
-Mirror of the Codex dispatcher, for Gemini. `scripts/start-gemini-signal-watch.sh`
+Mirror of the Codex dispatcher, for Gemini. `scripts/start-gemini-signal-watch.mts`
 (via the shared `signal-watch.mts` poller with `--state OVER_TO_GEMINI`) runs
 the headless Gemini CLI on each flip to `OVER_TO_GEMINI`. Use the headless CLI, not
 the interactive IDE agent (it stalls): `GOOGLE_GENAI_USE_GCA=true gemini
@@ -491,7 +491,7 @@ signal table before; keep a git copy to restore.
 
 ## Dispatching Kimi (signal-driven)
 
-The same mirror again, for Kimi. `scripts/start-kimi-signal-watch.sh` (via the
+The same mirror again, for Kimi. `scripts/start-kimi-signal-watch.mts` (via the
 shared `signal-watch.mts` poller with `--state OVER_TO_KIMI`) runs the
 headless Kimi CLI on each flip to `OVER_TO_KIMI`. Output lands in
 `logs/state/kimi-runs.log` and `logs/state/kimi-last-message.md`.

@@ -62,7 +62,7 @@
  * rather than in either implementation (BUG-096). The mutant landed, the file
  * changed, and the harness's CHANGED-NOTHING guard — asked of the mutant tree's
  * own git, which is the correct thing to ask — answered "changed nothing" and
- * refused the verdict. `scripts/start-codex-signal-watch.sh`, this suite's entire
+ * refused the verdict. `scripts/start-codex-signal-watch.mts`, this suite's entire
  * subject, is one of sixteen files the real repo TRACKS while `.gitignore` also
  * names them: tracked beats ignored in the real repo and NOT in the fresh `git
  * init` every harness builds its tree with. `git add -A -f` is the fix, and the
@@ -97,8 +97,8 @@ const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 // TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET
 // (resolveConsumer follows the shim), same as tests/state-dir.
-const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
-const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.sh')?.rel ?? 'scripts/start-gemini-signal-watch.sh')
+const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.mts')?.rel ?? 'scripts/start-codex-signal-watch.mts')
+const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.mts')?.rel ?? 'scripts/start-gemini-signal-watch.mts')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 

@@ -21,7 +21,7 @@
  *
  * THE FIX IS TWO MECHANISMS, not one:
  *   - the exit-status-file pattern already proven in
- *     start-kimi-signal-watch.sh (TASK-063 cross-provider review): a command
+ *     start-kimi-signal-watch.mts (TASK-063 cross-provider review): a command
  *     group writes `$?` to a status file right after codex exits, before its
  *     stdout (feeding the pipe) reaches EOF, so the file is always complete
  *     by the time the downstream stages finish. Closes (1).
@@ -51,7 +51,7 @@ import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 // TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET
 // (resolveConsumer follows the shim), same as tests/state-dir.
-const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
+const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.mts')?.rel ?? 'scripts/start-codex-signal-watch.mts')
 
 /** A script's source with comments stripped — the static checks need the code. */
 async function code(path: string): Promise<string> {
@@ -273,7 +273,7 @@ describe('BUG-143 — a Codex dispatch never reports finished for a run it did n
   it('the launcher captures the real exit status via a status file, not the pipeline’s', async () => {
     // Static pin of the mechanism (cause 1): the command group around codex
     // exec, writing `$?` to a status file before the downstream pipe sees EOF
-    // — the same shape as start-kimi-signal-watch.sh, since the wake command
+    // — the same shape as start-kimi-signal-watch.mts, since the wake command
     // runs under dash with no PIPESTATUS and no pipefail.
     expect(
       await code(LAUNCHER),

@@ -53,9 +53,9 @@ const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 // read its `.mts` TARGET (resolveConsumer follows the shim), same as
 // tests/state-dir. A not-yet-migrated launcher resolves to its own `.sh`
 // unchanged.
-const CODEX_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.sh')?.rel ?? 'scripts/start-codex-signal-watch.sh')
-const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.sh')?.rel ?? 'scripts/start-gemini-signal-watch.sh')
-const KIMI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-kimi-signal-watch.sh')?.rel ?? 'scripts/start-kimi-signal-watch.sh')
+const CODEX_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.mts')?.rel ?? 'scripts/start-codex-signal-watch.mts')
+const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.mts')?.rel ?? 'scripts/start-gemini-signal-watch.mts')
+const KIMI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-kimi-signal-watch.mts')?.rel ?? 'scripts/start-kimi-signal-watch.mts')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 
 /** A script's source with comments stripped — the static checks need the code. */
@@ -163,21 +163,21 @@ describe('BUG-142 — a dispatched persona is itself when it asks --whoami', () 
   it('BUG-142 the Codex launcher exports AGENT_PERSONA from the dispatch holder', async () => {
     expect(
       await code(CODEX_LAUNCHER),
-      'start-codex-signal-watch.sh does not bridge AGENT_SIGNAL_HOLDER to AGENT_PERSONA — a dispatched Codex still answers --whoami as the Orchestrator',
+      'start-codex-signal-watch.mts does not bridge AGENT_SIGNAL_HOLDER to AGENT_PERSONA — a dispatched Codex still answers --whoami as the Orchestrator',
     ).toMatch(/\[ -n "\$\{AGENT_SIGNAL_HOLDER:-\}" \] && export AGENT_PERSONA="\$AGENT_SIGNAL_HOLDER"/)
   })
 
   it('BUG-142 the Gemini launcher exports AGENT_PERSONA from the dispatch holder', async () => {
     expect(
       await code(GEMINI_LAUNCHER),
-      'start-gemini-signal-watch.sh does not bridge AGENT_SIGNAL_HOLDER to AGENT_PERSONA — a dispatched Gemini still answers --whoami as the Orchestrator',
+      'start-gemini-signal-watch.mts does not bridge AGENT_SIGNAL_HOLDER to AGENT_PERSONA — a dispatched Gemini still answers --whoami as the Orchestrator',
     ).toMatch(/\[ -n "\$\{AGENT_SIGNAL_HOLDER:-\}" \] && export AGENT_PERSONA="\$AGENT_SIGNAL_HOLDER"/)
   })
 
   it('BUG-142 the Kimi launcher exports AGENT_PERSONA from the dispatch holder', async () => {
     expect(
       await code(KIMI_LAUNCHER),
-      'start-kimi-signal-watch.sh does not bridge AGENT_SIGNAL_HOLDER to AGENT_PERSONA — a dispatched Kimi still answers --whoami as the Orchestrator',
+      'start-kimi-signal-watch.mts does not bridge AGENT_SIGNAL_HOLDER to AGENT_PERSONA — a dispatched Kimi still answers --whoami as the Orchestrator',
     ).toMatch(/\[ -n "\$\{AGENT_SIGNAL_HOLDER:-\}" \] && export AGENT_PERSONA="\$AGENT_SIGNAL_HOLDER"/)
   })
 

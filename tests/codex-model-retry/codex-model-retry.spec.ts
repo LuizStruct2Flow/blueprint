@@ -37,7 +37,6 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { shimTargetPath } from '../helpers/shim.js'
 
 /** A Codex persona with a Model cell — none of the other launcher suites carry one. */
 const FIXTURE_ROSTER = `# Roster
@@ -127,7 +126,7 @@ async function buildFixture(s: Scenario, name: string): Promise<Fixture> {
     await s.run('git', args, { cwd: repo.dir })
   }
 
-  const launcherRel = 'scripts/start-codex-signal-watch.sh'
+  const launcherRel = 'scripts/start-codex-signal-watch.mts'
   const shellScripts = [
     'scripts/signal-watch.mts',
     launcherRel,
@@ -141,12 +140,6 @@ async function buildFixture(s: Scenario, name: string): Promise<Fixture> {
   for (const script of shellScripts) {
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
     await s.fs.chmod(rel(script), 0o755)
-  }
-  for (const script of [launcherRel]) {
-    const target = shimTargetPath(script)
-    if (existsSync(join(REPO_ROOT, target))) {
-      await s.fs.copyIn(join(REPO_ROOT, target), rel(target))
-    }
   }
   for (const lib of [
     'scripts/lib/spawn-bounded.mts',
@@ -191,7 +184,7 @@ async function runOnce(
   env: Record<string, string | undefined>,
 ): Promise<{ code: number | null; output: string }> {
   const stub = await s.fs.write('stub-codex.sh', STUB_CODEX, { mode: 0o755 })
-  const r = await s.run('bash', [join(f.repo, 'scripts/start-codex-signal-watch.sh'), '--poll', '1', '--once'], {
+  const r = await s.run('node', [join(f.repo, 'scripts/start-codex-signal-watch.mts'), '--poll', '1', '--once'], {
     cwd: f.repo,
     timeoutMs: 60_000,
     env: {

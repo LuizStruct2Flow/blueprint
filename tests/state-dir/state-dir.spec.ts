@@ -95,7 +95,6 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import {
@@ -107,7 +106,7 @@ import {
   type StateDirScan,
   resolveConsumerFile,
 } from './state-dir.js'
-import { shimContent, shimTargetPath } from '../helpers/shim.js'
+
 
 const HELPER = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
 
@@ -346,20 +345,12 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       await s.fs.write(join('work', '.blueprint-source'), '')
 
       for (const rel of [
-        'scripts/start-codex-signal-watch.sh',
+        'scripts/start-codex-signal-watch.mts',
         'scripts/signal-watch.mts',
         'scripts/codex-feed-filter.sh',
       ]) {
         await s.fs.copyIn(join(REPO_ROOT, rel), join('work', rel))
         await s.fs.chmod(join('work', rel), 0o755)
-        // BUG-144 commit 0 — a migrated `rel`'s shim execs a sibling `.mts`
-        // (TASK-067); copy it too WHEN ONE EXISTS, so this out-of-tree fixture
-        // can still run it. None does yet, so this is a no-op today and the
-        // fixture is byte-for-byte what it always was.
-        const mts = shimTargetPath(rel)
-        if (existsSync(join(REPO_ROOT, mts))) {
-          await s.fs.copyIn(join(REPO_ROOT, mts), join('work', mts))
-        }
       }
       await s.fs.copyIn(HELPER, join('work', 'scripts/lib/state-dir.sh'))
       // BUG-144 round 3 — recoverStrandedMic (scripts/signal-watch.mts) now
@@ -417,41 +408,23 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
       // re-anchor a relative target against the LINK's own directory, and a chain
       // has to be followed rather than resolved in one call.
       const links = await s.workspace.dir('links', 'nested')
-      await s.run('ln', ['-s', s.workspace.path('work', 'scripts/start-codex-signal-watch.sh'), join(links, 'hop2.sh')], {
+      await s.run('ln', ['-s', s.workspace.path('work', 'scripts/start-codex-signal-watch.mts'), join(links, 'hop2.mts')], {
         cwd: s.workspace.root,
       })
-      await s.run('ln', ['-s', 'nested/hop2.sh', s.workspace.path('links', 'launch-via-symlink.sh')], {
+      await s.run('ln', ['-s', 'nested/hop2.mts', s.workspace.path('links', 'launch-via-symlink.mts')], {
         cwd: s.workspace.root,
       })
-      // BUG-144 commit 0, extended for the first real migration (TASK-083): a
-      // migrated shim's `exec node "$(dirname "$0")/NAME.mts"` never follows
-      // the symlink chain — bash's `dirname "$0"` reports the SYMLINK's own
-      // directory (`links/`), never the real file's. The old, unmigrated
-      // script survived this fixture by resolving its OWN physical root
-      // through a 40-hop readlink walk before doing anything else; the shim
-      // has no such walk, by design (AGENTS.md "Shell to TypeScript" fixes
-      // its two lines byte-for-byte). So a migrated launcher's `.mts` sibling
-      // has to be reachable from wherever `dirname "$0"` actually lands — the
-      // same directory as the outermost symlink, not the real tree. This
-      // mirrors what a real out-of-tree install now needs post-migration:
-      // carry the `.mts` alongside the `.sh` (or symlink the whole
-      // directory), not just the one file.
-      const mtsTarget = shimTargetPath('scripts/start-codex-signal-watch.sh')
-      if (existsSync(join(REPO_ROOT, mtsTarget))) {
-        await s.run(
-          'ln',
-          ['-s', s.workspace.path('work', mtsTarget), s.workspace.path('links', 'start-codex-signal-watch.mts')],
-          { cwd: s.workspace.root },
-        )
-      }
+      // TASK-088: the launcher is the `.mts` itself, run with node, which
+      // resolves its own physical location through the whole chain
+      // (realpathSync), so no sibling has to be linked beside the symlink.
 
       const decoy = await s.gitRepo('decoy')
       await s.fs.write(join('decoy', 'f.txt'), 'x\n')
       await decoy.commitAll('decoy base')
 
       const r = await s.run(
-        'bash',
-        [s.workspace.path('links', 'launch-via-symlink.sh'), '--poll', '1', '--once'],
+        'node',
+        [s.workspace.path('links', 'launch-via-symlink.mts'), '--poll', '1', '--once'],
         {
           cwd: s.workspace.root,
           timeoutMs: 60_000,
@@ -648,11 +621,13 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       // One consumer's copy drifts by a single character. Four copies exist
       // because the block cannot live in scripts/lib/ — it is the code that FINDS
       // scripts/lib/ — so pinning them byte-for-byte is the only defence.
-      files[CONSUMERS[1]] = mutateAll(real, '"$_bp_hops" -lt 40', '"$_bp_hops" -lt 41')
+      // The launchers are TypeScript now (TASK-088), so the copy that drifts is
+      // a 'ts' one: the second ts consumer, judged against the first.
+      files[CONSUMERS[2]] = mutateAll(TS_CONSUMER, 'dirname(dirname(realpathSync', 'dirname(realpathSync')
 
       const scan = await writeAndScan(s, 'bp', files)
 
-      expect(scan.rootBlockDrifted).toEqual([CONSUMERS[1]])
+      expect(scan.rootBlockDrifted).toEqual([CONSUMERS[2]])
       expect(scan.rootBlockCount).toBe(CONSUMERS.length)
     })
   })
@@ -671,30 +646,30 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
     })
   })
 
-  it('#4+#10+#10e each go red on the defect they name', async () => {
-    await scenario('sd-r6-rest', async (s) => {
-      const real = await readFile(firstShellBlockSource(), 'utf8')
-      const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
+  // agent-activity.sh is the one SHELL consumer left (the launchers are
+  // TypeScript, TASK-088), so each shell defect gets its own scenario on it.
+  const SHELL_DEFECTS: ReadonlyArray<readonly [string, keyof StateDirScan, string, string]> = [
+    // #4 — a consumer with its own copy of the rule instead of the helper.
+    ['#4', 'notSourcingHelper', 'lib/state-dir.sh', 'lib/its-own-idea.sh'],
+    // #10 — the GNU dependency, which fails SILENTLY on BSD.
+    ['#10', 'gnuReadlink', '_bp_self="$(readlink "$_bp_self")"', '_bp_self="$(readlink -f "$_bp_self")"'],
+    // #10e — a copy without the hop guard, so a cycle resolves to a wrong root.
+    ['#10e', 'noHopGuard', 'exceeds 40 hops', 'is fine actually'],
+  ]
+  for (const [id, field, find, to] of SHELL_DEFECTS) {
+    it(`${id} goes red on the defect it names`, async () => {
+      await scenario(`sd-r6-${id}`, async (s) => {
+        const real = await readFile(firstShellBlockSource(), 'utf8')
+        const files: Record<string, string> = {}
+        for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
+        files[CONSUMERS[0]] = mutateAll(real, find, to)
 
-      // #4 — a consumer with its own copy of the rule instead of the helper.
-      files[CONSUMERS[0]] = mutateAll(real, 'lib/state-dir.sh', 'lib/its-own-idea.sh')
-      // #10 — the GNU dependency, which fails SILENTLY on BSD.
-      files[CONSUMERS[1]] = mutateAll(
-        real,
-        '_bp_self="$(readlink "$_bp_self")"',
-        '_bp_self="$(readlink -f "$_bp_self")"',
-      )
-      // #10e — a copy without the hop guard, so a cycle resolves to a wrong root.
-      files[CONSUMERS[3]] = mutateAll(real, 'exceeds 40 hops', 'is fine actually')
+        const scan = await writeAndScan(s, 'bp', files)
 
-      const scan = await writeAndScan(s, 'bp', files)
-
-      expect(scan.notSourcingHelper).toEqual([CONSUMERS[0]])
-      expect(scan.gnuReadlink).toEqual([CONSUMERS[1]])
-      expect(scan.noHopGuard).toEqual([CONSUMERS[3]])
+        expect(scan[field]).toEqual([CONSUMERS[0]])
+      })
     })
-  })
+  }
 
   it('#3 a dispatcher building a log path from the literal placeholder is caught', async () => {
     await scenario('sd-r6-3', async (s) => {
@@ -705,15 +680,17 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       // working copy, so the placeholder stayed literal and every derived
       // checkout's dispatcher wrote into one shared directory.
       files[DISPATCHERS[0]] =
-        `${real}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n`
+        `${TS_CONSUMER}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n`
+      // #5b catches the same line from the other direction (shell consumers
+      // only — it is a shell-syntax rule), which is the belt-and-braces the two
+      // rules are for.
+      files[CONSUMERS[0]] = `${real}\nRUN_LOG="$HOME/.{{PROJECT_NAME}}/codex-runs.log"\n`
 
       const scan = await writeAndScan(s, 'bp', files)
 
       expect(scan.literalPlaceholder).toEqual([DISPATCHERS[0]])
       expect(scan.sawAnyLogPath).toBe(true)
-      // #5b catches the same line from the other direction, which is the
-      // belt-and-braces the two rules are for.
-      expect(scan.structural).toContain(`${DISPATCHERS[0]}(A)`)
+      expect(scan.structural).toContain(`${CONSUMERS[0]}(A)`)
     })
   })
 
@@ -746,78 +723,6 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       // folded that into `missing` alone, which made the two disagree on exactly
       // this tree. Found by the verdict comparison, not by reading.
       expect(scan.missingDispatchers).toEqual([CONSUMERS[3]])
-    })
-  })
-
-  /**
-   * BUG-144 commit 0 — the shim-awareness `resolveConsumer` adds. `writeAndScan`
-   * cannot prove this pair: `isValidShim` requires the target be TRACKED, and
-   * the workspace `writeAndScan` writes into is never a git repository. So
-   * these two build their own git-backed fixture instead — a valid shim only
-   * counts once git agrees the target is really there, same as the gate.
-   */
-  it('#7 R6 a valid, tracked shim redirects the static checks to its .mts target', async () => {
-    await scenario('sd-r6-shim-valid', async (s) => {
-      const shellTemplate = await readFile(firstShellBlockSource(), 'utf8')
-      const migrated = CONSUMERS[1]
-      const mtsRel = shimTargetPath(migrated)
-
-      const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, shellTemplate)
-      files[migrated] = shimContent(migrated)
-      files[mtsRel] = [
-        '// --- physical script root (A-09 / BUG-020, ported) ---',
-        "const _bpRoot = 'dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))'",
-        '// --- end physical script root ---',
-        "// reaches scripts/lib/state-dir.sh across a process boundary",
-        "const LOG_FILE = 'signal.log'",
-      ].join('\n')
-
-      const root = await s.workspace.dir('bp')
-      for (const [rel, content] of Object.entries(files)) {
-        await s.fs.write(join('bp', rel), content)
-      }
-      const repo = await s.gitRepo('bp')
-      await repo.commitAll('fixture: a valid shim')
-
-      const scan = await scanStateDir(root)
-
-      // The shim itself carries none of these properties — the point is that
-      // the scan followed it to the target and found them there instead.
-      expect(scan.rootBlockMissing).not.toContain(migrated)
-      expect(scan.notSourcingHelper).not.toContain(migrated)
-      expect(scan.rootBlockCount).toBe(CONSUMERS.length)
-      expect(scan.rootBlockDrifted).toEqual([])
-    })
-  })
-
-  it('#7 R6 a shim whose target is UNTRACKED is not treated as migrated', async () => {
-    await scenario('sd-r6-shim-untracked', async (s) => {
-      const shellTemplate = await readFile(firstShellBlockSource(), 'utf8')
-      const migrated = CONSUMERS[1]
-      const mtsRel = shimTargetPath(migrated)
-
-      const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, shellTemplate)
-      files[migrated] = shimContent(migrated)
-      // The .mts exists ON DISK but is never committed — same shape
-      // `scripts/shell-inventory-check.mts`'s own isValidShim refuses
-      // (a scratch file is not a migration). No fallback should treat the shim
-      // text as though it were still full shell, either: it has neither the
-      // physical-root block nor the `lib/state-dir.sh` string, so this is
-      // exactly the proof that an INCOMPLETE migration is still caught.
-      files[mtsRel] = '// not committed\n'
-
-      const root = await s.workspace.dir('bp')
-      for (const [rel, content] of Object.entries(files)) {
-        await s.fs.write(join('bp', rel), content)
-      }
-      await s.gitRepo('bp') // git repo exists, but nothing is staged or committed
-
-      const scan = await scanStateDir(root)
-
-      expect(scan.rootBlockMissing).toContain(migrated)
-      expect(scan.notSourcingHelper).toContain(migrated)
     })
   })
 })

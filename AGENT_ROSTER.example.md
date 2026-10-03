@@ -140,8 +140,8 @@ the Orchestrator or by the founder as needed.
   session start; the Orchestrator row gets none, since the founder picks that
   session's model.
 - **Codex / Gemini / Kimi** personas: launched by their dispatcher
-  (`start-codex-signal-watch.sh` / `start-gemini-signal-watch.sh` /
-  `start-kimi-signal-watch.sh`). All three drive the same provider-agnostic
+  (`start-codex-signal-watch.mts` / `start-gemini-signal-watch.mts` /
+  `start-kimi-signal-watch.mts`). All three drive the same provider-agnostic
   polling engine, so a fourth provider is a launcher, not an engine. The dispatch
   task names the persona/role for the run; a persona in `Holder` runs on the
   model its `Model` cell resolves to, and — for Codex and Gemini — the effort

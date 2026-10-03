@@ -105,10 +105,25 @@ import {
   scanStateDir,
   structuralViolations,
   type StateDirScan,
+  resolveConsumerFile,
 } from './state-dir.js'
-import { resolveConsumer, shimContent, shimTargetPath } from '../helpers/shim.js'
+import { shimContent, shimTargetPath } from '../helpers/shim.js'
 
 const HELPER = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
+
+/**
+ * A synthetic consumer's body. A consumer named by its `.mts` is judged as
+ * TypeScript (state-dir.ts resolveConsumerFile), so a synthetic fixture gives
+ * it the TS physical-root block instead of the shell template the others get.
+ */
+const TS_CONSUMER = [
+  '// --- physical script root (A-09 / BUG-020, ported) ---',
+  "const _bpRoot = 'dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))'",
+  '// --- end physical script root ---',
+  "// reaches scripts/lib/state-dir.sh across a process boundary",
+  "const LOG_FILE = 'signal.log'",
+].join('\n')
+const bodyFor = (rel: string, shell: string): string => (rel.endsWith('.mts') ? TS_CONSUMER : shell)
 
 /**
  * #10b/#10d extract the shared shell walk and re-run it in a synthetic
@@ -124,7 +139,7 @@ const HELPER = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
  */
 function firstShellBlockSource(): string {
   for (const rel of CONSUMERS) {
-    const resolved = resolveConsumer(REPO_ROOT, rel)
+    const resolved = resolveConsumerFile(REPO_ROOT, rel)
     if (resolved?.kind === 'shell') return join(REPO_ROOT, rel)
   }
   throw new Error(
@@ -629,7 +644,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       expect(block).not.toBeNull()
 
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = real
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
       // One consumer's copy drifts by a single character. Four copies exist
       // because the block cannot live in scripts/lib/ — it is the code that FINDS
       // scripts/lib/ — so pinning them byte-for-byte is the only defence.
@@ -646,7 +661,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
     await scenario('sd-r6-7-missing', async (s) => {
       const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = real
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
       files[CONSUMERS[2]] = '#!/bin/sh\n. lib/state-dir.sh\nexceeds 40 hops\n'
 
       const scan = await writeAndScan(s, 'bp', files)
@@ -660,7 +675,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
     await scenario('sd-r6-rest', async (s) => {
       const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = real
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
 
       // #4 — a consumer with its own copy of the rule instead of the helper.
       files[CONSUMERS[0]] = mutateAll(real, 'lib/state-dir.sh', 'lib/its-own-idea.sh')
@@ -685,7 +700,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
     await scenario('sd-r6-3', async (s) => {
       const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = real
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
       // THE ORIGINAL DEFECT, verbatim in shape: this repo is the template AND a
       // working copy, so the placeholder stayed literal and every derived
       // checkout's dispatcher wrote into one shared directory.
@@ -720,7 +735,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
     await scenario('sd-r6-missing', async (s) => {
       const real = await readFile(firstShellBlockSource(), 'utf8')
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = real
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
       delete files[CONSUMERS[3]]
 
       const scan = await writeAndScan(s, 'bp', files)
@@ -748,7 +763,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       const mtsRel = shimTargetPath(migrated)
 
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = shellTemplate
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, shellTemplate)
       files[migrated] = shimContent(migrated)
       files[mtsRel] = [
         '// --- physical script root (A-09 / BUG-020, ported) ---',
@@ -783,7 +798,7 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
       const mtsRel = shimTargetPath(migrated)
 
       const files: Record<string, string> = {}
-      for (const rel of CONSUMERS) files[rel] = shellTemplate
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, shellTemplate)
       files[migrated] = shimContent(migrated)
       // The .mts exists ON DISK but is never committed — same shape
       // `scripts/shell-inventory-check.mts`'s own isValidShim refuses

@@ -21,11 +21,14 @@
  * that fails fast and names the file, and #8/#9 are the actual boundary.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { resolveConsumer, type ConsumerKind } from '../helpers/shim.js'
 
 /** The three dispatchers that must rendezvous with the feed on one directory. */
 export const DISPATCHERS = [
   'scripts/start-codex-signal-watch.sh',
+  'scripts/signal-watch.mts',
   'scripts/start-gemini-signal-watch.sh',
   'scripts/start-kimi-signal-watch.sh',
 ] as const
@@ -286,6 +289,22 @@ function scanRootBlocks(
   return { rootBlockCount, rootBlockDrifted, rootBlockMissing }
 }
 
+/**
+ * TASK-088 — a consumer named by its `.mts` IS TypeScript (kind 'ts', its own
+ * source); a shell path still goes through resolveConsumer, which follows a
+ * not-yet-swept shim to its target. Kept here, not in helpers/shim.ts, which
+ * dies once the last shim does.
+ */
+export function resolveConsumerFile(root: string, rel: string): ReturnType<typeof resolveConsumer> {
+  if (!rel.endsWith('.mts')) return resolveConsumer(root, rel)
+  try {
+    return { rel, source: readFileSync(join(root, rel), 'utf8'), kind: 'ts' }
+  } catch {
+    // an absent consumer is reported as missing by the caller.
+    return undefined
+  }
+}
+
 export async function scanStateDir(root: string): Promise<StateDirScan> {
   const sources = new Map<string, string>()
   const kinds = new Map<string, ConsumerKind>()
@@ -297,7 +316,7 @@ export async function scanStateDir(root: string): Promise<StateDirScan> {
     // text itself. resolveConsumer reads the right file and says which kind
     // it is; every real consumer today is still 'shell', so this is a no-op
     // until the first port lands.
-    const resolved = resolveConsumer(root, rel)
+    const resolved = resolveConsumerFile(root, rel)
     if (resolved === undefined) {
       missing.push(rel)
       continue

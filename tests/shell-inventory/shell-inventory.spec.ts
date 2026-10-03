@@ -44,14 +44,6 @@ const CHECKER = `${REPO_ROOT}/scripts/shell-inventory-check.mts`
 const DOD_GATE_ADAPTER = readFileSync(`${REPO_ROOT}/scripts/lib/dod-gate.sh`, 'utf8')
 const DOD_GATE_TARGET_STUB = 'console.log("dod-gate stub")\n'
 
-// BUG-152: the same closed list admits a second sourced adapter,
-// scripts/lib/gate.sh → gate.mts. Same rationale for reading the real
-// committed bytes: a drift between the checker's GATE_ADAPTER constant and
-// the file on disk shows up as these cases going red, not as two silent
-// copies agreeing.
-const GATE_ADAPTER = readFileSync(`${REPO_ROOT}/scripts/lib/gate.sh`, 'utf8')
-const GATE_TARGET_STUB = 'console.log("gate stub")\n'
-
 function inventoryJson(exempt: string[], legacy: Record<string, string>): string {
   return JSON.stringify({ exempt, legacy }, null, 2) + '\n'
 }
@@ -493,115 +485,6 @@ describe('TASK-067 — the shell inventory gate', () => {
         const r = await runChecker(s, repo.dir, base, ['scripts/lib/other-lib.sh'])
         expect(r.code).not.toBe(0)
         expect(r.output).toMatch(/CHANGED:.*scripts\/lib\/other-lib\.sh/)
-      })
-    })
-  })
-
-  describe('BUG-152 — the sourced-adapter form for scripts/lib/gate.sh, the closed second entry', () => {
-    it('#20 the exact, tracked gate adapter is accepted (BUG-145 shape: no row in BASE)', async () => {
-      await scenario('shell-inventory-20', async (s) => {
-        const repo = await s.gitRepo('repo')
-        await s.fs.write('repo/scripts/lib/gate.sh', GATE_ADAPTER)
-        await s.fs.write('repo/scripts/lib/gate.mts', GATE_TARGET_STUB)
-        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
-        await repo.commitAll('seed: the gate port has already landed')
-        const base = await repo.head()
-
-        await s.fs.write('repo/docs-note.md', 'an unrelated change\n')
-        await repo.commitAll('unrelated change')
-
-        const r = await runChecker(s, repo.dir, base, ['scripts/lib/gate.sh'])
-        expect(r.code, r.output).toBe(0)
-      })
-    })
-
-    it('#21 a legacy gate.sh row removed together with the adapter, in the same push, is accepted', async () => {
-      await scenario('shell-inventory-21', async (s) => {
-        // The BUG-152 port push itself, judged against its BASE: the legacy
-        // row goes in the same commit as the adapter lands — the only
-        // legitimate way to remove a row.
-        const repo = await s.gitRepo('repo')
-        await s.fs.write('repo/scripts/lib/gate.sh', '#!/bin/sh\narm_gate() { :; }\n')
-        await repo.commitAll('seed legacy gate.sh')
-        const sha = await blobShaOf(repo, 'scripts/lib/gate.sh')
-        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], { 'scripts/lib/gate.sh': sha }))
-        await repo.commitAll('seed inventory')
-        const base = await repo.head()
-
-        await s.fs.write('repo/scripts/lib/gate.sh', GATE_ADAPTER)
-        await s.fs.write('repo/scripts/lib/gate.mts', GATE_TARGET_STUB)
-        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {})) // row removed
-        await repo.commitAll('port gate.sh to the sourced adapter, remove its row')
-
-        const r = await runChecker(s, repo.dir, base, ['scripts/lib/gate.sh'])
-        expect(r.code, r.output).toBe(0)
-      })
-    })
-
-    it('#22 an extra forwarding pair on the gate adapter is refused — pairs must match the canonical table', async () => {
-      await scenario('shell-inventory-22', async (s) => {
-        // Same class as #16b: the renderer replays whatever pairs it is fed,
-        // so byte-equality alone cannot refuse an appended pair. The
-        // authority is gate.mts's own main() switch — arm-gate and
-        // arm-push-keepalive only — transcribed as GATE_ADAPTER's
-        // canonicalPairs in the checker.
-        const repo = await s.gitRepo('repo')
-        await s.fs.write('repo/scripts/lib/gate.sh', GATE_ADAPTER)
-        await s.fs.write('repo/scripts/lib/gate.mts', GATE_TARGET_STUB)
-        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
-        await repo.commitAll('seed: the gate port has already landed')
-        const base = await repo.head()
-
-        await s.fs.write('repo/scripts/lib/gate.sh', `${GATE_ADAPTER}arm_gate_extra() { _gate_call extra "$1"; }\n`)
-        await repo.commitAll('add a syntactically valid extra forwarding pair')
-
-        const r = await runChecker(s, repo.dir, base, ['scripts/lib/gate.sh'])
-        expect(r.code).not.toBe(0)
-        expect(r.output).toMatch(/NEW:.*scripts\/lib\/gate\.sh/)
-      })
-    })
-
-    it('#23 a gate adapter whose target .mts is absent is refused', async () => {
-      await scenario('shell-inventory-23', async (s) => {
-        const repo = await s.gitRepo('repo')
-        await s.fs.write('repo/scripts/lib/gate.sh', '#!/bin/sh\necho legacy\n')
-        await repo.commitAll('seed legacy gate.sh, no target yet')
-        const sha = await blobShaOf(repo, 'scripts/lib/gate.sh')
-        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], { 'scripts/lib/gate.sh': sha }))
-        await repo.commitAll('seed inventory')
-        const base = await repo.head()
-
-        await s.fs.write('repo/scripts/lib/gate.sh', GATE_ADAPTER) // no gate.mts committed anywhere
-        await repo.commitAll('adapter with no target committed')
-
-        const r = await runChecker(s, repo.dir, base, ['scripts/lib/gate.sh'])
-        expect(r.code).not.toBe(0)
-        expect(r.output).toMatch(/CHANGED:.*scripts\/lib\/gate\.sh/)
-      })
-    })
-
-    it('#24 the gate adapter bytes borrowed for a THIRD path are refused — the list is closed at two', async () => {
-      await scenario('shell-inventory-24', async (s) => {
-        // The ceiling (AGENTS.md "Shell to TypeScript, organically",
-        // BUG-147): the sourced-adapter form is never a generic escape
-        // hatch. Renaming gate→third everywhere produces bytes that would
-        // be a valid gate adapter, at a path the table does not cover.
-        const adapterAtOtherPath = GATE_ADAPTER.replace(/gate/g, 'third')
-        const repo = await s.gitRepo('repo')
-        await s.fs.write('repo/scripts/lib/third.sh', '#!/bin/sh\necho legacy\n')
-        await repo.commitAll('seed legacy third.sh')
-        const sha = await blobShaOf(repo, 'scripts/lib/third.sh')
-        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], { 'scripts/lib/third.sh': sha }))
-        await repo.commitAll('seed inventory')
-        const base = await repo.head()
-
-        await s.fs.write('repo/scripts/lib/third.sh', adapterAtOtherPath)
-        await s.fs.write('repo/scripts/lib/third.mts', GATE_TARGET_STUB)
-        await repo.commitAll('borrow the gate adapter shape for a different file')
-
-        const r = await runChecker(s, repo.dir, base, ['scripts/lib/third.sh'])
-        expect(r.code).not.toBe(0)
-        expect(r.output).toMatch(/CHANGED:.*scripts\/lib\/third\.sh/)
       })
     })
   })

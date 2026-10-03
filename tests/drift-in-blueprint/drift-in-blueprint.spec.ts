@@ -50,22 +50,12 @@ async function run(s: Scenario, command: string, cwd: string) {
 }
 
 /**
- * BUG-152 commit 1 — copy `scripts/lib/gate.sh` into a fixture root, and, in
- * the same follow-the-shim shape copyCli uses for the CLI, its sourced
- * adapter's `gate.mts` target once the port lands. Before the port the
- * target does not exist and this is a plain gate.sh copy; after it, a
- * fixture missing gate.mts would leave `arm_gate` dying on "cannot find
- * …/gate.mts" instead of exercising the gate.
+ * Copy `scripts/lib/gate.mts` into a fixture root: `drift` runs it to arm the
+ * gate (TASK-088 deleted the shell adapter), and a fixture without it would
+ * refuse to report instead of exercising the gate.
  */
 async function copyGateLib(root: string) {
-  await copyFile(join(REPO_ROOT, 'scripts/lib/gate.sh'), join(root, 'scripts/lib/gate.sh'))
-  const target = join(REPO_ROOT, 'scripts/lib/gate.mts')
-  try {
-    await copyFile(target, join(root, 'scripts/lib/gate.mts'))
-  } catch {
-    // Pre-port tree: gate.mts does not exist yet, and gate.sh is the whole
-    // implementation — nothing to bring along.
-  }
+  await copyFile(join(REPO_ROOT, 'scripts/lib/gate.mts'), join(root, 'scripts/lib/gate.mts'))
 }
 
 async function git(s: Scenario, cwd: string, args: string[]) {

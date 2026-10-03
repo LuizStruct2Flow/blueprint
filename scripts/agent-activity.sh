@@ -763,8 +763,6 @@ supervise_body(){
 # Only for the modes an agent actually invokes to START the feed — arming as a
 # side effect of `--status` ("is it running?") or `--stop` would be a surprising
 # config change in answer to a question.
-# shellcheck source=scripts/lib/gate.sh
-[ -r "$repo_root/scripts/lib/gate.sh" ] && . "$repo_root/scripts/lib/gate.sh"
 
 # --whoami answers the question that had no answer while BUG-010 was open:
 # "the roster says one thing and the feed says another — which one is this
@@ -784,11 +782,11 @@ case "${1:-}" in
   --stop)      cmd_stop ;;
   --status)    cmd_status ;;
   --whoami)    cmd_whoami ;;
-  --daemon)    command -v arm_gate >/dev/null 2>&1 && arm_gate "$BP_STATE_ROOT"
-               command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$BP_STATE_ROOT"
+  --daemon)    [ -r "$repo_root/scripts/lib/gate.mts" ] && node "$repo_root/scripts/lib/gate.mts" arm-gate "$BP_STATE_ROOT"
+               [ -r "$repo_root/scripts/lib/gate.mts" ] && node "$repo_root/scripts/lib/gate.mts" arm-push-keepalive "$BP_STATE_ROOT"
                cmd_daemon ;;
   --supervise) AGENT_FEED_FOREGROUND=0 supervise ;;          # internal: daemon child
-  "")          command -v arm_gate >/dev/null 2>&1 && arm_gate "$BP_STATE_ROOT"
+  "")          [ -r "$repo_root/scripts/lib/gate.mts" ] && node "$repo_root/scripts/lib/gate.mts" arm-gate "$BP_STATE_ROOT"
                AGENT_FEED_FOREGROUND=1 supervise ;;          # foreground
   *)           echo "usage: $0 [--daemon|--stop|--status|--whoami]" >&2; exit 2 ;;
 esac

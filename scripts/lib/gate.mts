@@ -1,12 +1,11 @@
-// scripts/lib/gate.mts — TASK-067 / BUG-152 port of scripts/lib/gate.sh.
+// scripts/lib/gate.mts — TASK-067 / BUG-152 port of the shell library gate.sh,
+// which TASK-088 deleted.
 //
-// One CLI, one subcommand per compatibility function of the original shell
-// library. scripts/lib/gate.sh is now a mechanically generated SOURCED ADAPTER
-// (never hand-edited — see its own header and scripts/shell-inventory-check.mts)
-// that forwards each of its shell function names to the matching subcommand
-// below.
+// One CLI, one subcommand per function of the original shell library. Its
+// callers (scripts/agent-activity.sh, scripts/blueprint.mts) run
+// `node scripts/lib/gate.mts <subcommand>` directly.
 //
-// WHY THIS EXISTS — see the original scripts/lib/gate.sh history for the full
+// WHY THIS EXISTS — see the original gate.sh history for the full
 // policy rationale (BUG-004, BUG-077, BUG-032). This file's job is to preserve
 // that policy byte-for-byte — every echo line is exactly the shell's, because
 // both callers (scripts/agent-activity.sh, scripts/blueprint) inherit stdout

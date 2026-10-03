@@ -21,7 +21,7 @@
 // managed set (slice 1's, reused), marker structure and the marker-aware
 // merge (BUG-034/BUG-112), the P3 one-prospective-result and the P4 settings
 // layer, `_bp_is_blueprint_itself` / `_bp_project_root` (state-dir.sh
-// bridge) and gate arming (gate.sh bridge, stdout inherited so the bash
+// bridge) and gate arming (gate.mts, stdout inherited so the
 // lib's own echo lines are the bytes this process emits — no re-formatting
 // seam to drift from them).
 //
@@ -1671,43 +1671,28 @@ async function bpIsBlueprintItself(): Promise<boolean> {
   return here !== '' && existsSync(join(here, '.blueprint-root'))
 }
 
-// --- gate arming (scripts/lib/gate.sh bridge) -------------------------------
-// stdout/stderr INHERITED, not captured — the lib's own echo lines are
-// the bytes this process emits, so there is no re-formatting seam for them to
-// drift from the shell CLI's.
-//
-// BUG-152: the lib is now a generated sourced adapter whose bridge resolves
-// gate.mts against BP_CODE_ROOT (the dod-gate.sh shape). drift runs with the
-// caller's cwd, which may be any subdirectory of the project, so the code
-// root is passed into the bridge explicitly — the same way the bp_state_root
-// bridge above already does — rather than left to the adapter's `.` default.
+// --- gate arming (scripts/lib/gate.mts) ---------------------------------------
+// stdout/stderr INHERITED, not captured — gate.mts's own echo lines are the
+// bytes this process emits, so there is no re-formatting seam for them to
+// drift from the shell CLI's. TASK-088: node runs gate.mts directly; the
+// sourced shell adapter and its BP_CODE_ROOT bridge are gone (gate.mts reads
+// no BP_CODE_ROOT), and the path comes from libDir(), which is already the
+// code root's scripts/lib.
 async function armGate(root: string): Promise<void> {
-  const lib = join(libDir(), 'gate.sh')
+  const lib = join(libDir(), 'gate.mts')
   if (!existsSync(lib)) {
-    process.stdout.write(`  ${C_RED}⚠ gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed${C_RESET}\n`)
+    process.stdout.write(`  ${C_RED}⚠ gate: scripts/lib/gate.mts is missing — the pre-push gate is NOT armed${C_RESET}\n`)
     return die(
-      'refusing to report drift without scripts/lib/gate.sh. Fetch it once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint pull scripts/lib/gate.sh',
+      'refusing to report drift without scripts/lib/gate.mts. Fetch it once with: BLUEPRINT_ROOT=<checkout> node <checkout>/scripts/blueprint.mts pull scripts/lib/gate.mts',
     )
   }
-  // The arm call stays CHECKED, as it was before the port: arm_gate itself
-  // never fails (BUG-004), so a non-zero here means the bridge broke (gate.mts
-  // missing after a stale sync, node failing) and drift must refuse loudly,
-  // exactly as it does for a missing gate.sh (TASK-029) — never carry on and
-  // report a gate it did not arm. Only the keepalive is best-effort.
-  const env = { ...process.env, BP_CODE_ROOT: dirname(cliDir()) }
-  await run('bash', ['-c', '. "$1"; arm_gate "$2"', cliName(), lib, root], { stdout: 'inherit', stderr: 'inherit', env })
+  // The arm call stays CHECKED (BUG-152): arm-gate itself never fails
+  // (BUG-004), so a non-zero here means node or gate.mts broke and drift must
+  // refuse loudly — never carry on and report a gate it did not arm. Only the
+  // keepalive is best-effort.
+  await run(process.execPath, [lib, 'arm-gate', root], { stdout: 'inherit', stderr: 'inherit' })
   await unchecked(() =>
-    run(
-      'bash',
-      [
-        '-c',
-        '. "$1"; command -v arm_push_keepalive >/dev/null 2>&1 && arm_push_keepalive "$2"',
-        cliName(),
-        lib,
-        root,
-      ],
-      { stdout: 'inherit', stderr: 'inherit', env },
-    ),
+    run(process.execPath, [lib, 'arm-push-keepalive', root], { stdout: 'inherit', stderr: 'inherit' }),
   )
 }
 

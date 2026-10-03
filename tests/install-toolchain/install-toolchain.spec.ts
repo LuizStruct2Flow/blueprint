@@ -840,7 +840,7 @@ async function migrated(s: Scenario, tag: string, remote: { dir: string; head: s
     recursive: true,
     filter: (p) =>
       lib === 'all' ||
-      (lib === 'none' ? !p.startsWith(join(scripts, 'lib')) : p !== join(scripts, 'lib', 'gate.sh')),
+      (lib === 'none' ? !p.startsWith(join(scripts, 'lib')) : p !== join(scripts, 'lib', 'gate.mts')),
   })
   await repo(s, proj)
   return proj

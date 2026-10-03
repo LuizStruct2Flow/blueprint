@@ -320,7 +320,7 @@ const BODY = [
   '  [ -x "$c" ] && exec "$c" "$@"',
   'done',
   'echo "blueprint: no scripts/blueprint.mts (or executable scripts/blueprint) in $PWD. Run from a project root," >&2',
-  'echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts" >&2',
+  'echo "  or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> node <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts" >&2',
   'exit 1',
   '',
 ].join('\n')
@@ -485,7 +485,7 @@ describe('TASK-025 — the installer writes the per-machine blueprint command', 
       expect(none.code, none.output).toBe(1)
       expect(none.stderr).toContain('blueprint: no scripts/blueprint.mts (or executable scripts/blueprint) in ')
       expect(none.stderr).toContain(
-        'or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> bash <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts',
+        'or fetch the CLI and the libs it needs once with: BLUEPRINT_ROOT=<checkout> node <checkout>/scripts/blueprint.mts pull scripts/blueprint.mts',
       )
     })
   })

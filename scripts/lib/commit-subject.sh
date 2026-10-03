@@ -3,7 +3,7 @@
 #
 # Sourced, not executed. Used by `.githooks/commit-msg` (one commit, locally),
 # by `scripts/check-commit-subjects.sh` (many subjects, in CI), and by
-# `scripts/lib/dod-gate.sh` (which items a push serves, TASK-039).
+# `scripts/lib/dod-gate.mts` (which items a push serves, TASK-039).
 #
 # WHY IT IS A LIBRARY
 #

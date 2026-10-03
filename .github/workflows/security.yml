@@ -240,14 +240,13 @@ jobs:
           bash scripts/check-commit-subjects.sh --range "$RANGE"
           export BP_CODE_ROOT=.
           . scripts/lib/pipeline.sh
-          . scripts/lib/dod-gate.sh
           # Called under `||`, so `bash -e` does not abort inside the library, and
           # both stages report before the step fails.
           rc=0
           echo "every item has a row:"
-          dod_stage_rows "$RANGE" || rc=1
+          DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" node scripts/lib/dod-gate.mts rows "$RANGE" || rc=1
           echo "every BUG has a test:"
-          dod_stage_bugtests "$RANGE" || rc=1
+          DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" node scripts/lib/dod-gate.mts bugtests "$RANGE" || rc=1
           exit "$rc"
 
   contamination:

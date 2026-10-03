@@ -65,52 +65,12 @@ export interface ResolvedConsumer {
  * across a process boundary still spells that path out in its own source.
  */
 export function resolveConsumer(root: string, rel: string): ResolvedConsumer | undefined {
-  return resolveConsumerOpts(root, rel, {})
-}
-
-/**
- * BUG-152 commit 1 — the same follow for a SOURCED ADAPTER (the shape
- * scripts/lib/dod-gate.sh has since BUG-147 and scripts/lib/gate.sh gains in
- * BUG-152's port): the shell file stays, but the logic it forwarded lives in
- * the `.mts` its bridge path names, so a static check that keeps reading the
- * adapter tests nothing.
- *
- * OPT-IN, NOT DEFAULT — and deliberately so. Unlike a shim, an adapter keeps
- * its function-name tail in shell, and most resolveConsumer callers check
- * properties (a sourced path, an exec bit, a physical-root block) whose
- * expected text still lives in the adapter itself. Only a check that guards
- * the LOGIC — tests/forbidden-idiom — wants the target. Callers that follow
- * must say so.
- *
- * THE TABLE IS THE CLOSED LIST of adapters the blueprint recognises
- * (scripts/shell-inventory-check.mts is the byte-equality authority for what
- * a valid adapter IS; this table only maps path → target for checks that
- * read source text). A third adapter earns a row here and in the checker
- * together, never one alone.
- */
-const SOURCED_ADAPTER_TARGETS: Readonly<Record<string, string>> = {
-  'scripts/lib/dod-gate.sh': 'scripts/lib/dod-gate.mts',
-  'scripts/lib/gate.sh': 'scripts/lib/gate.mts',
-}
-
-export function resolveConsumerOpts(
-  root: string,
-  rel: string,
-  opts: { readonly followSourcedAdapters?: boolean },
-): ResolvedConsumer | undefined {
   const own = readFileOrUndefined(`${root}/${rel}`)
   if (own === undefined) return undefined
   if (isValidShim(root, rel)) {
     const target = shimTargetPath(rel)
     const targetSource = readFileOrUndefined(`${root}/${target}`)
     if (targetSource !== undefined) return { rel: target, source: targetSource, kind: 'ts' }
-  }
-  if (opts.followSourcedAdapters === true) {
-    const adapterTarget = SOURCED_ADAPTER_TARGETS[rel]
-    if (adapterTarget !== undefined) {
-      const targetSource = readFileOrUndefined(`${root}/${adapterTarget}`)
-      if (targetSource !== undefined) return { rel: adapterTarget, source: targetSource, kind: 'ts' }
-    }
   }
   return { rel, source: own, kind: 'shell' }
 }

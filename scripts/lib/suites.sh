@@ -66,7 +66,7 @@
 # 2026-09-16): a JSX component test cannot be written as `.ts`, and a runner this
 # function does not find is never declared to the batch — so an assertion about
 # "every runner" would pass over it in silence rather than fail. tests/dod-gate
-# #17 holds all three sides as ONE set: counted as evidence by `dod-gate.sh`,
+# #17 holds all three sides as ONE set: counted as evidence by `dod-gate.mts`,
 # discovered here, executed by `tests/vitest.config.ts`.
 #
 # A runner sitting directly in `tests/` belongs to no suite, and emits an EMPTY

@@ -274,7 +274,7 @@ function main(): void {
   const repo =
     opts.repo ??
     (() => {
-      const top = git('.', ['rev-parse', '--show-toplevel'])
+      const top = git('.', ['rev-parse', '--show-toplevel']) // bp-allow-toplevel: a CI/manual tool, never run from a git hook, so no exported GIT_DIR can redirect it
       if (top.code !== 0) {
         console.error('::error::not inside a git repository and no --repo given')
         process.exit(1)

@@ -444,30 +444,28 @@ command -v pipe_stage >/dev/null 2>&1 || . "$BP_CODE_ROOT/scripts/lib/pipeline.s
 # so the gate can derive which items this push serves. `push_log_opts` (defined
 # in .githooks/pre-push for the secret scan) gives the outgoing range.
 # ============================================================================
-if [ -f "$BP_CODE_ROOT/scripts/lib/dod-gate.sh" ]; then
-  # shellcheck source=scripts/lib/dod-gate.sh
-  . "$BP_CODE_ROOT/scripts/lib/dod-gate.sh"
+if [ -f "$BP_CODE_ROOT/scripts/lib/dod-gate.mts" ]; then
   _dod_ranges="$(push_log_opts)"
 
   AGENT_FEED_TAG="DoD-Gate"
 
-  _st_dod_rows(){ dod_stage_rows "$_dod_ranges"; }
+  _st_dod_rows(){ DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" node "$BP_CODE_ROOT/scripts/lib/dod-gate.mts" rows "$_dod_ranges"; }
   pipe_stage "§1b·1 every item has a backlog row" _st_dod_rows
 
-  _st_dod_bugtests(){ dod_stage_bugtests "$_dod_ranges"; }
+  _st_dod_bugtests(){ DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" node "$BP_CODE_ROOT/scripts/lib/dod-gate.mts" bugtests "$_dod_ranges"; }
   pipe_stage "§2 every BUG has a regression test" _st_dod_bugtests
 
-  _st_dod_signal(){ dod_stage_signal; }
+  _st_dod_signal(){ DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" node "$BP_CODE_ROOT/scripts/lib/dod-gate.mts" signal; }
   pipe_stage "§7G the live baton is well-formed" _st_dod_signal
 
-  _st_dod_judgement(){ dod_stage_judgement; }
+  _st_dod_judgement(){ DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" node "$BP_CODE_ROOT/scripts/lib/dod-gate.mts" judgement; }
   pipe_stage "§D·F·H judgement — printed, not verified" _st_dod_judgement
 
   AGENT_FEED_TAG="GATE"
 else
   # Fails LOUD rather than silently dropping four stages: a shorter run is
   # exactly the signal the founder watches for, so it must carry its reason.
-  pipe_skip "DoD checklist" "scripts/lib/dod-gate.sh absent — run: blueprint pull scripts/lib/dod-gate.sh"
+  pipe_skip "DoD checklist" "scripts/lib/dod-gate.mts absent — run: blueprint pull scripts/lib/dod-gate.mts"
 fi
 
 # --- TASK-018: the TypeScript suites ----------------------------------------

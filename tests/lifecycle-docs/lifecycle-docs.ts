@@ -339,7 +339,7 @@ export function bugsWithoutRows(
  * Every bug id with a record: a ROW (not a mention) in any `BUGS.md` under docs/,
  * or any mention in `config/findings.md`. BUG-134: DoD §1 cancels an item by
  * deleting its row and leaving a pointer in that register, and
- * `scripts/lib/dod-gate.sh` already treats the register as a record (BUG-130).
+ * `scripts/lib/dod-gate.mts` already treats the register as a record (BUG-130).
  */
 export async function rowedBugIds(docsDir: string): Promise<Set<string>> {
   const ids = new Set<string>()

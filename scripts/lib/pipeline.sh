@@ -60,7 +60,7 @@ if [ -r "$_PIPE_LIB/feed.sh" ]; then
   # git — git exports GIT_DIR into every hook and the gate runs suites from one.
   # Resolved here because the gate is the one feed producer that is not a
   # top-level script with its own physical-location block: `pwd` is git's hook
-  # contract, which is the same claim scripts/lib/dod-gate.sh makes.
+  # contract, which is the same claim scripts/lib/dod-gate.mts makes.
   if [ -z "${BP_STATE_ROOT:-}" ] && [ -r "$_PIPE_LIB/state-dir.sh" ]; then
     . "$_PIPE_LIB/state-dir.sh"
     : "${BP_CODE_ROOT:=$(pwd)}"

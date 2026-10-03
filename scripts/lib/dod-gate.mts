@@ -1,33 +1,32 @@
-// scripts/lib/dod-gate.mts — TASK-067 port of scripts/lib/dod-gate.sh.
+// scripts/lib/dod-gate.mts — TASK-067 port of the shell library dod-gate.sh,
+// which TASK-088 deleted.
 //
 // PLAN-BUG-147-dod-gate-port.md ("Option C") is the design this file
-// implements: one CLI, one subcommand per compatibility function of the
-// original shell library. scripts/lib/dod-gate.sh is now a mechanically
-// generated SOURCED ADAPTER (never hand-edited — see its own header and
-// scripts/shell-inventory-check.mts) that forwards each of its shell function
-// names to the matching subcommand below and replays any notes it recorded
-// through the caller's own `pipe_note`.
+// implements: one CLI, one subcommand per function of the original shell
+// library. Its callers (.githooks/pre-push-project and the security.yml DoD
+// step) run `node scripts/lib/dod-gate.mts <subcommand>` directly.
 //
-// WHY THIS EXISTS — see the original scripts/lib/dod-gate.sh history for the
+// WHY THIS EXISTS — see the original dod-gate.sh history for the
 // full policy rationale (docs/DoD.md §7, the FEATURE-002 argument, BUG-040,
 // BUG-130, BUG-139, BUG-140, TASK-039, TASK-047, BUG-147). This file's job is
 // to preserve that policy byte-for-byte while moving it off shell; it is not
 // the place to relitigate any of those decisions.
 //
-// NOTE PROTOCOL (DOD_GATE_NOTE_DIR). A stage that wants to call the caller's
-// `pipe_note` cannot do so directly — it runs in a separate process. When the
-// adapter invokes this CLI it sets DOD_GATE_NOTE_DIR to a private directory;
-// this file writes a decimal `count` file and one `note.<n>` payload file per
-// note (no added trailing newline) there, in call order, and the adapter
-// replays them after this process exits. Direct invocation with no
-// DOD_GATE_NOTE_DIR set prints each note as `note: …` on stdout instead, so a
-// sourced-but-unrendered caller and a bare CLI run both stay usable.
+// NOTE PROTOCOL (DOD_GATE_NOTE_FILE, PLAN-TASK-088 §6 Q1). A stage's notes ride
+// along on the caller's result line, and the caller owns that line, so the
+// caller says where a note goes through one variable:
+//   - set and non-empty (a buffered pipeline run): the path of the stage's note
+//     file; each note's raw text is appended to it, with no separator — what
+//     pipe_note does when buffered;
+//   - set but empty (an unbuffered run, and CI): each note prints as
+//     `     note: …` on stdout — what pipe_note does unbuffered;
+//   - unset (a bare CLI run): each note prints as `note: …`.
 //
 // Usage errors and internal failures exit >1 (2), never 1 — status 1 is
 // reserved for a DoD policy verdict (rows/bugtests/signal all return 0/1).
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, lstatSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, appendFileSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
 
 // --- the extension rule (tests/dod-gate #17 cross-checks this against
@@ -65,15 +64,12 @@ class Notes {
 }
 
 function flushNotes(notes: Notes) {
-  const dir = process.env.DOD_GATE_NOTE_DIR
-  const all = notes.all()
-  if (!dir) {
-    for (const n of all) process.stdout.write(`note: ${n.text}\n`)
-    return
+  const file = process.env.DOD_GATE_NOTE_FILE
+  for (const n of notes.all()) {
+    if (file === undefined) process.stdout.write(`note: ${n.text}\n`)
+    else if (file === '') process.stdout.write(`     note: ${n.text}\n`)
+    else appendFileSync(file, n.text)
   }
-  if (all.length === 0) return
-  writeFileSync(join(dir, 'count'), `${all.length}\n`)
-  all.forEach((n, i) => writeFileSync(join(dir, `note.${i + 1}`), n.text))
 }
 
 // --- dod_items_in_push -------------------------------------------------

@@ -386,7 +386,7 @@ function nowSeconds(): number {
 // which only proved the fixture's layout, not production's.
 //
 // BP_STATE_ROOT is the fix: it is the one root every other roster consumer
-// (agent-activity.sh, signal-set.sh, dod-gate.sh) already resolves from, and
+// (agent-activity.sh, signal-set.sh, dod-gate.mts) already resolves from, and
 // this watcher already computes it once at startup (state-dir.sh's own
 // contract, same as agentStateDir()/agentSignalFile() above) rather than
 // inventing a second derivation that only agrees with the first by

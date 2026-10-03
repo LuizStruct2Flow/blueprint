@@ -165,10 +165,11 @@ no such cycle exists (checked 2026-09-29).
 - **Providers:** Kimi hit its 5-hour limit at 07:34Z on 2026-10-02, in the
   middle of BUG-152. Codex reviewed at 09:11Z the same day. `node
   scripts/rotation.mts coverage` shows the live state.
-- **TASK-088 (backlog) waits for a founder decision:** retire a shell shim
-  once nothing names its path. The open question is whether that is a
-  standing rule (each port's follow-up removes the shim when its callers
-  allow) or a one-time sweep.
+- **TASK-088 is decided and in flight:** a port deletes its shell file, and a
+  legacy shell caller is repointed at the `.mts` as a reference-only edit that
+  the inventory checker verifies. Slice 1 (the rule and the checker) is landed;
+  slices 2-9 are in
+  [`PLAN-TASK-088-no-shims.md`](PLAN-TASK-088-no-shims.md) §5.
 - **The three watchers run with `nohup`**, restarted 2026-10-02 06:40Z (none
   was running at wake). Check with
   `pgrep -af scripts/signal-watch.mts` (three lines). One activity-feed
@@ -270,8 +271,9 @@ any you find with `pgrep -af '[s]ignal-watch.sh'`.
 
 **Shell to TypeScript is now a rule (TASK-067, `AGENTS.md`).** Before editing any
 shell file, check `scripts/shell-inventory.json`. A legacy file is migrated
-whole to `.mts` behind the two-line shim first, and the gate refuses anything
-else. **Follow the port method** in
+whole to `.mts` first, and its shell file is deleted (TASK-088; until its slice 9
+the checker still passes the shims already in the tree); the gate refuses
+anything else. **Follow the port method** in
 [`../done/PLAN-TASK-067-shell-to-typescript.md`](../done/PLAN-TASK-067-shell-to-typescript.md)
 §"The port method": a test-preparation commit first, then the port proven three
 ways.

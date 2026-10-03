@@ -324,6 +324,277 @@ function isValidSourcedAdapter(root: string, path: string): boolean {
   return isTracked(root, spec.target) && readFileOrUndefined(`${root}/${spec.target}`) !== undefined
 }
 
+// --- TASK-088: the reference-only edit (PLAN-TASK-088-no-shims.md §1.2) -----
+//
+// A ported script's shell file is DELETED, so a legacy shell caller of it must
+// be repointed at the .mts without being ported. The edit is accepted only if
+// the file's BASE blob and its HEAD content are the SAME TEXT once each is
+// reduced by its own, directional canonicaliser:
+//   C_base knows only the shell forms, C_head only the .mts forms, so a BASE
+//   form left in (or added to) HEAD stays literal and the comparison fails.
+// Rules, in order R3 R5 R4, then the tokens (R1), then R2:
+//   R3  a whole line that only sources a table lib (and the shellcheck
+//       directive above it) — deleted in BASE, nothing in HEAD.
+//   R5  `command -v fn >/dev/null 2>&1 && `  ~  `[ -r "PFX/L.mts" ] && `
+//   R4  `fn`  ~  `ENV node "PFX/L.mts" sub` (fn/sub from the lib table)
+//   R2  `bash|sh <token>`  ~  `node <token>` (interpreter kept; widenings below)
+//   R1  any other reference to a ported path, by path or unique basename.
+// PFX is pinned to the prefixes BASE's own R3 lines used. R3/R5 on a lib need
+// at least one R4 in HEAD ("coupling").
+
+export interface SourcedLib {
+  readonly sh: string
+  readonly mts: string
+  /** Fixed text in front of every node call in HEAD (the HEAD template's ENV). */
+  readonly env: string
+  /** shell function -> CLI subcommand, from the .mts's own main() switch. */
+  readonly fns: Readonly<Record<string, string>>
+}
+
+export const SOURCED_LIBS: readonly SourcedLib[] = [
+  {
+    sh: 'scripts/lib/gate.sh',
+    mts: 'scripts/lib/gate.mts',
+    env: '',
+    fns: { arm_gate: 'arm-gate', arm_push_keepalive: 'arm-push-keepalive' },
+  },
+  {
+    sh: 'scripts/lib/dod-gate.sh',
+    mts: 'scripts/lib/dod-gate.mts',
+    env: 'DOD_GATE_NOTE_FILE="${_PIPE_DIR:+$_PIPE_DIR/note.$_PIPE_N}" ',
+    fns: {
+      dod_items_in_push: 'items',
+      dod_stage_rows: 'rows',
+      dod_stage_bugtests: 'bugtests',
+      dod_stage_signal: 'signal',
+      dod_stage_judgement: 'judgement',
+    },
+  },
+]
+
+// D: a shell path P is ported when it is not tracked and its stem's .mts is.
+// An extensionless P (scripts/blueprint) additionally had to exist at BASE,
+// else every .mts in the tree would make a bare word a token.
+interface Ported {
+  readonly sh: string
+  /** index into PortedSet.mtsList */
+  readonly k: number
+}
+interface PortedSet {
+  readonly members: readonly Ported[]
+  readonly mtsList: readonly string[]
+}
+interface RefCtx {
+  readonly root: string
+  readonly baseRef: string
+  ported?: PortedSet
+}
+
+const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const SENTINEL = /[\u0001\u0002]/
+const PH_SPLIT = /\u0001([TU])(\d+)\u0002/
+const DIRECTIVE = /^\s*# shellcheck source=\S+\s*$/
+const R3_Q = String.raw`"?((?:\$\{?\w+\}?/)?)scripts/lib/([\w-]+)\.sh"?`
+const R3_RE = new RegExp(String.raw`^\s*(?:\[ -[rf] ${R3_Q} \] && )?(?:\.|source) ${R3_Q}\s*$`)
+
+function gitList(root: string, args: string[]): string[] {
+  try {
+    return execFileSync('git', ['-C', root, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\0')
+      .filter((s) => s !== '')
+  } catch {
+    // an unreadable ref or tree means nothing is ported, which refuses.
+    return []
+  }
+}
+
+function portedSet(root: string, baseRef: string): PortedSet {
+  const tracked = new Set(gitList(root, ['ls-files', '-z']))
+  const atBase = new Set(gitList(root, ['ls-tree', '-r', '--name-only', '-z', baseRef]))
+  const mtsList: string[] = []
+  const members: Ported[] = []
+  for (const m of [...tracked].sort()) {
+    if (!m.endsWith('.mts')) continue
+    const stem = m.slice(0, -4)
+    const absent = [`${stem}.sh`, ...(atBase.has(stem) ? [stem] : [])].filter((p) => !tracked.has(p))
+    if (absent.length === 0) continue
+    const k = mtsList.push(m) - 1
+    for (const sh of absent) members.push({ sh, k })
+  }
+  return { members, mtsList }
+}
+
+const baseName = (p: string): string => p.slice(p.lastIndexOf('/') + 1)
+
+// tokenRegex — every reference to a ported path: its repo-relative path, or its
+// bare basename when exactly one ported .sh has it (an extensionless path has
+// no basename form: `blueprint` is a word).
+function tokenRegex(d: PortedSet, side: 'base' | 'head'): { re: RegExp; byName: Map<string, number>; byBase: Map<string, number> } | undefined {
+  const name = (m: Ported): string => (side === 'base' ? m.sh : (d.mtsList[m.k] ?? ''))
+  const byName = new Map<string, number>()
+  for (const m of d.members) byName.set(name(m), m.k)
+  const shMembers = d.members.filter((m) => m.sh.endsWith('.sh'))
+  const count = (f: (m: Ported) => string): Map<string, number> => {
+    const c = new Map<string, number>()
+    for (const m of shMembers) c.set(f(m), (c.get(f(m)) ?? 0) + 1)
+    return c
+  }
+  const shCount = count((m) => baseName(m.sh))
+  const mtsCount = count((m) => baseName(d.mtsList[m.k] ?? ''))
+  const byBase = new Map<string, number>()
+  for (const m of shMembers) {
+    if (shCount.get(baseName(m.sh)) === 1 && mtsCount.get(baseName(d.mtsList[m.k] ?? '')) === 1) {
+      byBase.set(baseName(name(m)), m.k)
+    }
+  }
+  if (byName.size === 0) return undefined
+  const alt = (keys: Iterable<string>): string =>
+    [...keys].sort((a, b) => b.length - a.length).map(esc).join('|')
+  const tail = String.raw`(?![-\w]|\.\w)`
+  const re = new RegExp(
+    String.raw`(?<![-\w])(${alt(byName.keys())})${tail}` +
+      (byBase.size > 0 ? String.raw`|(?<![-\w/])(${alt(byBase.keys())})${tail}` : ''),
+    'g',
+  )
+  return { re, byName, byBase }
+}
+
+interface Canon {
+  lines: string[]
+  /** libs whose R3 or R5 was applied (BASE side) */
+  coupled: Set<number>
+  /** libs whose R4 was applied (HEAD side) */
+  resolved: Set<number>
+  /** BASE's own R3 prefixes per lib */
+  prefixes: Map<number, Set<string>>
+}
+
+function canonicalise(
+  content: string,
+  side: 'base' | 'head',
+  d: PortedSet,
+  prefixesIn?: Map<number, Set<string>>,
+): Canon | undefined {
+  if (SENTINEL.test(content)) return undefined
+  const tok = tokenRegex(d, side)
+  if (tok === undefined) return undefined
+  const prefixes = prefixesIn ?? new Map<number, Set<string>>()
+  const raw = content.split('\n')
+  const libInD = (li: number): boolean => d.members.some((m) => m.sh === SOURCED_LIBS[li]?.sh)
+  const r3 = (line: string): { li: number; pfx: string } | undefined => {
+    const m = R3_RE.exec(line)
+    if (!m) return undefined
+    const [, gp, gl, pfx = '', stem] = m
+    if (gl !== undefined && (gl !== stem || gp !== pfx)) return undefined
+    const li = SOURCED_LIBS.findIndex((l) => l.sh === `scripts/lib/${stem}.sh`)
+    return li >= 0 && libInD(li) ? { li, pfx } : undefined
+  }
+  if (side === 'base') {
+    for (const line of raw) {
+      const hit = r3(line)
+      if (hit) prefixes.set(hit.li, (prefixes.get(hit.li) ?? new Set()).add(hit.pfx))
+    }
+  }
+  const active = [...SOURCED_LIBS.entries()].filter(([li]) => prefixes.has(li))
+  const coupled = new Set<number>()
+  const resolved = new Set<number>()
+  const lines: string[] = []
+  for (const line of raw) {
+    let l = line
+    if (side === 'base') {
+      const hit = r3(line)
+      if (hit && prefixes.has(hit.li)) {
+        coupled.add(hit.li)
+        if (lines.length > 0 && DIRECTIVE.test(lines[lines.length - 1] ?? '')) lines.pop()
+        continue
+      }
+    }
+    if (!/^\s*#/.test(l)) {
+      for (const [li, lib] of active) {
+        const fns = Object.keys(lib.fns)
+        if (side === 'base') {
+          const alt = fns.map(esc).join('|')
+          const re = new RegExp(String.raw`command -v (${alt}) >/dev/null 2>&1 && |(?<![\w-])(${alt})(?![\w-])`, 'g')
+          l = l.replace(re, (_m, guardFn?: string, fn?: string) => {
+            if (guardFn !== undefined) {
+              coupled.add(li)
+              return `\u0001G${li}\u0002`
+            }
+            return `\u0001C${li}.${fns.indexOf(fn ?? '')}\u0002`
+          })
+        } else {
+          const pf = [...(prefixes.get(li) ?? [])].map(esc).join('|')
+          l = l.replace(new RegExp(String.raw`\[ -r "(?:${pf})${esc(lib.mts)}" \] && `, 'g'), `\u0001G${li}\u0002`)
+          fns.forEach((fn, fi) => {
+            const re = new RegExp(
+              `${esc(lib.env)}node "(?:${pf})${esc(lib.mts)}" ${esc(lib.fns[fn] ?? '')}(?![\\w-])`,
+              'g',
+            )
+            l = l.replace(re, () => {
+              resolved.add(li)
+              return `\u0001C${li}.${fi}\u0002`
+            })
+          })
+        }
+      }
+    }
+    l = l.replace(tok.re, (_m, p?: string, b?: string) => `\u0001T${p !== undefined ? tok.byName.get(p) : tok.byBase.get(b ?? '')}\u0002`)
+    const interp = side === 'base' ? 'bash|sh' : 'node'
+    l = l.replace(
+      new RegExp(String.raw`(?<![-\w/.])(?:${interp}) (["']?[^\s"'\u0001]*)\u0001T(\d+)\u0002`, 'g'),
+      '$1\u0001U$2\u0002',
+    )
+    lines.push(l)
+  }
+  return { lines, coupled, resolved, prefixes }
+}
+
+// BASE's ⟨P⟩ may become ⟨run P⟩ (adding node is always runnable); ⟨run P⟩ may
+// become ⟨P⟩ only when the .mts is executable. Everything else must be equal.
+function lineMatches(b: string, h: string, exec: (k: number) => boolean): boolean {
+  if (b === h) return true
+  const bp = b.split(PH_SPLIT)
+  const hp = h.split(PH_SPLIT)
+  if (bp.length !== hp.length) return false
+  for (let i = 0; i < bp.length; i += 3) {
+    if (bp[i] !== hp[i]) return false
+    if (i + 2 >= bp.length) break
+    const [bk, hk, n] = [bp[i + 1], hp[i + 1], bp[i + 2]]
+    if (n !== hp[i + 2]) return false
+    if (bk === hk || (bk === 'T' && hk === 'U') || (bk === 'U' && hk === 'T' && exec(Number(n)))) continue
+    return false
+  }
+  return true
+}
+
+function isExecutable(root: string, path: string): boolean {
+  return gitList(root, ['ls-files', '-s', '-z', '--', path])[0]?.startsWith('100755') ?? false
+}
+
+function isReferenceOnlyEdit(ctx: RefCtx, file: string, recordedSha: string): boolean {
+  let baseContent: string
+  try {
+    baseContent = execFileSync('git', ['-C', ctx.root, 'cat-file', 'blob', recordedSha], { encoding: 'utf8' })
+  } catch {
+    // a blob that cannot be read cannot be compared, which refuses.
+    return false
+  }
+  const headContent = readFileOrUndefined(`${ctx.root}/${file}`)
+  if (headContent === undefined) return false
+  const d = (ctx.ported ??= portedSet(ctx.root, ctx.baseRef))
+  const b = canonicalise(baseContent, 'base', d)
+  if (b === undefined) return false
+  const h = canonicalise(headContent, 'head', d, b.prefixes)
+  if (h === undefined) return false
+  for (const li of b.coupled) if (!h.resolved.has(li)) return false
+  if (b.lines.length !== h.lines.length) return false
+  const exec = (k: number): boolean => isExecutable(ctx.root, d.mtsList[k] ?? '')
+  return b.lines.every((l, i) => lineMatches(l, h.lines[i] ?? '', exec))
+}
+
 // checkTamper — HEAD's json compared against BASE's. Every problem here is a
 // self-authorization attempt: HEAD claiming something about the inventory
 // that BASE, which the push cannot edit, does not back up.
@@ -385,11 +656,12 @@ function checkRemovedRows(root: string, base: Inventory, head: Inventory, files:
 // checkTrackedFile — the verdict for one currently-tracked file, judged
 // against BASE (never HEAD's own claims — checkTamper already covers those).
 function checkTrackedFile(
-  root: string,
+  ctx: RefCtx,
   base: Inventory,
   effectiveExempt: Set<string>,
   file: string,
 ): string | undefined {
+  const root = ctx.root
   if (effectiveExempt.has(file)) return undefined
   const recorded = base.legacy[file]
   if (recorded === undefined) {
@@ -409,8 +681,9 @@ function checkTrackedFile(
   if (blobHash(root, file) === recorded) return undefined
   if (isValidShim(root, file)) return undefined
   if (isValidSourcedAdapter(root, file)) return undefined
+  if (isReferenceOnlyEdit(ctx, file, recorded)) return undefined // TASK-088
   return (
-    `CHANGED: ${file} no longer matches its BASE-recorded blob (${recorded}) and is ` +
+    `CHANGED:${file} no longer matches its BASE-recorded blob (${recorded}) and is ` +
     `not the exact, tracked two-line shim (or a recognised sourced adapter: scripts/lib/dod-gate.sh, ` +
     `scripts/lib/gate.sh). A legacy shell file is either unchanged or migrated whole, ` +
     `behind a shim or that adapter (PLAN-TASK-067 "the rule, as it will be written").`
@@ -449,11 +722,12 @@ function main(): number {
   const files = new Set(readFileList())
   const effectiveExempt = new Set(head.exempt.filter((file) => baseInv.exempt.includes(file)))
 
+  const ctx: RefCtx = { root, baseRef: base }
   const problems = [
     ...checkTamper(baseInv, head),
     ...checkRemovedRows(root, baseInv, head, files),
     ...[...files]
-      .map((file) => checkTrackedFile(root, baseInv, effectiveExempt, file))
+      .map((file) => checkTrackedFile(ctx, baseInv, effectiveExempt, file))
       .filter((p): p is string => p !== undefined),
     ...checkGoneRows(baseInv, head, effectiveExempt, files),
   ]

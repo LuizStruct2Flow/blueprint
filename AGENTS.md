@@ -306,32 +306,46 @@ one-line fix to `scripts/blueprint` means porting all 2,257 lines first, not
 extracting the one function that changed. The migration is its own commit,
 behaviour-identical, proven by the existing suites and by a mutant caught in
 the port; the change the item actually wanted comes after, so a reviewer can
-tell a port from a fix. **The shim is not an exception to whole-file
-migration — it is what whole-file migration LEAVES BEHIND.** A script's path
-is a public interface (hooks, allowlists, docs and CI all name it), so the
-migration moves the file's entire logic into a new `.mts` at the same stem
-and turns the OLD path into a fixed two-line shim
-(`#!/usr/bin/env bash` / `exec node "$(dirname "$0")/<basename>.mts" "$@"`)
-that keeps every caller working. Every whole-file migration ends this way;
-there is no smaller unit that also counts.
+tell a port from a fix.
 
-**One narrow, file-specific ceiling on that rule: a sourced library a
-still-shell caller must keep SOURCING cannot use the exec shim** (BUG-147,
-`PLAN-BUG-147-dod-gate-port.md`, "Option C") — an exec shim
-replaces the process with `node`, which cannot hand shell functions back to a
-caller that sourced it. `scripts/lib/dod-gate.sh` is the one file this
-applies to today: it is sourced by `.githooks/pre-push-project` and by
-`.github/workflows/security.yml`, so its migration moved every policy branch
-into `scripts/lib/dod-gate.mts` and left a small, MECHANICALLY GENERATED
-sourced adapter behind — the same shell function names as before, each
-forwarding to the matching CLI subcommand. `scripts/shell-inventory-check.mts`
-recognises only this exact, file-specific shape: it parses the adapter's
-trailing `(function, subcommand)` forwarding pairs, RE-RENDERS the whole file
-from them, and requires byte equality against what is on disk — the same
-"trust the renderer, not the bytes" contract the ordinary two-line shim
-already uses. An executable always uses the ordinary shim; this sourced form
-is never a general escape hatch, and a second sourced library earns its own
-reviewed extension of the checker rather than broadening it by analogy.
+**A port deletes the shell file** (TASK-088, founder, 2026-10-03). The
+migration moves the file's entire logic into a new `.mts` at the same stem, and
+the old shell file is DELETED, not left behind as a shim or an adapter. In the
+same commit every hook, allowlist entry, doc, workflow, suite and managed script
+that named the old path names the `.mts`, and the tests that only pinned the
+shim or the adapter go with it. Dated records keep the old path.
+
+**A legacy shell caller is repointed without being ported** (founder ruling,
+2026-10-03). A caller that is still shell is edited to name the `.mts`, and that
+edit must be the ONLY change to the file. It may only:
+
+- rename the path of a ported file (by path, or by a bare basename only one
+  ported file has);
+- keep its interpreter, as `node` (a bare `X` stays bare only when the `.mts`
+  is executable);
+- drop the line that sourced a ported library;
+- call `node L.mts sub` in place of a sourced function, with its own source
+  line's prefix and the environment prefix the checker's function table lists.
+
+Anything else forces the file's port. `scripts/shell-inventory-check.mts`
+verifies it: two directional canonicalisers reduce the BASE blob and the HEAD
+content, and the text must be equal, so a BASE form left in HEAD fails. Each
+sourced library earns one reviewed table row, landed in a mutant-tested commit
+before the commit that deletes its shell file. **The renaming trap:** a caller's
+row stays at its pre-edit sha, so its BASE blob is judged on every push. If a
+ported `.mts` is renamed or folded into another file, every caller repointed at
+it is `CHANGED` on every push until ported. Never rename or fold a ported `.mts`
+while a legacy caller names it.
+
+**One named exception: a Git hook.** TASK-088 supersedes TASK-018 §3.3 except
+for this case. Git fixes a hook's name, and Node cannot run an extensionless
+TypeScript file, so a ported hook keeps a two-line `exec` entry at the hook's
+path (`#!/usr/bin/env bash` / `exec node "$(dirname "$0")/<hook>.mts" "$@"`),
+recognised only under `.githooks/`.
+
+*Transitional, until TASK-088 slice 9:* the checker still recognises the
+two-line shim and the two sourced adapters (BUG-147, BUG-152) of the pairs not
+yet swept. Slice 9 deletes that recognition, and this sentence.
 
 **Runtime: Node's own type stripping, no flag, no dependency.** `.mts` scripts
 run on an official Node build (`engines.node` in `tests/package.json`) with no
@@ -347,10 +361,11 @@ keeps the gate's toolchain-bootstrap or fail-closed-without-Node property that
 a `.mts` port cannot have (TASK-018 §3.3). `.githooks/pre-push` and
 `.githooks/pre-push-project` are NOT in this exception list: they are legacy
 shell files like any other, and the first change that actually touches either
-one migrates that WHOLE file behind a shim, same as `scripts/blueprint` or
-anything else — TASK-018 §3.3 only means the gate's ENTRY stays a shim that
-fails closed without Node, not that the file's logic may migrate gradually.
-Everything else is either unmigrated shell or a `.mts` port.
+one migrates that WHOLE file (a Git hook keeps its two-line `exec` entry, per
+the hook exception above), same as `scripts/blueprint` or anything else —
+TASK-018 §3.3 only means the gate's ENTRY stays an entry that fails closed
+without Node, not that the file's logic may migrate gradually. Everything else
+is either unmigrated shell or a `.mts` port.
 
 **Enforcement is a committed inventory, judged against a BASE it cannot
 edit — not a diff heuristic, and not self-referential.** Currently **in this
@@ -363,9 +378,9 @@ the pushed range cannot have edited (locally `@{u}`/`origin/main`, in CI
 the pushed tree would let one commit patch a legacy file and update its own
 recorded sha in the same breath. Against that base it refuses: a shell file
 neither list covers, a legacy row HEAD adds or changes, an exempt entry HEAD
-grows, a legacy file whose blob changed to anything but the exact shim WITH A
-TRACKED `.mts` TARGET, and a row removed without its file becoming that valid
-shim or disappearing. Wired through `scripts/run-ts-suites.sh` (exempt), never
+grows, a legacy file whose BASE blob changed other than by the reference
+rewrites above (or, until slice 9, into the recognised shim or adapter, or a
+hook entry), and a row removed without its file being migrated or disappearing. Wired through `scripts/run-ts-suites.sh` (exempt), never
 by editing a legacy shell file to call it — that would force the migration the
 rule exists to phase in gradually.
 

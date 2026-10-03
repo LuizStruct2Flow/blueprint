@@ -363,7 +363,14 @@ code is the one whose clean review authorizes the push.
    # blind exactly when it believes it is covered. Resolving rather than
    # hardcoding means the recipe follows the baton if it ever moves again.
    . scripts/lib/state-dir.sh
-   SIG=$(agent_signal_file "$PWD")
+   # The helper derives the baton's path and takes no argument: it needs both
+   # roots set first. Without them SIG is empty and the loop polls nothing,
+   # silently, so the recipe also refuses to start blind and says when it is armed.
+   BP_CODE_ROOT="$PWD"
+   BP_STATE_ROOT="$(bp_state_root)" || exit 9
+   SIG=$(agent_signal_file)
+   [ -f "$SIG" ] || { echo "[signal-monitor] baton not found at '$SIG'"; exit 1; }
+   echo "[signal-monitor] armed on $SIG"
    last=$(mt "$SIG")
    while true; do
      sleep 2

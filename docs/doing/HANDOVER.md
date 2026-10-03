@@ -145,7 +145,7 @@ no such cycle exists (checked 2026-09-29).
   `.claude/worktrees/` (some may hold unlanded work; check before deleting —
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
-- **Waiting for the founder's acceptance:** BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
+- **Waiting for the founder's acceptance:** TASK-088 (all nine slices released at `29977d5`: no shell shim or sourced adapter is left, and the inventory checker accepts a reference-only repoint of a legacy caller), BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.
@@ -165,13 +165,17 @@ no such cycle exists (checked 2026-09-29).
 - **Providers:** Kimi hit its 5-hour limit at 07:34Z on 2026-10-02, in the
   middle of BUG-152. Codex reviewed at 09:11Z the same day. `node
   scripts/rotation.mts coverage` shows the live state.
-- **TASK-088 is decided and in flight:** a port deletes its shell file, and a
-  legacy shell caller is repointed at the `.mts` as a reference-only edit that
-  the inventory checker verifies. Slice 1 (the rule and the checker) is landed;
-  slices 2-9 are in
-  [`PLAN-TASK-088-no-shims.md`](PLAN-TASK-088-no-shims.md) §5.
-- **The three watchers run with `nohup`**, restarted 2026-10-02 06:40Z (none
-  was running at wake). Check with
+- **TASK-088 has landed and waits for acceptance:** a port deletes its shell
+  file, and a legacy shell caller is repointed at the `.mts` as a reference-only
+  edit that the inventory checker verifies. Plan:
+  [`PLAN-TASK-088-no-shims.md`](../waiting-acceptance/PLAN-TASK-088-no-shims.md).
+  **Run the contamination scan before every push** (`node
+  scripts/contamination-push-scan.mts --before origin/main --after HEAD`): slice
+  5 went red in CI on a planted test fixture the gate does not scan. Kimi was out
+  of quota for the whole item, so its reviews were Claude and Codex (founder
+  approved going ahead without Kimi, 2026-10-03).
+- **The three watchers run with `nohup`**, restarted 2026-10-03 ~11:52Z on the
+  `.mts` commands after slice 5 deleted the shell launchers. Check with
   `pgrep -af scripts/signal-watch.mts` (three lines). One activity-feed
   supervisor runs per project checkout (four), which is expected.
 - **Dispatched agents run the suites with a plain `npm --prefix tests test`**

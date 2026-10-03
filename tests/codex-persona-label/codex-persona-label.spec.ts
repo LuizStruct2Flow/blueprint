@@ -81,7 +81,6 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { resolveConsumer } from '../helpers/shim.js'
 import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command.js'
 
 /**
@@ -96,9 +95,9 @@ import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 // TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET
-// (resolveConsumer follows the shim), same as tests/state-dir.
-const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.mts')?.rel ?? 'scripts/start-codex-signal-watch.mts')
-const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.mts')?.rel ?? 'scripts/start-gemini-signal-watch.mts')
+//, same as tests/state-dir.
+const LAUNCHER = join(SUBJECT, 'scripts/start-codex-signal-watch.mts')
+const GEMINI_LAUNCHER = join(SUBJECT, 'scripts/start-gemini-signal-watch.mts')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 

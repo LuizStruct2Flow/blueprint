@@ -32,13 +32,12 @@
 // Against BASE, this refuses:
 //   - a shell file in the tree that BASE's legacy/exempt does not cover (a
 //     new .sh, or one HEAD's json newly claims — self-authorization, see
-//     below), UNLESS it is the exact two-line shim with a tracked .mts target:
-//     a valid shim is MIGRATED, not new (BUG-145 — after the port push itself
-//     becomes BASE, the shim has no row anywhere and must still pass);
+//     below), UNLESS it is a Git hook's exact two-line shim with a tracked
+//     .mts target (TASK-088: the only shim left; BUG-145 — after the port push
+//     itself becomes BASE, it has no row anywhere and must still pass);
 //   - a `legacy` file whose blob no longer matches BASE's recorded one,
-//     UNLESS the new content is the exact two-line shim AND the shim's
-//     target .mts exists and is tracked (a shim pointing at nothing is not a
-//     migration — Elias's second finding: a shim with no target passed);
+//     UNLESS it is such a hook shim (a shim pointing at nothing is not a
+//     migration — Elias's second finding) or a reference-only edit (below);
 //   - a `legacy` row present in BASE but missing from HEAD (removed), unless
 //     the file it named is now gone entirely or is exactly that valid shim —
 //     a row may only be removed TOGETHER WITH its migration, never as a bare
@@ -63,7 +62,79 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { blobHash, isTracked, readFileOrUndefined, isValidShim } from './lib/shim.mts'
+
+// blobHash — the blob sha git has recorded for `path` right now (index/HEAD of
+// a clean checkout), or undefined if git does not track it. Deliberately NOT
+// `git hash-object`: that would hash an uncommitted edit in the working tree,
+// and this check reads the TREE, the same thing CI's fresh checkout sees.
+function blobHash(root: string, path: string): string | undefined {
+  let out: string
+  try {
+    out = execFileSync('git', ['-C', root, 'ls-files', '-s', '--', path], { encoding: 'utf8' })
+  } catch {
+    // git refusing leaves the file unrecorded, which the caller reports
+    // as CHANGED. Never a pass.
+    return undefined
+  }
+  const line = out.trim()
+  if (line === '') return undefined
+  return line.split(/\s+/)[1]
+}
+
+// isTracked — is `path` in git's index right now? Used for the shim TARGET,
+// which reading the file alone cannot prove is not untracked scratch.
+function isTracked(root: string, path: string): boolean {
+  try {
+    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', '--', path], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    })
+    return true
+  } catch {
+    // --error-unmatch exits non-zero for an untracked path. That exit code is the answer.
+    return false
+  }
+}
+
+function readFileOrUndefined(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    // Absence is the probed state: the caller compares against undefined.
+    return undefined
+  }
+}
+
+// TASK-088 slice 9 — the ONE shim that survives: a Git-mandated hook name.
+// Git fixes a hook's file name and Node cannot run an extensionless
+// TypeScript file, so a ported hook keeps a two-line `exec` entry beside its
+// .mts. Anywhere else a ported script's shell file is deleted, and a shim
+// there is NEW shell.
+const GIT_HOOKS: ReadonlySet<string> = new Set([
+  'applypatch-msg', 'pre-applypatch', 'post-applypatch', 'pre-commit', 'pre-merge-commit',
+  'prepare-commit-msg', 'commit-msg', 'post-commit', 'pre-rebase', 'post-checkout',
+  'post-merge', 'pre-push', 'pre-receive', 'update', 'proc-receive', 'post-receive',
+  'post-update', 'reference-transaction', 'push-to-checkout', 'pre-auto-gc',
+  'post-rewrite', 'sendemail-validate', 'fsmonitor-watchman', 'p4-changelist',
+  'p4-prepare-changelist', 'p4-post-changelist', 'p4-pre-submit', 'post-index-change',
+])
+
+function isHookPath(path: string): boolean {
+  const m = /^\.githooks\/([^/]+)$/.exec(path)
+  return m !== null && GIT_HOOKS.has(m[1] ?? '')
+}
+
+function shimContent(path: string): string {
+  return `#!/usr/bin/env bash\nexec node "$(dirname "$0")/${path.split('/').pop()}.mts" "$@"\n`
+}
+
+// isValidShim — a Git hook entry: the exact two-line shim, whose .mts target
+// (beside it, named like it) is present and TRACKED.
+function isValidShim(root: string, path: string): boolean {
+  if (!isHookPath(path)) return false
+  if (readFileOrUndefined(`${root}/${path}`) !== shimContent(path)) return false
+  const target = `${path}.mts`
+  return isTracked(root, target) && readFileOrUndefined(`${root}/${target}`) !== undefined
+}
 
 interface Inventory {
   exempt: string[]
@@ -98,230 +169,6 @@ function readFileList(): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-}
-
-// --- the sourced-adapter migration form (BUG-147 / BUG-152) ----------------
-//
-// A sourced library cannot be an ordinary two-line exec shim: its callers
-// SOURCE it (scripts/lib/dod-gate.sh from .githooks/pre-push-project and the
-// security.yml workflow step; scripts/lib/gate.sh from
-// scripts/agent-activity.sh and scripts/blueprint), and a shim execs a child
-// process, which cannot hand shell functions back to a caller that sourced
-// it. The plans (PLAN-BUG-147 "Option C", BUG-152) admit exactly one second
-// migration shape for exactly these files: a generated "sourced adapter"
-// whose only variable content is the ordered list of (shell function name,
-// CLI subcommand) forwarding pairs at its tail. Everything else — the
-// header, the `_call` helper body — is FIXED text, re-rendered here rather
-// than trusted from disk.
-//
-// This is deliberately a TABLE over a CLOSED LIST OF TWO (CLAUDE.md's
-// TASK-067 ceiling, landed with the dod-gate port): a third sourced library
-// earns its own reviewed extension of this table rather than a generic "any
-// sourced adapter" rule this checker has no independent authority to bless.
-interface SourcedAdapterPair {
-  fn: string
-  sub: string
-  hasArg: boolean
-}
-
-interface SourcedAdapterSpec {
-  /** The repo-relative shell path this adapter occupies. */
-  readonly path: string
-  /** The repo-relative .mts the adapter's bridge resolves. */
-  readonly target: string
-  /** The fixed generated text through the `_call` helper, ending at the pairs. */
-  readonly header: string
-  /** The forwarding-line helper name the pairs must call. */
-  readonly callName: '_dg_call' | '_gate_call'
-  /** One forwarding line per function; anything else fails to parse. */
-  readonly pairRe: RegExp
-  /** The one authoritative (function, subcommand) list, transcribed from the target .mts's own main() switch. */
-  readonly canonicalPairs: readonly SourcedAdapterPair[]
-}
-
-const DOD_GATE_ADAPTER: SourcedAdapterSpec = {
-  path: 'scripts/lib/dod-gate.sh',
-  target: 'scripts/lib/dod-gate.mts',
-  callName: '_dg_call',
-  header: `#!/bin/sh
-# scripts/lib/dod-gate.sh — GENERATED sourced adapter. DO NOT HAND-EDIT.
-#
-# TASK-067 / BUG-147: the DoD gate's policy lives in scripts/lib/dod-gate.mts
-# now (PLAN-BUG-147-dod-gate-port.md, "Option C"). This file is the
-# small, mechanically re-renderable bridge that keeps both production callers
-# (.githooks/pre-push-project and .github/workflows/security.yml) byte-
-# identical: it defines the same shell function names the old shell library
-# did and forwards each call to the matching \`dod-gate.mts\` subcommand.
-#
-# scripts/shell-inventory-check.mts re-renders this exact file from the
-# (function, subcommand) pairs below and requires whole-file byte equality —
-# see CLAUDE.md "Shell to TypeScript, organically" for the ceiling this form
-# is admitted under. Regenerating it by hand risks drifting from that
-# renderer; treat the pairs as the source of truth.
-#
-# Sourced, not executed — same contract the old dod-gate.sh carried.
-
-_dg_bridge_mts="\${BP_CODE_ROOT:-.}/scripts/lib/dod-gate.mts"
-
-# _dg_call SUBCOMMAND [ARGS...] — invokes the CLI, replays any notes it wrote
-# to a private DOD_GATE_NOTE_DIR through the caller's own pipe_note (or prints
-# them as \`note: …\` when no pipe_note is defined), and returns the CLI's exit
-# status unchanged.
-_dg_call() {
-  if [ ! -f "$_dg_bridge_mts" ]; then
-    echo "cannot find $_dg_bridge_mts — run: blueprint pull scripts/lib/dod-gate.mts" >&2
-    return 2
-  fi
-  _dg_notedir="$(mktemp -d)" || { echo "internal error: cannot create a note directory" >&2; return 2; }
-  DOD_GATE_NOTE_DIR="$_dg_notedir" node "$_dg_bridge_mts" "$@"
-  _dg_rc=$?
-  if [ -f "$_dg_notedir/count" ]; then
-    _dg_count="$(cat "$_dg_notedir/count")"
-    _dg_i=1
-    while [ "$_dg_i" -le "$_dg_count" ]; do
-      if command -v pipe_note >/dev/null 2>&1; then
-        pipe_note "$(cat "$_dg_notedir/note.$_dg_i")"
-      else
-        printf 'note: %s\\n' "$(cat "$_dg_notedir/note.$_dg_i")"
-      fi
-      _dg_i=$((_dg_i + 1))
-    done
-  fi
-  rm -rf "$_dg_notedir"
-  return "$_dg_rc"
-}
-
-`,
-
-  // One forwarding line per function; anything else (an extra command, a
-  // malformed name, prose, a blank line) fails to parse, which is refusal —
-  // the validity check only accepts a bridge whose RE-RENDER matches byte
-  // for byte, so a parse failure alone is already enough to reject it.
-  pairRe: /^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ _dg_call ([a-z][a-z0-9-]*)( "\$1")?; \}$/,
-
-  // The one authoritative (function, subcommand) list this bridge may ever
-  // forward. BUG-147 round 2 (Codex four-eyes finding): re-rendering from
-  // the PARSED pairs and comparing bytes proves nothing on its own — the
-  // renderer reproduces whatever shape it is fed, so an appended or
-  // redefined pair (e.g. a second `dod_stage_bugtests() { ... }` overriding
-  // the real one, which is exactly what shell keeps on a duplicate function
-  // name) re-renders byte-identically and a bytes-only check passes it. The
-  // authority is dod-gate.mts's OWN declared subcommand switch (its
-  // `main()`, case 'rows' | 'bugtests' | 'signal' | 'judgement' | 'items'),
-  // transcribed once as this fixed list. Parsed pairs must equal it exactly
-  // — same functions, same subcommands, same order, no duplicates and no
-  // additions — which closes the whole class: no pair can ever exist that
-  // "nothing authoritative vouches for".
-  canonicalPairs: [
-    { fn: 'dod_items_in_push', sub: 'items', hasArg: true },
-    { fn: 'dod_stage_rows', sub: 'rows', hasArg: true },
-    { fn: 'dod_stage_bugtests', sub: 'bugtests', hasArg: true },
-    { fn: 'dod_stage_signal', sub: 'signal', hasArg: false },
-    { fn: 'dod_stage_judgement', sub: 'judgement', hasArg: false },
-  ],
-}
-
-// BUG-152 — the second (and, per the ceiling above, only other) sourced
-// adapter. Same shape as dod-gate's, minus the note protocol: the gate
-// functions only echo, so `_gate_call` forwards argv and the exit status
-// and nothing else. The authority for canonicalPairs is gate.mts's own
-// main() switch (case 'arm-gate' | 'arm-push-keepalive').
-const GATE_ADAPTER: SourcedAdapterSpec = {
-  path: 'scripts/lib/gate.sh',
-  target: 'scripts/lib/gate.mts',
-  callName: '_gate_call',
-  header: `#!/bin/sh
-# scripts/lib/gate.sh — GENERATED sourced adapter. DO NOT HAND-EDIT.
-#
-# TASK-067 / BUG-152: the gate-arming policy lives in scripts/lib/gate.mts
-# now. This file is the small, mechanically re-renderable bridge that keeps
-# both production callers (scripts/agent-activity.sh and scripts/blueprint)
-# byte-identical: it defines the same shell function names the old shell
-# library did and forwards each call to the matching \`gate.mts\` subcommand.
-#
-# scripts/shell-inventory-check.mts re-renders this exact file from the
-# (function, subcommand) pairs below and requires whole-file byte equality —
-# see CLAUDE.md "Shell to TypeScript, organically" for the ceiling this form
-# is admitted under. Regenerating it by hand risks drifting from that
-# renderer; treat the pairs as the source of truth.
-#
-# Sourced, not executed — same contract the old gate.sh carried.
-
-_gate_bridge_mts="\${BP_CODE_ROOT:-.}/scripts/lib/gate.mts"
-
-# _gate_call SUBCOMMAND [ARGS...] — invokes the CLI and returns the CLI's
-# exit status unchanged.
-_gate_call() {
-  if [ ! -f "$_gate_bridge_mts" ]; then
-    echo "cannot find $_gate_bridge_mts — run: blueprint pull scripts/lib/gate.mts" >&2
-    return 2
-  fi
-  node "$_gate_bridge_mts" "$@"
-}
-
-`,
-  pairRe: /^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ _gate_call ([a-z][a-z0-9-]*)( "\$1")?; \}$/,
-  canonicalPairs: [
-    { fn: 'arm_gate', sub: 'arm-gate', hasArg: true },
-    { fn: 'arm_push_keepalive', sub: 'arm-push-keepalive', hasArg: true },
-  ],
-}
-
-const SOURCED_ADAPTERS: readonly SourcedAdapterSpec[] = [DOD_GATE_ADAPTER, GATE_ADAPTER]
-
-function sourcedAdapterFor(path: string): SourcedAdapterSpec | undefined {
-  return SOURCED_ADAPTERS.find((s) => s.path === path)
-}
-
-function renderSourcedAdapter(spec: SourcedAdapterSpec, pairs: readonly SourcedAdapterPair[]): string {
-  const lines = pairs.map((p) => `${p.fn}() { ${spec.callName} ${p.sub}${p.hasArg ? ' "$1"' : ''}; }`)
-  return spec.header + lines.join('\n') + (lines.length > 0 ? '\n' : '')
-}
-
-function parseSourcedAdapterPairs(spec: SourcedAdapterSpec, content: string): SourcedAdapterPair[] | undefined {
-  if (!content.startsWith(spec.header)) return undefined
-  const tail = content.slice(spec.header.length)
-  if (tail.length === 0) return []
-  if (!tail.endsWith('\n')) return undefined
-  const lines = tail.slice(0, -1).split('\n')
-  const pairs: SourcedAdapterPair[] = []
-  for (const line of lines) {
-    const m = spec.pairRe.exec(line)
-    if (!m) return undefined
-    const fn = m[1]
-    const sub = m[2]
-    if (fn === undefined || sub === undefined) return undefined
-    pairs.push({ fn, sub, hasArg: m[3] !== undefined })
-  }
-  return pairs
-}
-
-function pairsMatchCanonical(spec: SourcedAdapterSpec, pairs: readonly SourcedAdapterPair[]): boolean {
-  if (pairs.length !== spec.canonicalPairs.length) return false
-  return pairs.every((p, i) => {
-    const c = spec.canonicalPairs[i]
-    return c !== undefined && p.fn === c.fn && p.sub === c.sub && p.hasArg === c.hasArg
-  })
-}
-
-// isValidSourcedAdapter — file-specific to the CLOSED SOURCED_ADAPTERS
-// table. Parses the tail into ordered pairs, requires them to equal the
-// spec's canonicalPairs exactly (the authoritative check above), and —
-// belt and braces — RE-RENDERS the whole file from the parsed pairs and
-// requires byte equality against what is actually on disk, the same "trust
-// the renderer, not the bytes" shape isValidShim uses for an ordinary exec
-// shim. The target .mts must also be present and tracked (BUG-145's shape:
-// a bridge pointing at nothing is not a migration).
-function isValidSourcedAdapter(root: string, path: string): boolean {
-  const spec = sourcedAdapterFor(path)
-  if (spec === undefined) return false
-  const content = readFileOrUndefined(`${root}/${path}`)
-  if (content === undefined) return false
-  const pairs = parseSourcedAdapterPairs(spec, content)
-  if (pairs === undefined) return false
-  if (!pairsMatchCanonical(spec, pairs)) return false
-  if (renderSourcedAdapter(spec, pairs) !== content) return false
-  return isTracked(root, spec.target) && readFileOrUndefined(`${root}/${spec.target}`) !== undefined
 }
 
 // --- TASK-088: the reference-only edit (PLAN-TASK-088-no-shims.md §1.2) -----
@@ -663,12 +510,10 @@ function checkRemovedRows(root: string, base: Inventory, head: Inventory, files:
     if (file in head.legacy) continue // retained — checkTamper already judged it
     if (!files.has(file)) continue // gone entirely — a legitimate removal
     if (isValidShim(root, file)) continue // migrated — a legitimate removal
-    if (isValidSourcedAdapter(root, file)) continue // migrated — the sourced-adapter form
     problems.push(
       `ROW-REMOVED-WITHOUT-MIGRATION: ${file}'s row was removed from scripts/shell-` +
-        `inventory.json, but the file itself is neither gone nor the exact, tracked ` +
-        `shim (or a recognised sourced adapter: scripts/lib/dod-gate.sh, scripts/lib/gate.sh). ` +
-        `Remove a row only in the same commit that migrates or deletes its file.`,
+        `inventory.json, but the file itself is neither gone nor a Git hook's exact, ` +
+        `tracked two-line shim. Remove a row only in the same commit that migrates or deletes its file.`,
     )
   }
   return problems
@@ -686,12 +531,12 @@ function checkTrackedFile(
   if (effectiveExempt.has(file)) return undefined
   const recorded = base.legacy[file]
   if (recorded === undefined) {
-    // BUG-145: a valid shim is MIGRATED, not new — accept it whether or not
-    // any list names it. Once the port push (which removed the legacy row) is
-    // itself the BASE, the shim has no row anywhere and would otherwise read
-    // as new shell on every subsequent push.
+    // BUG-145: a Git hook's valid shim is MIGRATED, not new — accept it
+    // whether or not any list names it. Once the port push (which removed the
+    // legacy row) is itself the BASE, the shim has no row anywhere and would
+    // otherwise read as new shell on every subsequent push. A shim anywhere
+    // else is NEW: a ported script's shell file is deleted (TASK-088).
     if (isValidShim(root, file)) return undefined
-    if (isValidSourcedAdapter(root, file)) return undefined
     return (
       `NEW: ${file} is a shell file tracked in scripts/ or .githooks/ but BASE's ` +
       `scripts/shell-inventory.json covers it in neither list. New code is TypeScript ` +
@@ -701,13 +546,12 @@ function checkTrackedFile(
   }
   if (blobHash(root, file) === recorded) return undefined
   if (isValidShim(root, file)) return undefined
-  if (isValidSourcedAdapter(root, file)) return undefined
   if (isReferenceOnlyEdit(ctx, file, recorded)) return undefined // TASK-088
   return (
     `CHANGED:${file} no longer matches its BASE-recorded blob (${recorded}) and is ` +
-    `not the exact, tracked two-line shim (or a recognised sourced adapter: scripts/lib/dod-gate.sh, ` +
-    `scripts/lib/gate.sh). A legacy shell file is either unchanged or migrated whole, ` +
-    `behind a shim or that adapter (PLAN-TASK-067 "the rule, as it will be written").`
+    `neither a Git hook's exact, tracked two-line shim nor a reference-only edit. A ` +
+    `legacy shell file is either unchanged, repointed at a ported .mts, or migrated ` +
+    `whole (PLAN-TASK-067, PLAN-TASK-088).`
   )
 }
 

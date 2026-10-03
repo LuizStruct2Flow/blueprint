@@ -343,10 +343,6 @@ TypeScript file, so a ported hook keeps a two-line `exec` entry at the hook's
 path (`#!/usr/bin/env bash` / `exec node "$(dirname "$0")/<hook>.mts" "$@"`),
 recognised only under `.githooks/`.
 
-*Transitional, until TASK-088 slice 9:* the checker still recognises the
-two-line shim and the two sourced adapters (BUG-147, BUG-152) of the pairs not
-yet swept. Slice 9 deletes that recognition, and this sentence.
-
 **Runtime: Node's own type stripping, no flag, no dependency.** `.mts` scripts
 run on an official Node build (`engines.node` in `tests/package.json`) with no
 `tsx`, `ts-node`, Bun or Deno — they must run before `npm ci` installs
@@ -379,8 +375,7 @@ the pushed tree would let one commit patch a legacy file and update its own
 recorded sha in the same breath. Against that base it refuses: a shell file
 neither list covers, a legacy row HEAD adds or changes, an exempt entry HEAD
 grows, a legacy file whose BASE blob changed other than by the reference
-rewrites above (or, until slice 9, into the recognised shim or adapter, or a
-hook entry), and a row removed without its file being migrated or disappearing. Wired through `scripts/run-ts-suites.sh` (exempt), never
+rewrites above (or a hook entry), and a row removed without its file being migrated or disappearing. Wired through `scripts/run-ts-suites.sh` (exempt), never
 by editing a legacy shell file to call it — that would force the migration the
 rule exists to phase in gradually.
 

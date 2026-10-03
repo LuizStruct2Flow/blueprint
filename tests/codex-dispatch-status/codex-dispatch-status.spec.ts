@@ -45,13 +45,12 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
-import { resolveConsumer } from '../helpers/shim.js'
 import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command.js'
 
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 // TASK-083 — a migrated launcher is a two-line shim; read its `.mts` TARGET
-// (resolveConsumer follows the shim), same as tests/state-dir.
-const LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.mts')?.rel ?? 'scripts/start-codex-signal-watch.mts')
+//, same as tests/state-dir.
+const LAUNCHER = join(SUBJECT, 'scripts/start-codex-signal-watch.mts')
 
 /** A script's source with comments stripped — the static checks need the code. */
 async function code(path: string): Promise<string> {

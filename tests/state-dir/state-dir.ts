@@ -23,7 +23,15 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { resolveConsumer, type ConsumerKind } from '../helpers/shim.js'
+
+/** What kind of source a static check is looking at. */
+export type ConsumerKind = 'shell' | 'ts'
+
+export interface ResolvedConsumer {
+  readonly rel: string
+  readonly source: string
+  readonly kind: ConsumerKind
+}
 
 /** The three dispatchers that must rendezvous with the feed on one directory. */
 export const DISPATCHERS = [
@@ -290,15 +298,13 @@ function scanRootBlocks(
 }
 
 /**
- * TASK-088 — a consumer named by its `.mts` IS TypeScript (kind 'ts', its own
- * source); a shell path still goes through resolveConsumer, which follows a
- * not-yet-swept shim to its target. Kept here, not in helpers/shim.ts, which
- * dies once the last shim does.
+ * TASK-088 — a ported script's shell file is deleted, so a consumer is its own
+ * file: an `.mts` is TypeScript (kind 'ts'), anything else is shell. No shim
+ * is followed.
  */
-export function resolveConsumerFile(root: string, rel: string): ReturnType<typeof resolveConsumer> {
-  if (!rel.endsWith('.mts')) return resolveConsumer(root, rel)
+export function resolveConsumerFile(root: string, rel: string): ResolvedConsumer | undefined {
   try {
-    return { rel, source: readFileSync(join(root, rel), 'utf8'), kind: 'ts' }
+    return { rel, source: readFileSync(join(root, rel), 'utf8'), kind: rel.endsWith('.mts') ? 'ts' : 'shell' }
   } catch {
     // an absent consumer is reported as missing by the caller.
     return undefined

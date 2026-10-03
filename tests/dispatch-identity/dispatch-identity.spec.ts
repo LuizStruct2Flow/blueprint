@@ -40,7 +40,6 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { REPO_ROOT, scenario } from '../harness/index.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
-import { resolveConsumer } from '../helpers/shim.js'
 import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command.js'
 
 /**
@@ -50,12 +49,12 @@ import { extractWakeCommand, unescapeTsShellText } from '../helpers/wake-command
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 // TASK-083 — a migrated launcher is a two-line shim; the static checks below
-// read its `.mts` TARGET (resolveConsumer follows the shim), same as
+// read its `.mts` TARGET, same as
 // tests/state-dir. A not-yet-migrated launcher resolves to its own `.sh`
 // unchanged.
-const CODEX_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-codex-signal-watch.mts')?.rel ?? 'scripts/start-codex-signal-watch.mts')
-const GEMINI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-gemini-signal-watch.mts')?.rel ?? 'scripts/start-gemini-signal-watch.mts')
-const KIMI_LAUNCHER = join(SUBJECT, resolveConsumer(SUBJECT, 'scripts/start-kimi-signal-watch.mts')?.rel ?? 'scripts/start-kimi-signal-watch.mts')
+const CODEX_LAUNCHER = join(SUBJECT, 'scripts/start-codex-signal-watch.mts')
+const GEMINI_LAUNCHER = join(SUBJECT, 'scripts/start-gemini-signal-watch.mts')
+const KIMI_LAUNCHER = join(SUBJECT, 'scripts/start-kimi-signal-watch.mts')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 
 /** A script's source with comments stripped — the static checks need the code. */

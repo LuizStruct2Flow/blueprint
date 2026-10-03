@@ -271,9 +271,9 @@ any you find with `pgrep -af '[s]ignal-watch.sh'`.
 
 **Shell to TypeScript is now a rule (TASK-067, `AGENTS.md`).** Before editing any
 shell file, check `scripts/shell-inventory.json`. A legacy file is migrated
-whole to `.mts` first, and its shell file is deleted (TASK-088; until its slice 9
-the checker still passes the shims already in the tree); the gate refuses
-anything else. **Follow the port method** in
+whole to `.mts` first, and its shell file is deleted (TASK-088; only a Git
+hook keeps a two-line shim, and the checker recognises no other); the gate
+refuses anything else. **Follow the port method** in
 [`../done/PLAN-TASK-067-shell-to-typescript.md`](../done/PLAN-TASK-067-shell-to-typescript.md)
 §"The port method": a test-preparation commit first, then the port proven three
 ways.

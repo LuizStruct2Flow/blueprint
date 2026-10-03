@@ -49,7 +49,6 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { relativeLinkTargets } from '../doc-links/doc-links.js'
-import { resolveConsumer } from '../helpers/shim.js'
 
 const PROJECT = 'test-proj'
 
@@ -417,8 +416,8 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       // `.mts` TARGET's AGENT_WAKE_COMMAND body now. Checking the shim's own
       // bytes here would pass vacuously (it never contained the placeholder),
       // exactly the "no test asserted substitution" gap this case exists to
-      // close — resolveConsumer follows the shim, same as tests/state-dir.
-      const target = resolveConsumer(derived, rel)?.rel ?? rel
+      // close — the launchers are .mts files now.
+      const target = rel
       const text = await readFile(join(derived, target), 'utf8')
       expect(text, 'omitted from new-project.sh substitution').not.toContain('{{PROJECT_NAME}}')
     })

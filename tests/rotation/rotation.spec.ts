@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { REPO_ROOT, scenario, type Scenario, type RunResult } from '../harness/index.js'
-import { resolveConsumer } from '../helpers/shim.js'
 
 const ROTATION_SCRIPT = join(REPO_ROOT, 'scripts', 'rotation.mts')
 const ROTATION_URL = pathToFileURL(ROTATION_SCRIPT).href
@@ -243,10 +242,10 @@ describe('TASK-065 rotation event log', () => {
     for (const provider of ['codex', 'kimi', 'gemini']) {
       // TASK-083 — the launcher is now a two-line shim with no RUN_LOG text
       // of its own; the assignment lives in its `.mts` target's
-      // AGENT_WAKE_COMMAND body instead. resolveConsumer follows the shim,
+      // AGENT_WAKE_COMMAND body instead. the launcher is an .mts,
       // same as tests/state-dir.
       const rel = `scripts/start-${provider}-signal-watch.mts`
-      const target = resolveConsumer(root, rel)?.rel ?? rel
+      const target = rel
       const launcher = await readFile(join(root, target), 'utf8')
       expect(launcher).toContain(`RUN_LOG="$STATE_DIR/${provider}-runs.log"`)
     }

@@ -11,7 +11,7 @@
  * map of path -> git blob sha, tamper-proof because the pushed range cannot
  * edit history before itself) and the current shell-file list on stdin, it
  * refuses a shell file in neither list, a `legacy` file whose blob no longer
- * matches BASE unless the new content is the exact two-line shim WITH A
+ * matches BASE unless it is a Git hook's exact two-line shim WITH A
  * TRACKED TARGET, a `legacy` row removed without its file becoming that shim
  * or disappearing, an `exempt` entry BASE did not have, and a `legacy` row
  * added or changed relative to BASE — the last two being the SELF-
@@ -107,33 +107,6 @@ describe('TASK-067 — the shell inventory gate', () => {
     })
   })
 
-  it('#3 the exact, tracked two-line shim is accepted (row left in place)', async () => {
-    await scenario('shell-inventory-3', async (s) => {
-      const repo = await s.gitRepo('repo')
-      const base = await seedFooWithTarget(repo, s)
-
-      await s.fs.write('repo/scripts/foo.sh', SHIM)
-      await repo.commitAll('migrate to shim, row left in the json')
-      const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
-
-      expect(r.code).toBe(0)
-    })
-  })
-
-  it('#4 a shim with anything extra is refused', async () => {
-    await scenario('shell-inventory-4', async (s) => {
-      const repo = await s.gitRepo('repo')
-      const base = await seedFooWithTarget(repo, s)
-
-      await s.fs.write('repo/scripts/foo.sh', `${SHIM}# one extra line\n`)
-      await repo.commitAll('shim plus an extra line')
-      const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
-
-      expect(r.code).not.toBe(0)
-      expect(r.output).toMatch(/CHANGED:.*scripts\/foo\.sh/)
-    })
-  })
-
   it('#5 an exempt file may change freely', async () => {
     await scenario('shell-inventory-5', async (s) => {
       const repo = await s.gitRepo('repo')
@@ -173,26 +146,6 @@ describe('TASK-067 — the shell inventory gate', () => {
 
       expect(r.code).not.toBe(0)
       expect(r.output).toMatch(/GONE:.*scripts\/ghost\.sh/)
-    })
-  })
-
-  it('#7 an exact shim whose target .mts is absent is refused', async () => {
-    await scenario('shell-inventory-7', async (s) => {
-      const repo = await s.gitRepo('repo')
-      // Seed WITHOUT foo.mts this time.
-      await s.fs.write('repo/scripts/foo.sh', '#!/bin/sh\necho one\n')
-      await repo.commitAll('seed foo.sh, no target yet')
-      const sha = await blobShaOf(repo, 'scripts/foo.sh')
-      await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], { 'scripts/foo.sh': sha }))
-      await repo.commitAll('seed inventory')
-      const base = await repo.head()
-
-      await s.fs.write('repo/scripts/foo.sh', SHIM) // no scripts/foo.mts exists anywhere
-      await repo.commitAll('shim with no target committed')
-      const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
-
-      expect(r.code).not.toBe(0)
-      expect(r.output).toMatch(/CHANGED:.*scripts\/foo\.sh/)
     })
   })
 
@@ -265,43 +218,6 @@ describe('TASK-067 — the shell inventory gate', () => {
     })
   })
 
-  it('#11 a legacy row removed together with a valid shim is accepted', async () => {
-    await scenario('shell-inventory-11', async (s) => {
-      const repo = await s.gitRepo('repo')
-      const base = await seedFooWithTarget(repo, s)
-
-      await s.fs.write('repo/scripts/foo.sh', SHIM)
-      await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {})) // row removed
-      await repo.commitAll('migrate to shim AND remove its row')
-
-      const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
-
-      expect(r.code).toBe(0)
-    })
-  })
-
-  it('#13 BUG-145 the push AFTER a port: the ported shim, no row in BASE, is accepted', async () => {
-    await scenario('shell-inventory-13', async (s) => {
-      const repo = await s.gitRepo('repo')
-      // BASE already has the port: foo.sh is the exact shim, foo.mts is
-      // tracked, and the inventory names neither — the row was removed in the
-      // port push. This is the state CI on main was in at 3cfa5e1.
-      await s.fs.write('repo/scripts/foo.sh', SHIM)
-      await s.fs.write('repo/scripts/foo.mts', 'console.log("one")\n')
-      await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
-      await repo.commitAll('seed: the port has already landed')
-      const base = await repo.head()
-
-      // A later push touches something unrelated.
-      await s.fs.write('repo/docs-note.md', 'an unrelated change\n')
-      await repo.commitAll('unrelated change')
-
-      const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
-
-      expect(r.code).toBe(0)
-    })
-  })
-
   it('#12 a legacy row removed WITHOUT its file migrating or disappearing is refused', async () => {
     await scenario('shell-inventory-12', async (s) => {
       const repo = await s.gitRepo('repo')
@@ -317,6 +233,65 @@ describe('TASK-067 — the shell inventory gate', () => {
 
       expect(r.code).not.toBe(0)
       expect(r.output).toMatch(/ROW-REMOVED-WITHOUT-MIGRATION:.*scripts\/foo\.sh/)
+    })
+  })
+
+  // N9 (TASK-088 slice 9) — the only shim the checker recognises is a Git
+  // hook's. A ported script's shell file is deleted, so a shim anywhere else
+  // is refused, whether BASE still has its row (CHANGED) or not (NEW).
+  describe('N9 — shim recognition is scoped to .githooks/', () => {
+    it('N9a a two-line shim with a tracked target outside .githooks/ is refused (row kept, and row removed)', async () => {
+      await scenario('shell-inventory-n9a', async (s) => {
+        const repo = await s.gitRepo('repo')
+        const base = await seedFooWithTarget(repo, s)
+        await s.fs.write('repo/scripts/foo.sh', SHIM)
+        await repo.commitAll('replace foo.sh with a shim, row left in the json')
+        const kept = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
+        expect(kept.code).not.toBe(0)
+        expect(kept.output).toMatch(/CHANGED:.*scripts\/foo\.sh/)
+
+        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
+        await repo.commitAll('and drop its row')
+        const removed = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
+        expect(removed.code).not.toBe(0)
+        expect(removed.output).toMatch(/ROW-REMOVED-WITHOUT-MIGRATION:.*scripts\/foo\.sh/)
+      })
+      await scenario('shell-inventory-n9a-new', async (s) => {
+        const repo = await s.gitRepo('repo')
+        await s.fs.write('repo/scripts/foo.sh', SHIM)
+        await s.fs.write('repo/scripts/foo.mts', 'console.log("one")\n')
+        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
+        await repo.commitAll('seed: a shim no list names')
+        const base = await repo.head()
+        const r = await runChecker(s, repo.dir, base, ['scripts/foo.sh'])
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/NEW:.*scripts\/foo\.sh/)
+      })
+    })
+
+    it('N9b the same shape under .githooks/ with a tracked target is accepted, and refused with none', async () => {
+      const HOOK_SHIM = '#!/usr/bin/env bash\nexec node "$(dirname "$0")/pre-push.mts" "$@"\n'
+      await scenario('shell-inventory-n9b', async (s) => {
+        const repo = await s.gitRepo('repo')
+        await s.fs.write('repo/.githooks/pre-push', '#!/bin/sh\necho one\n')
+        await repo.commitAll('seed the hook')
+        const sha = await blobShaOf(repo, '.githooks/pre-push')
+        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], { '.githooks/pre-push': sha }))
+        await repo.commitAll('seed inventory')
+        const base = await repo.head()
+
+        await s.fs.write('repo/.githooks/pre-push', HOOK_SHIM)
+        await repo.commitAll('the hook becomes a shim with no target')
+        const bare = await runChecker(s, repo.dir, base, ['.githooks/pre-push'])
+        expect(bare.code).not.toBe(0)
+        expect(bare.output).toMatch(/CHANGED:.*\.githooks\/pre-push/)
+
+        await s.fs.write('repo/.githooks/pre-push.mts', 'console.log("one")\n')
+        await s.fs.write('repo/scripts/shell-inventory.json', inventoryJson([], {}))
+        await repo.commitAll('the target lands, the row goes')
+        const r = await runChecker(s, repo.dir, base, ['.githooks/pre-push'])
+        expect(r.code, r.output).toBe(0)
+      })
     })
   })
 

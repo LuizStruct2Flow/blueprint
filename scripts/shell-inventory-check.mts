@@ -390,7 +390,7 @@ interface RefCtx {
 
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const SENTINEL = /[\u0001\u0002]/
-const PH_SPLIT = /\u0001([TU])(\d+)\u0002/
+const PH_SPLIT = /\u0001([TUB])(\d+)\u0002/
 const DIRECTIVE = /^\s*# shellcheck source=\S+\s*$/
 const R3_Q = String.raw`"?((?:\$\{?\w+\}?/)?)scripts/lib/([\w-]+)\.sh"?`
 const R3_RE = new RegExp(String.raw`^\s*(?:\[ -[rf] ${R3_Q} \] && )?(?:\.|source) ${R3_Q}\s*$`)
@@ -456,8 +456,9 @@ function tokenRegex(d: PortedSet, side: 'base' | 'head'): { re: RegExp; byName: 
   // The plan's boundary `(?![-\w.])`, relaxed only for a sentence-ending dot.
   const tail = String.raw`(?![-\w]|\.(?!\s|$))`
   // A path token is a WHOLE path: at a start, whitespace, quote, `=`, `(`, `:`,
-  // or after a `$VAR/` or `./` prefix — never after another `/segment`.
-  const start = String.raw`(?:(?<=^|[\s"'=(:])|(?<=\$\{?\w+\}?/)|(?<=(?:^|[\s"'=(:])\./))`
+  // a backtick (command substitution in code, a code span in a comment), or
+  // after a `$VAR/` or `./` prefix — never after another `/segment`.
+  const start = String.raw`(?:(?<=^|[\s"'=(:\x60])|(?<=\$\{?\w+\}?/)|(?<=(?:^|[\s"'=(:\x60])\./))`
   const re = new RegExp(
     String.raw`${start}(${alt(byName.keys())})${tail}` +
       (byBase.size > 0 ? String.raw`|(?<![-\w/])(${alt(byBase.keys())})${tail}` : ''),
@@ -551,15 +552,26 @@ function canonicalise(
       new RegExp(String.raw`(?<![-\w/.])(?:${interp}) (["']?[^\s"'\u0001]*)\u0001T(\d+)\u0002`, 'g'),
       '$1\u0001U$2\u0002',
     )
+    // A token left in COMMAND POSITION of a code line (first word of a command,
+    // or after `, $(, ;, |, & or a keyword) is a bare run: no interpreter, so
+    // the .mts must be executable to stay runnable (kind B). Anywhere else — a
+    // comment, an argument, a test — it is only a mention (kind T).
+    if (!/^\s*#/.test(l)) {
+      l = l.replace(
+        /(^\s*|[`;|&]\s*|\$\(\s*|\b(?:then|do|else|exec|nohup)\s+)(["']?(?:[\w.$/{}~-]*\/)?)\u0001T(\d+)\u0002/g,
+        '$1$2\u0001B$3\u0002',
+      )
+    }
     lines.push(l)
   }
   return { lines, coupled, resolved, prefixes }
 }
 
-// BASE's ⟨P⟩ may become ⟨run P⟩ (adding node is always runnable); ⟨run P⟩ may
-// become ⟨P⟩ only when the .mts is executable. Everything else must be equal.
+// BASE's mention ⟨P⟩ or bare run ⟨B⟩ may become ⟨run P⟩ (adding node is always
+// runnable); ⟨run P⟩ may become a bare ⟨B⟩ (or a mention, as before) and a bare
+// ⟨B⟩ may stay bare only when the .mts is executable. Everything else must be equal.
 function lineMatches(b: string, h: string, exec: (k: number) => boolean): boolean {
-  if (b === h) return true
+  if (b === h && !b.includes('\u0001B')) return true
   const bp = b.split(PH_SPLIT)
   const hp = h.split(PH_SPLIT)
   if (bp.length !== hp.length) return false
@@ -568,7 +580,11 @@ function lineMatches(b: string, h: string, exec: (k: number) => boolean): boolea
     if (i + 2 >= bp.length) break
     const [bk, hk, n] = [bp[i + 1], hp[i + 1], bp[i + 2]]
     if (n !== hp[i + 2]) return false
-    if (bk === hk || (bk === 'T' && hk === 'U') || (bk === 'U' && hk === 'T' && exec(Number(n)))) continue
+    const runnable = (): boolean => exec(Number(n))
+    if (bk === hk && bk !== 'B') continue
+    if ((bk === 'T' || bk === 'B') && hk === 'U') continue
+    if (bk === 'B' && hk === 'B' && runnable()) continue
+    if (bk === 'U' && (hk === 'T' || hk === 'B') && runnable()) continue
     return false
   }
   return true

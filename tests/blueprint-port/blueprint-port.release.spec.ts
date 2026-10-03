@@ -311,6 +311,15 @@ async function installShellCli(s: Scenario, dir: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true })
   await writeFile(target, await preShimBlueprintSource(s), 'utf8')
   await chmod(target, 0o755)
+  await installHistoricalGate(join(dir, 'scripts/lib'))
+}
+
+/** TASK-088 deleted scripts/lib/gate.sh, but the historical shell CLI still
+ * sources it to arm the gate, so OLD's fixtures carry the adapter it sourced
+ * (the file as of beef710), beside the live gate.mts it forwards to. */
+async function installHistoricalGate(libDir: string): Promise<void> {
+  await mkdir(libDir, { recursive: true })
+  await copyFile(join(REPO_ROOT, 'tests/blueprint-port/historical-gate.sh'), join(libDir, 'gate.sh'))
 }
 
 /** A standalone materialized copy for the handful of rows that run the shell
@@ -327,6 +336,7 @@ async function shellCliPath(s: Scenario): Promise<string> {
   await writeFile(path, await preShimBlueprintSource(s), 'utf8')
   await chmod(path, 0o755)
   await cp(join(REPO_ROOT, 'scripts/lib'), join(dir, 'lib'), { recursive: true })
+  await installHistoricalGate(join(dir, 'lib'))
   return path
 }
 
@@ -1315,7 +1325,7 @@ describe('blueprint-port differential — drift', () => {
    * holding `&`/`\`.
    */
 
-  it('scripts/lib/gate.sh missing — refuses to report drift (TASK-029)', async () => {
+  it('scripts/lib/gate.sh missing — the historical shell CLI refuses to report drift (TASK-029)', async () => {
     await scenario('blueprint-port-drift-gate-missing', async (s) => {
       const { oldResult } = await samePathTwice<DriftFixture>(s, 'root', {
         build: async (s, root) => {
@@ -1332,6 +1342,10 @@ describe('blueprint-port differential — drift', () => {
         },
         run: runDrift,
         snapshotOpts: driftSnapshotOpts,
+        // TASK-088: the live CLI no longer reads gate.sh at all (it runs
+        // gate.mts), so only the archived shell CLI's refusal is the subject;
+        // the live CLI's own is the next row.
+        compareRuns: false,
       })
       expect(oldResult.code).not.toBe(0)
       expect(oldResult.stdout).toContain('gate: scripts/lib/gate.sh is missing — the pre-push gate is NOT armed')
@@ -1339,7 +1353,7 @@ describe('blueprint-port differential — drift', () => {
     })
   })
 
-  it('scripts/lib/gate.mts missing while gate.sh is present — drift fails loudly, never reports armed (BUG-152)', async () => {
+  it('scripts/lib/gate.mts missing — drift fails loudly, never reports armed (BUG-152)', async () => {
     await scenario('blueprint-port-drift-gate-mts-missing', async (s) => {
       const { newResult } = await samePathTwice<DriftFixture>(s, 'root', {
         build: async (s, root) => {
@@ -1361,8 +1375,8 @@ describe('blueprint-port differential — drift', () => {
         compareRuns: false,
       })
       expect(newResult.code).not.toBe(0)
-      expect(newResult.stderr).toContain('cannot find')
-      expect(newResult.stderr).toContain('scripts/lib/gate.mts')
+      expect(newResult.stdout).toContain('gate: scripts/lib/gate.mts is missing — the pre-push gate is NOT armed')
+      expect(newResult.stderr).toContain('refusing to report drift without scripts/lib/gate.mts')
       expect(newResult.stdout).not.toContain('gate: armed')
       expect(newResult.stdout).not.toContain('gate: ARMED')
     })

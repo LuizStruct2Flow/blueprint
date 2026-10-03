@@ -25,12 +25,11 @@
  * TASK-018-TARGET §3.3 exempts the pre-push hook's shell ENTRY POINT from the
  * TypeScript migration, because a TypeScript gate cannot report its own absence
  * when `npm ci` has not run. This suite does not port that entry point.
- * BUG-152's port moved `scripts/lib/gate.sh` to `scripts/lib/gate.mts` behind
- * a generated sourced adapter (the dod-gate.sh shape): the cases below still
- * drive the real committed bytes through the SOURCED path — the adapter the
- * feed and the CLI source, forwarding to the `.mts` — so what they prove
- * about the gate policy is unchanged. The subject is TypeScript reached
- * across the sourcing boundary; its test is the same either way.
+ * BUG-152's port moved `scripts/lib/gate.sh` to `scripts/lib/gate.mts`, and
+ * TASK-088 deleted the shell adapter: the feed and the CLI now run the `.mts`
+ * with node, and the cases below drive the real committed bytes the same way
+ * (`callGate` runs `node gate.mts <subcommand>`), so what they prove about the
+ * gate policy is unchanged.
  *
  * THE FIXTURE IS BUILT FROM `HEAD`, NOT FROM THE WORKING TREE. A clone carries
  * what is committed, so that is what a clone-shaped fixture must carry. The shell
@@ -163,24 +162,22 @@ async function mkClone(
   }
 }
 
-/** Source the fixture's committed `gate.sh` and call one of its functions. */
+/** Run the fixture's committed `gate.mts` the way its callers do. */
 async function callGate(
   s: Scenario,
   fixtureDir: string,
   call: string,
   options: { env?: Record<string, string | undefined>; cwd?: string } = {},
 ): Promise<{ code: number | null; output: string }> {
-  const driver = await s.fs.write(
-    `drive-${call.replace(/[^a-z_]/gi, '-')}.sh`,
-    `. ${JSON.stringify(`${fixtureDir}/scripts/lib/gate.sh`)}\n${call}\n`,
-  )
-  const r = await s.run('sh', [driver], {
+  // `call` is `<shell function> [<JSON-quoted path>]`; the function name maps
+  // to the gate.mts subcommand both real callers run (agent-activity.sh and
+  // blueprint.mts: `node scripts/lib/gate.mts arm-gate|arm-push-keepalive ROOT`).
+  const [fn = '', ...rest] = call.split(' ')
+  const sub = fn.replaceAll('_', '-')
+  const args = rest.length > 0 ? [JSON.parse(rest.join(' ')) as string] : []
+  const r = await s.run(process.execPath, [`${fixtureDir}/scripts/lib/gate.mts`, sub, ...args], {
     cwd: options.cwd ?? fixtureDir,
-    // BP_CODE_ROOT is what both real callers (agent-activity.sh, blueprint.mts)
-    // set before sourcing: the adapter resolves gate.mts against it, and its
-    // `.` default is only the cwd. A case that runs from another cwd (#8) must
-    // still model a caller, not the missing-variable fallback.
-    env: { BP_CODE_ROOT: fixtureDir, ...options.env },
+    env: options.env ?? {},
     timeoutMs: 60_000,
   })
   return { code: r.code, output: r.output }

@@ -17,7 +17,7 @@
 # project's feed — that is the whole defect in one line.
 #
 # The fix is one mechanism, sourced by every caller — never two implementations
-# that agree only when a substitution happens to line up (cf. scripts/lib/gate.sh).
+# that agree only when a substitution happens to line up (cf. scripts/lib/gate.mts).
 #
 # BUG-020 — the state dir lives INSIDE the project now.
 #

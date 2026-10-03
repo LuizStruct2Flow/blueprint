@@ -720,7 +720,7 @@ async function triggerIfNeeded(): Promise<boolean> {
     spawnSync(command[0] as string, command.slice(1), { stdio: 'inherit', env: childEnv })
   } else if (wakeCommand !== '') {
     // `bash`, not `sh` — BUG-144 F1 (Thomas/Kimi review, round 3). All three
-    // launchers (start-codex/kimi/gemini-signal-watch.sh) build this string
+    // launchers (start-codex/kimi/gemini-signal-watch.mts) build this string
     // themselves and source scripts/lib/roster.sh INSIDE it to resolve the
     // hand-back Orchestrator name; roster.sh is `#!/usr/bin/env bash` and its
     // lookup-MISS path uses `${want// /_}`, a bash-only expansion. `/bin/sh`

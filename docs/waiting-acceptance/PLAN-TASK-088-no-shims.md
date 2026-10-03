@@ -8,6 +8,14 @@ quota. **Approved by the founder, 2026-10-03:** go ahead without Kimi's review,
 and Q2-Q5 are confirmed as recommended (§6). Kimi reviews the first
 implementation slice instead when its quota returns.
 
+**Landed 2026-10-03: all nine slices released at `29977d5`, waiting for the
+founder's acceptance.** Kimi stayed out of quota for the whole item, so the
+slice reviews went to Codex (Stefan on slice 1, Elias on slice 2, Andreas on
+slice 8). Three boundary gaps in the checker surfaced during the sweep, each
+fixed with a test and a mutant: a nested `/segment` path and a widened tail
+(Stefan), a backtick before a path (`db6efe9`), and a glob star before a path
+(`e9138c6`).
+
 The founder's rule and his 2026-10-03 ruling are quoted in the row and settled.
 This plan implements them. It does not re-argue them:
 

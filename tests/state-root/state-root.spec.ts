@@ -309,12 +309,11 @@ async function consumersWithInitGuard(): Promise<{ missing: string[]; checked: s
     // TARGET, still as literal shell inside its AGENT_WAKE_COMMAND template
     // (this particular pattern needs no JS-escaping — it contains no `${`),
     // so the same regex below still applies. NARROWLY scoped to those three:
-    // scripts/signal-watch.sh is ALSO a valid shim, but its `.mts` target is
-    // genuine TypeScript calling the same functions programmatically, not
-    // shell text — following it would ask a shell-syntax regex a TS question
-    // it cannot answer. Its own init-guard property is proven elsewhere
-    // (tests/state-dir, tests/codex-dispatch-status), not by this grep, so it
-    // stays read as the (guard-less) shim, same as before this file existed.
+    // scripts/signal-watch.mts is genuine TypeScript calling the same
+    // functions programmatically, not shell text — a shell-syntax regex cannot
+    // answer a TS question, and this scan lists shell files only. Its own
+    // init-guard property is proven elsewhere (tests/state-dir,
+    // tests/codex-dispatch-status), not by this grep.
     const isPortedLauncher = /^start-(codex|kimi|gemini)-signal-watch\.sh$/.test(n)
     const resolved = isPortedLauncher ? resolveConsumer(REPO_ROOT, `scripts/${n}`) : undefined
     const body = resolved !== undefined ? resolved.source : await readFile(join(dir, n), 'utf8')

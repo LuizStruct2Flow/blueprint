@@ -48,11 +48,9 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until } from '../harness/watcher.js'
-import { shimTargetPath } from '../helpers/shim.js'
 
 /**
  * The tree under test. `BP_SPEC_ROOT` repoints it at a perturbed copy, which
@@ -99,15 +97,9 @@ async function liveRepo(s: Scenario, name: string): Promise<{ root: string; watc
   await s.fs.write(`${name}/.blueprint-source`, '')
   await s.fs.write(`${name}/AGENT_ROSTER.md`, FIXTURE_ROSTER)
   const watch = await s.fs.copyIn(
-    join(SUBJECT, 'scripts', 'signal-watch.sh'),
-    `${name}/scripts/signal-watch.sh`,
+    join(SUBJECT, 'scripts', 'signal-watch.mts'),
+    `${name}/scripts/signal-watch.mts`,
   )
-  // A migrated watcher is a two-line shim execing a sibling .mts (TASK-067);
-  // copy it too WHEN ONE EXISTS, so the out-of-tree fixture can run it.
-  const watchMts = shimTargetPath('scripts/signal-watch.sh')
-  if (existsSync(join(SUBJECT, watchMts))) {
-    await s.fs.copyIn(join(SUBJECT, watchMts), `${name}/${watchMts}`)
-  }
   await s.fs.copyIn(join(SUBJECT, 'scripts', 'rotation.mts'), `${name}/scripts/rotation.mts`)
   // recoverStrandedMic hands back through scripts/signal-set.sh, resolved
   // from the SAME copied code root — the fixture copy must carry it, and its
@@ -184,7 +176,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       await s.fs.write(`${agentStateRel}/kimi-runs.log`, 'older run\n')
       const stub = await s.fs.write('mic-recovery-rotation-quota/stub-wake', '#!/bin/sh\n' +
         `printf "error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit\\nkimi FAILED (exit 1)\\n" >> "${runLogPath}"\n`, { mode: 0o755 })
-      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      const w = startWatcher(s, 'node', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
       await until('quota outcome is recorded', async () => {
         if (!await s.fs.exists(`${agentStateRel}/rotation.log`)) return false
         return (await s.fs.read(`${agentStateRel}/rotation.log`)).includes('"class":"quota"')
@@ -209,7 +201,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       await s.fs.write(`${agentStateRel}/kimi-runs.log`, '')
       const stub = await s.fs.write('mic-recovery-rotation-ok/stub-wake', '#!/bin/sh\n' +
         `printf 'kimi finished\\n' >> "${runLogPath}"\n`, { mode: 0o755 })
-      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      const w = startWatcher(s, 'node', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
       await until('ok outcome is recorded', async () => (await s.fs.exists(`${agentStateRel}/rotation.log`)) && (await s.fs.read(`${agentStateRel}/rotation.log`)).includes('"class":"ok"'))
       await w.stop()
     })
@@ -228,7 +220,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       const stub = await s.fs.write('mic-recovery-rotation-missing/stub-wake', '#!/bin/sh\n' +
         `printf 'kimi FAILED (exit 1)\\n' >> "${runLogPath}"\n` +
         `mv "${rotationPath}" "${rotationPath}.gone"\n`, { mode: 0o755 })
-      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      const w = startWatcher(s, 'node', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
       await until('recorder failure is visible and the mic is recovered', async () => {
         const recovered = await readField(s, signalRel, 'Holder') === orchestrator
         const logged = (await s.fs.exists('state/signal.log')) && /rotation outcome recorder failed/.test(await s.fs.read('state/signal.log'))
@@ -266,7 +258,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
         // exits fast with "unsettled top-level await", verified directly);
         // a live timer is what actually keeps the process running.
         `printf 'setInterval(() => {}, 1000)\\n' > "${rotationPath}"\n`, { mode: 0o755 })
-      const w = startWatcher(s, 'bash', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
+      const w = startWatcher(s, 'node', [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub], { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } })
       // Bounded well above the recorder's own timeout so a fix that bounds
       // the recorder still has room to pass, and well below the 30s default
       // so an unbounded hang (the bug) fails fast rather than after a full
@@ -315,7 +307,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       )
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub],
         { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
       )
@@ -400,7 +392,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       )
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub],
         { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
       )
@@ -479,7 +471,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
       )
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [live.watch, '--file', signalPath, '--state', 'OVER_TO_KIMI', '--poll', '0.2', '--', stub],
         { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' } },
       )
@@ -538,7 +530,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -600,7 +592,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -668,7 +660,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -746,7 +738,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -825,7 +817,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -887,7 +879,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -951,7 +943,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [
           live.watch,
           '--file', signalPath,
@@ -1036,7 +1028,7 @@ describe('BUG-144 — a failed dispatch must not strand the mic', () => {
 
       const w = startWatcher(
         s,
-        'bash',
+        'node',
         [live.watch, '--file', signalPath, '--state', 'OVER_TO_SOMEONE', '--poll', '0.2'],
         {
           cwd: s.workspace.root,

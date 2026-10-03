@@ -50,7 +50,7 @@
 set -uo pipefail
 
 # --- physical script root (A-09 / BUG-020) -----------------------------------
-# Resolved from THIS FILE, through symlinks. See scripts/signal-watch.sh
+# Resolved from THIS FILE, through symlinks. See scripts/signal-watch.mts
 # for why $0, cwd and `git rev-parse` are each wrong here. The block below is
 # byte-identical in every consumer and tests/state-dir/ #7 enforces that: it
 # cannot be shared as a lib, because finding the lib is the very problem it
@@ -106,7 +106,7 @@ state_dir="$(agent_state_dir)"; mkdir -p "$state_dir"
 # project (same class as BUG-002).
 . "$repo_root/scripts/lib/roster.sh"
 
-# The watcher-liveness oracle, shared with scripts/signal-watch.sh (TASK-063,
+# The watcher-liveness oracle, shared with scripts/signal-watch.mts (TASK-063,
 # formerly scripts/codex-signal-watch.sh) which takes the lock this tests
 # (BUG-022). Guarded rather than sourced outright: a
 # project that has pulled the feed but not this lib must keep its feed, and lose

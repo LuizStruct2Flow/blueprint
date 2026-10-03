@@ -332,7 +332,7 @@ describe('A-09 — the feed and the dispatchers rendezvous on ONE per-project st
 
       for (const rel of [
         'scripts/start-codex-signal-watch.sh',
-        'scripts/signal-watch.sh',
+        'scripts/signal-watch.mts',
         'scripts/codex-feed-filter.sh',
       ]) {
         await s.fs.copyIn(join(REPO_ROOT, rel), join('work', rel))

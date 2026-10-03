@@ -99,16 +99,16 @@ rmdir "$_ident_probe" 2>/dev/null || true
 # Bootstrap then printed "Substituted placeholders in 0 file(s)", finished with
 # "Happy struct2flowing", and exited 0 — handing over a brand-new project whose
 # CLAUDE.md still said {{PROJECT_NAME}} in five places. Verified by breaking
-# scripts/blueprint and re-running: rc=0, project delivered, placeholders intact.
+# scripts/blueprint.mts and re-running: rc=0, project delivered, placeholders intact.
 # BUG-028 already established that nothing downstream would ever report it.
 #
 # So the list is resolved HERE, before `mkdir -p "$TARGET_DIR"`, for exactly the
 # reason the identity probe above is: a late check leaves a half-bootstrapped
 # directory whose presence then defeats the "fix it and re-run" advice. Each
 # stage runs and is checked on its own — never `a | b` — which is the same
-# correction bp_managed_files makes in scripts/blueprint.
+# correction bp_managed_files makes in scripts/blueprint.mts.
 _files_raw="$(mktemp)"
-if ! bash "$BLUEPRINT_ROOT/scripts/blueprint" files >"$_files_raw" 2>&1; then
+if ! node "$BLUEPRINT_ROOT/scripts/blueprint.mts" files >"$_files_raw" 2>&1; then
   echo "❌ 'blueprint files' failed — nothing has been created." >&2
   echo "   The bootstrap cannot know which files to substitute, and a project" >&2
   echo "   built without that list ships literal {{PROJECT_NAME}} everywhere." >&2

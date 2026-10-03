@@ -857,14 +857,14 @@ describe('TASK-029 — U7 (PR #69): the installed command is the project CLI, an
       await install(s, m, [])
       const proj = await migrated(s, 'a', await releasedRemote(s), 'all')
       const env = { HOME: m.home, PATH: base }
-      const direct = join(proj, 'scripts/blueprint')
+      const direct = join(proj, 'scripts/blueprint.mts')
 
       // Warm-up: the first run arms the gate and fills the cache, and says so.
       // Both compared runs then start from the same state.
-      const warm = await s.run(direct, ['drift'], { cwd: proj, env })
+      const warm = await s.run('node', [direct, 'drift'], { cwd: proj, env })
       expect(warm.code, warm.output).toBe(0)
 
-      const viaDirect = await s.run(direct, ['drift'], { cwd: proj, env })
+      const viaDirect = await s.run('node', [direct, 'drift'], { cwd: proj, env })
       const viaCommand = await s.run(m.target, ['drift'], { cwd: proj, env })
 
       // NON-VACUITY: a real report, from the address, with the gate line and a

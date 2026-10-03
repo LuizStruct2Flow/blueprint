@@ -145,7 +145,7 @@ export class ScopedFs {
    * Copy a file INTO the workspace from anywhere.
    *
    * Deliberately asymmetric: the source may be outside (a suite legitimately
-   * copies scripts/blueprint out of the repo under test), the destination may
+   * copies scripts/blueprint.mts out of the repo under test), the destination may
    * not. Reading real files is fine; writing them is the defect.
    */
   async copyIn(absSource: string, relDest: string): Promise<string> {

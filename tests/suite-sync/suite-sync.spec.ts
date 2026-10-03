@@ -148,24 +148,16 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { isValidShim, shimTargetPath } from '../helpers/shim.js'
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 
 /**
- * Copy `scripts/blueprint` into a fixture blueprint's tree, as one of its
- * MANAGED files: chmod +x, and, once TASK-081 lands, follow it as a shim to
- * its `.mts` target, so a fixture blueprint a project pulls from still ships
- * something that runs. A no-op today — `isValidShim` is false with no
- * `scripts/blueprint.mts` in this tree yet.
+ * Copy `scripts/blueprint.mts` into a fixture blueprint's tree, as one of its
+ * MANAGED files, so a fixture blueprint a project pulls from still ships
+ * something that runs.
  */
 async function copyCliInto(s: Scenario, bp: string) {
-  await s.fs.copyIn(CLI, join(bp, 'scripts/blueprint'))
-  await s.fs.chmod(join(bp, 'scripts/blueprint'), 0o755)
-  if (isValidShim(REPO_ROOT, 'scripts/blueprint')) {
-    const target = shimTargetPath('scripts/blueprint')
-    await s.fs.copyIn(join(REPO_ROOT, target), join(bp, target))
-  }
+  await s.fs.copyIn(CLI, join(bp, 'scripts/blueprint.mts'))
 }
 
 /**
@@ -313,8 +305,8 @@ async function archiveTests(s: Scenario, root: string): Promise<string[]> {
     .sort()
 }
 
-const drift = (s: Scenario, proj: string) => s.run(CLI, ['drift'], { cwd: proj })
-const pullAll = (s: Scenario, proj: string) => s.run(CLI, ['pull', '--yes'], { cwd: proj })
+const drift = (s: Scenario, proj: string) => s.run('node', [CLI, 'drift'], { cwd: proj })
+const pullAll = (s: Scenario, proj: string) => s.run('node', [CLI, 'pull', '--yes'], { cwd: proj })
 
 describe('BUG-029 — a managed DIRECTORY syncs, additively, without eating project-owned files', () => {
   it('#1 the expansion equals `git archive HEAD tests` exactly', async () => {

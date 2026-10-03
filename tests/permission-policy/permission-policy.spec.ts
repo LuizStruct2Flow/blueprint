@@ -80,7 +80,7 @@ describe('BUG-118 — approving a deployment is a decision, not a default', () =
 
 // --- TASK-042 ---------------------------------------------------------------
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 const ASK = 'Bash(aws codepipeline put-approval-result *)'
 const DENY = 'Bash(sudo rm *)'
 const PROJECT_RULE = 'Bash(aws logs tail *)'
@@ -200,7 +200,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       const p = await fixture(s, 'a', blueprintSettings([]), layered)
       const layerBefore = await readFile(join(p, LAYER), 'utf8')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(0)
 
       const got = await settingsOf(p)
@@ -215,7 +215,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
   it('#5 a project allow cannot re-allow what the blueprint asks or denies', async () => {
     await scenario('permission-policy-5', async (s) => {
       const p = await fixture(s, 'b', blueprintSettings([]), layered)
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(0)
 
       const got = await settingsOf(p)
@@ -233,12 +233,12 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       const p = await fixture(s, 'c', blueprintSettings([]), layered)
 
       // Non-vacuity: before the pull the file really is behind.
-      const before = await s.run(CLI, ['drift'], { cwd: p })
+      const before = await s.run('node', [CLI, 'drift'], { cwd: p })
       expect(driftLine(before.output), before.output).toMatch(/~.*\.claude\/settings\.json/)
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(0)
-      const after = await s.run(CLI, ['drift'], { cwd: p })
+      const after = await s.run('node', [CLI, 'drift'], { cwd: p })
       expect(
         driftLine(after.output),
         `drift still reports settings.json after a pull — a project with its own rules would read as drifted forever:\n${after.output}`,
@@ -252,7 +252,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       const p = await fixture(s, 'd', legacy)
       const before = await readFile(join(p, '.claude/settings.json'), 'utf8')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, `a refused settings.json must exit 4:\n${r.output}`).toBe(4)
       expect(await readFile(join(p, '.claude/settings.json'), 'utf8'), 'the project rules were overwritten').toBe(
         before,
@@ -260,11 +260,11 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       expect(r.output, 'the refusal must show the rule and where it goes').toContain(PROJECT_RULE)
       expect(r.output).toContain(LAYER)
 
-      const drift = await s.run(CLI, ['drift'], { cwd: p })
+      const drift = await s.run('node', [CLI, 'drift'], { cwd: p })
       expect(driftLine(drift.output), drift.output).toMatch(/✗.*\.claude\/settings\.json/)
 
       await s.fs.write(join(p, LAYER), json({ permissions: { allow: [PROJECT_RULE] } }))
-      const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const again = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(again.code, again.output).toBe(0)
       const got = await settingsOf(p)
       expect(got.permissions.allow).toContain(PROJECT_RULE)
@@ -277,7 +277,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       const p = await fixture(s, 'e', blueprintSettings([]), { hooks: {}, permissions: { allow: [PROJECT_RULE] } })
       const before = await readFile(join(p, '.claude/settings.json'), 'utf8')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(4)
       expect(r.output).toMatch(/settings\.project\.json must/)
       expect(await readFile(join(p, '.claude/settings.json'), 'utf8')).toBe(before)
@@ -287,7 +287,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
   it('#9 a project with no rules of its own and no project file pulls exactly as before', async () => {
     await scenario('permission-policy-9', async (s) => {
       const p = await fixture(s, 'f', blueprintSettings([]))
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(0)
       expect(await readFile(join(p, '.claude/settings.json'), 'utf8')).toBe(
         json(blueprintSettings(['Bash(git log *)'])),
@@ -304,7 +304,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       // `{broken` in a project. Nothing downstream validates it either.
       const p = await fixture(s, 'g', null, undefined, '{broken\n')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, `malformed blueprint settings must be refused:\n${r.output}`).toBe(4)
       await expect(
         readFile(join(p, '.claude/settings.json'), 'utf8'),
@@ -324,7 +324,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       } as unknown as Settings
       const p = await fixture(s, 'h', legacy)
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(r.code, r.output).toBe(4)
       expect(r.output, 'an unsupported legacy key was neither carried nor named').toContain(
         'permissions.otherList',
@@ -342,7 +342,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
 
       // The guarantee itself: saving what was printed ends the migration.
       await s.fs.write(join(p, LAYER), json(proposal))
-      const again = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const again = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
       expect(again.code, `the printed proposal was rejected as a project file:\n${again.output}`).toBe(0)
       const got = await settingsOf(p)
       expect(got.permissions.allow).toContain(PROJECT_RULE)
@@ -364,7 +364,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
         `{}\n{"permissions":{"allow":[${JSON.stringify(PROJECT_RULE)}]}}\n`,
       )
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(r.code, `a two-object project layer was accepted:\n${r.output}`).toBe(4)
       expect(r.output, 'the refusal does not say what is wrong with the file').toMatch(
@@ -380,7 +380,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       const p = await fixture(s, 'j', null)
       await s.fs.write(join(p, LAYER), '{"hooks":{"PreToolUse":[]}}\n{}\n')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(r.code, `an unsupported first object was accepted:\n${r.output}`).toBe(4)
     })
@@ -394,7 +394,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
         `{}{"permissions":{"allow":[${JSON.stringify(PROJECT_RULE)}]}}\n`,
       )
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(r.code, `a two-object settings.json was accepted:\n${r.output}`).toBe(4)
       expect(r.output).toMatch(/single JSON object/i)
@@ -413,7 +413,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
         const p = await fixture(s, `l-${tag}`, null)
         await s.fs.write(join(p, LAYER), body)
 
-        const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+        const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
         expect(r.code, `a ${tag} layer was accepted:\n${r.output}`).toBe(4)
         expect(r.output, `a ${tag} is valid JSON — the refusal must not call it invalid`).not.toMatch(
@@ -434,7 +434,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
         const p = await fixture(s, `n-${tag}`, null)
         await s.fs.write(join(p, '.claude/settings.json'), body)
 
-        const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+        const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
         expect(r.code, `a ${tag} settings.json was accepted:\n${r.output}`).toBe(4)
         expect(r.output, `a ${tag} is valid JSON — the refusal must not call it invalid`).not.toMatch(
@@ -449,7 +449,7 @@ describe('TASK-042 — a project keeps its own permission rules across pull', ()
       const p = await fixture(s, 'm', null)
       await s.fs.write(join(p, '.claude/settings.json'), 'null\n')
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: p })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: p })
 
       expect(r.code, `null settings.json was overwritten without a word:\n${r.output}`).toBe(4)
     })

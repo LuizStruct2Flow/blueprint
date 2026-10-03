@@ -3,7 +3,7 @@
 #
 # Everything between the markers is owned by the blueprint and is REPLACED by
 # `blueprint pull`; everything below the end marker is yours and is preserved
-# byte-for-byte (marker_aware_merge, scripts/blueprint). Editing inside the
+# byte-for-byte (marker_aware_merge, scripts/blueprint.mts). Editing inside the
 # region means losing the edit at the next pull — back-propagate it instead:
 # `blueprint a2bp .githooks/pre-push-project`.
 #

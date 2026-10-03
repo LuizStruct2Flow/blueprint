@@ -190,7 +190,7 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 const LIB = join(REPO_ROOT, 'scripts/lib/staleness.sh')
 
 /**
@@ -727,7 +727,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       const { bp, proj } = await driftFixture(s)
 
       const start = Date.now()
-      const r = await s.run(CLI, ['drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
       const elapsed = Date.now() - start
 
       expect(elapsed, `drift took ${elapsed}ms without a TTY — this runs at every wake`).toBeLessThan(20_000)
@@ -744,7 +744,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       const { bp, proj } = await driftFixture(s)
       const before = (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim()
 
-      await s.run(CLI, ['drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
+      await s.run('node', [CLI, 'drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
 
       expect(
         (await git(s, bp, ['rev-parse', 'HEAD'])).stdout.trim(),
@@ -776,7 +776,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
 
       const withTty = async (env: Record<string, string>) => {
         const probe = await s.run('script', ['-qec', 'true', '/dev/null'], { cwd: proj })
-        const cmd = `cd '${proj}' && '${CLI}' drift 2>&1`
+        const cmd = `cd '${proj}' && node '${CLI}' drift 2>&1`
         const args =
           probe.code === 0
             ? ['-qec', cmd, '/dev/null']
@@ -808,7 +808,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       // checks the status — which is every agent wake.
       const { bp, proj } = await driftFixture(s)
 
-      const r = await s.run(CLI, ['drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: proj, env: { BLUEPRINT_ROOT: bp }, timeoutMs: 60_000 })
 
       expect(r.code, `drift exited ${r.code} because the checkout was stale — staleness is advisory`).toBe(0)
     })
@@ -822,7 +822,7 @@ describe('`blueprint drift` reports staleness without blocking or mutating anyth
       const path = await blackHoleRemote(s, bp)
 
       const start = Date.now()
-      const r = await s.run(CLI, ['drift'], {
+      const r = await s.run('node', [CLI, 'drift'], {
         cwd: proj,
         env: { BP_STALENESS_TIMEOUT: '2', PATH: path, BLUEPRINT_ROOT: bp },
         timeoutMs: 60_000,

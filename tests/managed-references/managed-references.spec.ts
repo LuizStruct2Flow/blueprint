@@ -52,7 +52,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 
 /** A `scripts/…` path as it appears in prose, code or JSON. */
 const SCRIPT_REF = /scripts\/[A-Za-z0-9_./-]*[A-Za-z0-9_]/g
@@ -83,7 +83,7 @@ async function shippedFiles(s: Scenario): Promise<Set<string>> {
  * than a regex over a bash array, which would be a second parser of one fact.
  */
 async function managedEntries(s: Scenario): Promise<string[]> {
-  const r = await s.run(CLI, ['files'], { cwd: s.workspace.root })
+  const r = await s.run('node', [CLI, 'files'], { cwd: s.workspace.root })
   expect(r.code, r.output).toBe(0)
   const lines = r.stdout.split('\n')
   const start = lines.findIndex((l) => l.startsWith('Blueprint-managed files'))
@@ -172,7 +172,7 @@ describe('BUG-114 — every script a managed file names reaches a project that p
       )
       await initRepo(s, proj)
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: proj })
       expect(r.code, r.output).toBe(0)
 
       const absent: string[] = []
@@ -200,7 +200,7 @@ describe('BUG-114 — every script a managed file names reaches a project that p
  * into a new project. CI's ts-tests checkout carries full history for this.
  */
 describe('TASK-025 — a single-file pull of the CLI brings the libs it needs', () => {
-  it('#3 an old project pulls only scripts/blueprint, then its own CLI runs drift against the remote', async () => {
+  it('#3 an old project pulls only scripts/blueprint.mts, then its own CLI runs drift against the remote', async () => {
     await scenario('managed-references-3', async (s) => {
       const first = await s.run(
         'git',
@@ -249,15 +249,15 @@ describe('TASK-025 — a single-file pull of the CLI brings the libs it needs', 
       await initRepo(s, proj)
 
       // Only the CLI, through the address-reading CLI of this tree.
-      const pulled = await s.run(CLI, ['pull', 'scripts/blueprint', '--yes'], { cwd: proj })
+      const pulled = await s.run('node', [CLI, 'pull', 'scripts/blueprint.mts', '--yes'], { cwd: proj })
       expect(pulled.code, pulled.output).toBe(0)
       expect(await s.fs.read(join(proj, 'docs/DoD.md')), 'a partial pull of the CLI pulled an unrelated file').toBe(
         '# DoD\nowner proj\nedited here\n',
       )
 
       // Then the project's OWN CLI, with nothing fetched separately.
-      const own = await s.run(join(proj, 'scripts/blueprint'), ['drift'], { cwd: proj })
-      expect(own.code, `the project's own CLI refused after pulling scripts/blueprint:\n${pulled.output}\n---\n${own.output}`).toBe(0)
+      const own = await s.run('node', [join(proj, 'scripts/blueprint.mts'), 'drift'], { cwd: proj })
+      expect(own.code, `the project's own CLI refused after pulling scripts/blueprint.mts:\n${pulled.output}\n---\n${own.output}`).toBe(0)
       expect(own.stdout).toContain(`fetched:    ${sha}`)
     })
   })
@@ -323,7 +323,7 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
       expect(await readFile(join(proj, '.blueprint-source'), 'utf8'), `the old CLI's full pull did not advance past the removal\n${byOld.output}`).toContain(removal)
       expect(await s.fs.exists(join(proj, 'scripts/orphan.sh')), 'fixture broken: the old CLI already removed the orphan').toBe(true)
 
-      const byNew = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+      const byNew = await s.run('node', [CLI, 'pull', '--yes'], { cwd: proj })
       expect(byNew.code, byNew.output).toBe(0)
       expect(
         await s.fs.exists(join(proj, 'scripts/orphan.sh')),
@@ -389,7 +389,7 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
         `fixture broken: the old CLI did not install the never-shipped version\n${byOld.output}`,
       ).toContain('edited after export-ignore')
 
-      const byNew = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+      const byNew = await s.run('node', [CLI, 'pull', '--yes'], { cwd: proj })
       expect(byNew.code, byNew.output).toBe(0)
       expect(
         await s.fs.exists(join(proj, tool)),
@@ -399,7 +399,7 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
   })
 
   // Alexey, S1-S2 implementation review: the CLI wrote pulled files with
-  // `cat > DEST`, so a pull that replaced scripts/blueprint rewrote the script
+  // `cat > DEST`, so a pull that replaced the shell CLI rewrote the script
   // bash was still reading. After the dispatch returned, bash read the NEW bytes
   // at its OLD offset and failed after reporting success (exit 127 and 2 in two
   // real projects). The new CLI here is the old one plus a tail, so the bytes at
@@ -411,11 +411,11 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
         .split('\n')
         .filter(Boolean)
       // Split words, so pull's own diff preview of the tail never matches the output.
-      const tail = '\necho "ran bytes" "the pull wrote" >&2\nexit 97\n'
+      const tail = '\nconsole.error("ran bytes" + " the pull wrote")\nprocess.exit(97)\n'
 
       const bp = await s.workspace.dir('bp')
       for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(bp, f))
-      await s.fs.write(join(bp, 'scripts/blueprint'), tail, { append: true })
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), tail, { append: true })
       await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
       await initRepo(s, bp)
       const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
@@ -429,19 +429,20 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
       )
       await initRepo(s, proj)
 
-      // Under the port, the running process is `node scripts/blueprint.mts`
-      // and never re-reads `scripts/blueprint` at all, so this witness would
-      // go vacuous. The inode is what still pins "rename, never rewrite in
-      // place": a write that truncated and rewrote the SAME file would leave
-      // the running process's inode unchanged even though the bytes moved.
-      const before = await stat(join(proj, 'scripts/blueprint'))
+      // The running process is `node scripts/blueprint.mts` and never re-reads
+      // it, so the "ran bytes" witness is vacuous here. The inode is what
+      // still pins "rename, never rewrite in place": a write that truncated and
+      // rewrote the SAME file would leave the running process's inode
+      // unchanged even though the bytes moved.
+      const cli = join(proj, 'scripts/blueprint.mts')
+      const before = await stat(cli)
 
-      const pulled = await s.run(join(proj, 'scripts/blueprint'), ['pull', '--yes'], { cwd: proj })
-      expect(await s.fs.read(join(proj, 'scripts/blueprint')), `the pull did not replace the CLI\n${pulled.output}`).toContain(tail)
+      const pulled = await s.run('node', [cli, 'pull', '--yes'], { cwd: proj })
+      expect(await s.fs.read(cli), `the pull did not replace the CLI\n${pulled.output}`).toContain(tail)
       expect(pulled.output, 'the running CLI executed bytes the pull wrote over it').not.toContain('ran bytes the pull wrote')
       expect(pulled.code, pulled.output).toBe(0)
 
-      const after = await stat(join(proj, 'scripts/blueprint'))
+      const after = await stat(cli)
       expect(after.ino, 'the pulled CLI kept its old inode — the file was rewritten in place, not renamed into').not.toBe(before.ino)
     })
   })
@@ -450,14 +451,12 @@ describe('TASK-021 — retirement comes from history, so an old CLI cannot erase
 /**
  * TASK-081 slice 6 (plan §7) — the closure is a FIXED POINT, not one hop.
  * `#3` above proves the closure follows the CLI to a lib it names; this
- * proves it also follows a LIB to a `.mts` sibling THAT LIB names, which is
- * what BUG-152 needs once `scripts/lib/gate.sh` becomes a sourced adapter
- * shaped like `scripts/lib/dod-gate.sh` (a non-comment line assigning its
- * own bridge path). BUG-152 has not landed, so the fixture stands in for it:
- * `gate.sh` here is a small adapter naming `gate.mts` and dying if that
- * sibling is absent — exactly the `_dg_call` shape — so a closure that stops
- * after one hop leaves the project with the adapter but not its target, and
- * `arm_gate` (which `drift` always calls) reports the missing file.
+ * proves it also follows a LIB to a `.mts` sibling THAT LIB names. TASK-088
+ * deleted the real sourced adapters, so the fixture stands in for one: the
+ * blueprint's CLI gains a line naming `zz-adapter.sh`, which assigns the path
+ * of `zz-target.mts` (the same non-comment assignment shape the real adapters
+ * had). A closure that stops after one hop leaves the project with the
+ * adapter but not its target.
  */
 describe('TASK-081 slice 6 — the closure follows a lib to its own .mts sibling', () => {
   it('#6 a single-file pull of the CLI brings a sourced-adapter libs own .mts, so drift exits 0', async () => {
@@ -466,37 +465,20 @@ describe('TASK-081 slice 6 — the closure follows a lib to its own .mts sibling
         .split('\n')
         .filter(Boolean)
 
-      // The fixture adapter: same shape as scripts/lib/dod-gate.sh's bridge —
-      // a non-comment line naming its own `.mts` sibling by path, and a
-      // function that refuses when that sibling is missing.
-      const adapterGateSh = [
-        '#!/bin/sh',
-        '# scripts/lib/gate.sh — fixture sourced adapter (TASK-081 slice 6 reproducer,',
-        '# standing in for BUG-152s real port). Sources arm_gate from gate.mts.',
-        'arm_gate() {',
-        '  _gate_mts="$1/scripts/lib/gate.mts"',
-        '  if [ ! -f "$_gate_mts" ]; then',
-        '    echo "cannot find $_gate_mts" >&2',
-        '    return 2',
-        '  fi',
-        '  echo "gate armed via $_gate_mts"',
-        '}',
-        '',
-      ].join('\n')
-      const gateMts = '// fixture stub for BUG-152s gate.mts — not otherwise executed\n'
+      const adapter = ['#!/bin/sh', '# fixture sourced adapter', 'target="scripts/lib/zz-target.mts"', '. "$target"', ''].join('\n')
 
       const bp = await s.workspace.dir('bp')
       for (const f of tracked) await s.fs.copyIn(join(REPO_ROOT, f), join(bp, f))
-      await s.fs.write(join(bp, 'scripts/lib/gate.sh'), adapterGateSh)
-      await s.fs.write(join(bp, 'scripts/lib/gate.mts'), gateMts)
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), '\nconst fixtureAdapter = "scripts/lib/zz-adapter.sh"\n', { append: true })
+      await s.fs.write(join(bp, 'scripts/lib/zz-adapter.sh'), adapter)
+      await s.fs.write(join(bp, 'scripts/lib/zz-target.mts'), '// fixture target\n')
       await s.fs.write(join(bp, 'docs/DoD.md'), '# DoD\nowner {{PROJECT_NAME}}\n')
       await s.fs.write(join(bp, 'tests/fixture/test.sh'), 'echo fixture\n')
       await initRepo(s, bp)
       const sha = (await s.run('git', ['rev-parse', 'HEAD'], { cwd: bp })).stdout.trim()
 
-      // The project: today's real scripts/ minus gate.mts (BUG-152 has since
-      // ported gate.sh for real, so it is left out here) — a project that
-      // predates the port and holds no gate.mts at all.
+      // The project: today's real scripts/ minus gate.mts — a project that
+      // holds no gate.mts at all, which the CLI names directly.
       const proj = await s.workspace.dir('proj')
       for (const f of tracked) {
         if (f !== 'scripts/lib/gate.mts') await s.fs.copyIn(join(REPO_ROOT, f), join(proj, f))
@@ -516,20 +498,24 @@ describe('TASK-081 slice 6 — the closure follows a lib to its own .mts sibling
       )
       await initRepo(s, proj)
 
-      const pulled = await s.run(CLI, ['pull', 'scripts/blueprint', '--yes'], { cwd: proj })
+      const pulled = await s.run('node', [CLI, 'pull', 'scripts/blueprint.mts', '--yes'], { cwd: proj })
       expect(pulled.code, pulled.output).toBe(0)
       expect(await s.fs.read(join(proj, 'docs/DoD.md')), 'a partial pull of the CLI pulled an unrelated file').toBe(
         '# DoD\nowner proj\nedited here\n',
       )
       expect(
         await s.fs.exists(join(proj, 'scripts/lib/gate.mts')),
-        `the closure pulled the adapter (scripts/lib/gate.sh) but not the .mts it names — a one-hop closure\n${pulled.output}`,
+        `the closure did not bring the lib the CLI names directly\n${pulled.output}`,
+      ).toBe(true)
+      expect(
+        await s.fs.exists(join(proj, 'scripts/lib/zz-target.mts')),
+        `the closure pulled the adapter (scripts/lib/zz-adapter.sh) but not the .mts it names — a one-hop closure\n${pulled.output}`,
       ).toBe(true)
 
-      const own = await s.run(join(proj, 'scripts/blueprint'), ['drift'], { cwd: proj })
+      const own = await s.run('node', [join(proj, 'scripts/blueprint.mts'), 'drift'], { cwd: proj })
       expect(
         own.code,
-        `the project's own drift refused after pulling scripts/blueprint — arm_gate could not find its .mts sibling\n${pulled.output}\n---\n${own.output}`,
+        `the project's own drift refused after pulling scripts/blueprint.mts — it could not find a lib the pull should have brought\n${pulled.output}\n---\n${own.output}`,
       ).toBe(0)
     })
   })

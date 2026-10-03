@@ -70,7 +70,7 @@
  * which its region tracking is correct.
  *
  * TASK-026 MUTATION RECORD (R6) — observed, not predicted. Each mutant applied to
- * scripts/blueprint alone, the suite run, the file restored. BUG-113's cases are
+ * scripts/blueprint (then the shell CLI) alone, the suite run, the file restored. BUG-113's cases are
  * left out of the BUG-034 red sets: they were red for their own unfixed reason.
  *   BUG-112 reproducer's parent (substring detection)  → red #3 #4
  *   M1 the structure scan never reports `bad`          → red #5 #5b #6
@@ -95,9 +95,8 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { resolveConsumer } from '../helpers/shim.js'
 
-const CLI = join(REPO_ROOT, 'scripts/blueprint')
+const CLI = join(REPO_ROOT, 'scripts/blueprint.mts')
 const FIXTURES = join(REPO_ROOT, 'tests/marker-merge')
 
 async function initRepo(s: Scenario, dir: string) {
@@ -166,7 +165,7 @@ describe('BP-7 — `blueprint pull` replaces the marker region and keeps the pro
       expect(expected, 'the oracle equals the pre-pull state — the case is vacuous').not.toBe(before)
       expect(expected, 'the oracle equals the blueprint copy — a whole-file cp would pass').not.toBe(upstream)
 
-      const r = await s.run(CLI, ['pull', 'docs/mocks/README.md', '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', 'docs/mocks/README.md', '--yes'], { cwd: proj })
       expect(r.code, r.output).toBe(0)
 
       const landed = await readFile(join(proj, 'docs/mocks/README.md'), 'utf8')
@@ -224,7 +223,7 @@ describe('BP-7 — `blueprint pull` replaces the marker region and keeps the pro
       )
       await initRepo(s, proj)
 
-      const r = await s.run(CLI, ['pull', 'docs/mocks/README.md', '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', 'docs/mocks/README.md', '--yes'], { cwd: proj })
       expect(r.code, r.output).toBe(0)
       expect(r.output).toMatch(/marker structure mismatch/)
 
@@ -284,7 +283,7 @@ describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file',
         `${v}\n`
       const { proj } = await pair(s, 'p', 'CLAUDE.md', prose('v2'), prose('v1'))
 
-      const r = await s.run(CLI, ['pull', 'CLAUDE.md', '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', 'CLAUDE.md', '--yes'], { cwd: proj })
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).not.toMatch(FALLBACK)
@@ -295,17 +294,11 @@ describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file',
 
   it('BUG-112 #4 code that SEARCHES for the markers is not a marker — the CLI pulls itself cleanly', async () => {
     await scenario('marker-merge-4', async (s) => {
-      // scripts/blueprint is a managed file whose own code greps for the tokens
-      // and one of whose comments starts with one. Under substring detection
-      // every pull of the CLI took the fallback — and on the day its counts
-      // happened to balance, the awk would have "merged" the CLI into itself.
-      //
-      // TASK-081 §8 slice 0 / slice 5: once the port lands, scripts/blueprint
-      // is the two-line shim and this marker-grepping code moves to
-      // scripts/blueprint.mts. resolveConsumer follows the shim to find
-      // where the code this case is ABOUT actually lives, so it keeps
-      // testing the right file instead of a shim that mentions no markers at
-      // all.
+      // scripts/blueprint.mts is a managed file whose own code greps for the
+      // tokens and one of whose comments starts with one. Under substring
+      // detection every pull of the CLI took the fallback — and on the day its
+      // counts happened to balance, the awk would have "merged" the CLI into
+      // itself.
       //
       // TASK-081 §9 D (founder decision, "Option 1"): scripts/blueprint.mts
       // never spells the joined token `BLUEPRINT:` + `BEGIN` as one
@@ -318,20 +311,14 @@ describe('BUG-112 — a marker is a LINE, not a substring anywhere in the file',
       // rather than merely tested against. The kind-aware check below still
       // proves the fixture is "code that deals with the markers", using
       // whichever shape that code currently has.
-      const consumer = resolveConsumer(REPO_ROOT, 'scripts/blueprint')
-      expect(consumer, 'scripts/blueprint is missing from this checkout').toBeDefined()
-      const rel = consumer?.rel ?? 'scripts/blueprint'
-      const cli = consumer?.source ?? ''
-      if (consumer?.kind === 'ts') {
-        expect(cli, 'the fixture is vacuous: the ported CLI no longer deals with the markers at all').toContain(
-          'BP_MARKER_LEAD',
-        )
-      } else {
-        expect(cli, 'the fixture is vacuous: the CLI no longer mentions the markers').toContain('BLUEPRINT:BEGIN')
-      }
+      const rel = 'scripts/blueprint.mts'
+      const cli = await readFile(join(REPO_ROOT, rel), 'utf8')
+      expect(cli, 'the fixture is vacuous: the ported CLI no longer deals with the markers at all').toContain(
+        'BP_MARKER_LEAD',
+      )
       const { proj } = await pair(s, 'c', rel, cli, cli + '# an older local copy\n')
 
-      const r = await s.run(CLI, ['pull', rel, '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', rel, '--yes'], { cwd: proj })
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).not.toMatch(FALLBACK)
@@ -359,7 +346,7 @@ describe('BUG-034 — markers out of order are refused, never merged', () => {
       const inverted = '#!/bin/sh\n# BLUEPRINT:END\necho FOOTER-TO-KEEP\n# BLUEPRINT:BEGIN\necho stale\n'
       const { proj } = await pair(s, 'i', HOOK, region('echo managed-v2'), inverted)
 
-      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', HOOK, '--yes'], { cwd: proj })
 
       // The defect printed "project outside-marker content preserved" and exited
       // 0 over a file it had rearranged. A refusal must be visible to a script.
@@ -381,7 +368,7 @@ describe('BUG-034 — markers out of order are refused, never merged', () => {
         '#!/bin/sh\n# BLUEPRINT:END\necho FOOTER-TO-KEEP\n# BLUEPRINT:BEGIN\necho stale\n# BLUEPRINT:END\n'
       const { proj } = await pair(s, 's', HOOK, region('echo managed-v2'), stray)
 
-      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', HOOK, '--yes'], { cwd: proj })
 
       expect(r.code, r.output).not.toBe(0)
       expect(r.output).toMatch(/refuse/)
@@ -395,7 +382,7 @@ describe('BUG-034 — markers out of order are refused, never merged', () => {
       const unbalanced = '#!/bin/sh\n# BLUEPRINT:BEGIN\necho stale\necho PROJECT-GUARD\n'
       const { proj } = await pair(s, 'u', HOOK, region('echo managed-v2'), unbalanced)
 
-      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', HOOK, '--yes'], { cwd: proj })
 
       expect(r.code, r.output).not.toBe(0)
       expect(r.output).toMatch(/refuse/)
@@ -416,14 +403,14 @@ describe("BUG-113 — drift, pull's selection and pull's preview give ONE answer
   it('BUG-113 #7 drift does not report project-owned lines after the end marker', async () => {
     await scenario('marker-merge-7', async (s) => {
       const same = await pair(s, 'd', HOOK, region('echo managed'), region('echo managed', 'echo PROJECT-FOOTER\n'))
-      const clean = await s.run(CLI, ['drift'], { cwd: same.proj })
+      const clean = await s.run('node', [CLI, 'drift'], { cwd: same.proj })
       expect(clean.code, clean.output).toBe(0)
       expect(listed(clean.output, '~'), clean.output).not.toContain(HOOK)
 
       // NON-VACUITY: the same file with a changed REGION is still reported, so
       // the case above is drift judging the file, not drift skipping it.
       const moved = await pair(s, 'e', HOOK, region('echo managed-v2'), region('echo managed-v1', 'echo PROJECT-FOOTER\n'))
-      const drifted = await s.run(CLI, ['drift'], { cwd: moved.proj })
+      const drifted = await s.run('node', [CLI, 'drift'], { cwd: moved.proj })
       expect(listed(drifted.output, '~'), drifted.output).toContain(HOOK)
     })
   })
@@ -433,7 +420,7 @@ describe("BUG-113 — drift, pull's selection and pull's preview give ONE answer
       const text = region('echo managed', 'echo PROJECT-FOOTER\n')
       const { proj } = await pair(s, 'n', HOOK, region('echo managed'), text)
 
-      const r = await s.run(CLI, ['pull', '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', '--yes'], { cwd: proj })
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).toContain('Nothing to pull')
@@ -445,7 +432,7 @@ describe("BUG-113 — drift, pull's selection and pull's preview give ONE answer
     await scenario('marker-merge-9', async (s) => {
       const { proj } = await pair(s, 'v', HOOK, region('echo managed-v2'), region('echo managed-v1', 'echo PROJECT-FOOTER\n'))
 
-      const r = await s.run(CLI, ['pull', HOOK, '--yes'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'pull', HOOK, '--yes'], { cwd: proj })
 
       expect(r.code, r.output).toBe(0)
       expect(r.output).toContain('+echo managed-v2')
@@ -461,7 +448,7 @@ describe("BUG-113 — drift, pull's selection and pull's preview give ONE answer
       const inverted = '#!/bin/sh\n# BLUEPRINT:END\necho FOOTER\n# BLUEPRINT:BEGIN\necho stale\n'
       const { proj } = await pair(s, 'r', HOOK, region('echo managed'), inverted)
 
-      const r = await s.run(CLI, ['drift'], { cwd: proj })
+      const r = await s.run('node', [CLI, 'drift'], { cwd: proj })
 
       expect(r.output).not.toContain('All blueprint-managed files match')
       expect(listed(r.output, '✗'), r.output).toContain(HOOK)

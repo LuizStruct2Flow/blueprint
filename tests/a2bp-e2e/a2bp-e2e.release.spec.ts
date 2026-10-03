@@ -57,7 +57,7 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
 
 const SUBJECT_ROOT = process.env.BP_SUBJECT_ROOT ?? REPO_ROOT
-const CLI = join(SUBJECT_ROOT, 'scripts/blueprint')
+const CLI = join(SUBJECT_ROOT, 'scripts/blueprint.mts')
 
 /** Exit statuses under test (must match request-file.sh). */
 const RC = { OK: 0, PENDING: 3, BLOCKED: 4, FAILED: 5, NOTHING: 6 } as const
@@ -182,7 +182,7 @@ async function setup(s: Scenario): Promise<E2E> {
     bpWork: bp.dir,
     proj: projRepo.dir,
     noGhPath: noGhDir,
-    run: (args) => s.run(CLI, args, { cwd: projRepo.dir, env: { PATH: noGhDir } }),
+    run: (args) => s.run('node', [CLI, ...args], { cwd: projRepo.dir, env: { PATH: noGhDir } }),
     git,
     async sha(ref) {
       const r = await git(['rev-parse', ref])
@@ -523,7 +523,7 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
       )
 
       const before = await e.sha('main')
-      const r = await s.run(CLI, ['a2bp', 'docs/DoD.md'], {
+      const r = await s.run('node', [CLI, 'a2bp', 'docs/DoD.md'], {
         cwd: e.proj,
         env: { PATH: `${shims.dir}:${e.noGhPath}` },
       })
@@ -587,7 +587,7 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
       )
 
       const before = await e.sha('main')
-      const r = await s.run(CLI, ['a2bp', 'docs/DoD.md'], {
+      const r = await s.run('node', [CLI, 'a2bp', 'docs/DoD.md'], {
         cwd: e.proj,
         env: { PATH: `${shims.dir}:${e.noGhPath}` },
       })
@@ -632,7 +632,7 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
         `exit 1`,
       ].join('\n'),
     )
-    const r = await s.run(CLI, args, { cwd: e.proj, env: { PATH: `${shims.dir}:${e.noGhPath}` } })
+    const r = await s.run('node', [CLI, ...args], { cwd: e.proj, env: { PATH: `${shims.dir}:${e.noGhPath}` } })
     const body = await s.fs.read('pr-body.txt').catch(() => '')
     return { r, body }
   }
@@ -768,7 +768,7 @@ describe('a2bp files requests and cannot write into the blueprint', () => {
       ].join('\n'),
     )
     for (const [name, body] of Object.entries(shims)) await dir.add(name, body)
-    const r = await s.run(CLI, args, { cwd: e.proj, env: { PATH: `${dir.dir}:${basePath}` } })
+    const r = await s.run('node', [CLI, ...args], { cwd: e.proj, env: { PATH: `${dir.dir}:${basePath}` } })
     const contacted = (await s.fs.read(`contact-${n}.log`)).split('\n').filter(Boolean)
     return { r, contacted }
   }

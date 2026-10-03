@@ -84,7 +84,7 @@ round-robin kick-off to confirm the roster after editing it.
 
 **The Orchestrator is the Claude Code session the founder talks to**; its wake is
 in `CLAUDE.md` §"On wake". **Agents without Claude hooks (Codex, Gemini, Kimi)
-wake by hand:** run `bash scripts/blueprint drift` and report a non-zero exit as
+wake by hand:** run `node scripts/blueprint.mts drift` and report a non-zero exit as
 unknown, then `bash scripts/agent-activity.sh --daemon` regardless of the drift
 result.
 
@@ -302,7 +302,7 @@ migration, but nobody adds a new shell script either.
 subcommand or a function.** The founder overruled the 2-to-1 majority that
 wanted a shrink-into-a-dispatcher middle ground, on cost, in front of him
 (docs/done/PLAN-TASK-067-shell-to-typescript.md §"Review synthesis"): a
-one-line fix to `scripts/blueprint` means porting all 2,257 lines first, not
+one-line fix to the shell `scripts/blueprint` meant porting all 2,257 lines first, not
 extracting the one function that changed. The migration is its own commit,
 behaviour-identical, proven by the existing suites and by a mutant caught in
 the port; the change the item actually wanted comes after, so a reviewer can
@@ -362,7 +362,7 @@ a `.mts` port cannot have (TASK-018 §3.3). `.githooks/pre-push` and
 `.githooks/pre-push-project` are NOT in this exception list: they are legacy
 shell files like any other, and the first change that actually touches either
 one migrates that WHOLE file (a Git hook keeps its two-line `exec` entry, per
-the hook exception above), same as `scripts/blueprint` or anything else —
+the hook exception above), same as any other legacy shell file —
 TASK-018 §3.3 only means the gate's ENTRY stays an entry that fails closed
 without Node, not that the file's logic may migrate gradually. Everything else
 is either unmigrated shell or a `.mts` port.

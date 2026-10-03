@@ -120,14 +120,14 @@ commit is pushed. TASK-084 slices 1 and 2 are on `main` (slice 2 ends at
 that `released` reached `416bcd1` or later). TASK-081 is released and waits for
 the founder's acceptance.**
 
-**TASK-081 (the `scripts/blueprint` port) — RELEASED at `8893e14`, waiting for
-acceptance** (row and plan in `docs/waiting-acceptance/`). `scripts/blueprint`
-is the two-line shim over `scripts/blueprint.mts`; libraries under
+**TASK-081 (the `scripts/blueprint.mts` port) — RELEASED at `8893e14`, waiting
+for acceptance** (row and plan in `docs/waiting-acceptance/`). The CLI is
+`scripts/blueprint.mts`; TASK-088 slice 8 deleted the two-line shell shim
+`scripts/blueprint` (run `node scripts/blueprint.mts <command>`, or the v2
+`blueprint` command after `bash scripts/install-toolchain.sh`). Libraries under
 `scripts/lib/` are still shell, reached through the bridge. Every derived
-project switches on its next FULL `blueprint pull` (a pre-port CLI pulling
-`scripts/blueprint` alone gets a shim with no target and exits 1 until a full
-pull; the CLI now needs a Node with type stripping — both announced in
-`bf739cc`'s body and plan §7). Known limit, recorded in the row: two
+project switches on its next FULL `blueprint pull`, never a single-file pull of
+the CLI; the CLI needs a Node with type stripping (`bf739cc`'s body, plan §7). Known limit, recorded in the row: two
 `scripts/lib/` files depending on each other could half-apply if one refuses;
 no such cycle exists (checked 2026-09-29).
 - **Traps for the next session:** the auto-mode classifier blocks `git merge`

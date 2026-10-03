@@ -151,7 +151,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
       // No bootstrap needed: this compares the CLI's declared list against what
       // is on disk. A lib that exists but is not managed means a derived project
       // receives a CLI it cannot run.
-      const managed = await s.runScript('scripts/blueprint', ['files'], { cwd: REPO_ROOT })
+      const managed = await s.run('node', [join(REPO_ROOT, 'scripts/blueprint.mts'), 'files'], { cwd: REPO_ROOT })
       expect(
         managed.code,
         'blueprint files exited non-zero — the comparison below would run against a truncated list',
@@ -566,7 +566,7 @@ describe('A-05 — bootstrap ships tracked template content only', () => {
 
 /** The two sections `blueprint files` prints, run by `root`'s own CLI from `root`. */
 async function filesOf(s: Scenario, root: string): Promise<{ managed: string[]; owned: string[] }> {
-  const r = await s.run('bash', [join(root, 'scripts/blueprint'), 'files'], { cwd: root })
+  const r = await s.run('node', [join(root, 'scripts/blueprint.mts'), 'files'], { cwd: root })
   expect(r.code, `blueprint files failed, so nothing below would be a comparison:\n${r.output}`).toBe(0)
   const managed: string[] = []
   const owned: string[] = []

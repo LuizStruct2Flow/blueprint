@@ -163,7 +163,7 @@ blueprint/
 
 Once a project is bootstrapped, the blueprint stays alive. Two sync
 directions, both founder-gated through the agent and both driven by a
-single CLI: **`blueprint`** (at `scripts/blueprint` in this repo).
+single CLI: **`blueprint`** (at `scripts/blueprint.mts` in this repo).
 
 ### One-time setup
 
@@ -175,7 +175,7 @@ bash scripts/install-toolchain.sh
 
 Along with the gate's tools, it writes the `blueprint` command to
 `~/.local/bin/blueprint`. That command runs **the CLI of the project you are
-standing in** (`scripts/blueprint`), so it names no checkout and keeps working
+standing in** (`scripts/blueprint.mts`), so it names no checkout and keeps working
 wherever the blueprint lives or moves. It works from a project root.
 
 It never overwrites a `blueprint` it did not write. If you have an older

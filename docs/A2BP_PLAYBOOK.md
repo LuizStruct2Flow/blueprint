@@ -70,7 +70,7 @@ request is filed (A-07 — `scripts/lib/contamination.sh`). It does two things:
    render alike, content matching rewrites both. Only position carries the
    provenance that substitution destroyed.
 
-   Files that *implement* the substitution (`scripts/blueprint`,
+   Files that *implement* the substitution (`scripts/blueprint.mts`,
    `scripts/new-project.sh`) are exempt — they carry the tokens as code.
 
    A **new** file has no blueprint copy, so nothing in it is restored and the
@@ -156,7 +156,7 @@ which request is which:
 | **B. Recipe change** | Edit to `docs/OBSERVABILITY.md` / `SECURITY.md` / `INFRASTRUCTURE.md` / `DOCUMENTATION.md` | Deck recipes slide for that concern; possibly `project_config_overview.md` §"X stack" table if a new mechanism row was implied |
 | **C. Gate change** | Edit to `docs/DoD.md` (§4, §5, §6, §7) | Deck Quality slides if §3 or §4 changed; `project_config_dod.md` if a new table row was implied; cross-references in other DoD subsections |
 | **D. Pre-push change** | Edit to `.githooks/pre-push` or `scripts/install-toolchain.sh` | DoD §4; AGENTS.md §"Before Every Push"; README "What's in the blueprint" tree; `project_config_dod.md` §"Pre-push gate — project commands" table |
-| **E. Sync layer change** | Edit to `scripts/blueprint`, `scripts/new-project.sh`, the `MANAGED_FILES` array | README §"The sync model"; AGENTS.md §"Blueprint sync"; this playbook (if the calling pattern changed) |
+| **E. Sync layer change** | Edit to `scripts/blueprint.mts`, `scripts/new-project.sh`, the `MANAGED_FILES` array | README §"The sync model"; AGENTS.md §"Blueprint sync"; this playbook (if the calling pattern changed) |
 | **F. Agent layer change** | Edit to `AGENT_SIGNAL.md`, `AGENT_ROSTER.example.md`, `scripts/agent-activity.sh`, `scripts/start-codex-signal-watch.mts`, `scripts/start-gemini-signal-watch.mts`, `scripts/start-kimi-signal-watch.mts`, `scripts/team-kickoff.sh` | Deck "persona team — radio-over" slide; AGENTS.blueprint.md pitch-surface item #9; README hero paragraph if the framing changed |
 | **G. Stack / architecture default** | Edit to `STACK_DEFAULTS.md` | Deck Architecture slide; AGENTS.md `## Architecture Principles`; any `project_config_overview.md §"Tech stack"` defaults that mirror it |
 | **H. Cosmetic / typo / doc-only** | Single-character fix, link repair, prose clarification | None usually; commit straight |

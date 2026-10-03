@@ -14,7 +14,7 @@
 # shellcheck shell=bash
 
 # Exit statuses, distinct so a script cannot mistake one outcome for another.
-# shellcheck disable=SC2034 # read by scripts/blueprint, which sources this file (cmd_a2bp)
+# shellcheck disable=SC2034 # read by scripts/blueprint.mts, which sources this file (cmd_a2bp)
 {
 BP_RC_OK=0                 # filed clean
 BP_RC_PENDING=3            # filed, awaiting a decision — deliberately non-zero

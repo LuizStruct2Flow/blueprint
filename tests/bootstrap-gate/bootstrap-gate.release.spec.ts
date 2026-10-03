@@ -404,7 +404,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // hand-maintained substitution list in new-project.sh had gone stale and
       // its raw `sed` knew nothing of {{PROJECT_NAME_UPPER}}. Both of the first
       // two commands a new project runs were lying to it.
-      const drift = await s.run('bash', ['scripts/blueprint', 'drift'], {
+      const drift = await s.run('node', ['scripts/blueprint.mts', 'drift'], {
         cwd: target,
         timeoutMs: 120_000,
       })
@@ -435,7 +435,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // check that cannot fail is worth less than no check, because it is
       // counted. Checking only for emptiness is not enough either — it misses
       // the command that fails AFTER printing part of its output.
-      const listed = await s.run('bash', ['scripts/blueprint', 'files'], { cwd: bp })
+      const listed = await s.run('node', ['scripts/blueprint.mts', 'files'], { cwd: bp })
       expect(
         listed.code,
         'a partial list would let this case pass over the files it never saw',
@@ -497,7 +497,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // they disagree by so much as a substitution, every project gets a
       // spurious diff on its suites at the first wake), and tests/manifest must
       // still pass afterwards.
-      const pull = await s.run('bash', ['scripts/blueprint', 'pull', '--yes'], {
+      const pull = await s.run('node', ['scripts/blueprint.mts', 'pull', '--yes'], {
         cwd: target,
         timeoutMs: 300_000,
       })
@@ -551,7 +551,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // `blueprint files` cannot fail from the tests/ expansion the review
       // proposed. Writing the case around an unreachable trigger would have
       // produced one that passes for the wrong reason.
-      await s.fs.write(join(bp, 'scripts/blueprint'), 'exit 9\n')
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), 'process.exit(9)\n')
 
       const target = s.workspace.path('derived-broken')
       const r = await bootstrap(s, bp, 'derived-broken', target)
@@ -583,7 +583,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // cannot catch, and the mirror image of the partial-output case a content
       // check alone cannot catch. Both refusals need a case, or one of them is
       // asserted only by reading the source.
-      await s.fs.write(join(bp, 'scripts/blueprint'), 'exit 0\n')
+      await s.fs.write(join(bp, 'scripts/blueprint.mts'), 'process.exit(0)\n')
 
       const target = s.workspace.path('derived-empty')
       const r = await bootstrap(s, bp, 'derived-empty', target)

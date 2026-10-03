@@ -8,7 +8,7 @@
 // WHY THIS EXISTS — see the original gate.sh history for the full
 // policy rationale (BUG-004, BUG-077, BUG-032). This file's job is to preserve
 // that policy byte-for-byte — every echo line is exactly the shell's, because
-// both callers (scripts/agent-activity.sh, scripts/blueprint) inherit stdout
+// both callers (scripts/agent-activity.sh, scripts/blueprint.mts) inherit stdout
 // and the wake report is built from these bytes — while moving it off shell;
 // it is not the place to relitigate any of those decisions.
 //

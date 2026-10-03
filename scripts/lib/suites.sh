@@ -169,7 +169,7 @@ bp_release_suites() {
 }
 
 # bp_marker_balance FILE PREFIX — prints "<begins> <ends>" for one marker
-# vocabulary. The precondition marker_aware_merge (scripts/blueprint) requires
+# vocabulary. The precondition marker_aware_merge (scripts/blueprint.mts) requires
 # before it will merge rather than clobber: unequal counts make it return 1, and
 # pull falls back to a whole-file copy that destroys the project's own content
 # outside the markers. Exposed here because the counting rule belongs beside the

@@ -54,8 +54,8 @@
  * MUTATION RECIPE (R6) — observed red, not predicted:
  *   Restore `_fl_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"` in
  *   scripts/lib/feed.sh, or the `${1:-$(git rev-parse --show-toplevel ...)}`
- *   default in scripts/lib/gate.sh (its `gate.mts` after BUG-152's port —
- *   the adapter follow above is what keeps this recipe aimed at the policy).
+ *   default in scripts/lib/gate.mts (the population lists `.mts` files since
+ *   TASK-088, so this recipe is aimed at the gate policy itself).
  *   → this spec goes red naming the file and line. The pre-BUG-077 version
  *     stayed green on both, which is the whole reason this file changed.
  */
@@ -65,7 +65,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import ts from 'typescript'
 import { join } from 'node:path'
 import { REPO_ROOT } from '../harness/index.js'
-import { resolveConsumerOpts } from '../helpers/shim.js'
+import { resolveConsumerFile } from '../state-dir/state-dir.js'
 
 /**
  * `git … rev-parse … --show-toplevel` on one line.
@@ -92,7 +92,7 @@ async function population(): Promise<string[]> {
   for (const dir of ['scripts', 'scripts/lib']) {
     const names = await readdir(join(REPO_ROOT, dir))
     for (const n of names) {
-      if (n.endsWith('.sh')) out.push(`${dir}/${n}`)
+      if (n.endsWith('.sh') || n.endsWith('.mts')) out.push(`${dir}/${n}`)
     }
   }
   // The sync CLI has no .sh suffix and is the most widely shipped script here.
@@ -112,19 +112,12 @@ describe('BUG-076 / BUG-077 — nothing resolves a path with git rev-parse --sho
     const offenders: string[] = []
 
     for (const rel of files) {
-      // TASK-081 §8 slice 0: once a file in this population becomes a
-      // two-line shim (scripts/blueprint is the first candidate), the shell
-      // idiom this case guards against moves with the logic, to the shim's
-      // `.mts` target — the shim itself has nothing to scan. resolveConsumer
-      // follows it, so the population keeps scanning where the code actually
-      // lives. BUG-152 commit 1 widens the same follow to a SOURCED ADAPTER
-      // (scripts/lib/gate.sh, the dod-gate.sh shape): the adapter keeps its
-      // function tail in shell, but the idiom this case bans lives wherever
-      // the gate policy now lives — `gate.mts` after the port, nothing today
-      // (gate.sh is still its own consumer, so the follow is a no-op until
-      // the port lands). Opt-in because adapter-following changes what other
-      // checks read; only a logic guard wants the target.
-      const resolved = resolveConsumerOpts(REPO_ROOT, rel, { followSourcedAdapters: true })
+      // TASK-088: a port deletes its shell file, so the population now lists
+      // the `.mts` files themselves (a ported script's idiom lives there), and
+      // the one shim left (scripts/blueprint) is followed to its target.
+      // resolveConsumerFile reads an `.mts` as TypeScript, whose comments are
+      // `//`, and a shell path as shell.
+      const resolved = resolveConsumerFile(REPO_ROOT, rel)
       if (resolved === undefined) continue
       const body = resolved.source
       // A 'ts' consumer's comments are `//`, not `#` — following the shim to

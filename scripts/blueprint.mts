@@ -1980,7 +1980,7 @@ const CLI_SHIM_SOURCE = '#!/usr/bin/env bash\nexec node "$(dirname "$0")/bluepri
 
 // Matches both `.sh` and `.mts` lib names: slice 6 (plan §7) walks the same
 // text for either, so one scanner serves the whole closure — a shim names
-// its `.mts`, a sourced adapter (the dod-gate.sh shape) names its `.mts` in a
+// its `.mts`, a sourced shell adapter (a retired shape) names its `.mts` in a
 // non-comment bridge-path assignment, an ordinary lib names another `.sh`.
 export function extractShLibNames(src: string): string[] {
   const names = new Set<string>()
@@ -2075,8 +2075,8 @@ function bpCliShimSeedNames(): Set<string> {
 export async function bpLibClosureFromSeeds(seedNames: Iterable<string>): Promise<CliLibClosure> {
   const names = new Set(seedNames)
   // SLICE 6 (plan §7) — the closure is a FIXED POINT, not one hop: any lib
-  // already in the set may itself be a shim or a sourced adapter (the
-  // dod-gate.sh shape BUG-152 will give scripts/lib/gate.sh) naming its own
+  // already in the set may itself be a shim or a sourced shell adapter (a
+  // retired shape, TASK-088) naming its own
   // `.sh`/`.mts` sibling in a non-comment bridge-path line, exactly the same
   // textual shape the shim-follow above already reads. Scan every named
   // lib's own text for more names, and repeat until a pass adds nothing.

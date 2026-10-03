@@ -197,7 +197,7 @@ stricter, and currently adds Semgrep's `p/javascript` and `p/typescript` packs
 to the local `p/owasp-top-ten` pack.
 
 The residual is explicit. CI does not re-run the local `settings.json` host-path
-guard or two `dod-gate.sh` stages: `§7G` reads the untracked live baton, and
+guard or two `dod-gate.mts` stages: `§7G` reads the untracked live baton, and
 `§D·F·H` only prints judgement prompts. The backend, frontend, and IaC stages
 are also dormant in this repository because those trees do not exist. Thus “CI
 catches it” covers the security and committed-content checks named above, not

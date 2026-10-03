@@ -120,12 +120,8 @@ import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { skipVisibly } from '../helpers/project-config.js'
 
-const LIB = 'scripts/lib/dod-gate.sh'
-// TASK-067/BUG-147: LIB is now a mechanically generated SOURCED ADAPTER (see
-// its own header) that forwards to this .mts target. Every fixture that
-// copies LIB copies MTS alongside it, or the adapter fails closed with
-// "cannot find ... — run: blueprint pull scripts/lib/dod-gate.mts" instead
-// of running the stage it is asked for.
+// TASK-088: the gate is scripts/lib/dod-gate.mts, run with node (its shell
+// adapter is deleted); every fixture copies it.
 const MTS = 'scripts/lib/dod-gate.mts'
 const SUBJECT_LIB = 'scripts/lib/commit-subject.sh'
 const HOOK = join(REPO_ROOT, '.githooks/pre-push-project')
@@ -148,7 +144,7 @@ async function git(s: Scenario, cwd: string, args: string[]) {
 /**
  * A fixture repo carrying a lifecycle tree, so the lib's RELATIVE paths resolve.
  *
- * `dod-gate.sh` reads `docs/<state>/BUGS.md` and `tests/` with no root argument —
+ * `dod-gate.mts` reads `docs/<state>/BUGS.md` and `tests/` with no root argument —
  * git runs hooks from the work-tree root, so the lib's cwd IS the project. That
  * is why the whole tree is built rather than just the files one case touches:
  * a missing `docs/done/BACKLOG.md` would make `dod_find_row` skip a folder, and
@@ -163,7 +159,6 @@ async function git(s: Scenario, cwd: string, args: string[]) {
  */
 async function build(s: Scenario, tag: string, kind: 'blueprint' | 'derived' = 'blueprint'): Promise<Fixture> {
   const dir = await s.workspace.dir(tag)
-  await s.fs.copyIn(join(REPO_ROOT, LIB), join(dir, LIB))
   await s.fs.copyIn(join(REPO_ROOT, MTS), join(dir, MTS))
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/state-dir.sh'), join(dir, 'scripts/lib/state-dir.sh'))
   // BUG-140: dod_stage_signal's roster check. No AGENT_ROSTER.md is written here,
@@ -210,17 +205,23 @@ async function appendRow(s: Scenario, f: Fixture, relPath: string, row: string) 
 /**
  * Run one stage inside the fixture.
  *
- * `pipe_note` is stubbed: the lib calls it, and the real one lives in the
- * pipeline renderer, which `tests/pipeline` owns. The stub is also why the
- * `rows outside doing/` branch is uncovered here — noted in the docblock.
+ * Notes go to DOD_GATE_NOTE_FILE (what a buffered pipeline run sets), so they
+ * stay off stdout; the note modes themselves are pinned at the end of this file.
  */
 async function runStage(s: Scenario, f: Fixture, fn: string, range: string, env: Record<string, string> = {}) {
-  return s.run(
-    'bash',
-    ['-c', `pipe_note(){ :; }\n. ./${LIB}\n"$1" "$2"\n`, 'dod-stage', fn, range],
-    { cwd: f.dir, env: { ...BATON_FROM_FIXTURE, ...env } },
-  )
+  // fn is the old shell function name; its subcommand is the part after
+  // `dod_stage_` (rows, bugtests, signal, judgement) or `items`.
+  const sub = fn === 'dod_items_in_push' ? 'items' : fn.replace(/^dod_stage_/, '')
+  const args = [join(f.dir, MTS), sub, ...(range === '' ? [] : [range])]
+  // Notes go to a file outside the fixture (what a buffered pipeline run does),
+  // so stdout carries only the stage's own output and the notes are readable.
+  return s.run(process.execPath, args, {
+    cwd: f.dir,
+    env: { ...BATON_FROM_FIXTURE, DOD_GATE_NOTE_FILE: noteFileOf(f), ...env },
+  })
 }
+
+const noteFileOf = (f: Fixture) => `${f.dir}.notes`
 
 /**
  * Unset the baton pointers so the stage RESOLVES one instead of being handed one.
@@ -267,7 +268,7 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
     // Not ceremony. Every case below sources it; if it were absent they would all
     // fail with a shell error naming a path, and nobody would read that as "the
     // lib is gone" — they would read it as a broken fixture.
-    await expect(readFile(join(REPO_ROOT, LIB), 'utf8')).resolves.toContain('dod_items_in_push')
+    await expect(readFile(join(REPO_ROOT, MTS), 'utf8')).resolves.toContain("case 'items':")
   })
 
   it('#1 an item with no backlog row fails, and the message names it', async () => {
@@ -679,11 +680,7 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
       await commit(s, f, 'x.txt', 'BUG#40: a commit whose subject the extraction must see')
       await commit(s, f, 'y.txt', 'TASK#7: and a second item of a different kind')
 
-      const r = await s.run(
-        'bash',
-        ['-c', `. ./${LIB}\ndod_items_in_push "$1"\n`, 'dod-items', rangeOf(f)],
-        { cwd: f.dir },
-      )
+      const r = await runStage(s, f, 'dod_items_in_push', rangeOf(f))
       const items = r.stdout.split('\n').filter(Boolean)
 
       expect(
@@ -859,11 +856,7 @@ describe('TASK-007 — the DoD prints as stages, and each one fails when it shou
       await commit(s, f, 'x.txt', 'BUG#41:no space after the colon')
       await commit(s, f, 'y.txt', 'TASK#7: a conforming subject')
 
-      const r = await s.run(
-        'bash',
-        ['-c', `. ./${LIB}\ndod_items_in_push "$1"\n`, 'dod-items', rangeOf(f)],
-        { cwd: f.dir },
-      )
+      const r = await runStage(s, f, 'dod_items_in_push', rangeOf(f))
       expect(r.stdout.split('\n').filter(Boolean), r.output).toEqual(['TASK-7'])
     })
   })
@@ -1400,7 +1393,48 @@ describe('TASK-039 — a project bug is vouched for by the project, not by a blu
         'The DoD bug-test stage treats ANY spec there as the project\'s own (docs/DoD.md §2),\n' +
         'so a shipped one would vouch for a derived project\'s bug carrying the same number —\n' +
         'the exact defect TASK-039 exists to close. Move it into a suite directory under\n' +
-        'tests/<suite>/, or change the rule in scripts/lib/dod-gate.sh and these tests together.',
+        'tests/<suite>/, or change the rule in scripts/lib/dod-gate.mts and these tests together.',
     ).toEqual([])
+  })
+})
+
+// TASK-088 §6 Q1 — the note contract. A stage's notes ride on the caller's result
+// line, and DOD_GATE_NOTE_FILE says where they go: a file (buffered pipeline run,
+// raw text appended, no separator), set-but-empty (unbuffered run and CI: printed
+// as `     note: …`), or unset (a bare run: printed as `note: …`).
+describe('TASK-088 — DOD_GATE_NOTE_FILE, the three note modes', () => {
+  const NOTE = '§D docs in sync · §F cross-provider review · §H self-audit — judgement, not checked here'
+  const judge = (s: Scenario, f: Fixture, note: string | undefined) =>
+    s.run(process.execPath, [join(f.dir, MTS), 'judgement'], { cwd: f.dir, env: { ...BATON_FROM_FIXTURE, DOD_GATE_NOTE_FILE: note } })
+
+  it('a non-empty value is a file: the raw note is appended and stdout carries no note line', async () => {
+    await scenario('dod-note-file', async (s) => {
+      const f = await build(s, 'note-file')
+      const file = `${f.dir}.stage-note`
+      await s.fs.write(file, 'earlier ')
+      const r = await judge(s, f, file)
+      expect(r.code, r.output).toBe(0)
+      expect(await readFile(file, 'utf8')).toBe(`earlier ${NOTE}`)
+      expect(r.stdout).not.toContain('note:')
+    })
+  })
+
+  it('set but empty prints the note indented, as an unbuffered or CI run shows it', async () => {
+    await scenario('dod-note-empty', async (s) => {
+      const f = await build(s, 'note-empty')
+      const r = await judge(s, f, '')
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toContain(`\n     note: ${NOTE}\n`)
+    })
+  })
+
+  it('unset prints a bare `note:` line, as a bare CLI run always did', async () => {
+    await scenario('dod-note-unset', async (s) => {
+      const f = await build(s, 'note-unset')
+      const r = await judge(s, f, undefined)
+      expect(r.code, r.output).toBe(0)
+      expect(r.stdout).toContain(`\nnote: ${NOTE}\n`)
+      expect(r.stdout).not.toContain('     note:')
+    })
   })
 })

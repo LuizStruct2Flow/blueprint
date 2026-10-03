@@ -49,8 +49,8 @@ const COUNTERPARTS: readonly Counterpart[] = [
   { stage: /^typecheck · TASK-031$/, job: 'ts-tests', evidence: ['ts_typecheck .'] },
   { stage: /^docs · TASK-053$/, job: 'ts-tests', evidence: ['ts_scrubbed npx vitest run'] },
   { stage: /^vitest · TASK-018$/, job: 'ts-tests', evidence: ['ts_scrubbed npx vitest run'] },
-  { stage: /^§1b·1 every item has a backlog row$/, job: 'commit-subjects', evidence: ['dod_stage_rows'] },
-  { stage: /^§2 every BUG has a regression test$/, job: 'commit-subjects', evidence: ['dod_stage_bugtests'] },
+  { stage: /^§1b·1 every item has a backlog row$/, job: 'commit-subjects', evidence: ['dod-gate.mts rows'] },
+  { stage: /^§2 every BUG has a regression test$/, job: 'commit-subjects', evidence: ['dod-gate.mts bugtests'] },
 ]
 
 /**
@@ -204,7 +204,7 @@ jobs:
       - run: osv-scanner scan source
   commit-subjects:
     steps:
-      - run: dod_stage_rows && dod_stage_bugtests
+      - run: node scripts/lib/dod-gate.mts rows && node scripts/lib/dod-gate.mts bugtests
   ts-tests:
     steps:
       - run: sh_lint . && ts_shell_inventory . node && ts_typecheck . && ts_scrubbed npx vitest run

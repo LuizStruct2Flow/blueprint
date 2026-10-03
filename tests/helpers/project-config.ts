@@ -2,7 +2,7 @@
  * tests/helpers/project-config.ts — what a project declares in
  * project_config_paths.md, for the suites that must respect it.
  *
- * THE SHAPE IS scripts/lib/dod-gate.sh's (TASK-039): a line
+ * THE SHAPE IS scripts/lib/dod-gate.mts's (TASK-039): a line
  *
  *     - NAME: `value`
  *

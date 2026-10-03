@@ -1,7 +1,6 @@
-// scripts/signal-watch.mts — TASK-067 port of scripts/signal-watch.sh (BUG-144),
-// the repo's first whole-file shell-to-TypeScript migration. scripts/signal-watch.sh
-// is now the fixed two-line shim AGENTS.md's "Shell to TypeScript, organically"
-// requires; this file carries the whole implementation.
+// scripts/signal-watch.mts — TASK-067 port of the shell signal-watch.sh (BUG-144),
+// the repo's first whole-file shell-to-TypeScript migration. TASK-088 deleted
+// the shell file; the launchers run this one with node.
 //
 // Watch AGENT_SIGNAL.md and run a wake command when the mic flips to a given
 // state. Provider-agnostic (TASK-063): Codex, Gemini and Kimi each `exec` this
@@ -9,11 +8,11 @@
 // it does — signal-watch — rather than for the first consumer it had.
 //
 // Example:
-//   scripts/signal-watch.sh --once -- printf 'wake\n'
+//   node scripts/signal-watch.mts --once -- printf 'wake\n'
 //
 // Or configure a real client command:
 //   AGENT_WAKE_COMMAND='codex --cwd /path/to/repo wake' \
-//     scripts/signal-watch.sh
+//     node scripts/signal-watch.mts
 //
 // The command receives AGENT_SIGNAL_HOLDER, AGENT_SIGNAL_STATE, and
 // AGENT_SIGNAL_TASK in its environment. Every trigger is also appended to
@@ -26,7 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnBounded } from './lib/spawn-bounded.mts'
 
 function usage(): string {
-  return `Usage: scripts/signal-watch.sh [options] [-- command ...]
+  return `Usage: node scripts/signal-watch.mts [options] [-- command ...]
 
 Options:
   --file PATH       Signal file to watch (default: ./AGENT_SIGNAL.md)

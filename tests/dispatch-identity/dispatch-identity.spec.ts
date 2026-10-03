@@ -10,7 +10,7 @@
  * mitigation.
  *
  * THE FIX IS A BRIDGE, NOT A NEW RESOLVER. `resolve_identity` already honours
- * an `AGENT_PERSONA` override, and `signal-watch.sh` already exports
+ * an `AGENT_PERSONA` override, and `signal-watch.mts` already exports
  * `AGENT_SIGNAL_HOLDER` into every wake command. The launchers simply never
  * connected the two. Each launcher now exports `AGENT_PERSONA` from
  * `AGENT_SIGNAL_HOLDER`, so the CLI it spawns inherits the override and
@@ -82,7 +82,7 @@ const FIXTURE_ROSTER = `# Roster
 `
 
 /**
- * The wake body a launcher hands to `signal-watch.sh`, read fresh from its
+ * The wake body a launcher hands to `signal-watch.mts`, read fresh from its
  * bytes. The launcher builds it as a single-quoted string, so the extraction
  * regex anchors on the assignment and the closing quote before `exec` — the
  * same shape tests/codex-persona-label asserts about.
@@ -110,7 +110,7 @@ describe('BUG-142 — a dispatched persona is itself when it asks --whoami', () 
         { mode: 0o755 },
       )
 
-      // THE DISPATCH, staged exactly as signal-watch.sh stages it: the holder
+      // THE DISPATCH, staged exactly as signal-watch.mts stages it: the holder
       // persona in AGENT_SIGNAL_HOLDER, the task in AGENT_SIGNAL_TASK, both
       // set before the wake body runs. Holder=Slava, a Kimi persona; the
       // Orchestrator row is Jesko. See the header for why these are set in

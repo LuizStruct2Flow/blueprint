@@ -15,7 +15,7 @@
  * makes this expensive: a dispatch that dies loudly costs minutes, one that dies
  * silently costs the session.
  *
- * THE MECHANISM, precisely. `signal-watch.sh` builds a trigger key from
+ * THE MECHANISM, precisely. `signal-watch.mts` builds a trigger key from
  * Holder|State|Task and dispatches once it settles. A branch operation rewrites
  * all three at once, which produces a new key (resetting the settle window) and
  * usually restores a State that is not the target (clearing the pending state
@@ -65,7 +65,7 @@ import { shimTargetPath } from '../helpers/shim.js'
 
 /**
  * The dispatcher's own pointers must NOT be inherited, and that is BUG-046's
- * exact shape: `signal-watch.sh` does `export AGENT_SIGNAL_FILE` before
+ * exact shape: `signal-watch.mts` does `export AGENT_SIGNAL_FILE` before
  * running the wake command, so every process inside a dispatch — including an
  * agent running this suite as part of a review — inherits a pointer to the REAL
  * baton. `agent_signal_file()` honours it, so the fixture's own copy of
@@ -86,7 +86,7 @@ const DERIVE_FROM_THE_FIXTURE = {
   AGENT_STATE_HOME: undefined,
 } as const
 
-/** Whole seconds. Never fractional — `signal-watch.sh` compares `date +%s`. */
+/** Whole seconds. Never fractional — `signal-watch.mts` compares `date +%s`. */
 const SETTLE = 2
 const POLL = 0.2
 /** Poll iterations spanning one settle window plus two, so a pending candidate is decidable. */
@@ -144,14 +144,14 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   const rel = (p: string) => join(name, p)
 
   for (const script of [
-    'scripts/signal-watch.sh',
+    'scripts/signal-watch.mts',
     'scripts/start-codex-signal-watch.sh',
     'scripts/codex-feed-filter.sh',
     'scripts/signal-set.sh',
     'scripts/lib/state-dir.sh',
   ]) {
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
-    // The launcher EXECS signal-watch.sh rather than running `bash` on it,
+    // The launcher EXECS signal-watch.mts rather than running `bash` on it,
     // so the bit is load-bearing rather than cosmetic.
     await s.fs.chmod(rel(script), 0o755)
   }
@@ -159,7 +159,7 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   // Copy it too WHEN ONE EXISTS, so this out-of-tree fixture can still run
   // it; same pattern as tests/watcher-liveness's liveRepo(). TASK-083 added
   // start-codex-signal-watch.sh to the migrated set.
-  for (const script of ['scripts/signal-watch.sh', 'scripts/start-codex-signal-watch.sh']) {
+  for (const script of ['scripts/start-codex-signal-watch.sh']) {
     const target = shimTargetPath(script)
     if (existsSync(join(REPO_ROOT, target))) {
       await s.fs.copyIn(join(REPO_ROOT, target), rel(target))

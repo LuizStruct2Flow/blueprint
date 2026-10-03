@@ -81,7 +81,7 @@ async function buildFixture(
   }
 
   const shellScripts = [
-    'scripts/signal-watch.sh',
+    'scripts/signal-watch.mts',
     launcherRel,
     'scripts/codex-feed-filter.sh',
     'scripts/lib/state-dir.sh',
@@ -92,7 +92,7 @@ async function buildFixture(
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
     await s.fs.chmod(rel(script), 0o755)
   }
-  for (const script of ['scripts/signal-watch.sh', launcherRel]) {
+  for (const script of [launcherRel]) {
     const target = shimTargetPath(script)
     if (existsSync(join(REPO_ROOT, target))) {
       await s.fs.copyIn(join(REPO_ROOT, target), rel(target))

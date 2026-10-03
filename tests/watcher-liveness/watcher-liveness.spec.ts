@@ -74,11 +74,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until } from '../harness/watcher.js'
 import { feedFixture } from '../helpers/feed-fixture.js'
-import { shimTargetPath } from '../helpers/shim.js'
 
 /**
  * The tree under test. `BP_SPEC_ROOT` repoints it at a perturbed copy, which is
@@ -88,7 +86,7 @@ import { shimTargetPath } from '../helpers/shim.js'
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 const LIB = join(SUBJECT, 'scripts', 'lib', 'watcher-lock.sh')
-const WATCH = join(SUBJECT, 'scripts', 'signal-watch.sh')
+const WATCH = join(SUBJECT, 'scripts', 'signal-watch.mts')
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
 
 /**
@@ -188,14 +186,7 @@ async function holdLock(
 async function liveRepo(s: Scenario, name = 'live') {
   const root = await s.fs.mkdirp(name)
   await s.fs.write(`${name}/.blueprint-source`, '')
-  const watch = await s.fs.copyIn(WATCH, `${name}/scripts/signal-watch.sh`)
-  // BUG-144 commit 0 — a migrated WATCH's shim execs a sibling `.mts`
-  // (TASK-067); copy it too WHEN ONE EXISTS, so this out-of-tree fixture can
-  // still run it. None does yet, so this is a no-op today.
-  const watchMts = shimTargetPath('scripts/signal-watch.sh')
-  if (existsSync(join(SUBJECT, watchMts))) {
-    await s.fs.copyIn(join(SUBJECT, watchMts), `${name}/${watchMts}`)
-  }
+  const watch = await s.fs.copyIn(WATCH, `${name}/scripts/signal-watch.mts`)
   // The WHOLE lib dir, never named files — feed-fixture.ts records why.
   // TASK-065 (round 3): signal-watch.mts now imports a sibling .mts lib
   // (scripts/lib/spawn-bounded.mts) directly, not just the .sh libs it
@@ -343,14 +334,14 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         '--poll', '0.2',
         '--log', join(dir, 'signal.log'),
       ]
-      const first = startWatcher(s, 'bash', args)
+      const first = startWatcher(s, 'node', args)
       try {
         await until(
           'the first watcher holds the lock',
           async () => (await lib(s, `bp_watch_liveness "${dir}" OVER_TO_CODEX`)) === 'alive',
         )
 
-        const second = await s.run('bash', args, { cwd: s.workspace.root, timeoutMs: 15_000 })
+        const second = await s.run('node', args, { cwd: s.workspace.root, timeoutMs: 15_000 })
 
         expect(
           second.code,
@@ -370,7 +361,7 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
     await scenario('wl-4-sigkill', async (s) => {
       const dir = await batonDir(s, 'proj/logs/state', 'ACTIVE')
       const child = s.background(
-        'bash',
+        'node',
         [
           WATCH,
           '--file', join(dir, 'signal.md'),
@@ -574,7 +565,7 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         const dir = await batonDir(s, 'fix/state', 'OVER_TO_CODEX')
         const w = startWatcher(
           s,
-          'bash',
+          'node',
           [
             live.watch,
             '--file', join(dir, 'signal.md'),
@@ -615,7 +606,7 @@ describe('BUG-022 — a dispatch into silence is visible', () => {
         'sh',
         [
           '-c',
-          `AGENT_SIGNAL_SETTLE=0 timeout 3 bash "${WATCH}" --file "${join(dir, 'signal.md')}" ` +
+          `AGENT_SIGNAL_SETTLE=0 timeout 3 node "${WATCH}" --file "${join(dir, 'signal.md')}" ` +
             `--poll 1 --log "${join(dir, 'signal.log')}" -- true`,
         ],
         { cwd: s.workspace.root, env: { AGENT_SIGNAL_SETTLE: '0' }, timeoutMs: 30_000 },

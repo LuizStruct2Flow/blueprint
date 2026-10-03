@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-// scripts/start-kimi-signal-watch.mts — TASK-083 port of
-// scripts/start-kimi-signal-watch.sh. scripts/start-kimi-signal-watch.sh is
-// now the fixed two-line exec shim AGENTS.md's "Shell to TypeScript,
-// organically" requires; this file carries the whole implementation.
+// scripts/start-kimi-signal-watch.mts — TASK-083 port of the shell
+// start-kimi-signal-watch.mts, which TASK-088 deleted; this file is the launcher.
 //
 // Launcher for the AGENT_SIGNAL.md ↔ Kimi CLI orchestrator.
 //
-// Mirror of start-gemini-signal-watch.sh, but for Kimi. Watches AGENT_SIGNAL.md
+// Mirror of start-gemini-signal-watch.mts, but for Kimi. Watches AGENT_SIGNAL.md
 // (via the shared scripts/signal-watch.mts polling engine) and, every time
 // the mic flips to `OVER_TO_KIMI`, invokes the real Kimi CLI in non-interactive
 // (-p) mode with the current `Task` field as the prompt — `-p` alone runs
@@ -18,7 +16,7 @@
 // by default).
 //
 // Usage:
-//   scripts/start-kimi-signal-watch.sh
+//   node scripts/start-kimi-signal-watch.mts
 //
 // The Kimi CLI is `~/.kimi-code/bin/kimi` or whatever `KIMI_BIN` points at. (a2bp-allow: Kimi CLI's own install dir, not per-project state.)
 // Auth reuses ~/.kimi-code/ (device-code login). (a2bp-allow: same — Kimi's own auth dir, not per-project state.)

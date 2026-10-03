@@ -39,10 +39,7 @@
     "scripts/sonar-api.sh": "5e14426f113b5ce2f192fe0ad58d5a25ff1f8687",
     "scripts/sonar.sh": "00f8777fbcd814a21ebd3804d22e5a34dca83708",
     "scripts/start-all-watchers.sh": "fdf0e3cee4ba8be033da6fe0e2aa802972560495",
-    "scripts/start-codex-signal-watch.sh": "1688761ac7d1b69d86db75c7e00cd0e68d331080",
     "scripts/start-copilot-signal-watch.sh": "c2f729c54f175cd82a79b81c90870b33e89e17f5",
-    "scripts/start-gemini-signal-watch.sh": "84c8591c32cbe576c7b90640753d483482e33057",
-    "scripts/start-kimi-signal-watch.sh": "9ef8800dbb6df44241e62cb16a050ea90e97e27e",
     "scripts/team-kickoff.sh": "eda45c6dd5f216a13923104f9a0cb2a53bfc684f",
     "scripts/wait-mic.sh": "c96e02ccda2fec4f3f16dfbcbc86e3f9cb3840a8",
     "scripts/watch-ci.sh": "44c2d778d00222dc7b77049d1f09cb51683edfdd"

@@ -56,7 +56,7 @@ If neither is provided, the watcher only writes the trigger log line.
 // the feed and dispatcher stop rendezvousing.
 //
 // The shell version needed a hand-rolled 40-hop symlink walk here (see
-// scripts/start-codex-signal-watch.sh, still shell) because BASH_SOURCE is not
+// scripts/start-codex-signal-watch.mts, still shell) because BASH_SOURCE is not
 // resolved through symlinks and `readlink -f` is a GNU extension absent on
 // BSD/older macOS. Node's `fs.realpathSync` does both jobs natively — it
 // follows an arbitrary symlink chain AND throws (ELOOP) on a cycle — so there

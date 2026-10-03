@@ -83,7 +83,6 @@ import { describe, it, expect } from 'vitest'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
-import { resolveConsumer } from '../helpers/shim.js'
 
 const LIB = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.sh')
 
@@ -255,7 +254,7 @@ describe('TASK-021 #C — the no-argument API is a boundary, not a default', () 
 describe('TASK-021 #D — an unset code root fails rather than guessing cwd', () => {
   it('#D bp_state_root refuses when BP_CODE_ROOT is unset', async () => {
     // There was a `${BP_CODE_ROOT:-$PWD}` fallback here for one afternoon and
-    // it caused a live leak: start-codex-signal-watch.sh's wake command is a
+    // it caused a live leak: start-codex-signal-watch.mts's wake command is a
     // single-quoted string run later by `sh -c`, where only EXPORTED variables
     // survive. The fallback resolved to whatever directory the dispatch ran
     // from — the REAL blueprint checkout — so a fixture dispatch wrote
@@ -297,26 +296,25 @@ describe('TASK-021 #E — the empty-root path is unreachable', () => {
   })
 })
 
+const LAUNCHER_MTS = /^start-(codex|kimi|gemini)-signal-watch\.mts$/
+
 /** Production scripts that call the state API, and whether each guards its init. */
 async function consumersWithInitGuard(): Promise<{ missing: string[]; checked: string[] }> {
   const dir = join(REPO_ROOT, 'scripts')
-  const names = (await readdir(dir)).filter((n) => n.endsWith('.sh'))
+  const names = (await readdir(dir)).filter((n) => n.endsWith('.sh') || LAUNCHER_MTS.test(n))
   const missing: string[] = []
   const checked: string[] = []
   for (const n of names) {
-    // TASK-083 — the three provider launchers are now two-line shims with no
-    // state-API text of their own; the guard text lives in each one's `.mts`
-    // TARGET, still as literal shell inside its AGENT_WAKE_COMMAND template
-    // (this particular pattern needs no JS-escaping — it contains no `${`),
-    // so the same regex below still applies. NARROWLY scoped to those three:
+    // TASK-083/088 — the three provider launchers are `.mts` files whose guard
+    // text is literal shell inside their AGENT_WAKE_COMMAND template (this
+    // particular pattern needs no JS-escaping — it contains no `${`), so the
+    // same regex below still applies. NARROWLY scoped to those three:
     // scripts/signal-watch.mts is genuine TypeScript calling the same
     // functions programmatically, not shell text — a shell-syntax regex cannot
     // answer a TS question, and this scan lists shell files only. Its own
     // init-guard property is proven elsewhere (tests/state-dir,
     // tests/codex-dispatch-status), not by this grep.
-    const isPortedLauncher = /^start-(codex|kimi|gemini)-signal-watch\.sh$/.test(n)
-    const resolved = isPortedLauncher ? resolveConsumer(REPO_ROOT, `scripts/${n}`) : undefined
-    const body = resolved !== undefined ? resolved.source : await readFile(join(dir, n), 'utf8')
+    const body = await readFile(join(dir, n), 'utf8')
     const stripped = body.replace(/^\s*#.*$/gm, '')
     if (!/\bagent_(state_dir|signal_file|signal_journal)\b/.test(stripped)) continue
     checked.push(n)

@@ -27,10 +27,10 @@ import { resolveConsumer, type ConsumerKind } from '../helpers/shim.js'
 
 /** The three dispatchers that must rendezvous with the feed on one directory. */
 export const DISPATCHERS = [
-  'scripts/start-codex-signal-watch.sh',
+  'scripts/start-codex-signal-watch.mts',
   'scripts/signal-watch.mts',
-  'scripts/start-gemini-signal-watch.sh',
-  'scripts/start-kimi-signal-watch.sh',
+  'scripts/start-gemini-signal-watch.mts',
+  'scripts/start-kimi-signal-watch.mts',
 ] as const
 
 /** Every consumer of the shared derivation — the feed plus the dispatchers. */

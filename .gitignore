@@ -115,7 +115,7 @@ docs/**/CODEX_REVIEW.md
 # Project-specific scripts that ship publicly go in scripts/ with
 # names that don't match these.
 scripts/signal-watch.sh
-scripts/start-codex-signal-watch.sh
+scripts/start-codex-signal-watch.mts
 scripts/new-project.sh
 
 # Bootstrap provenance — points at the founder's local blueprint path

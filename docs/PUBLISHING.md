@@ -51,7 +51,7 @@ git status --ignored
 
 `Ignored files:` should include `docs/**/CODEX_REVIEW.md`,
 `project_config_*.md`, `scripts/signal-watch.mts`,
-`scripts/start-codex-signal-watch.sh`, `scripts/new-project.sh`,
+`scripts/start-codex-signal-watch.mts`, `scripts/new-project.sh`,
 `.claude/`, `.blueprint-source`, plus any project-specific privacy paths
 you've added in the project's `.gitignore` extension block. The rest of
 `docs/` (lifecycle artifacts) is PUBLIC and should NOT appear under
@@ -106,7 +106,7 @@ grep if needed.)
 The current local repo's git history includes the struct2flow bootstrap
 commit (`chore(bootstrap)`). That commit **tracks** the still-private
 files (`project_config_*.md`, `scripts/signal-watch.mts`,
-`scripts/start-codex-signal-watch.sh`, `scripts/new-project.sh`,
+`scripts/start-codex-signal-watch.mts`, `scripts/new-project.sh`,
 `.claude/settings.json`). `.gitignore` does NOT untrack them — it only
 prevents NEW additions. They will publish on a normal `git push` unless
 we explicitly close the gap.
@@ -150,7 +150,7 @@ PUBLIC_PATHS=(
   # tests/
   # — scripts: copy each PUBLIC script EXPLICITLY. Do NOT copy the
   # whole scripts/ folder; it contains struct2flow methodology files
-  # (signal-watch.mts, start-codex-signal-watch.sh, new-project.sh)
+  # (signal-watch.mts, start-codex-signal-watch.mts, new-project.sh)
   # that .gitignore correctly prevents from being committed but that
   # would end up on disk in the public-repo dir as untracked-gitignored
   # files — a latent leak risk if someone later force-adds.
@@ -198,7 +198,7 @@ find docs -name 'CODEX_REVIEW.md' -delete 2>/dev/null
 # on the filesystem rather than the git index, plus the handover.
 find . -type f \( -name 'HANDOVER.md' -o -name 'CODEX_REVIEW.md' \
   -o -name 'project_config_*.md' \
-  -o -name 'signal-watch.mts' -o -name 'start-codex-signal-watch.sh' \
+  -o -name 'signal-watch.mts' -o -name 'start-codex-signal-watch.mts' \
   -o -name 'new-project.sh' -o -path './.claude/*' \
   -o -name '.blueprint-source' \) | head -20
 
@@ -255,7 +255,7 @@ git rm --cached \
   $(git ls-files 'docs/**/CODEX_REVIEW.md') \
   project_config_overview.md project_config_paths.md project_config_dod.md \
   project_config_security.md project_config_infra.md \
-  scripts/signal-watch.mts scripts/start-codex-signal-watch.sh scripts/new-project.sh \
+  scripts/signal-watch.mts scripts/start-codex-signal-watch.mts scripts/new-project.sh \
   $(git ls-files '.claude/**' 2>/dev/null) \
   .blueprint-source
 

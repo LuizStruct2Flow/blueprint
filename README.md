@@ -131,7 +131,7 @@ blueprint/
 ├── scripts/
 │   ├── install-toolchain.sh        ← installs the gate's tools per-OS (brew on macOS, pinned binaries on Linux)
 │   ├── signal-watch.mts             ← signal poller (whole-file generic; provider-agnostic, TASK-063)
-│   ├── start-codex-signal-watch.sh ← Codex CLI launcher (uses {{PROJECT_NAME}})
+│   ├── start-codex-signal-watch.mts ← Codex CLI launcher (uses {{PROJECT_NAME}})
 │   ├── new-project.sh              ← bootstrap a new project
 │   └── blueprint                   ← sync CLI: drift / pull / a2bp (add to PATH)
 ├── config/
@@ -341,7 +341,7 @@ decides what ships. Run `blueprint files` to print it. Current contents include:
 - **`docs/` (canonical references):** `DoD.md`, `OBSERVABILITY.md`,
   `SECURITY.md`, `INFRASTRUCTURE.md`, `PUBLISHING.md`
 - **`scripts/`:** `install-toolchain.sh`, `signal-watch.mts`,
-  `start-codex-signal-watch.sh`, `blueprint` itself
+  `start-codex-signal-watch.mts`, `blueprint` itself
 - **`tests/`** — every suite the archive ships (BUG-029). The regression suites guard blueprint-managed machinery your
   project runs, so they have to move forward with it. The blueprint's own
   TypeScript harness manifest lives here too and is `export-ignore`d, so it

@@ -56,12 +56,10 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 import { startWatcher, until, type Watcher } from '../harness/watcher.js'
 import type { FixtureRepo } from '../harness/fixture-repo.js'
-import { shimTargetPath } from '../helpers/shim.js'
 
 /**
  * The dispatcher's own pointers must NOT be inherited, and that is BUG-046's
@@ -145,7 +143,7 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
 
   for (const script of [
     'scripts/signal-watch.mts',
-    'scripts/start-codex-signal-watch.sh',
+    'scripts/start-codex-signal-watch.mts',
     'scripts/codex-feed-filter.sh',
     'scripts/signal-set.sh',
     'scripts/lib/state-dir.sh',
@@ -154,16 +152,6 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
     // The launcher EXECS signal-watch.mts rather than running `bash` on it,
     // so the bit is load-bearing rather than cosmetic.
     await s.fs.chmod(rel(script), 0o755)
-  }
-  // BUG-144 — a migrated script's shim execs a sibling `.mts` (TASK-067).
-  // Copy it too WHEN ONE EXISTS, so this out-of-tree fixture can still run
-  // it; same pattern as tests/watcher-liveness's liveRepo(). TASK-083 added
-  // start-codex-signal-watch.sh to the migrated set.
-  for (const script of ['scripts/start-codex-signal-watch.sh']) {
-    const target = shimTargetPath(script)
-    if (existsSync(join(REPO_ROOT, target))) {
-      await s.fs.copyIn(join(REPO_ROOT, target), rel(target))
-    }
   }
   // TASK-065 (round 3) — signal-watch.mts also imports a sibling .mts lib
   // directly (scripts/lib/spawn-bounded.mts), not sourced through a shell
@@ -235,7 +223,7 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
     movePointer: (target) => s.fs.write(`${name}/pointer`, `${target}\n`).then(() => undefined),
 
     async start(args, settle = SETTLE) {
-      const w = startWatcher(s, 'bash', [join(root, 'scripts/start-codex-signal-watch.sh'), ...args], {
+      const w = startWatcher(s, 'node', [join(root, 'scripts/start-codex-signal-watch.mts'), ...args], {
         cwd: root,
         env: {
           ...DERIVE_FROM_THE_FIXTURE,

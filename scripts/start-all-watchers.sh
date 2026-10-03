@@ -18,7 +18,7 @@ start_watch(){
   fi
 }
 
-dispatchers=(start-codex-signal-watch.sh start-gemini-signal-watch.sh start-kimi-signal-watch.sh)
+dispatchers=(start-codex-signal-watch.mts start-gemini-signal-watch.mts start-kimi-signal-watch.mts)
 notifiers=(start-copilot-signal-watch.sh)
 
 echo "Starting dispatchers: ${dispatchers[*]}"

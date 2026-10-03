@@ -103,7 +103,7 @@
 # BP_CODE_ROOT IS REQUIRED. There is deliberately no `$PWD` fallback, and that
 # is not caution — it is a bug this change already caused and caught.
 #
-# start-codex-signal-watch.sh builds its wake command as a single-quoted string
+# start-codex-signal-watch.mts builds its wake command as a single-quoted string
 # executed LATER by `sh -c`, where only EXPORTED variables survive. With a $PWD
 # fallback, `bp_state_root` there resolved to whatever directory the dispatch
 # happened to run from — which in tests/state-dir's fixture was the REAL

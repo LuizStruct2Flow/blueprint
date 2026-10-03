@@ -87,10 +87,11 @@ async function scanTree(
 function healthyTree(): { files: Record<string, string>; managed: string[] } {
   const files: Record<string, string> = {
     // #3's subject. It must source the shared appender and hold no rotation.
-    'scripts/log-activity.sh': `#!/bin/sh\n. "$root/scripts/lib/feed.sh"\nfeed_append "$1"\n`,
+    'scripts/log-activity.mts': `#!/bin/sh\n. "$root/scripts/lib/feed.sh"\nfeed_append "$1"\n`,
   }
-  const managed = ['scripts/log-activity.sh']
-  for (let i = 0; i < 5; i++) {
+  // The .mts subject is read by checkRotationIsShared, not scanned: six shell scripts.
+  const managed: string[] = []
+  for (let i = 0; i < 6; i++) {
     const rel = `scripts/clean-${i}.sh`
     files[rel] = CLEAN_SCRIPT
     managed.push(rel)
@@ -220,10 +221,10 @@ describe('BUG-006 — no managed file carries a project-specific env namespace',
     })
   })
 
-  it('#3 log-activity.sh that does NOT source the shared appender is caught', async () => {
+  it('#3 log-activity.mts that does NOT source the shared appender is caught', async () => {
     await scenario('env-ns-3-unshared', async (s) => {
       const { files, managed } = healthyTree()
-      files['scripts/log-activity.sh'] = `#!/bin/sh\necho "$1" >> "$log"\n`
+      files['scripts/log-activity.mts'] = `#!/bin/sh\necho "$1" >> "$log"\n`
 
       const scan = await scanTree(s, 'bp', files, managed)
 
@@ -237,7 +238,7 @@ describe('BUG-006 — no managed file carries a project-specific env namespace',
       // Sourcing the shared appender AND keeping the old trim is the shape that
       // actually drifts: a `mv`-based rotate in one copy orphans the feed
       // supervisor's open handle while the other stays correct.
-      files['scripts/log-activity.sh'] = [
+      files['scripts/log-activity.mts'] = [
         '#!/bin/sh',
         '. "$root/scripts/lib/feed.sh"',
         'n=$(wc -l < "$log")',
@@ -250,7 +251,7 @@ describe('BUG-006 — no managed file carries a project-specific env namespace',
     })
   })
 
-  it('#3 a MISSING log-activity.sh refuses to judge rather than passing', async () => {
+  it('#3 a MISSING log-activity.mts refuses to judge rather than passing', async () => {
     await scenario('env-ns-3-missing', async (s) => {
       const scan = await scanTree(s, 'bp', { 'scripts/clean.sh': CLEAN_SCRIPT }, [
         'scripts/clean.sh',

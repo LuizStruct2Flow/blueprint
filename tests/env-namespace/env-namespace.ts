@@ -45,7 +45,7 @@ export interface EnvNamespaceScan {
   readonly offenders: readonly string[]
   /** Managed scripts still reading an `LWA_` name as their PRIMARY source. */
   readonly lwaPrimary: readonly string[]
-  /** Why #3 failed, or null when `log-activity.sh` routes through the appender. */
+  /** Why #3 failed, or null when `log-activity.mts` routes through the appender. */
   readonly rotationCopy: string | null
 }
 
@@ -139,7 +139,7 @@ export async function scanEnvNamespace(
  * get right. One appender.
  */
 export async function checkRotationIsShared(root: string): Promise<string | null> {
-  const rel = 'scripts/log-activity.sh'
+  const rel = 'scripts/log-activity.mts'
   let source: string
   try {
     source = await readFile(join(root, rel), 'utf8')
@@ -148,22 +148,11 @@ export async function checkRotationIsShared(root: string): Promise<string | null
     return `${rel} not found`
   }
 
-  // TASK-067: a migrated hook is the fixed two-line exec shim, and its logic —
-  // including which appender it routes through — lives in the sibling .mts.
-  // The property this check is actually about (one shared appender, no
-  // reimplemented rotation) has to be judged against wherever the logic is.
-  const isShim = source === '#!/usr/bin/env bash\nexec node "$(dirname "$0")/log-activity.mts" "$@"\n'
-  const implRel = isShim ? 'scripts/log-activity.mts' : rel
-  const implSource = isShim
-    ? await readFile(join(root, implRel), 'utf8').catch(() => '')
-    : source
-  if (isShim && implSource === '') return `${implRel} (the shim's own target) not found`
-
-  if (!implSource.includes('feed.sh')) {
-    return `${implRel} does not source the shared appender — it has its own copy of the rotation`
+  if (!source.includes('feed.sh')) {
+    return `${rel} does not source the shared appender — it has its own copy of the rotation`
   }
-  if (/tail -n .*>.*\.rot\.|wc -l < ?"?\$log/.test(stripComments(implSource))) {
-    return `${implRel} still contains its own rotation logic`
+  if (/tail -n .*>.*\.rot\.|wc -l < ?"?\$log/.test(stripComments(source))) {
+    return `${rel} still contains its own rotation logic`
   }
   return null
 }

@@ -241,7 +241,7 @@ EOF
 
 # --- a Claude subagent's meta file -> its feed label (BUG-124) ---------------
 # THE one way a subagent is labelled, for the streamed lines (agent-activity.sh)
-# and for both hook bookends (log-activity.sh). They used to derive it apart —
+# and for both hook bookends (log-activity.mts). They used to derive it apart —
 # the feed from the meta file, the hook from a `description` field no real hook
 # payload carries — so every bookend read `[general-purpose - Claude Code]` while
 # the lines between them read the persona.

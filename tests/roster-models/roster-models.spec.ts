@@ -118,7 +118,6 @@ describe('TASK-059 — roster Model tiers', () => {
   it('#4 a subagent feed line reads [Name - model it ran on - effort]', async () => {
     await scenario('rm-4', async (s) => {
       const { dir, env } = await project(s)
-      await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.sh'), 'proj/scripts/log-activity.sh')
       await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.mts'), 'proj/scripts/log-activity.mts')
       for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
         if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
@@ -136,7 +135,7 @@ describe('TASK-059 — roster Model tiers', () => {
       })
       const r = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh "${join(dir, 'scripts', 'log-activity.sh')}"`, 'x', payload],
+        ['-c', `printf '%s' "$1" | node "${join(dir, 'scripts', 'log-activity.mts')}"`, 'x', payload],
         { cwd: dir, env: { ...env, AGENT_FEED_LOG: log } },
       )
       expect(r.code, r.output).toBe(0)
@@ -153,7 +152,6 @@ describe('TASK-059 — roster Model tiers', () => {
     // persona only in free-text description) and so never exercised this path.
     await scenario('rm-4b', async (s) => {
       const { dir, env } = await project(s)
-      await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.sh'), 'proj/scripts/log-activity.sh')
       await s.fs.copyIn(join(SUBJECT, 'scripts', 'log-activity.mts'), 'proj/scripts/log-activity.mts')
       for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
         if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
@@ -174,7 +172,7 @@ describe('TASK-059 — roster Model tiers', () => {
       })
       const r = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh "${join(dir, 'scripts', 'log-activity.sh')}"`, 'x', payload],
+        ['-c', `printf '%s' "$1" | node "${join(dir, 'scripts', 'log-activity.mts')}"`, 'x', payload],
         { cwd: dir, env: { ...env, AGENT_FEED_LOG: log } },
       )
       expect(r.code, r.output).toBe(0)

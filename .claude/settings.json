@@ -282,7 +282,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/log-activity.sh\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/log-activity.mts\"",
             "timeout": 5
           }
         ]
@@ -293,7 +293,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/log-activity.sh\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/log-activity.mts\"",
             "timeout": 5
           }
         ]

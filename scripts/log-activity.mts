@@ -1,7 +1,5 @@
-// scripts/log-activity.mts — TASK-067 port of scripts/log-activity.sh.
-// scripts/log-activity.sh is now the fixed two-line exec shim AGENTS.md's
-// "Shell to TypeScript, organically" requires; this file carries the whole
-// implementation.
+// scripts/log-activity.mts — TASK-067 port of the shell hook log-activity.sh,
+// which TASK-088 deleted: .claude/settings.json runs this file with node.
 //
 // Hook → activity-feed appender. Wired in .claude/settings.json on the
 // SubagentStart / SubagentStop events so Claude Code SUBAGENTS show up in the

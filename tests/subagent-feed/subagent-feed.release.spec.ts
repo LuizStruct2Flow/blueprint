@@ -45,13 +45,8 @@
  *     fails the build. The hook still needs `timeout(1)` internally to bound its
  *     own lookup, so its absence is now a FAILURE with a message saying so rather
  *     than a silent gap in coverage on that host.
- *   - `#7` stays a SOURCE check, deliberately, and that is a real limit rather
- *     than an oversight. The behavioural check needs a shell that LACKS
- *     `pipefail`, and this machine has none to offer — a stub cannot help, because
- *     it would have to INTERPRET the script rather than merely launch it. #5 and
- *     #6 run the hook under `sh` and do catch BUG-031 behaviourally, but only
- *     where that `sh` lacks the option, i.e. on the runner where it broke and
- *     where a green local suite said nothing.
+ *   - `#7` (the shim pin for BUG-031) is gone: TASK-088 deleted the shell file,
+ *     and the hook is TypeScript run with node, so no `sh` option can kill it.
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -68,10 +63,8 @@ import { feedFixture, type FeedFixture } from '../helpers/feed-fixture.js'
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 
 const FEED = join(SUBJECT, 'scripts', 'agent-activity.sh')
-const HOOK = join(SUBJECT, 'scripts', 'log-activity.sh')
-// TASK-067: the hook's own logic lives here now — scripts/log-activity.sh is
-// the fixed two-line exec shim, and a source check for the LOGIC has to read
-// its sibling, not the shim.
+// TASK-088: the hook is scripts/log-activity.mts, run with node; its shell file
+// is deleted.
 const HOOK_IMPL = join(SUBJECT, 'scripts', 'log-activity.mts')
 const ROSTER_LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
@@ -253,7 +246,6 @@ async function hookTree(s: Scenario, name: string, rosterLib: string): Promise<s
   const dir = await s.fs.mkdirp(name)
   await s.fs.mkdirp(`${name}/logs`)
   await s.fs.write(`${name}/.blueprint-source`, '')
-  await s.fs.copyIn(HOOK, `${name}/scripts/log-activity.sh`)
   await s.fs.copyIn(HOOK_IMPL, `${name}/scripts/log-activity.mts`)
   const libs = await s.run('sh', ['-c', `ls "${join(SUBJECT, 'scripts', 'lib')}"`], {
     cwd: s.workspace.root,
@@ -277,7 +269,7 @@ async function fireHook(
 ) {
   return s.run(
     'sh',
-    ['-c', `printf '%s' "$1" | sh "${join(dir, 'scripts', 'log-activity.sh')}"`, 'x', JSON.stringify(payload)],
+    ['-c', `printf '%s' "$1" | node "${join(dir, 'scripts', 'log-activity.mts')}"`, 'x', JSON.stringify(payload)],
     { cwd: dir, env, timeoutMs },
   )
 }
@@ -730,25 +722,6 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
     })
   })
 
-  it('#7 the hook is the fixed exec shim, so BUG-031 cannot recur (source check — see the header)', async () => {
-    // BUG-031 was `set -uo pipefail` killing the hook at rc=2 under a `sh`
-    // that rejects the option — the most defensive script in the repo
-    // destroyed by its own first statement. TASK-067 ported the hook's whole
-    // logic to scripts/log-activity.mts, so scripts/log-activity.sh is now the
-    // fixed two-line `exec node ...` shim: no `set`, no pipefail, no `sh`
-    // running any of the logic BUG-031 was about. The concern moved rather
-    // than being re-guarded, so this checks that it moved — the exact shim
-    // text, not a probe idiom that no longer has anything to probe.
-    // code() strips `#`-lines (including the shebang) — assert on the RAW
-    // file, which is what actually runs, not the comment-stripped view every
-    // other case in this describe uses for source scanning.
-    const raw = await readFile(HOOK, 'utf8').catch(() => '')
-    expect(raw, 'the hook is missing or empty — the assertion would be vacuous').not.toBe('')
-    expect(raw, 'the hook is no longer the fixed exec shim — it is shell logic again, and BUG-031 applies').toBe(
-      '#!/usr/bin/env bash\nexec node "$(dirname "$0")/log-activity.mts" "$@"\n',
-    )
-  })
-
   // =========================================================================
   // Source backstops. Cheap guards against the exact idioms, not the coverage.
   // =========================================================================
@@ -759,8 +732,6 @@ describe('BUG-027 — delegated work is visible in the feed, under its persona',
   it('static: the hook and the feed label a subagent through the one shared function', async () => {
     // The BUG-010 shape: two copies of a rule are two rules. BUG-124 was exactly
     // that — the hook derived its label apart from the feed, and they disagreed.
-    // TASK-067: the hook's logic is scripts/log-activity.mts now — HOOK (the
-    // shim) carries none of it.
     expect(await code(HOOK_IMPL)).toMatch(/bp_roster_subagent_label/)
     expect(await code(HOOK_IMPL)).toMatch(/ROSTER_LIB/)
     expect(await code(FEED)).toMatch(/bp_roster_subagent_label/)
@@ -830,7 +801,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         'hold-fd.sh',
         `exec 9>${JSON.stringify(lock)}\n` +
           `flock -n 9 || exit 3\n` +
-          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}\n` +
+          `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}\n` +
           `exec 9>&-\n`,
       )
 
@@ -862,7 +833,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       const f = await deferFixture(s)
       const r = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'abc123def456')],
+        ['-c', `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`, 'x', start(s, f, 'abc123def456')],
         { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '999999' } },
       )
       expect(r.code, r.output).toBe(0)
@@ -891,7 +862,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       const f = await deferFixture(s)
       const r = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'abc123def456')],
+        ['-c', `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`, 'x', start(s, f, 'abc123def456')],
         { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: 'soon' } },
       )
       expect(r.code, `a hook must always exit 0\n${r.output}`).toBe(0)
@@ -918,7 +889,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       for (const id of ids) {
         const r = await s.run(
           'sh',
-          ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, id)],
+          ['-c', `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`, 'x', start(s, f, id)],
           { cwd: f.repo, env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '20' } },
         )
         expect(r.code, r.output).toBe(0)
@@ -951,13 +922,13 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       // BP_SUBAGENT_DEFER_MAX is 999 here, so the ceiling must be the hook's own.
       const f = await deferFixture(s)
       const go = s.workspace.path('go')
-      const hook = join(f.repo, 'scripts/log-activity.sh')
+      const hook = join(f.repo, 'scripts/log-activity.mts')
       const runs = []
       for (let i = 0; i < 12; i += 1) {
         const driver = await s.fs.write(
           `race-${i}.sh`,
           `while [ ! -e ${JSON.stringify(go)} ]; do sleep 0.02; done\n` +
-            `printf '%s' "$1" | sh ${JSON.stringify(hook)}\n`,
+            `printf '%s' "$1" | node ${JSON.stringify(hook)}\n`,
         )
         runs.push(
           s.run('sh', [driver, start(s, f, `race${i}00000000`)], {
@@ -989,7 +960,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
     })
   })
 
-  for (const shell of ['sh', 'bash']) {
+  for (const shell of ['node']) {
     it(`#13 ${shell}: an inherited fd 19 is released AND the bookend still lands`, async () => {
       await scenario(`sf-13-${shell}`, async (s) => {
         // #8 uses fd 9. A multi-digit descriptor is the boundary: `eval "exec
@@ -1003,7 +974,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
           `hold-19-${shell}.sh`,
           `exec 19>${JSON.stringify(lock)}\n` +
             `flock -n 19 || exit 3\n` +
-            `printf '%s' "$1" | ${shell} ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}\n` +
+            `printf '%s' "$1" | ${shell} ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}\n` +
             `exec 19>&-\n`,
         )
 
@@ -1045,7 +1016,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
           'sh',
           [
             '-c',
-            `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+            `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`,
             'x',
             start(s, f, 'abc123def456'),
           ],
@@ -1074,7 +1045,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         'sh',
         [
           '-c',
-          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+          `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`,
           'x',
           start(s, f, 'abc123def456'),
         ],
@@ -1129,7 +1100,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
           `exec /bin/rm "$@"`,
       )
 
-      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))
+      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))
       const env = {
         ...f.env,
         AGENT_FEED_LOG: f.log,
@@ -1139,7 +1110,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         PATH: shims.path(),
       }
       const call = (id: string) =>
-        s.run('sh', ['-c', `printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, id)], {
+        s.run('sh', ['-c', `printf '%s' "$1" | node ${hook}`, 'x', start(s, f, id)], {
           cwd: f.repo,
           env,
         })
@@ -1210,7 +1181,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
 
       const callA = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'aaaa00000000')],
+        ['-c', `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`, 'x', start(s, f, 'aaaa00000000')],
         {
           cwd: f.repo,
           env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
@@ -1246,7 +1217,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
 
       const callB = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'bbbb00000000')],
+        ['-c', `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`, 'x', start(s, f, 'bbbb00000000')],
         {
           cwd: f.repo,
           env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
@@ -1297,7 +1268,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
 
       const call = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`, 'x', start(s, f, 'cccc00000000')],
+        ['-c', `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`, 'x', start(s, f, 'cccc00000000')],
         {
           cwd: f.repo,
           env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
@@ -1378,10 +1349,10 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       await s.fs.write('repo/subagent-defer/.lock', '')
       await s.fs.write('repo/logs/agent-activity.log', '')
 
-      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))
+      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))
       const callA = await s.run(
         'sh',
-        ['-c', `umask 0222; printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, 'aaaa00000000')],
+        ['-c', `umask 0222; printf '%s' "$1" | node ${hook}`, 'x', start(s, f, 'aaaa00000000')],
         {
           cwd: f.repo,
           env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
@@ -1424,7 +1395,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       // live slot" would look like.
       const callB = await s.run(
         'sh',
-        ['-c', `printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, 'bbbb00000000')],
+        ['-c', `printf '%s' "$1" | node ${hook}`, 'x', start(s, f, 'bbbb00000000')],
         {
           cwd: f.repo,
           env: { ...f.env, AGENT_FEED_LOG: f.log, BP_SUBAGENT_META_WAIT: '10', BP_SUBAGENT_DEFER_MAX: '1' },
@@ -1461,7 +1432,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         'sh',
         [
           '-c',
-          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+          `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`,
           'x',
           start(s, f, 'abc123def456'),
         ],
@@ -1562,7 +1533,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
       // feed is that place — hook stderr is discarded outside --debug — and it
       // says so ONCE, because a line per dispatch is noise that gets muted.
       const f = await deferFixture(s)
-      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))
+      const hook = JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))
       // BP_FLOCK_FALLBACKS is the test seam for the Homebrew keg paths the hook
       // probes after PATH: `brew install util-linux` is keg-only, so flock is
       // NOT symlinked onto PATH and the command name alone would miss it on the
@@ -1575,7 +1546,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         BP_FLOCK_FALLBACKS: '',
       }
       const call = (id: string) =>
-        s.run('sh', ['-c', `printf '%s' "$1" | sh ${hook}`, 'x', start(s, f, id)], {
+        s.run('sh', ['-c', `printf '%s' "$1" | node ${hook}`, 'x', start(s, f, id)], {
           cwd: f.repo,
           env,
         })
@@ -1649,7 +1620,7 @@ describe('BUG-124 — the deferred bookend child holds nothing and is bounded', 
         'sh',
         [
           '-c',
-          `printf '%s' "$1" | sh ${JSON.stringify(join(f.repo, 'scripts/log-activity.sh'))}`,
+          `printf '%s' "$1" | node ${JSON.stringify(join(f.repo, 'scripts/log-activity.mts'))}`,
           'x',
           start(s, f, 'clean0000000'),
         ],

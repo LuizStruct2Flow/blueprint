@@ -386,8 +386,6 @@ interface PortedSet {
 }
 interface RefCtx {
   readonly root: string
-  readonly baseRef: string
-  ported?: PortedSet
 }
 
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -411,15 +409,17 @@ function gitList(root: string, args: string[]): string[] {
   }
 }
 
-function portedSet(root: string, baseRef: string): PortedSet {
+// An extensionless P is a member only when the caller's own BASE blob names it:
+// that evidence survives every later push (BASE then has no P, the row's blob
+// still does), and no bare .mts stem becomes a token.
+function portedSet(root: string, baseContent: string): PortedSet {
   const tracked = new Set(gitList(root, ['ls-files', '-z']))
-  const atBase = new Set(gitList(root, ['ls-tree', '-r', '--name-only', '-z', baseRef]))
   const mtsList: string[] = []
   const members: Ported[] = []
   for (const m of [...tracked].sort()) {
     if (!m.endsWith('.mts')) continue
     const stem = m.slice(0, -4)
-    const absent = [`${stem}.sh`, ...(atBase.has(stem) ? [stem] : [])].filter((p) => !tracked.has(p))
+    const absent = [`${stem}.sh`, ...(baseContent.includes(stem) ? [stem] : [])].filter((p) => !tracked.has(p))
     if (absent.length === 0) continue
     const k = mtsList.push(m) - 1
     for (const sh of absent) members.push({ sh, k })
@@ -453,9 +453,13 @@ function tokenRegex(d: PortedSet, side: 'base' | 'head'): { re: RegExp; byName: 
   if (byName.size === 0) return undefined
   const alt = (keys: Iterable<string>): string =>
     [...keys].sort((a, b) => b.length - a.length).map(esc).join('|')
-  const tail = String.raw`(?![-\w]|\.\w)`
+  // The plan's boundary `(?![-\w.])`, relaxed only for a sentence-ending dot.
+  const tail = String.raw`(?![-\w]|\.(?!\s|$))`
+  // A path token is a WHOLE path: at a start, whitespace, quote, `=`, `(`, `:`,
+  // or after a `$VAR/` or `./` prefix — never after another `/segment`.
+  const start = String.raw`(?:(?<=^|[\s"'=(:])|(?<=\$\{?\w+\}?/)|(?<=(?:^|[\s"'=(:])\./))`
   const re = new RegExp(
-    String.raw`(?<![-\w])(${alt(byName.keys())})${tail}` +
+    String.raw`${start}(${alt(byName.keys())})${tail}` +
       (byBase.size > 0 ? String.raw`|(?<![-\w/])(${alt(byBase.keys())})${tail}` : ''),
     'g',
   )
@@ -584,7 +588,7 @@ function isReferenceOnlyEdit(ctx: RefCtx, file: string, recordedSha: string): bo
   }
   const headContent = readFileOrUndefined(`${ctx.root}/${file}`)
   if (headContent === undefined) return false
-  const d = (ctx.ported ??= portedSet(ctx.root, ctx.baseRef))
+  const d = portedSet(ctx.root, baseContent)
   const b = canonicalise(baseContent, 'base', d)
   if (b === undefined) return false
   const h = canonicalise(headContent, 'head', d, b.prefixes)
@@ -722,7 +726,7 @@ function main(): number {
   const files = new Set(readFileList())
   const effectiveExempt = new Set(head.exempt.filter((file) => baseInv.exempt.includes(file)))
 
-  const ctx: RefCtx = { root, baseRef: base }
+  const ctx: RefCtx = { root }
   const problems = [
     ...checkTamper(baseInv, head),
     ...checkRemovedRows(root, baseInv, head, files),

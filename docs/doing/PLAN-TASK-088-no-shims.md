@@ -4,7 +4,9 @@ Row: [`BACKLOG.md`](BACKLOG.md) (TASK-088). Author: Christian (Architect), 2026-
 Status: **revised after the Claude and Codex reviews.** Markus (Security,
 Claude) and Alexey (Codex) both returned APPROVE WITH CHANGES, and every
 finding is folded in below. Kimi's review is missing because Kimi is out of
-quota.
+quota. **Approved by the founder, 2026-10-03:** go ahead without Kimi's review,
+and Q2-Q5 are confirmed as recommended (§6). Kimi reviews the first
+implementation slice instead when its quota returns.
 
 The founder's rule and his 2026-10-03 ruling are quoted in the row and settled.
 This plan implements them. It does not re-argue them:
@@ -360,9 +362,9 @@ shim and adapter tests, and the helper imports it needed, and each carries
 2. **Q2: Git hooks.** Recommended by both reviewers: a hook keeps a two-line
    `exec` entry, recognised only under `.githooks/` (§1.3). AGENTS.md says that
    TASK-088 supersedes TASK-018 except for this case.
-3. **Q3: the installer.** May the Orchestrator rerun
-   `bash scripts/install-toolchain.sh` here after slice 2? Both reviewers
-   recommend yes, with `check` exiting 0 as the precondition for slice 8.
+3. **Q3: the installer.** The Orchestrator reruns
+   `bash scripts/install-toolchain.sh` here after slice 2 (founder, 2026-10-03),
+   with `check` exiting 0 as the precondition for slice 8.
 4. **Q4: the function table.** Each future sourced-lib port adds one reviewed
    row. Both reviewers say yes. Markus asks for the `case`-coverage test, and
    Alexey asks for the row to land in an additive, mutant-tested commit before

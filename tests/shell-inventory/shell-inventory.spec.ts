@@ -871,10 +871,56 @@ esac
       })
     })
 
+    it('N10b an extensionless path survives the push after its first repoint (BASE no longer has it)', async () => {
+      await scenario('shell-inventory-n10b', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/new-project.sh', base: N2_BASE, head: N2_HEAD, ported: ['scripts/blueprint'], mts: ['scripts/blueprint.mts'], secondPush: true })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N16 a pre-existing nested path ending in a deleted root path is not repointed', async () => {
+      await scenario('shell-inventory-n16', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: '#!/bin/sh\nbash tests/x/scripts/lib/gate.sh\n', head: '#!/bin/sh\nnode tests/x/scripts/lib/gate.mts\n', ...GATE_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/caller\.sh/)
+      })
+    })
+
+    it('N17 a path followed by .${suffix} is not a token; a sentence-ending dot still is', async () => {
+      const ported = { ported: ['scripts/foo.sh'], mts: ['scripts/foo.mts'] }
+      await scenario('shell-inventory-n17a', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: '#!/bin/sh\ncp scripts/foo.sh.${suffix} out\n', head: '#!/bin/sh\ncp scripts/foo.mts.${suffix} out\n', ...ported })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*scripts\/caller\.sh/)
+      })
+      await scenario('shell-inventory-n17b', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/caller.sh', base: '#!/bin/sh\n# see scripts/foo.sh.\n', head: '#!/bin/sh\n# see scripts/foo.mts.\n', ...ported })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    // The case labels of main()'s switch only: comments and strings do not count.
+    function mainSwitchBody(src: string): string {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+      const open = code.indexOf('{', code.indexOf('switch (', code.search(/function main\(/)))
+      let depth = 0
+      for (let i = open; i < code.length; i++) {
+        if (code[i] === '{') depth++
+        else if (code[i] === '}' && --depth === 0) return code.slice(open, i)
+      }
+      return ''
+    }
+
+    it('N18 a case label that appears only in a comment is not found in main()\'s switch', () => {
+      const src = "// case 'rows':\nfunction main(): void {\n  switch (sub) {\n    case 'bugtests':\n      break\n    // case 'rows':\n  }\n}\n"
+      expect(mainSwitchBody(src)).toContain("case 'bugtests':")
+      expect(mainSwitchBody(src)).not.toContain("case 'rows':")
+    })
+
     it('the function table names only subcommands the .mts main() switch has', () => {
       for (const lib of SOURCED_LIBS) {
-        const src = readFileSync(`${REPO_ROOT}/${lib.mts}`, 'utf8')
-        for (const sub of Object.values(lib.fns)) expect(src, `${lib.mts} case '${sub}'`).toContain(`case '${sub}':`)
+        const body = mainSwitchBody(readFileSync(`${REPO_ROOT}/${lib.mts}`, 'utf8'))
+        for (const sub of Object.values(lib.fns)) expect(body, `${lib.mts} case '${sub}'`).toContain(`case '${sub}':`)
       }
     })
   })

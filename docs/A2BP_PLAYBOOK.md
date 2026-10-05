@@ -53,7 +53,7 @@ request seconds after raising it is exactly what this rule exists to stop.
 ## Step A0 — What the requester's guard already did
 
 The contamination guard runs on the **project** side, at `a2bp` time, before the
-request is filed (A-07 — `scripts/lib/contamination.sh`). It does two things:
+request is filed (A-07 — `scripts/lib/contamination.mts`). It does two things:
 
 1. **Placeholder restoration, by positional alignment.** `a2bp`
    forward-substitutes the blueprint's own copy — reproducing exactly what

@@ -46,6 +46,7 @@ const COUNTERPARTS: readonly Counterpart[] = [
   { stage: /^SCA · osv-scanner$/, job: 'sca', evidence: ['osv-scanner scan source'] },
   { stage: /^shellcheck · TASK-033$/, job: 'ts-tests', evidence: ['sh_lint .'] },
   { stage: /^shell-inventory · TASK-067$/, job: 'ts-tests', evidence: ['ts_shell_inventory .'] },
+  { stage: /^contamination · TASK-090$/, job: 'contamination', evidence: ['node scripts/contamination-push-scan.mts'] },
   { stage: /^typecheck · TASK-031$/, job: 'ts-tests', evidence: ['ts_typecheck .'] },
   { stage: /^docs · TASK-053$/, job: 'ts-tests', evidence: ['ts_scrubbed npx vitest run'] },
   { stage: /^vitest · TASK-018$/, job: 'ts-tests', evidence: ['ts_scrubbed npx vitest run'] },
@@ -186,6 +187,7 @@ pipe_stage "§D·F·H judgement — printed, not verified" _st_judgement
   bridge: `
 pipe_stage "shellcheck · TASK-033" sh_lint
 pipe_stage "shell-inventory · TASK-067" ts_shell_inventory
+pipe_stage "contamination · TASK-090" ts_contamination
 pipe_stage "typecheck · TASK-031" ts_typecheck
 pipe_stage "docs · TASK-053" run_docs
 pipe_stage "vitest · TASK-018" run_specs
@@ -202,6 +204,9 @@ jobs:
   sca:
     steps:
       - run: osv-scanner scan source
+  contamination:
+    steps:
+      - run: node scripts/contamination-push-scan.mts --range "$BASE..$HEAD"
   commit-subjects:
     steps:
       - run: node scripts/lib/dod-gate.mts rows && node scripts/lib/dod-gate.mts bugtests
@@ -209,7 +214,7 @@ jobs:
     steps:
       - run: sh_lint . && ts_shell_inventory . node && ts_typecheck . && ts_scrubbed npx vitest run
   release:
-    needs: [secret-scan, sast, sca, commit-subjects, ts-tests]
+    needs: [secret-scan, sast, sca, commit-subjects, contamination, ts-tests]
     steps:
       - run: git push origin released
 `,
@@ -219,7 +224,7 @@ describe('TASK-078 — a bypass is contained by measured local/CI parity', () =>
   it('the healthy fixture has counterparts while keeping the three residuals visible', () => {
     const report = inspectGateCiParity(fixture())
     expect(report.problems).toEqual([])
-    expect(report.covered).toHaveLength(10)
+    expect(report.covered).toHaveLength(11)
     expect(report.residual).toEqual([
       'settings.json host-path guard',
       '§7G the live baton is well-formed',
@@ -260,8 +265,8 @@ describe('TASK-078 — a bypass is contained by measured local/CI parity', () =>
     const report = inspectGateCiParity(files)
 
     expect(report.problems, report.problems.join('\n')).toEqual([])
-    expect(report.stages).toHaveLength(23)
-    expect(report.covered).toHaveLength(10)
+    expect(report.stages).toHaveLength(24)
+    expect(report.covered).toHaveLength(11)
     expect(report.residual).toEqual([
       'settings.json host-path guard',
       '§7G the live baton is well-formed',

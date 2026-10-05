@@ -55,9 +55,11 @@ async function workflow(): Promise<string> {
 }
 
 describe('TASK-079 — the pushed diff is scanned by contamination.sh’s own checker', () => {
-  it('#1 the script SOURCES contamination.sh and carries none of its patterns itself', async () => {
+  it('#1 the script reaches the contamination lib and carries none of its patterns itself', async () => {
     const text = await readFile(SCRIPT, 'utf8')
-    expect(text).toContain('contamination.sh')
+    // The shell lib today, its `.mts` once BUG-155 ports it — either way the
+    // checker is reached, never re-spelled here.
+    expect(text).toMatch(/contamination\.(sh|mts)/)
     // The checker's regexes. If any of these appears in the script, the
     // patterns have been forked and will drift — the audit's re-open trigger.
     expect(text).not.toMatch(/\?\(Users\|home\)|\(Users\|home\)/)

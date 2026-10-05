@@ -452,7 +452,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
       // Since TASK-021 `blueprint files` lists those files one by one.
       const exempt = (f: string) =>
         f.startsWith('tests/') ||
-        /(scripts\/blueprint|scripts\/new-project\.sh|scripts\/lib\/placeholders\.sh|scripts\/lib\/contamination\.sh)$/.test(
+        /(scripts\/blueprint|scripts\/new-project\.sh|scripts\/lib\/placeholders\.sh|scripts\/lib\/contamination\.(sh|mts))$/.test(
           f,
         )
 

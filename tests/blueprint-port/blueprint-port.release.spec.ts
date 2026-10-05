@@ -316,10 +316,19 @@ async function installShellCli(s: Scenario, dir: string): Promise<void> {
 
 /** TASK-088 deleted scripts/lib/gate.sh, but the historical shell CLI still
  * sources it to arm the gate, so OLD's fixtures carry the adapter it sourced
- * (the file as of beef710), beside the live gate.mts it forwards to. */
+ * (the file as of beef710), beside the live gate.mts it forwards to. The same
+ * for scripts/lib/contamination.sh, one of cmd_a2bp's required libs, which
+ * BUG-155 ports and deletes: OLD keeps the shell lib as of e3fd8d8. It sits
+ * under historical/, not beside historical-gate.sh, because tests/<suite>/*.sh
+ * is git-isolation's population and the lib's known-dotdir list spells `git`
+ * in code, which that scan reads as driving git. */
 async function installHistoricalGate(libDir: string): Promise<void> {
   await mkdir(libDir, { recursive: true })
   await copyFile(join(REPO_ROOT, 'tests/blueprint-port/historical-gate.sh'), join(libDir, 'gate.sh'))
+  await copyFile(
+    join(REPO_ROOT, 'tests/blueprint-port/historical/contamination.sh'),
+    join(libDir, 'contamination.sh'),
+  )
 }
 
 /** A standalone materialized copy for the handful of rows that run the shell

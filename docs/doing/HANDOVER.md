@@ -145,7 +145,7 @@ no such cycle exists (checked 2026-09-29).
   `.claude/worktrees/` (some may hold unlanded work; check before deleting —
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
-- **Waiting for the founder's acceptance:** TASK-088 (all nine slices released at `29977d5`: no shell shim or sourced adapter is left, and the inventory checker accepts a reference-only repoint of a legacy caller), BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
+- **Waiting for the founder's acceptance:** BUG-155 (released `0b7a6f3`), TASK-089 (a2bp PR #86 from stash2flow, released `37be0fb`), TASK-088 (all nine slices released at `29977d5`: no shell shim or sourced adapter is left, and the inventory checker accepts a reference-only repoint of a legacy caller), BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.
@@ -190,17 +190,18 @@ no such cycle exists (checked 2026-09-29).
    3 on migration case 4 is a known limit the founder accepted (2026-09-30).
    In the release after this one, remove the `@claude.internal.md` import.
    Plan: [`PLAN-TASK-084-agents-md.md`](../waiting-acceptance/PLAN-TASK-084-agents-md.md).
-2. **BUG-155** (port
-   `contamination.sh`, then its fix) — unblocked now that TASK-081 has
-   landed; slice 6's closure brings a ported lib's `.mts` on a single-file pull.
-3. **BUG-146** on the next #20d hang.
+2. **BUG-146** on the next #20d hang.
 
-**The pre-push gate does not run the contamination push scan; only CI does.**
-It turned `main` red twice today (`4a2b7e2`, `5966207`), both times on BUG-155's
-misread of `${VAR:-$HOME/.codex}`. Until BUG-155 is fixed, run
+**BUG-155 is fixed and released at `0b7a6f3`, waiting for acceptance:**
+`contamination.sh` is ported to `scripts/lib/contamination.mts` and deleted, and
+`${VAR:-$HOME/.codex}` and `~/.kimi-code` no longer block.
+
+**The pre-push gate still does not run the contamination push scan; only CI
+does.** It turned `main` red three times (`4a2b7e2` and `5966207` on BUG-155's
+misread, `d334541` on a planted test fixture in TASK-088 slice 5). Run
 `node scripts/contamination-push-scan.mts --before origin/main --after HEAD`
-before pushing a change that names a home dotdir. Whether the gate should
-run it is a question for the founder, not yet asked.
+before every push. Whether the gate should run it was put to the founder on
+2026-10-05, with a recommendation of yes; no answer yet.
 
 **Housekeeping, not urgent:** 32 agent worktrees under `.claude/worktrees/`.
 Their work mostly landed by cherry-pick (new SHAs), so git cannot say which are

@@ -196,12 +196,15 @@ no such cycle exists (checked 2026-09-29).
 `contamination.sh` is ported to `scripts/lib/contamination.mts` and deleted, and
 `${VAR:-$HOME/.codex}` and `~/.kimi-code` no longer block.
 
-**The pre-push gate still does not run the contamination push scan; only CI
-does.** It turned `main` red three times (`4a2b7e2` and `5966207` on BUG-155's
-misread, `d334541` on a planted test fixture in TASK-088 slice 5). Run
-`node scripts/contamination-push-scan.mts --before origin/main --after HEAD`
-before every push. Whether the gate should run it was put to the founder on
-2026-10-05, with a recommendation of yes; no answer yet.
+**The pre-push gate now runs the contamination push scan (TASK-090, founder
+decision 2026-10-05: "yes, do it").** The gate stage
+`contamination · TASK-090` runs `scripts/contamination-push-scan.mts --before
+<base> --after HEAD` on every blueprint push — full and text-only profiles
+alike, the latter through `ts_docs_stage` — and blocks on a BLOCK finding; CI's
+`contamination` job remains the backstop for a `--no-verify` bypass. The
+CI-only gap it closes turned `main` red three times (`4a2b7e2` and `5966207`
+on BUG-155's misread, `d334541` on a planted test fixture in TASK-088 slice
+5). Manual pre-push scan runs are no longer needed.
 
 **Housekeeping, not urgent:** 32 agent worktrees under `.claude/worktrees/`.
 Their work mostly landed by cherry-pick (new SHAs), so git cannot say which are

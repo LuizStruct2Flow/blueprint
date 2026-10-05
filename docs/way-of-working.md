@@ -415,9 +415,10 @@ Guarded push, in detail: the same multiplier that spreads a good rule spreads
 a leaked one. So `a2bp` reverse-substitutes the project's name back to
 `{{PROJECT_NAME}}` and blocks on host paths, foreign state dirs, and any
 project name that survived. Suppressions are per-line and must carry a
-justification. The blueprint's own CI runs the same checker over every pushed
-diff's added lines, so `released` never advances over contamination that
-reached `main` another way.
+justification. The blueprint's own pre-push gate runs the same checker over
+every push's added lines and blocks the push on a BLOCK finding, and CI re-runs
+it over the pushed diff, so `released` never advances over contamination that
+reached `main` another way — a `--no-verify` bypass.
 
 A request, not a delivery — and we say exactly what that buys: `a2bp` pushes
 to `a2bp/<project>/<hash>`, never to `main`, and has no verb that merges — it

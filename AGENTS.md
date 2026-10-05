@@ -452,7 +452,7 @@ On the blueprint's own pushes this is scanned, not just advised — enforced by:
 tests/contamination-push-scan "TASK-079: a planted contaminated line fails the
 pushed-diff scan, and removing it passes", via the `contamination` job in
 `.github/workflows/security.yml`, which hands the pushed diff's added lines to
-`scripts/lib/contamination.sh`'s own checker — for the files that ship: a path
+`scripts/lib/contamination.mts`'s own checker — for the files that ship: a path
 whose `export-ignore` attribute is set reaches no project, and this repo's own
 incident records quote host paths on purpose. That is after-the-fact by design
 (TASK-079, founder decision 2026-09-22): once contamination lands on `main` it

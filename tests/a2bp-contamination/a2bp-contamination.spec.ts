@@ -65,7 +65,6 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
 
@@ -1375,12 +1374,12 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       // preconditions, not the CLI's behaviour.
       //
       // THE PATH MATTERS: `tests/*` is managed and NOT substituted, so with
-      // contamination.sh absent and the refusal downgraded, staging is a plain
-      // `cp`, `contamination_scan` is simply not a command, `findings` comes back
-      // empty — and the request is filed with the scan having never run. That is
-      // the door BUG-002 and A-09 came through, standing open. Any substitutable
-      // path would instead fail in `contamination_stage` and be rejected for a
-      // different reason, which is why this case does not use the carrier.
+      // contamination.mts absent and the refusal downgraded, staging is a plain
+      // `cp` and the scan is reached only through the lib's import — so the
+      // request would be filed with the scan having never run. That is the door
+      // BUG-002 and A-09 came through, standing open. Any substitutable path
+      // would instead fail in staging and be rejected for a different reason,
+      // which is why this case does not use the carrier.
       const f = await fixture(s)
       const contaminated = 'tests/fixture/test.sh'
       const hostPath = '/home/someone/dev/acme-flow/secret'
@@ -1418,14 +1417,8 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       ).toBe(RC.BLOCKED)
       expect(control.out.toUpperCase(), 'the control run reported no finding').toContain('BLOCK')
 
-      // The guard is the shell lib today and its `.mts` once BUG-155 ports it;
-      // whichever the tree holds is the one dropped, so this case stays
-      // non-vacuous across the port.
-      const guard = existsSync(join(SUBJECT_ROOT, 'scripts/lib/contamination.mts'))
-        ? 'contamination.mts'
-        : 'contamination.sh'
       const r = await f.a2bp(f.proj, [contaminated], {
-        cli: await copyCli('cli-no-guard', guard),
+        cli: await copyCli('cli-no-guard', 'contamination.mts'),
       })
 
       expect(
@@ -1436,7 +1429,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       expect(
         r.out,
         'refused, but not by the required-libs guard — a downstream failure is not the same as a refusal (BUG-003)',
-      ).toContain(`scripts/lib/${guard} is missing`)
+      ).toContain('scripts/lib/contamination.mts is missing')
     })
   })
 })

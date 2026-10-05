@@ -363,7 +363,13 @@ code is the one whose clean review authorizes the push.
    # blind exactly when it believes it is covered. Resolving rather than
    # hardcoding means the recipe follows the baton if it ever moves again.
    . scripts/lib/state-dir.sh
-   SIG=$(agent_signal_file "$PWD")
+   # `agent_signal_file` takes no argument and refuses one, which left SIG empty
+   # and the loop polling nothing, silently (a2bp PR #86, stash2flow). The
+   # root-taking form is `agent_signal_file_for`; refuse to start blind, and say
+   # when the watch is armed.
+   SIG=$(agent_signal_file_for "$PWD")
+   [ -f "$SIG" ] || { echo "[signal-monitor] baton not found at '$SIG'"; exit 1; }
+   echo "[signal-monitor] armed on $SIG"
    last=$(mt "$SIG")
    while true; do
      sleep 2

@@ -824,10 +824,12 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       const kimi = await file('KIMI_BIN="$HOME/.kimi-code/bin/kimi"')
       expect(kimi.rc, `BUG-155: the Kimi CLI's own home dir was BLOCKED as a per-project state dir\n${kimi.out}`).toBe(0)
 
-      const placeholder = await file('state_dir="$HOME/.{{PROJECT_NAME}}"')
+      // This suite SHIPS, so the CI push scan judges these two lines as added
+      // lines of a script file — exactly the shape they plant.
+      const placeholder = await file('state_dir="$HOME/.{{PROJECT_NAME}}"') // a2bp-allow: fixture plant, the A-09 shape this run pins
       expect(
         placeholder.rc,
-        'a SCRIPT hardcoding $HOME/.{{PROJECT_NAME}} was filed — the A-09 shape must still block (#11)',
+        'a SCRIPT hardcoding $HOME/.{{PROJECT_NAME}} was filed — the A-09 shape must still block (#11)', // a2bp-allow: names the fixture plant above
       ).not.toBe(0)
       expect(placeholder.out).toContain('literal per-project state dir')
     })

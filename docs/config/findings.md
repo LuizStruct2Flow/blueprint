@@ -295,11 +295,13 @@ re-derives it.
 
 ## F-006 — `contamination_scan` blocks on shipped lines the blueprint has always shipped with
 
-**Status: Open** — recorded, not fixed: the defect is in
-`scripts/lib/contamination.sh`, legacy shell, and CLAUDE.md §"Shell to
-TypeScript" prices any edit to it as a whole-file port, which is not
-TASK-079's job. It bites on the first push that RE-ADDS one of the lines
-below, and this row is what the author of that push will find.
+**Status: Fixed** — by BUG-155 (2026-10-05): the lib is ported to
+`scripts/lib/contamination.mts`, its dot-dir regex admits a brace only as a
+whole `{{WORD}}` placeholder, and `kimi-code` is on the known list. The
+reproducer is tests/a2bp-contamination "BUG-155 …". The text below is the
+finding as raised, when the defect sat in `scripts/lib/contamination.sh`,
+legacy shell, and CLAUDE.md §"Shell to TypeScript" priced any edit to it as a
+whole-file port, which was not TASK-079's job.
 
 **Raised by** Markus (Security-1), 2026-09-23, reviewing TASK-079 (`0db7d4e`),
 from a whole-tree run of the checker over the managed set. Two classes of

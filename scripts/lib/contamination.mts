@@ -58,9 +58,11 @@ const PLACEHOLDER = ['{{', 'PROJECT_NAME', '}}'].join('')
 // literally into a generic file. The placeholder is deliberately NOT listed:
 // after reverse-substitution a project's own dir becomes `~/.<placeholder>`,
 // which is A-09 exactly (the shared literal dir every checkout collided on).
+// `kimi-code` is the Kimi CLI's own home, the same class as `codex` and
+// `gemini` (BUG-155; it joined the roster after the list was written).
 const KNOWN_DOTDIRS = new Set(
   `aws bash_history bashrc cache claude codex config
-copilot cursor docker gemini git gitconfig gitignore gnupg kube local npm nvm
+copilot cursor docker gemini git gitconfig gitignore gnupg kimi-code kube local npm nvm
 profile semgrep ssh vscode zshrc`.split(/\s+/),
 )
 
@@ -303,10 +305,14 @@ export function contaminationScan(f: string, projName: string, logical: string =
   })
 
   // --- BLOCK: literal per-project state dir --- (one finding per match)
+  // A brace is admitted only as a WHOLE `{{WORD}}` placeholder (BUG-155): the
+  // closing `}` of a shell default `${X:-$HOME/.codex}` is not part of the
+  // name, so `codex` is looked up as `codex`, while `~/.<placeholder>` stays
+  // visible to the prose/script split below.
   lines.forEach((line, i) => {
     const ln = i + 1
     if (suppressed.has(ln)) return
-    for (const m of line.matchAll(/(\$HOME|~)\/\.[A-Za-z0-9_{][A-Za-z0-9_.{}-]*/g)) {
+    for (const m of line.matchAll(/(\$HOME|~)\/\.(\{\{[A-Za-z0-9_]+\}\}|[A-Za-z0-9_][A-Za-z0-9_.-]*)/g)) {
       const text = m[0]
       const name = text.slice(text.indexOf('/.') + 2).split('/')[0] ?? ''
       if (KNOWN_DOTDIRS.has(name)) continue

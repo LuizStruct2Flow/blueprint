@@ -65,6 +65,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
 
@@ -1417,8 +1418,14 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       ).toBe(RC.BLOCKED)
       expect(control.out.toUpperCase(), 'the control run reported no finding').toContain('BLOCK')
 
+      // The guard is the shell lib today and its `.mts` once BUG-155 ports it;
+      // whichever the tree holds is the one dropped, so this case stays
+      // non-vacuous across the port.
+      const guard = existsSync(join(SUBJECT_ROOT, 'scripts/lib/contamination.mts'))
+        ? 'contamination.mts'
+        : 'contamination.sh'
       const r = await f.a2bp(f.proj, [contaminated], {
-        cli: await copyCli('cli-no-guard', 'contamination.sh'),
+        cli: await copyCli('cli-no-guard', guard),
       })
 
       expect(
@@ -1429,7 +1436,7 @@ describe('A-07 — a2bp reverse-substitutes and refuses to launder project speci
       expect(
         r.out,
         'refused, but not by the required-libs guard — a downstream failure is not the same as a refusal (BUG-003)',
-      ).toContain('scripts/lib/contamination.sh is missing')
+      ).toContain(`scripts/lib/${guard} is missing`)
     })
   })
 })

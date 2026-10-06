@@ -629,4 +629,20 @@ describe('TASK-021 — bootstrap and sync deliver the same set', () => {
       expect(missing, 'project-owned files bootstrap did not seed').toEqual([])
     })
   })
+
+  it('#10c BUG-160: every managed file is TRACKED in a freshly bootstrapped project', async () => {
+    await scenario('bootstrap-contents-10c', async (s) => {
+      const { blueprint, derived } = await build(s)
+      const { managed } = await filesOf(s, blueprint)
+
+      // `git add -A` skips an ignored path in silence, and git ignores .gitignore
+      // for paths the blueprint itself tracks, so a seeded ignore line that hides
+      // a managed file is invisible here and fails the new project's first CI run.
+      const tracked = new Set((await s.run('git', ['ls-files'], { cwd: derived })).stdout.split('\n').filter(Boolean))
+      expect(
+        managed.filter((f) => !tracked.has(f)),
+        'managed files a seeded .gitignore line hides from the new project',
+      ).toEqual([])
+    })
+  })
 })

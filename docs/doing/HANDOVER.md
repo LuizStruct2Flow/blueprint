@@ -145,7 +145,8 @@ no such cycle exists (checked 2026-09-29).
   `.claude/worktrees/` (some may hold unlanded work; check before deleting —
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
-- **Waiting for the founder's acceptance:** TASK-090 (the pre-push gate runs the contamination push scan, released `0e1cf57`), BUG-155 (released `0b7a6f3`), TASK-089 (a2bp PR #86 from stash2flow, released `37be0fb`), TASK-088 (all nine slices released at `29977d5`: no shell shim or sourced adapter is left, and the inventory checker accepts a reference-only repoint of a legacy caller), BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
+- **Accepted 2026-10-06:** TASK-090, BUG-155 and TASK-089 (now in `docs/done/`).
+- **Waiting for the founder's acceptance:** TASK-088 (all nine slices released at `29977d5`: no shell shim or sourced adapter is left, and the inventory checker accepts a reference-only repoint of a legacy caller), BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.
@@ -191,10 +192,6 @@ no such cycle exists (checked 2026-09-29).
    In the release after this one, remove the `@claude.internal.md` import.
    Plan: [`PLAN-TASK-084-agents-md.md`](../waiting-acceptance/PLAN-TASK-084-agents-md.md).
 2. **BUG-146** on the next #20d hang.
-
-**BUG-155 is fixed and released at `0b7a6f3`, waiting for acceptance:**
-`contamination.sh` is ported to `scripts/lib/contamination.mts` and deleted, and
-`${VAR:-$HOME/.codex}` and `~/.kimi-code` no longer block.
 
 **The pre-push gate now runs the contamination push scan (TASK-090, founder
 decision 2026-10-05: "yes, do it").** The gate stage

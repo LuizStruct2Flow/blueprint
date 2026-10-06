@@ -29,12 +29,13 @@ npm-debug.log*
 .vscode/
 .idea/
 
-# Claude Code (ignore everything except shared team skills)
-# settings.json is gitignored for public-publishability — it reveals the
-# founder's personal toolchain. If your project needs cross-machine
-# permission sync, do it via a private path outside the repo, not via
-# the public repo.
-.claude/
+# Claude Code. settings.json is blueprint-managed and settings.project.json is
+# the project's own permission rules (TASK-042), so both are tracked (BUG-160).
+# Everything else stays local: .claude/agents/ is generated from the roster and
+# settings.local.json is per-machine.
+.claude/*
+!.claude/settings.json
+!.claude/settings.project.json
 
 # Per-engineer agent roster. Works like .env: AGENT_ROSTER.example.md is the
 # tracked template, AGENT_ROSTER.md is your personal copy. Each engineer runs a
@@ -114,8 +115,6 @@ docs/**/CODEX_REVIEW.md
 # struct2flow agent-protocol scripts (Codex dispatcher etc.).
 # Project-specific scripts that ship publicly go in scripts/ with
 # names that don't match these.
-scripts/signal-watch.sh
-scripts/start-codex-signal-watch.mts
 scripts/new-project.sh
 
 # Bootstrap provenance — points at the founder's local blueprint path

@@ -146,7 +146,7 @@ no such cycle exists (checked 2026-09-29).
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
 - **Accepted 2026-10-06:** TASK-090, BUG-155, TASK-089 and TASK-088 (now in `docs/done/`).
-- **Waiting for the founder's acceptance:** BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
+- **Waiting for the founder's acceptance:** BUG-160 (the seeded `.gitignore` hid two managed files, released `a17f310`; lyricscreator and seals-validator still need the hand fix in the row) and BUG-161 (`source-map-js` 1.2.2, released `ef4668f`), both from stash2flow's a2bp PR #87, now closed; BUG-152 (`caa2ac8`: `gate.sh` ported to `gate.mts`, then the fix), TASK-086 (`6f91bc1`) and TASK-087 (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081 (released `8893e14`), BUG-154 (released `bfe4984`),
   BUG-151 and TASK-083 (released at `52e8e32`), BUG-156 [SEC] (released
   `686ca6c`), BUG-157, BUG-158, BUG-159 (released `0776f35`). PRs #76 and
   #79-#82 are closed with pointers to the landed commits.

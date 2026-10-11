@@ -22,6 +22,7 @@ belong where the decision happens.
 
 | # | Bug | Severity | Status | What to test | Detail |
 |---|---|---|---|---|---|
+| **BUG-164** | **Reproducer: required.** **`tests/agent-activity-bound` #4 failed once in CI counting two feed supervisors where there was one** (run 38155512454 on `2d2ea6e`, a docs-only push). | S2 | FIXED `2fb5673` (reproducer `6e23405`), CI green and released at `2fb5673`; fixed by Vitali (Claude), reviewed by the Orchestrator (Claude) | `npm --prefix tests test -- agent-activity-bound`: the BUG-164 case counts a supervisor holding a subshell as one, and two separate process trees as two. Acceptance is CI staying free of `expected 2 to be 1` in that suite. | **Cause, measured:** the test helper `ownedProcesses` counted a just-forked subshell of the one supervisor as a second supervisor (a `ps` sampler caught a same-named child whose parent was the supervisor). **Fix:** the helper skips a candidate whose parent is also a candidate; no product code changed. **Not reproduced:** the CI failure itself never recurred locally, so that this is what CI hit is inferred from the mechanism. **Re-open if** the suite again counts more supervisors than exist. |
 
 The 2026-07-29 QA pass dispositioned the earlier bugs: BUG-001, BUG-002 and
 BUG-003 are all ACCEPTED and live in [`../done/BUGS.md`](../done/BUGS.md) with

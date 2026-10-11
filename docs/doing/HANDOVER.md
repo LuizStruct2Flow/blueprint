@@ -158,8 +158,9 @@ no such cycle exists (checked 2026-09-29).
   rewritten history, a force-push plus a GitHub Support purge, or making it
   private. Do not force-push or pass `--no-verify` without that answer.
 - **Accepted 2026-10-07:** every bug that was waiting, BUG-147 to BUG-163
-  (now in `docs/done/BUGS.md`, with the BUG-147 and BUG-151 plans). No bug
-  waits for acceptance.
+  (now in `docs/done/BUGS.md`, with the BUG-147 and BUG-151 plans).
+- **One bug waits for acceptance:** BUG-164 (a test helper counted a
+  supervisor's own fork as a second supervisor, released `2fb5673`).
 - **Waiting for the founder's acceptance:** TASK-086 (`6f91bc1`) and TASK-087
   (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081
   (released `8893e14`) and TASK-083 (released at `52e8e32`). PRs #76 and

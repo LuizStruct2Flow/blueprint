@@ -146,6 +146,17 @@ no such cycle exists (checked 2026-09-29).
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
 - **Accepted 2026-10-06:** TASK-090, BUG-155, TASK-089 and TASK-088 (now in `docs/done/`).
+- **TASK-091 is open (row in `BACKLOG.md`): a client's name must leave this
+  public repository.** The tree is scrubbed at `822f3c3` except one comment
+  line in `scripts/lib/state-dir.sh` (legacy shell, the inventory gate refuses
+  the edit). The founder said "do it" to a history rewrite on 2026-10-11, but
+  nothing was rewritten: the session's permission classifier refused the
+  mirror clone and the pull-request edits, and a rewrite alone would not
+  finish the job. GitHub keeps every old commit reachable through the 87 pull
+  requests, and PR #25's head branch name contains the name and cannot be
+  renamed. The founder has to choose between recreating the repository from a
+  rewritten history, a force-push plus a GitHub Support purge, or making it
+  private. Do not force-push or pass `--no-verify` without that answer.
 - **Accepted 2026-10-07:** every bug that was waiting, BUG-147 to BUG-163
   (now in `docs/done/BUGS.md`, with the BUG-147 and BUG-151 plans). No bug
   waits for acceptance.

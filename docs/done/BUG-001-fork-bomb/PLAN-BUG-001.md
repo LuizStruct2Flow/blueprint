@@ -433,8 +433,8 @@ All four derived copies exist and have drifted, so propagation is a per-project
 
 | Project | Drift | Note |
 |---|---|---|
-| `peer-stream/peer-stream-blueprint` | 13 lines | Has BUG-001 in full; **already fixed BUG-002 better than we proposed** (`AGENT_ACTIVITY_HOME` + repo-basename default) — adopt that upward. |
-| `peer-stream/peer-stream-project` | 33 lines | |
+| the peer stream's blueprint | 13 lines | Has BUG-001 in full; **already fixed BUG-002 better than we proposed** (`AGENT_ACTIVITY_HOME` + repo-basename default) — adopt that upward. |
+| a second peer-stream project | 33 lines | |
 | `struct2flow/storm2flow` | 120 lines | |
 | `struct2flow/linkedin-watcher-agent` | 112 lines | |
 
@@ -448,7 +448,7 @@ All four derived copies exist and have drifted, so propagation is a per-project
 - **C-3** — **Agreed.** The sweep is deleted, not hardened. Nothing kills a
   process it did not spawn.
 - **C-4** — **Accepted:** `struct2flow/blueprint` is canonical. Noting the
-  tension: `peer-stream-blueprint` holds the better version of this very
+  tension: the peer stream's blueprint holds the better version of this very
   file (§6), so the BUG-002 fix should travel up from there even though the
   BUG-001 fix lands here first.
 - **C-5** — **Agreed.** The wake protocol becomes *"ensure the feed is

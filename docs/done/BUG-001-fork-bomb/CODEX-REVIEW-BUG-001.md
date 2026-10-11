@@ -112,7 +112,7 @@ Never use global `pkill -f`.
 **`struct2flow/blueprint` is canonical.** This repository says so in
 `docs/DoD.md` §11, README's sync model, and `scripts/blueprint`; the latter's
 `MANAGED_FILES` is explicitly the source of truth. The plan supplies no
-repository evidence that `peer-stream/peer-stream-blueprint` supersedes it.
+repository evidence that the peer stream's blueprint supersedes it.
 Fix and cross-provider-review here first, then propagate with `blueprint pull`
 and reconcile drift per derived repo.
 

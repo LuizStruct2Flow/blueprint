@@ -30,7 +30,7 @@ FAIL: a transient semgrep failure should retry and pass (rc=1)
 FAIL: retry did not recover a parallel-only failure via --jobs 1 (rc=1)
 ```
 
-This is the peer inherited-PATH shape the handoff asked me to confirm or
+This is the peer stream's inherited-PATH shape the handoff asked me to confirm or
 refute. The fixture must control every executable the hook can discover during
 these cases. Add an `osv-scanner` shim whose default behavior is the intended
 neutral path, then counterfactually put a hostile same-named binary later on

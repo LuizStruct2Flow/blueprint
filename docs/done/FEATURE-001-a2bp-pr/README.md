@@ -39,7 +39,7 @@ anywhere else, and `drift`'s new staleness warning only means something when
 there is a local checkout that can fall behind. The blueprint cannot accept this
 feature by looking at itself. So acceptance is gated on the next session in a real
 derived project (`storm2flow`, `linkedin-watcher-agent`,
-`peer-stream-project`), not on reading this document.
+a peer-stream project), not on reading this document.
 
 Two consequences:
 

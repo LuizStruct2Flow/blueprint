@@ -251,7 +251,7 @@ same file that the plan does not currently cover and must.
 | Fix order | **Accepted "guard the pipe first"** (A-05 bootstrap copy, A-07 a2bp scan, A-15 test wiring, A-02/A-03 scanners) before BUG-001/BUG-002. | Order adopted; pipe work not yet started |
 | A-14 git identity | **Inherit from `git config --global`** — do not bake a person in. | **DONE** |
 | A-12 `AGENT_ROSTER.md` | **Treat it like `.env`** — tracked example, gitignored per-engineer copy. Backing agents open-ended (teammates may run Qwen, or not run Codex at all). | **DONE** |
-| Scope | Write an explanation of the findings to `../peer-stream/peer-stream-blueprint`. | **DONE** — `docs/doing/INHERITED-AUDIT-2026-07-23.md` there, with every finding **re-verified against that repo** rather than copied |
+| Scope | Write an explanation of the findings to the peer stream's blueprint checkout. | **DONE** — `docs/doing/INHERITED-AUDIT-2026-07-23.md` there, with every finding **re-verified against that repo** rather than copied |
 
 ### A-14 — implemented
 
@@ -306,7 +306,7 @@ absent, `bash -n` clean on all three scripts, no stale
   with A-06 folded in — but *not implemented*; round-2 consensus pending.
 - Not propagated anything to the four derived repos — all have drifted
   (13/33/120/112 lines), so each needs its own `blueprint pull` + review. The
-  the peer stream explanation doc is written (§3b).
+  peer-stream explanation doc is written (§3b).
 - **A-02 is now closed** — `gitleaks` 8.30.1, `semgrep` 1.171.0,
   `osv-scanner` 2.4.0 and `trivy` 0.72.0 are installed (no `brew` on this
   Ubuntu host, so binaries were fetched from upstream releases into
@@ -441,7 +441,7 @@ That is an argument for option 3 being viable, **not** an argument that options
 
 **Blueprint-level consequence, worth the founder's attention.** CLAUDE.md
 mandates trunk-based generically, but derived projects do not all follow it —
-the peer stream collaborates via PRs. That means **patterns arriving from the peer
+The peer stream collaborates via PRs. That means **patterns arriving from the peer stream
 stream may silently assume a PR flow**, and this one did. I adopted their
 reframe and audited my repo against a mechanism shaped for their PR flow, then
 compounded it by concluding the mechanism was unavailable rather than merely
@@ -468,9 +468,9 @@ agreed "guard the pipe first" order:
    `.gitignore`. One line, and it is a live exposure.
 6. **Then** BUG-001 (needs the plan revised to Codex's offset-supervisor
    design first, plus A-06 folded in) and BUG-002 — for which
-   `peer-stream-blueprint` already holds the better fix (§2 of the
+   the peer stream's blueprint already holds the better fix (§2 of the
    inherited-audit doc there).
 
-**Still open:** the derived repos beyond the peer stream (`peer-stream-project`,
+**Still open:** the derived repos beyond the peer stream (a peer-stream project,
 `storm2flow`, `linkedin-watcher-agent`) have not been swept — all have drifted
 (33/120/112 lines) and the same `a2bp` vector applies in both directions.

@@ -1067,18 +1067,24 @@ describe('BUG-001 / BUG-141 — one instance, a bounded process set, byte-correc
       // same-argv subshell and holds it — what supervise() does at every `$(...)`.
       await s.fs.write(
         'fake/agent-activity.sh',
-        '( : ; sleep 60 ; : ) &\n: > "$1"\nsleep 60\n',
+        // Both the script and its subshell exit by themselves once `release` exists.
+        'hold() { while [ ! -e release ]; do sleep 0.1; done; }\n' +
+          '( : ; hold ; : ) &\n: > "$1"\nhold\nwait\n',
       )
       const start = async (marker: string) => {
         s.background('bash', ['fake/agent-activity.sh', marker], { cwd: s.workspace.root })
         await vi.waitFor(async () => expect(await s.fs.exists(marker)).toBe(true))
       }
-      await start('one')
-      // Old counting: 2 (the script and its subshell). New: 1.
-      expect((await b.f.ownedProcesses()).supervisors).toBe(1)
-      // A second, unrelated process tree is a second supervisor and must still count.
-      await start('two')
-      expect((await b.f.ownedProcesses()).supervisors).toBe(2)
+      try {
+        await start('one')
+        // Old counting: 2 (the script and its subshell). New: 1.
+        expect((await b.f.ownedProcesses()).supervisors).toBe(1)
+        // A second, unrelated process tree is a second supervisor and must still count.
+        await start('two')
+        expect((await b.f.ownedProcesses()).supervisors).toBe(2)
+      } finally {
+        await s.fs.write('release', '')
+      }
     })
   })
 

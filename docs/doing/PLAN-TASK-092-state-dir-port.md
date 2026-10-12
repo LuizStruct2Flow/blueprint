@@ -301,3 +301,21 @@ above. Each has a real trigger.
 | The widening's test cases sat in slice 1 | They are red until slice 2's change exists | slices 1 and 2 |
 
 Not checked by either reviewer: the full suite, and §2's test list.
+
+### Slice 2 four-eyes review (Andreas, Codex, 2026-10-12)
+
+Reviewed by reading. Confirmed: the real `pipeline.sh` rewrite slice 3 makes is
+accepted and works at runtime; storing directory prefixes changes nothing for
+the existing `gate` and `dod-gate` rows; the `export-ignore` is right; the
+`tests/state-root` wrappers are stronger, not weaker. Two findings, both
+judged known limits with no action (DoD §1b rule 4: no real trigger):
+
+- **A caller that reassigns its root variable between the source line and the
+  call** would source from the old value in BASE and run the `.mts` from the
+  new value in HEAD, and the checker accepts it. No legacy caller does this,
+  and the usual `$VAR/scripts/lib/` form has had the same property since
+  TASK-088. Re-open if a legacy shell file ever reassigns such a variable.
+- **A path value ending in newlines** (`AGENT_STATE_HOME=$'/x\n\n'`): the shell
+  strips every trailing newline inside its nested command substitution, the
+  port strips one. Nothing sets such a value. Re-open if a state path is ever
+  built from unsanitised command output.

@@ -146,8 +146,11 @@ no such cycle exists (checked 2026-09-29).
   an unscoped `npx vitest` from the repo root also picks up their stale specs).
 
 - **Accepted 2026-10-06:** TASK-090, BUG-155, TASK-089 and TASK-088 (now in `docs/done/`).
-- **TASK-091 waits for acceptance: the repository was recreated on
-  2026-10-12 from a rewritten history** (row in `docs/waiting-acceptance/`).
+- **TASK-091 is accepted (2026-10-12): the repository was recreated that day
+  from a rewritten history** (row in `docs/done/`).
+  - **The first push did not start a CI run**, so the first run was started
+    by hand (`workflow_dispatch`). Check that an ordinary push triggers CI and
+    that `released` advances after it.
   - **Every commit id changed.** `docs/config/SHA-MAP-2026-10-12.txt` maps
     old to new. An id quoted in a row, plan or commit body written before
     that date is an OLD id: look it up there.

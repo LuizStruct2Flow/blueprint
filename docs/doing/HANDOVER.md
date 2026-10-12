@@ -147,9 +147,9 @@ no such cycle exists (checked 2026-09-29).
 
 - **Accepted 2026-10-06:** TASK-090, BUG-155, TASK-089 and TASK-088 (now in `docs/done/`).
 - **TASK-091 is open (row in `BACKLOG.md`): a client's name must leave this
-  public repository.** The tree is scrubbed at `822f3c3` except one comment
-  line in `scripts/lib/state-dir.sh` (legacy shell, the inventory gate refuses
-  the edit). The founder said "do it" to a history rewrite on 2026-10-11, but
+  public repository.** The tree is clean since `e282216` (TASK-092 ported and
+  deleted the last file that held it). What remains is git history and
+  GitHub. The founder said "do it" to a history rewrite on 2026-10-11, but
   nothing was rewritten: the session's permission classifier refused the
   mirror clone and the pull-request edits, and a rewrite alone would not
   finish the job. GitHub keeps every old commit reachable through the 87 pull
@@ -157,6 +157,19 @@ no such cycle exists (checked 2026-09-29).
   renamed. The founder has to choose between recreating the repository from a
   rewritten history, a force-push plus a GitHub Support purge, or making it
   private. Do not force-push or pass `--no-verify` without that answer.
+- **TASK-092 waits for acceptance: `scripts/lib/state-dir.sh` is ported to
+  `state-dir.mts` and deleted** (released `92ab565`; row and plan in
+  `docs/waiting-acceptance/`). Three things follow from it:
+  - **A derived project's next pull must be a FULL `blueprint pull`** that
+    accepts the retirement of `scripts/lib/state-dir.sh`. The repointed
+    callers and the new `.mts` only work together.
+  - **Restart the watchers after that pull.** A watcher started before it
+    holds the old wake snippet and fails on its next dispatch. This checkout's
+    three were restarted on 2026-10-12 at about 07:48Z.
+  - **Never rename or fold `scripts/lib/state-dir.mts`** while a legacy shell
+    caller names it: every repointed caller would read `CHANGED` on every push.
+  - Kimi ran out of its 5-hour quota at 06:53Z on 2026-10-12, mid-item; the
+    item moved to Matthias (Claude) with nothing lost.
 - **Accepted 2026-10-07:** every bug that was waiting, BUG-147 to BUG-163
   (now in `docs/done/BUGS.md`, with the BUG-147 and BUG-151 plans).
 - **One bug waits for acceptance:** BUG-164 (a test helper counted a

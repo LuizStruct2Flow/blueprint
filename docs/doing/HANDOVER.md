@@ -154,12 +154,12 @@ no such cycle exists (checked 2026-09-29).
   mirror clone and the pull-request edits, and a rewrite alone would not
   finish the job. GitHub keeps every old commit reachable through the 87 pull
   requests, and PR #25's head branch name contains the name and cannot be
-  renamed. The founder has to choose between recreating the repository from a
-  rewritten history, a force-push plus a GitHub Support purge, or making it
-  private. Do not force-push or pass `--no-verify` without that answer.
-- **TASK-092 waits for acceptance: `scripts/lib/state-dir.sh` is ported to
+  renamed. **The founder chose on 2026-10-12: recreate the repository from a
+  rewritten history.** Check the TASK-091 row for how far that got before
+  touching history or the GitHub repository.
+- **TASK-092 is accepted (2026-10-12): `scripts/lib/state-dir.sh` is ported to
   `state-dir.mts` and deleted** (released `92ab565`; row and plan in
-  `docs/waiting-acceptance/`). Three things follow from it:
+  `docs/done/`). Three things still follow from it:
   - **A derived project's next pull must be a FULL `blueprint pull`** that
     accepts the retirement of `scripts/lib/state-dir.sh`. The repointed
     callers and the new `.mts` only work together.
@@ -172,8 +172,7 @@ no such cycle exists (checked 2026-09-29).
     item moved to Matthias (Claude) with nothing lost.
 - **Accepted 2026-10-07:** every bug that was waiting, BUG-147 to BUG-163
   (now in `docs/done/BUGS.md`, with the BUG-147 and BUG-151 plans).
-- **One bug waits for acceptance:** BUG-164 (a test helper counted a
-  supervisor's own fork as a second supervisor, released `2fb5673`).
+- **Accepted 2026-10-12:** BUG-164 and TASK-092. No bug waits for acceptance.
 - **Waiting for the founder's acceptance:** TASK-086 (`6f91bc1`) and TASK-087
   (`bffebec`, the a2bp PRs #83 and #84), TASK-084 (`eb27da8`), TASK-081
   (released `8893e14`) and TASK-083 (released at `52e8e32`). PRs #76 and

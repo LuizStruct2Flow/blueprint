@@ -249,12 +249,7 @@ describe('BUG-001 / BUG-141 — one instance, a bounded process set, byte-correc
       const b = await bound(s)
       try {
         await Promise.all(
-          Array.from({ length: 50 }, () =>
-            s.run('bash', ['scripts/agent-activity.sh', '--daemon'], {
-              cwd: b.f.repo,
-              env: b.f.env,
-            }),
-          ),
+          Array.from({ length: 50 }, () => b.f.startDaemon()),
         )
         await b.f.expectSupervisors(1)
         expect((await b.f.ownedProcesses()).supervisors).toBe(1)
@@ -834,10 +829,7 @@ describe('BUG-001 / BUG-141 — one instance, a bounded process set, byte-correc
         AGENT_SIGNAL_FILE: join(spacey, 'signal.md'),
       }
 
-      await s.run('bash', ['scripts/agent-activity.sh', '--daemon'], {
-        cwd: b.f.repo,
-        env: { ...b.f.env, ...spaceyEnv },
-      })
+      await b.f.startDaemon(spaceyEnv)
       try {
         await b.f.expectSupervisors(1)
         await b.f.expectLine('ACTIVE — t')

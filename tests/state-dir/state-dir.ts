@@ -21,7 +21,7 @@
  * that fails fast and names the file, and #8/#9 are the actual boundary.
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** What kind of source a static check is looking at. */
@@ -311,6 +311,22 @@ export function resolveConsumerFile(root: string, rel: string): ResolvedConsumer
   }
 }
 
+/**
+ * The name a consumer must name to be wired to the ONE mechanism (#4).
+ *
+ * TASK-092 slice 1 — migration-aware: while only the shell helper exists, the
+ * name is `lib/state-dir.sh`. Once the port exists at `scripts/lib/state-dir.mts`
+ * in the scanned root, a consumer naming `lib/state-dir.mts` is wired to the
+ * same mechanism across the same process boundary, and satisfies the property
+ * too. The acceptance of the .mts name is keyed to the port EXISTING, so a
+ * consumer renaming the helper before the port lands is still the #4 defect.
+ */
+export function sourcesHelperPattern(root: string): RegExp {
+  return existsSync(join(root, 'scripts/lib/state-dir.mts'))
+    ? /lib\/state-dir\.(?:sh|mts)/
+    : /lib\/state-dir\.sh/
+}
+
 export async function scanStateDir(root: string): Promise<StateDirScan> {
   const sources = new Map<string, string>()
   const kinds = new Map<string, ConsumerKind>()
@@ -342,8 +358,9 @@ export async function scanStateDir(root: string): Promise<StateDirScan> {
     // a 'ts' consumer reaches scripts/lib/state-dir.sh across a process
     // boundary rather than duplicating its derivation (TASK-067's stated
     // consequence for sourced libraries), and doing that means naming the
-    // path in its own source too.
-    if (!source.includes('lib/state-dir.sh')) notSourcingHelper.push(rel)
+    // path in its own source too. The accepted name is migration-aware
+    // (TASK-092): the .mts name counts only once the port exists in `root`.
+    if (!sourcesHelperPattern(root).test(source)) notSourcingHelper.push(rel)
     // #5b, #10, #10e are shell-syntax / shell-portability heuristics with no
     // TypeScript analogue to mis-fire on: a 'ts' consumer cannot spell a
     // reconstruction the way STATE_ASSIGN matches, cannot depend on GNU

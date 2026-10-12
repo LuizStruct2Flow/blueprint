@@ -80,14 +80,47 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const LIB = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.sh')
+const MTS = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.mts')
 
 /**
- * Run a snippet with state-dir.sh sourced.
+ * The prelude that puts the state API in scope for a snippet — shell today,
+ * CLI once the port exists (TASK-092 slice 1).
+ *
+ * While only the shell helper exists, it is sourced exactly as production
+ * consumers source it. Once `state-dir.mts` exists, the same seven functions
+ * are shell wrappers around the helper's CLI, so the snippets below drive the
+ * real contract either way and every case becomes an old-vs-new differential
+ * the moment the port lands. The `env` prefix mirrors the switch-over's
+ * passthrough (plus the ceiling, which the shell read in-process): a snippet
+ * that sets BP_CODE_ROOT / BP_STATE_ROOT_CEILING as plain shell variables is
+ * honoured the same way sourcing honoured it.
+ */
+const PRELUDE = existsSync(MTS)
+  ? [
+      'sd() { env "BP_CODE_ROOT=${BP_CODE_ROOT:-}" "BP_STATE_ROOT=${BP_STATE_ROOT:-}" ' +
+        '"BP_STATE_ROOT_CEILING=${BP_STATE_ROOT_CEILING:-}" "AGENT_STATE_HOME=${AGENT_STATE_HOME:-}" ' +
+        '"AGENT_SIGNAL_FILE=${AGENT_SIGNAL_FILE:-}" node "' +
+        MTS +
+        '" "$@"; }',
+      'bp_state_root() { sd bp-state-root; }',
+      'agent_state_dir() { sd agent-state-dir; }',
+      'agent_state_dir_for() { sd agent-state-dir-for "$@"; }',
+      'agent_signal_file() { sd agent-signal-file; }',
+      'agent_signal_file_for() { sd agent-signal-file-for "$@"; }',
+      'agent_signal_journal() { sd agent-signal-journal; }',
+      'agent_signal_journal_for() { sd agent-signal-journal-for "$@"; }',
+    ].join('; ')
+  : `. "${LIB}"`
+
+/**
+ * Run a snippet with the state API in scope — sourced from state-dir.sh today,
+ * driven through the ported CLI once it exists.
  *
  * `env -u` strips the harness's own AGENT_STATE_HOME / AGENT_SIGNAL_FILE:
  * those are overrides the production code honours FIRST, so leaving them set
@@ -95,11 +128,7 @@ const LIB = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.sh')
  * them is explicit about it.
  */
 async function sh(s: Scenario, snippet: string, cwd: string) {
-  return s.run(
-    'sh',
-    ['-c', `env -u AGENT_STATE_HOME -u AGENT_SIGNAL_FILE sh -c '. "${LIB}"; ${snippet}'`],
-    { cwd },
-  )
+  return s.run('sh', ['-c', `env -u AGENT_STATE_HOME -u AGENT_SIGNAL_FILE sh -c '${PRELUDE}; ${snippet}'`], { cwd })
 }
 
 describe('TASK-021 #A — the state root terminates at the enclosing project root', () => {
@@ -210,7 +239,7 @@ describe('TASK-021 #B — the walk consults no git command, so GIT_DIR cannot mo
         'sh',
         [
           '-c',
-          `env -u AGENT_STATE_HOME GIT_DIR="${decoy.dir}/.git" sh -c '. "${LIB}"; BP_CODE_ROOT="${sub}"; bp_state_root'`,
+          `env -u AGENT_STATE_HOME GIT_DIR="${decoy.dir}/.git" sh -c '${PRELUDE}; BP_CODE_ROOT="${sub}"; bp_state_root'`,
         ],
         { cwd: sub },
       )
@@ -342,7 +371,10 @@ describe('TASK-021 #G — production code never passes a root to the state API',
     let seamUses = 0
 
     for (const f of files) {
-      if (f.endsWith('lib/state-dir.sh')) continue // the definitions themselves
+      // the definitions themselves — state-dir.sh today, state-dir.mts once
+      // ported (TASK-092). The sweep lists .sh files only at the moment, so the
+      // .mts half of this guard is belt and braces for a future widening.
+      if (f.endsWith('lib/state-dir.sh') || f.endsWith('lib/state-dir.mts')) continue
       const body = await readFile(f, 'utf8')
       const name = f.slice(REPO_ROOT.length + 1)
       body.split('\n').forEach((line, i) => {

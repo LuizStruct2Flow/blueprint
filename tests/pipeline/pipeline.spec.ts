@@ -103,6 +103,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type RunResult, type Scenario } from '../harness/index.js'
@@ -111,6 +112,7 @@ const LIB = join(REPO_ROOT, 'scripts/lib/pipeline.sh')
 const FEED_LIB = join(REPO_ROOT, 'scripts/lib/feed.sh')
 
 const STATE_LIB = join(REPO_ROOT, 'scripts/lib/state-dir.sh')
+const STATE_MTS = join(REPO_ROOT, 'scripts/lib/state-dir.mts')
 
 /** The suffix `scripts/lib/feed.sh` appends to the project root it derives. */
 const FEED_SUFFIX = 'logs/agent-activity.log'
@@ -128,11 +130,21 @@ const FEED_SUFFIX = 'logs/agent-activity.log'
  * `scripts/log-activity.sh` do. The case's claim is unchanged — the enclosing
  * project root plus FEED_SUFFIX — but it is now asked of the shared derivation
  * rather than of git.
+ *
+ * TASK-092 slice 1 — migration-aware: while only the shell helper exists it is
+ * sourced, exactly as production callers do. Once the port exists, the same
+ * resolution runs through the helper's CLI (the .sh is gone at the
+ * switch-over, and the CLI is the contract either way). BP_CODE_ROOT must be
+ * exported for the CLI child; BP_STATE_ROOT stays a plain shell variable, the
+ * way feed.sh reads it when sourced into the same snippet.
  */
-const RESOLVE_STATE_ROOT =
-  `. ${JSON.stringify(STATE_LIB)}\n` +
-  `BP_CODE_ROOT="$(pwd)"\n` +
-  `BP_STATE_ROOT="$(bp_state_root)" || exit 9\n`
+const RESOLVE_STATE_ROOT = existsSync(STATE_MTS)
+  ? `BP_CODE_ROOT="$(pwd)"\n` +
+    `export BP_CODE_ROOT\n` +
+    `BP_STATE_ROOT="$(node ${JSON.stringify(STATE_MTS)} bp-state-root)" || exit 9\n`
+  : `. ${JSON.stringify(STATE_LIB)}\n` +
+    `BP_CODE_ROOT="$(pwd)"\n` +
+    `BP_STATE_ROOT="$(bp_state_root)" || exit 9\n`
 
 /**
  * ESC, as the thing to search for. A CI log full of these is soup.

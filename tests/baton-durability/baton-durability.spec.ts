@@ -55,6 +55,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -113,6 +114,89 @@ const POINTER_SHIM =
   "agent_signal_file() { printf '%s\\n' \"${AGENT_SIGNAL_FILE:-$(cat \"$BD_POINTER\")/signal.md}\"; }\n" +
   'agent_signal_journal() { printf \'%s\\n\' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }\n'
 
+/**
+ * The `.mts` form of POINTER_SHIM (TASK-092 slice 1): the same four functions,
+ * plus the CLI `main()` the repointed shell callers will invoke once the real
+ * `scripts/lib/state-dir.mts` exists. Written INTO the fixture only when the
+ * fixture carries the ported file — until the port lands (slice 2) the fixture
+ * has only the `.sh`, and this string is inert.
+ *
+ * The `_for` subcommands resolve through the pointer exactly like the shim's
+ * shell functions do: in this fixture the pointer target IS the state dir, so
+ * the dir argument is arity-checked and then deliberately ignored, the way the
+ * `.sh` shim ignores the state root's real derivation.
+ */
+const POINTER_SHIM_MTS = [
+  '// Fixture shim - the .mts form of this suite\'s POINTER_SHIM (TASK-092).',
+  '// Same four functions, plus the CLI main() repointed shell callers invoke.',
+  'import { readFileSync } from "node:fs"',
+  'import { dirname } from "node:path"',
+  'import { pathToFileURL } from "node:url"',
+  '',
+  'const pointer = (): string => readFileSync(process.env.BD_POINTER ?? "", "utf8").trim()',
+  '',
+  'export function bp_state_root(): string {',
+  '  return pointer()',
+  '}',
+  'export function agent_state_dir(): string {',
+  '  return pointer()',
+  '}',
+  'export function agent_signal_file(): string {',
+  '  return process.env.AGENT_SIGNAL_FILE ?? `${pointer()}/signal.md`',
+  '}',
+  'export function agent_signal_journal(): string {',
+  '  return `${dirname(agent_signal_file())}/signal-history.log`',
+  '}',
+  '',
+  'function main(argv: string[]): number {',
+  '  const [sub, ...rest] = argv',
+  '  const exactArity = (n: number): boolean => {',
+  '    if (rest.length === n) return true',
+  '    console.error(`${sub}: expected ${n} argument(s), got ${rest.length}`)',
+  '    return false',
+  '  }',
+  '  // The dir argument is checked and then ignored: the pointer target IS the',
+  '  // state dir in this fixture, as in the .sh shim.',
+  '  switch (sub) {',
+  '    case "bp-state-root":',
+  '      if (!exactArity(0)) return 2',
+  '      console.log(bp_state_root())',
+  '      return 0',
+  '    case "agent-state-dir":',
+  '      if (!exactArity(0)) return 2',
+  '      console.log(agent_state_dir())',
+  '      return 0',
+  '    case "agent-state-dir-for":',
+  '      if (!exactArity(1)) return 2',
+  '      console.log(agent_state_dir())',
+  '      return 0',
+  '    case "agent-signal-file":',
+  '      if (!exactArity(0)) return 2',
+  '      console.log(agent_signal_file())',
+  '      return 0',
+  '    case "agent-signal-file-for":',
+  '      if (!exactArity(1)) return 2',
+  '      console.log(agent_signal_file())',
+  '      return 0',
+  '    case "agent-signal-journal":',
+  '      if (!exactArity(0)) return 2',
+  '      console.log(agent_signal_journal())',
+  '      return 0',
+  '    case "agent-signal-journal-for":',
+  '      if (!exactArity(1)) return 2',
+  '      console.log(agent_signal_journal())',
+  '      return 0',
+  '    default:',
+  '      console.error(`state-dir: unknown subcommand: ${sub}`)',
+  '      return 2',
+  '  }',
+  '}',
+  '',
+  'const invoked = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href',
+  'if (invoked) process.exit(main(process.argv.slice(2)))',
+  '',
+].join('\n')
+
 interface Fixture {
   readonly root: string
   readonly repo: FixtureRepo
@@ -141,13 +225,21 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   const root = repo.dir
   const rel = (p: string) => join(name, p)
 
-  for (const script of [
+  const copiedScripts = [
     'scripts/signal-watch.mts',
     'scripts/start-codex-signal-watch.mts',
     'scripts/codex-feed-filter.sh',
     'scripts/signal-set.sh',
     'scripts/lib/state-dir.sh',
-  ]) {
+  ]
+  // TASK-092 slice 1 — migration-aware: once the helper is ported, its .mts
+  // travels with the fixture too, so the repointed signal-set.sh / wake snippet
+  // (switch-over, slice 3) has something to run. Copied BESIDE the .sh, never
+  // instead of it, while shell callers still source the .sh.
+  if (existsSync(join(REPO_ROOT, 'scripts/lib/state-dir.mts'))) {
+    copiedScripts.push('scripts/lib/state-dir.mts')
+  }
+  for (const script of copiedScripts) {
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
     // The launcher EXECS signal-watch.mts rather than running `bash` on it,
     // so the bit is load-bearing rather than cosmetic.
@@ -216,7 +308,16 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
     },
 
     async usePointer(target) {
-      await s.fs.write(rel('scripts/lib/state-dir.sh'), POINTER_SHIM)
+      // TASK-092 slice 1 — write the shim in whichever form(s) the fixture
+      // carries: the .sh while shell callers source it, and the .mts (same
+      // pointer contract, plus the CLI) once the port exists and the repointed
+      // callers drive the CLI.
+      if (await s.fs.exists(rel('scripts/lib/state-dir.mts'))) {
+        await s.fs.write(rel('scripts/lib/state-dir.mts'), POINTER_SHIM_MTS)
+      }
+      if (await s.fs.exists(rel('scripts/lib/state-dir.sh'))) {
+        await s.fs.write(rel('scripts/lib/state-dir.sh'), POINTER_SHIM)
+      }
       await s.fs.write(`${name}/pointer`, `${target}\n`)
     },
 

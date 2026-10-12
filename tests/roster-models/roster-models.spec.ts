@@ -13,11 +13,23 @@
 
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 const LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
+
+/**
+ * TASK-092 slice 1 — the ported state-dir helper's .mts travels with any
+ * fixture that carries the .sh, so the switch-over's repointed callers
+ * (claude-agents.sh, log-activity.mts) have something to run. A no-op until
+ * the port exists.
+ */
+async function copyStateDirMts(s: Scenario, destDir: string): Promise<void> {
+  const mts = join(SUBJECT, 'scripts', 'lib', 'state-dir.mts')
+  if (existsSync(mts)) await s.fs.copyIn(mts, join(destDir, 'state-dir.mts'))
+}
 
 const ROSTER = `# Roster
 
@@ -83,6 +95,7 @@ describe('TASK-059 — roster Model tiers', () => {
       for (const f of ['roster.sh', 'state-dir.sh']) {
         await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
+      await copyStateDirMts(s, 'proj/scripts/lib')
       const r = await s.run('bash', [join(dir, 'scripts', 'claude-agents.sh')], { cwd: dir, env })
       expect(r.code, r.output).toBe(0)
       expect(await readdir(join(dir, '.claude', 'agents'))).toEqual(['nadia.md'])
@@ -99,6 +112,7 @@ describe('TASK-059 — roster Model tiers', () => {
       for (const f of ['roster.sh', 'state-dir.sh']) {
         await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
+      await copyStateDirMts(s, 'proj/scripts/lib')
       const own = '---\nname: nadia\ndescription: mine\n---\nHand-written project instructions\n'
       await s.fs.write('proj/.claude/agents/nadia.md', own)
       const r = await s.run('bash', [join(dir, 'scripts', 'claude-agents.sh')], { cwd: dir, env })
@@ -122,6 +136,7 @@ describe('TASK-059 — roster Model tiers', () => {
       for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
         if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
+      await copyStateDirMts(s, 'proj/scripts/lib')
       const sub = 'proj/sess/subagents/agent-feed01'
       await s.fs.write(`${sub}.meta.json`, JSON.stringify({ agentType: 'general-purpose', description: 'Nadia checks it' }))
       await s.fs.write(`${sub}.jsonl`, JSON.stringify({ type: 'assistant', message: { model: 'claude-ran-7' } }) + '\n')
@@ -156,6 +171,7 @@ describe('TASK-059 — roster Model tiers', () => {
       for (const f of await readdir(join(SUBJECT, 'scripts', 'lib'))) {
         if (f.endsWith('.sh')) await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
+      await copyStateDirMts(s, 'proj/scripts/lib')
       const sub = 'proj/sess/subagents/agent-feed02'
       await s.fs.write(
         `${sub}.meta.json`,

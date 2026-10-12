@@ -671,6 +671,26 @@ describe('A-09 R6 — the static guards are provably able to fail', () => {
     })
   }
 
+  it('#4 the ported name satisfies the property ONCE THE PORT EXISTS — and only then', async () => {
+    await scenario('sd-r6-4-mts', async (s) => {
+      const real = await readFile(firstShellBlockSource(), 'utf8')
+      const files: Record<string, string> = {}
+      for (const rel of CONSUMERS) files[rel] = bodyFor(rel, real)
+      // TASK-092 slice 1 — the migration-aware half of #4: naming the .mts is
+      // wired to the one mechanism, but ONLY because the port exists in the
+      // scanned root. Renaming the helper while only the .sh exists is the #4
+      // defect exactly as renaming it to an unrelated path is.
+      files[CONSUMERS[0]] = mutateAll(real, 'lib/state-dir.sh', 'lib/state-dir.mts')
+
+      const beforePort = await writeAndScan(s, 'bp', files)
+      expect(beforePort.notSourcingHelper).toEqual([CONSUMERS[0]])
+
+      files['scripts/lib/state-dir.mts'] = '// the port\n'
+      const afterPort = await writeAndScan(s, 'bp2', files)
+      expect(afterPort.notSourcingHelper).toEqual([])
+    })
+  })
+
   it('#3 a dispatcher building a log path from the literal placeholder is caught', async () => {
     await scenario('sd-r6-3', async (s) => {
       const real = await readFile(firstShellBlockSource(), 'utf8')

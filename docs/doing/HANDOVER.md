@@ -69,11 +69,6 @@ because another machine only sees what is pushed.
   `npm --prefix tests test -- <suite>` runs the check behind it, and
   `node scripts/flip-checks.mts` prints TASK-075's three observations directly.
   Everything landed through 2026-09-22 is already accepted and in `../done/`.
-- **BUG-146 is open, and its next step is the founder's to start:**
-  [`BUGS.md`](BUGS.md). `tests/sync-by-address` #20d hangs about 1 CI run in 10
-  and has never reproduced locally (162 clean runs). The proposed next step is
-  a harness change that dumps the process tree when a scenario's wait times
-  out, so the next CI hang is captured rather than rerun.
 - **TASK-062 (backlog) is the live epic:** enforcement in code, not in agent
   context. Its input is the refreshed audit in
   [`../done/TASK-022-anchor-rules/`](../done/TASK-022-anchor-rules/): of 309 rules
@@ -148,15 +143,8 @@ no such cycle exists (checked 2026-09-29).
 - **Accepted 2026-10-06:** TASK-090, BUG-155, TASK-089 and TASK-088 (now in `docs/done/`).
 - **TASK-091 is accepted (2026-10-12): the repository was recreated that day
   from a rewritten history** (row in `docs/done/`).
-  - **The push trigger works on the new repository**: the first push's run
-    appeared a few minutes late, after one had been started by hand. Still to
-    confirm: that `released` advances after a green push run.
-- **BUG-163 is REOPENED (2026-10-12, row in `BUGS.md`):** `agent-activity-bound`
-  failed twice in one day with the supervisor never starting, once in CI and
-  once locally. Suspect, unproven: TASK-092's switch from a sourced shell file
-  to `node` child processes in the daemon's startup.
-- **BUG-146: the founder said "solve the bug in doing" on 2026-10-12**, which
-  ends the earlier "wait for the next hang" instruction.
+  - **CI and the release job work on the new repository**: pushes trigger
+    runs, and `released` advanced after the first green one.
   - **Every commit id changed.** `docs/config/SHA-MAP-2026-10-12.txt` maps
     old to new. An id quoted in a row, plan or commit body written before
     that date is an OLD id: look it up there.
@@ -169,6 +157,17 @@ no such cycle exists (checked 2026-09-29).
   - **Never write the client's name again**, in a file, a commit message, a
     branch name or a pull request. An agent brief must say so: one plan
     reintroduced it within a day of the first scrub.
+- **BUG-163 is REOPENED and still open (row in `BUGS.md`):**
+  `agent-activity-bound` failed twice on 2026-10-12 with the feed supervisor
+  never starting, once in CI and once locally. The cause is unproven and it
+  did not reproduce under load. What landed (`c2a1ba83`): the fixture keeps
+  `--daemon`'s exit code and output, so the NEXT occurrence says why. When
+  one lands, read that message first. Suspect: TASK-092's `node` child
+  processes in the daemon's startup. One quiet leg remains: the supervisor's
+  own stderr is discarded in `scripts/agent-activity.sh`, a legacy shell file.
+- **BUG-146 waits for acceptance** (released `c2a1ba83`): the leftover scratch
+  directory is fixed with a deterministic test; the 320 s `#20d` hang was never
+  explained but has not occurred in 76 push runs since the CLI was ported.
 - **TASK-092 is accepted (2026-10-12): `scripts/lib/state-dir.sh` is ported to
   `state-dir.mts` and deleted** (released `92ab565`; row and plan in
   `docs/done/`). Three things still follow from it:
@@ -207,12 +206,6 @@ no such cycle exists (checked 2026-09-29).
   else will ever look at that history. Rotate anything found before
   investigating. lyricscreator and seals-validator were checkout tests, and
   the founder deleted them on 2026-10-06.
-- **BUG-146:** the capture that names an orphaned pipe holder is released
-  (`6ec8315`, reviewed under the founder's waiver). The founder's call: wait
-  for the next #20d hang to name the survivor, then fix what it shows; no
-  speculative change. Philipp's frequency finding (suite growth 61 → 73 spec
-  files under `fileParallelism` plus the nested `bootstrap-gate` run, not
-  TASK-083) is in the row, unproven.
 - **Providers:** Kimi hit its 5-hour limit at 07:34Z on 2026-10-02, in the
   middle of BUG-152. Codex reviewed at 09:11Z the same day. `node
   scripts/rotation.mts coverage` shows the live state.
@@ -239,7 +232,8 @@ no such cycle exists (checked 2026-09-29).
    3 on migration case 4 is a known limit the founder accepted (2026-09-30).
    In the release after this one, remove the `@claude.internal.md` import.
    Plan: [`PLAN-TASK-084-agents-md.md`](../waiting-acceptance/PLAN-TASK-084-agents-md.md).
-2. **BUG-146** on the next #20d hang.
+2. **BUG-163** on the next `agent-activity-bound` failure: read the daemon's
+   exit code and output in the failure message.
 
 **The pre-push gate now runs the contamination push scan (TASK-090, founder
 decision 2026-10-05: "yes, do it").** The gate stage

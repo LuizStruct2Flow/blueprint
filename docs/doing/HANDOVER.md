@@ -148,9 +148,15 @@ no such cycle exists (checked 2026-09-29).
 - **Accepted 2026-10-06:** TASK-090, BUG-155, TASK-089 and TASK-088 (now in `docs/done/`).
 - **TASK-091 is accepted (2026-10-12): the repository was recreated that day
   from a rewritten history** (row in `docs/done/`).
-  - **The first push did not start a CI run**, so the first run was started
-    by hand (`workflow_dispatch`). Check that an ordinary push triggers CI and
-    that `released` advances after it.
+  - **The push trigger works on the new repository**: the first push's run
+    appeared a few minutes late, after one had been started by hand. Still to
+    confirm: that `released` advances after a green push run.
+- **BUG-163 is REOPENED (2026-10-12, row in `BUGS.md`):** `agent-activity-bound`
+  failed twice in one day with the supervisor never starting, once in CI and
+  once locally. Suspect, unproven: TASK-092's switch from a sourced shell file
+  to `node` child processes in the daemon's startup.
+- **BUG-146: the founder said "solve the bug in doing" on 2026-10-12**, which
+  ends the earlier "wait for the next hang" instruction.
   - **Every commit id changed.** `docs/config/SHA-MAP-2026-10-12.txt` maps
     old to new. An id quoted in a row, plan or commit body written before
     that date is an OLD id: look it up there.

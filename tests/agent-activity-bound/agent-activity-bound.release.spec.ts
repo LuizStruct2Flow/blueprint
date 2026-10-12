@@ -293,6 +293,32 @@ describe('BUG-001 / BUG-141 — one instance, a bounded process set, byte-correc
     })
   })
 
+  // BUG-163, reopened 2026-10-12. Twice that day (CI #5b after 15.9 s, a local
+  // full-suite run of #15 after 15.6 s) the suite burned its WHOLE startup bound
+  // and reported only `expected 1 owned supervisor(s), saw 0` — the supervisor
+  // never appeared, and the fixture had discarded `--daemon`'s exit code and
+  // output, so nothing said why. This case pins the contract that a daemon
+  // which fails to start fails LOUDLY: the error must carry `--daemon`'s exit
+  // code and the child's own stderr.
+  it('BUG-163 — a --daemon that dies at startup fails with its exit code and stderr, not a bare "saw 0"', async () => {
+    await scenario('aab-163', async (s) => {
+      const b = await bound(s)
+      // The reopened row's unproven suspect, made deterministic: a
+      // `node scripts/lib/state-dir.mts` child that cannot run sends `--daemon`
+      // to `exit 9` (agent-activity.sh's startup resolution). Exactly the class
+      // a contended CI runner can produce for real (a fork/exec failure under
+      // load), which is why the diagnosis must ride the failure instead of a
+      // timeout a re-run then hides.
+      await s.fs.rm('repo/scripts/lib/state-dir.mts')
+      const err = await b.f.withDaemon(async () => {}).then(
+        () => undefined,
+        (e: unknown) => e as Error,
+      )
+      expect(err?.message).toMatch(/--daemon exited with code 9/)
+      expect(err?.message).toMatch(/Cannot find module/)
+    })
+  })
+
   it('#5c --status reports not running after stop', async () => {
     await scenario('aab-5c', async (s) => {
       const b = await bound(s)

@@ -319,3 +319,19 @@ judged known limits with no action (DoD §1b rule 4: no real trigger):
   strips every trailing newline inside its nested command substitution, the
   port strips one. Nothing sets such a value. Re-open if a state path is ever
   built from unsanitised command output.
+
+### Slice 3 four-eyes review (Andreas, Codex, 2026-10-12)
+
+Reviewed by reading, and dispatched by a watcher already running the
+switched-over code: the dispatch was normal (persona and model line, prompt,
+state directory), which is the real-dispatch proof for the wake snippets and
+for `signal-set.sh`. Clean on the production callers, the template escaping,
+the `pipeline.sh` fallbacks, the narrowed tests and the remaining references.
+One finding, fixed: the `AGENT_SIGNAL.md` monitor recipe called the CLI without
+passing `AGENT_STATE_HOME` and `AGENT_SIGNAL_FILE`, so a value set but not
+exported in that shell was no longer honoured.
+
+The mutant for this slice (the CLI ignoring `AGENT_SIGNAL_FILE`) turned
+`tests/baton-durability` #4 and #5 red, not `tests/state-root` or
+`tests/signal-set` as slice 3 predicted. Known limit, no action: the property
+is caught, by a different suite than expected.

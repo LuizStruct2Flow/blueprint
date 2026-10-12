@@ -365,9 +365,10 @@ code is the one whose clean review authorizes the push.
    # `agent-signal-file` takes no argument and refuses one, which left SIG empty
    # and the loop polling nothing, silently (a2bp PR #86, stash2flow). The
    # root-taking form is `agent-signal-file-for`; refuse to start blind, and say
-   # when the watch is armed. The CLI reads its roots from the environment, so
-   # an exported AGENT_STATE_HOME or AGENT_SIGNAL_FILE is honoured as before.
-   SIG=$(node scripts/lib/state-dir.mts agent-signal-file-for "$PWD")
+   # when the watch is armed. The CLI is a child process, so the two overrides
+   # it reads are passed in explicitly: set but unexported in this shell, they
+   # are honoured as they were when the helper was sourced.
+   SIG=$(AGENT_STATE_HOME="${AGENT_STATE_HOME:-}" AGENT_SIGNAL_FILE="${AGENT_SIGNAL_FILE:-}" node scripts/lib/state-dir.mts agent-signal-file-for "$PWD")
    [ -f "$SIG" ] || { echo "[signal-monitor] baton not found at '$SIG'"; exit 1; }
    echo "[signal-monitor] armed on $SIG"
    last=$(mt "$SIG")

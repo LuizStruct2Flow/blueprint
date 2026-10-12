@@ -2,8 +2,8 @@
 
 **Status:** design complete; ready for three-provider review. No port is part of
 this document. Serves TASK-091: the client name's last tree occurrence is one
-comment line in this file (`scripts/lib/state-dir.sh:16` — `git grep -il
-the peer stream` hits nothing else), and the shell-inventory gate refuses any edit to a
+comment line in this file (`scripts/lib/state-dir.sh:16`; a case-insensitive
+`git grep` for the name hits nothing else), and the shell-inventory gate refuses any edit to a
 legacy shell file short of a whole-file port. Founder ruling 2026-10-12: port.
 
 ## 1. Cascade verdict — the premise is REFUTED, one file is ported
@@ -135,9 +135,10 @@ bp-state-root)" || exit 9` etc. — still resolved per dispatch (BUG-020's
 "not baked in" design is preserved).
 
 **Docblock:** the incident record (A-09, BUG-020, BUG-019, TASK-021, the
-`BP_CODE_ROOT`-required rationale) is ported as TS comments, minus the two
-client-identifying lines (`:16`, `:133`) which say "the peer stream" per
-TASK-091's convention. The name leaves the tree when slice 4 deletes the `.sh`.
+`BP_CODE_ROOT`-required rationale) is ported as TS comments, except that the
+one client-identifying line (`:16`) says "the peer stream" per TASK-091's
+convention. Line `:133` names linkedin-watcher-agent, the founder's own
+project, and is kept. The name leaves the tree when slice 4 deletes the `.sh`.
 
 ## 4. Slices
 

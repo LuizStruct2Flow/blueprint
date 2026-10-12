@@ -155,8 +155,22 @@ no such cycle exists (checked 2026-09-29).
   finish the job. GitHub keeps every old commit reachable through the 87 pull
   requests, and PR #25's head branch name contains the name and cannot be
   renamed. **The founder chose on 2026-10-12: recreate the repository from a
-  rewritten history.** Check the TASK-091 row for how far that got before
-  touching history or the GitHub repository.
+  rewritten history.** State on 2026-10-12, nothing on GitHub changed yet:
+  - A rehearsal lives in the gitignored `.scratch/recreate-2jL4/`:
+    `backup.git` (untouched mirror), `work.git` (rewritten with
+    `git filter-repo --replace-text/--replace-message replace.txt --refs main
+    released`), `new/` (checkout to push from). Redo the rewrite from a fresh
+    mirror at cut-over, because `main` has moved since.
+  - Proven on the rehearsal: zero mentions in `main` and `released`, the tip
+    tree identical to the old tip, 1477 commits both sides, full suite
+    1426/1426.
+  - Two things the first push needs: `.gitleaksignore` re-keyed to the new id
+    of the one historical false positive, and the old-to-new id map committed
+    as `docs/config/SHA-MAP-2026-10-12.txt`.
+  - **Blocked on the founder for two answers:** the first push of a whole
+    history fails the gate's §2 stage (13 old bugs have no test title), so it
+    needs a one-time `--no-verify`; and the old repository can only be
+    renamed and made private by this session's token, not deleted.
 - **TASK-092 is accepted (2026-10-12): `scripts/lib/state-dir.sh` is ported to
   `state-dir.mts` and deleted** (released `92ab565`; row and plan in
   `docs/done/`). Three things still follow from it:

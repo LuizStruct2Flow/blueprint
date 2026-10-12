@@ -80,48 +80,37 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
-const LIB = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.sh')
 const MTS = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.mts')
 
 /**
- * The prelude that puts the state API in scope for a snippet — shell today,
- * CLI once the port exists (TASK-092 slice 1).
- *
- * While only the shell helper exists, it is sourced exactly as production
- * consumers source it. Once `state-dir.mts` exists, the same seven functions
- * are shell wrappers around the helper's CLI, so the snippets below drive the
- * real contract either way and every case becomes an old-vs-new differential
- * the moment the port lands. The `env` prefix mirrors the switch-over's
- * passthrough (plus the ceiling, which the shell read in-process): a snippet
- * that sets BP_CODE_ROOT / BP_STATE_ROOT_CEILING as plain shell variables is
- * honoured the same way sourcing honoured it.
+ * The prelude that puts the state API in scope for a snippet: shell wrappers
+ * around the helper's CLI, so the snippets drive the real contract. The `env`
+ * prefix mirrors the callers' passthrough: a snippet that sets BP_CODE_ROOT /
+ * BP_STATE_ROOT_CEILING as plain shell variables is honoured as it was when the
+ * shell lib was sourced.
  */
-const PRELUDE = existsSync(MTS)
-  ? [
-      'sd() { env "BP_CODE_ROOT=${BP_CODE_ROOT:-}" "BP_STATE_ROOT=${BP_STATE_ROOT:-}" ' +
-        '"BP_STATE_ROOT_CEILING=${BP_STATE_ROOT_CEILING:-}" "AGENT_STATE_HOME=${AGENT_STATE_HOME:-}" ' +
-        '"AGENT_SIGNAL_FILE=${AGENT_SIGNAL_FILE:-}" node "' +
-        MTS +
-        '" "$@"; }',
-      'bp_state_root() { sd bp-state-root; }',
-      // the no-argument functions forward "$@" so their arity refusal is reachable (#C1)
-      'agent_state_dir() { sd agent-state-dir "$@"; }',
-      'agent_state_dir_for() { sd agent-state-dir-for "$@"; }',
-      'agent_signal_file() { sd agent-signal-file "$@"; }',
-      'agent_signal_file_for() { sd agent-signal-file-for "$@"; }',
-      'agent_signal_journal() { sd agent-signal-journal "$@"; }',
-      'agent_signal_journal_for() { sd agent-signal-journal-for "$@"; }',
-    ].join('; ')
-  : `. "${LIB}"`
+const PRELUDE = [
+  'sd() { env "BP_CODE_ROOT=${BP_CODE_ROOT:-}" "BP_STATE_ROOT=${BP_STATE_ROOT:-}" ' +
+    '"BP_STATE_ROOT_CEILING=${BP_STATE_ROOT_CEILING:-}" "AGENT_STATE_HOME=${AGENT_STATE_HOME:-}" ' +
+    '"AGENT_SIGNAL_FILE=${AGENT_SIGNAL_FILE:-}" node "' +
+    MTS +
+    '" "$@"; }',
+  'bp_state_root() { sd bp-state-root; }',
+  // the no-argument functions forward "$@" so their arity refusal is reachable (#C1)
+  'agent_state_dir() { sd agent-state-dir "$@"; }',
+  'agent_state_dir_for() { sd agent-state-dir-for "$@"; }',
+  'agent_signal_file() { sd agent-signal-file "$@"; }',
+  'agent_signal_file_for() { sd agent-signal-file-for "$@"; }',
+  'agent_signal_journal() { sd agent-signal-journal "$@"; }',
+  'agent_signal_journal_for() { sd agent-signal-journal-for "$@"; }',
+].join('; ')
 
 /**
- * Run a snippet with the state API in scope — sourced from state-dir.sh today,
- * driven through the ported CLI once it exists.
+ * Run a snippet with the state API in scope, driven through the CLI.
  *
  * `env -u` strips the harness's own AGENT_STATE_HOME / AGENT_SIGNAL_FILE:
  * those are overrides the production code honours FIRST, so leaving them set
@@ -346,9 +335,9 @@ async function consumersWithInitGuard(): Promise<{ missing: string[]; checked: s
     // tests/codex-dispatch-status), not by this grep.
     const body = await readFile(join(dir, n), 'utf8')
     const stripped = body.replace(/^\s*#.*$/gm, '')
-    if (!/\bagent_(state_dir|signal_file|signal_journal)\b/.test(stripped)) continue
+    if (!/\bagent[_-](state[_-]dir|signal[_-]file|signal[_-]journal)\b/.test(stripped)) continue
     checked.push(n)
-    if (!/BP_STATE_ROOT="\$\(bp_state_root\)"\s*\|\|\s*exit/.test(stripped)) missing.push(n)
+    if (!/BP_STATE_ROOT="\$\([^)]*\bbp[_-]state[_-]root\)"\s*\|\|\s*exit/.test(stripped)) missing.push(n)
   }
   return { missing, checked }
 }
@@ -372,10 +361,9 @@ describe('TASK-021 #G — production code never passes a root to the state API',
     let seamUses = 0
 
     for (const f of files) {
-      // the definitions themselves — state-dir.sh today, state-dir.mts once
-      // ported (TASK-092). The sweep lists .sh files only at the moment, so the
-      // .mts half of this guard is belt and braces for a future widening.
-      if (f.endsWith('lib/state-dir.sh') || f.endsWith('lib/state-dir.mts')) continue
+      // the definitions themselves. The sweep lists .sh files only, so this is
+      // belt and braces for a future widening.
+      if (f.endsWith('lib/state-dir.mts')) continue
       const body = await readFile(f, 'utf8')
       const name = f.slice(REPO_ROOT.length + 1)
       body.split('\n').forEach((line, i) => {
@@ -384,10 +372,10 @@ describe('TASK-021 #G — production code never passes a root to the state API',
         // `agent_signal_file 2>/dev/null` and `$( … agent_signal_file )` are
         // both zero-argument calls; a first cut matched `\s+\S` and flagged
         // both, which would have made the sweep noise rather than a control.
-        if (/\bagent_(state_dir|signal_file|signal_journal)\s+(?![0-9]*[<>|&)}]|$)\S/.test(code)) {
+        if (/\bagent[_-](state[_-]dir|signal[_-]file|signal[_-]journal)\s+(?![0-9]*[<>|&)}]|$)\S/.test(code)) {
           offenders.push(`${name}:${i + 1} passes a root to the no-argument API`)
         }
-        if (/\bagent_(state_dir|signal_file|signal_journal)_for\b/.test(code)) {
+        if (/\bagent[_-](state[_-]dir|signal[_-]file|signal[_-]journal)[_-]for\b/.test(code)) {
           seamUses += 1
           const base = name.split('/').pop() as string
           if (!ALLOWED.has(base)) {

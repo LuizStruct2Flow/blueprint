@@ -27,7 +27,6 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -83,16 +82,10 @@ async function buildFixture(
     'scripts/signal-watch.mts',
     launcherRel,
     'scripts/codex-feed-filter.sh',
-    'scripts/lib/state-dir.sh',
+    'scripts/lib/state-dir.mts',
     'scripts/lib/roster.sh',
     'scripts/lib/feed.sh',
   ]
-  // TASK-092 slice 1 — migration-aware: the ported helper's .mts travels with
-  // the fixture once it exists, so the switch-over's repointed callers have
-  // something to run. A no-op until the port lands.
-  if (existsSync(join(REPO_ROOT, 'scripts/lib/state-dir.mts'))) {
-    shellScripts.push('scripts/lib/state-dir.mts')
-  }
   for (const script of shellScripts) {
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
     await s.fs.chmod(rel(script), 0o755)

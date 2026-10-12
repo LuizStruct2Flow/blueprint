@@ -13,22 +13,16 @@
 
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
 const SUBJECT = process.env.BP_SPEC_ROOT ?? REPO_ROOT
 const LIB = join(SUBJECT, 'scripts', 'lib', 'roster.sh')
 
-/**
- * TASK-092 slice 1 — the ported state-dir helper's .mts travels with any
- * fixture that carries the .sh, so the switch-over's repointed callers
- * (claude-agents.sh, log-activity.mts) have something to run. A no-op until
- * the port exists.
- */
+/** The state-dir helper's .mts travels with any fixture that carries a repointed caller. */
 async function copyStateDirMts(s: Scenario, destDir: string): Promise<void> {
   const mts = join(SUBJECT, 'scripts', 'lib', 'state-dir.mts')
-  if (existsSync(mts)) await s.fs.copyIn(mts, join(destDir, 'state-dir.mts'))
+  await s.fs.copyIn(mts, join(destDir, 'state-dir.mts'))
 }
 
 const ROSTER = `# Roster
@@ -92,7 +86,7 @@ describe('TASK-059 — roster Model tiers', () => {
     await scenario('rm-3', async (s) => {
       const { dir, env } = await project(s)
       await s.fs.copyIn(join(SUBJECT, 'scripts', 'claude-agents.sh'), 'proj/scripts/claude-agents.sh')
-      for (const f of ['roster.sh', 'state-dir.sh']) {
+      for (const f of ['roster.sh']) {
         await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
       await copyStateDirMts(s, 'proj/scripts/lib')
@@ -109,7 +103,7 @@ describe('TASK-059 — roster Model tiers', () => {
     await scenario('rm-3b', async (s) => {
       const { dir, env } = await project(s)
       await s.fs.copyIn(join(SUBJECT, 'scripts', 'claude-agents.sh'), 'proj/scripts/claude-agents.sh')
-      for (const f of ['roster.sh', 'state-dir.sh']) {
+      for (const f of ['roster.sh']) {
         await s.fs.copyIn(join(SUBJECT, 'scripts', 'lib', f), `proj/scripts/lib/${f}`)
       }
       await copyStateDirMts(s, 'proj/scripts/lib')

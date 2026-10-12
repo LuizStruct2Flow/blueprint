@@ -58,12 +58,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
 
-const STATE_LIB = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.sh')
 const STATE_MTS = join(REPO_ROOT, 'scripts', 'lib', 'state-dir.mts')
 
 /** The CLI subcommand each shell function name maps to (TASK-092). */
@@ -87,28 +85,18 @@ const CLI_SUB: Record<string, string> = {
  * the init and got exactly that 9 back, which is the contract working.
  */
 async function resolveLive(s: Scenario, fn: string, codeRoot: string) {
-  // TASK-092 slice 1 — once the port exists, the same resolution is asked of
-  // the helper's CLI: the .sh is gone at the switch-over, and the CLI is the
-  // contract either way. The once-per-script init (BP_STATE_ROOT resolved with
-  // `|| exit 9` before any state API call) is carried out the same way against
-  // the CLI, and the five derivation inputs travel as the exported env prefix.
-  if (existsSync(STATE_MTS)) {
-    return s.run(
-      'sh',
-      [
-        '-c',
-        `env -u AGENT_STATE_HOME -u AGENT_SIGNAL_FILE sh -c '` +
-          `BP_CODE_ROOT="${codeRoot}"; export BP_CODE_ROOT; ` +
-          `BP_STATE_ROOT="$(node "${STATE_MTS}" bp-state-root)" || exit 9; export BP_STATE_ROOT; ` +
-          `node "${STATE_MTS}" ${CLI_SUB[fn] ?? fn}'`,
-      ],
-      { cwd: REPO_ROOT },
-    )
-  }
-  const init = `BP_CODE_ROOT="${codeRoot}"; BP_STATE_ROOT="$(bp_state_root)" || exit 9`
+  // The once-per-script init (BP_STATE_ROOT resolved with `|| exit 9` before any
+  // state API call) is carried out against the CLI, and the five derivation
+  // inputs travel as the exported env.
   return s.run(
     'sh',
-    ['-c', `env -u AGENT_STATE_HOME -u AGENT_SIGNAL_FILE sh -c '. "${STATE_LIB}"; ${init}; ${fn}'`],
+    [
+      '-c',
+      `env -u AGENT_STATE_HOME -u AGENT_SIGNAL_FILE sh -c '` +
+        `BP_CODE_ROOT="${codeRoot}"; export BP_CODE_ROOT; ` +
+        `BP_STATE_ROOT="$(node "${STATE_MTS}" bp-state-root)" || exit 9; export BP_STATE_ROOT; ` +
+        `node "${STATE_MTS}" ${CLI_SUB[fn] ?? fn}'`,
+    ],
     { cwd: REPO_ROOT },
   )
 }

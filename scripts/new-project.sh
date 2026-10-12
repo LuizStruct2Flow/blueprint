@@ -212,7 +212,7 @@ done
 # BUG-028. This used to be a hand-maintained TARGETS array rewritten with a raw
 # `sed`, and both halves were wrong:
 #
-#   - The LIST went stale. `docs/way-of-working.md` and `scripts/lib/state-dir.sh`
+#   - The LIST went stale. `docs/way-of-working.md` and `scripts/lib/state-dir.mts`
 #     carry the placeholder and were never added, so `blueprint drift` — the
 #     command CLAUDE.md mandates at every wake — reported 5 drifted files on a
 #     zero-second-old bootstrap. The first thing a new project heard from its
@@ -256,7 +256,7 @@ TODAY="$(date '+%Y-%m-%d')"
 # resolution downstream of it depends on it existing. It used to be written
 # ~80 lines later, after the baton seed and after `git init`, which left a
 # window in which the target had NO terminator at all: not this marker, not
-# `.git`. `scripts/lib/state-dir.sh`'s walk correctly refused to guess, so
+# `.git`. `scripts/lib/state-dir.mts`'s walk correctly refused to guess, so
 # `signal-set.sh` exited 9 and the new project was bootstrapped with no baton —
 # caught by tests/bootstrap-identity #6 and tests/bootstrap-gate #2/#3.
 #
@@ -327,7 +327,7 @@ EOF
 # BUG-046 — the seed is scrubbed of the CALLER's baton pointers, because the
 # only baton this line may ever write is the NEW PROJECT'S.
 #
-# `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.sh:87) and
+# `signal-set.sh` honours $AGENT_SIGNAL_FILE (state-dir.mts:87) and
 # $AGENT_STATE_HOME (:56), and `signal-watch.mts` (TASK-063, formerly
 # codex-signal-watch.sh) EXPORTS AGENT_SIGNAL_FILE into every dispatched wake
 # command. So bootstrapping from a
@@ -341,7 +341,7 @@ EOF
 # session's baton" cannot also mean "the baton of a project that does not exist
 # yet", so it is not an override this call may honour AT ALL. Unsetting inside
 # the subshell — rather than computing a path and passing `--file` — keeps the
-# target's own scripts/lib/state-dir.sh as the SINGLE derivation of where its
+# target's own scripts/lib/state-dir.mts as the SINGLE derivation of where its
 # baton lives (A-09; tests/state-dir #7), instead of adding a second copy of
 # that rule here that could drift from it.
 if [[ -f "$TARGET_DIR/scripts/signal-set.sh" ]]; then

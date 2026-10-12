@@ -251,7 +251,7 @@ describe('BUG-028 — a fresh bootstrap passes its own gate, and is drift-clean'
             // baton, journal and feed so nothing can reach the operator's. The
             // derived project's gate then runs suites that MANAGE those files
             // -- agent-activity-bound among them -- and they must derive their
-            // own per-project paths, which is what scripts/lib/state-dir.sh
+            // own per-project paths, which is what scripts/lib/state-dir.mts
             // exists to do. Inheriting the scenario's pointers made
             // agent-activity-bound #9b operate on this scenario's signal file
             // instead of its own fixture, and it failed for a reason that had

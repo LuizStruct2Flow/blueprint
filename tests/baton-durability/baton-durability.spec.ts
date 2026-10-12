@@ -55,7 +55,6 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { REPO_ROOT, scenario, type Scenario } from '../harness/index.js'
@@ -99,36 +98,18 @@ const IDLE_BATON =
   '| Field | Value |\n|---|---|\n| Holder | Nobody |\n| State | IDLE |\n| Task | nothing yet |\n'
 
 /**
- * The fixture shim for `state-dir.sh`: resolve the baton through a POINTER FILE,
- * so the path can move WHILE the watcher runs.
+ * The fixture shim for `scripts/lib/state-dir.mts`: resolve the baton through a
+ * POINTER FILE, so the path can move WHILE the watcher runs. Same four functions
+ * as the real lib, plus the CLI `main()` the repointed callers invoke.
  *
  * This shims the DERIVATION, not the watcher. What is under test is whether the
  * watcher asks again — it either does or it does not — and there is no other way
  * to move a baton under a live process without also changing the thing being
- * measured.
+ * measured. The `_for` subcommands resolve through the pointer: the pointer
+ * target IS the state dir, so the dir argument is arity-checked and ignored.
  */
-const POINTER_SHIM =
-  '#!/bin/sh\n' +
-  "bp_state_root()     { printf '%s\\n' \"$(cat \"$BD_POINTER\")\"; }\n" +
-  "agent_state_dir()   { printf '%s\\n' \"$(cat \"$BD_POINTER\")\"; }\n" +
-  "agent_signal_file() { printf '%s\\n' \"${AGENT_SIGNAL_FILE:-$(cat \"$BD_POINTER\")/signal.md}\"; }\n" +
-  'agent_signal_journal() { printf \'%s\\n\' "$(dirname "$(agent_signal_file "${1:-}")")/signal-history.log"; }\n'
-
-/**
- * The `.mts` form of POINTER_SHIM (TASK-092 slice 1): the same four functions,
- * plus the CLI `main()` the repointed shell callers will invoke once the real
- * `scripts/lib/state-dir.mts` exists. Written INTO the fixture only when the
- * fixture carries the ported file — until the port lands (slice 2) the fixture
- * has only the `.sh`, and this string is inert.
- *
- * The `_for` subcommands resolve through the pointer exactly like the shim's
- * shell functions do: in this fixture the pointer target IS the state dir, so
- * the dir argument is arity-checked and then deliberately ignored, the way the
- * `.sh` shim ignores the state root's real derivation.
- */
-const POINTER_SHIM_MTS = [
-  '// Fixture shim - the .mts form of this suite\'s POINTER_SHIM (TASK-092).',
-  '// Same four functions, plus the CLI main() repointed shell callers invoke.',
+const POINTER_SHIM = [
+  '// Fixture shim for scripts/lib/state-dir.mts (resolves through BD_POINTER).',
   'import { readFileSync } from "node:fs"',
   'import { dirname } from "node:path"',
   'import { pathToFileURL } from "node:url"',
@@ -208,7 +189,7 @@ interface Fixture {
   afterIterations(n: number, fact: string): Promise<void>
   /** Publish through the FIXTURE's own copy of signal-set.sh, from inside the fixture. */
   publish(args: string[]): Promise<void>
-  /** Replace the fixture's state-dir.sh with the pointer shim. */
+  /** Replace the fixture's state-dir.mts with the pointer shim. */
   usePointer(target: string): Promise<void>
   /** Point the shim at a different state directory. */
   movePointer(target: string): Promise<void>
@@ -230,15 +211,8 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
     'scripts/start-codex-signal-watch.mts',
     'scripts/codex-feed-filter.sh',
     'scripts/signal-set.sh',
-    'scripts/lib/state-dir.sh',
+    'scripts/lib/state-dir.mts',
   ]
-  // TASK-092 slice 1 — migration-aware: once the helper is ported, its .mts
-  // travels with the fixture too, so the repointed signal-set.sh / wake snippet
-  // (switch-over, slice 3) has something to run. Copied BESIDE the .sh, never
-  // instead of it, while shell callers still source the .sh.
-  if (existsSync(join(REPO_ROOT, 'scripts/lib/state-dir.mts'))) {
-    copiedScripts.push('scripts/lib/state-dir.mts')
-  }
   for (const script of copiedScripts) {
     await s.fs.copyIn(join(REPO_ROOT, script), rel(script))
     // The launcher EXECS signal-watch.mts rather than running `bash` on it,
@@ -247,7 +221,7 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
   }
   // TASK-065 (round 3) — signal-watch.mts also imports a sibling .mts lib
   // directly (scripts/lib/spawn-bounded.mts), not sourced through a shell
-  // function like scripts/lib/state-dir.sh above, so it has to travel with
+  // function like scripts/lib/state-dir.mts above, so it has to travel with
   // the copied watcher too or it fails ERR_MODULE_NOT_FOUND on startup.
   await s.fs.copyIn(join(REPO_ROOT, 'scripts/lib/spawn-bounded.mts'), rel('scripts/lib/spawn-bounded.mts'))
   // TASK-083 — the ported start-codex-signal-watch.mts imports
@@ -308,16 +282,7 @@ async function fixture(s: Scenario, name: string): Promise<Fixture> {
     },
 
     async usePointer(target) {
-      // TASK-092 slice 1 — write the shim in whichever form(s) the fixture
-      // carries: the .sh while shell callers source it, and the .mts (same
-      // pointer contract, plus the CLI) once the port exists and the repointed
-      // callers drive the CLI.
-      if (await s.fs.exists(rel('scripts/lib/state-dir.mts'))) {
-        await s.fs.write(rel('scripts/lib/state-dir.mts'), POINTER_SHIM_MTS)
-      }
-      if (await s.fs.exists(rel('scripts/lib/state-dir.sh'))) {
-        await s.fs.write(rel('scripts/lib/state-dir.sh'), POINTER_SHIM)
-      }
+      await s.fs.write(rel('scripts/lib/state-dir.mts'), POINTER_SHIM)
       await s.fs.write(`${name}/pointer`, `${target}\n`)
     },
 

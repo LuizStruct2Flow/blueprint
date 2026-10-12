@@ -76,7 +76,7 @@ Declare neither if your docs link no served pages.
 
 > Where the agent dispatchers write logs and artefacts. State lives **inside
 > the project**, under gitignored `logs/state/`, derived by
-> `scripts/lib/state-dir.sh` — so deleting the project deletes its state
+> `scripts/lib/state-dir.mts` — so deleting the project deletes its state
 > (BUG-020: it used to live in `~/.<repo>`, and a project bootstrapped later
 > at the same path inherited the previous one's records). Override here only
 > if you want a different location.

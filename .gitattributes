@@ -160,8 +160,6 @@ tests/link-guard/                  export-ignore
 scripts/shell-inventory.json       export-ignore
 scripts/shell-inventory-check.mts  export-ignore
 tests/shell-inventory/             export-ignore
-# TASK-092: the old-vs-new differential needs state-dir.sh, which slice 3 deletes.
-tests/state-dir-port/              export-ignore
 
 # --- TASK-018 PHASE 2: the TypeScript harness SHIPS -------------------------
 #

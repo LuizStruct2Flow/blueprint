@@ -1,6 +1,7 @@
 # PLAN — TASK-092: port `scripts/lib/state-dir.sh` to TypeScript
 
-**Status:** design complete; ready for three-provider review. No port is part of
+**Status:** reviewed by Christian (Claude) and Alexey (Codex), both APPROVE WITH
+CHANGES; the changes are folded in (§7). No port is part of
 this document. Serves TASK-091: the client name's last tree occurrence is one
 comment line in this file (`scripts/lib/state-dir.sh:16`; a case-insensitive
 `git grep` for the name hits nothing else), and the shell-inventory gate refuses any edit to a
@@ -26,7 +27,12 @@ passing the gate today).
 shell caller is ported. The cascade is:
 
 - 8 shell callers repointed by reference-only edits — 7 under today's checker,
-  1 (`scripts/lib/pipeline.sh`) after a small reviewed checker widening (§4.2);
+  1 (`scripts/lib/pipeline.sh`) after a small reviewed checker widening
+  (slice 2, item 2);
+- 3 more legacy shell files that only MENTION the old path in comments
+  (`scripts/lib/feed.sh`, `scripts/lib/roster.sh`, `scripts/new-project.sh`),
+  whose mentions are repointed in the same commit (R1) — measured in review:
+  left untouched, the checker reports all three `CHANGED` once the lib is gone;
 - 5 `.mts` files that reach the lib across a process boundary and 3 `.mts`
   files embedding a wake-command shell snippet that sources it — all free
   edits, the inventory gate does not judge `.mts`;
@@ -68,6 +74,8 @@ AGENT_SIGNAL.md:365-370).
 | `scripts/start-codex-signal-watch.mts` | wake-command snippet sources + calls both | L99-101 |
 | `scripts/start-gemini-signal-watch.mts` | same | L144-146 |
 | `scripts/start-kimi-signal-watch.mts` | same | L93-95 |
+| `scripts/lib/contamination.mts` | names the old path in a comment and in a BLOCK message | L57, L324 |
+| `scripts/lib/scratch-tmpdir.mts` | names it in a comment | L13 |
 
 ### Tests and fixtures
 
@@ -90,9 +98,9 @@ AGENT_SIGNAL.md:365-370).
 - **Docs:** `AGENT_SIGNAL.md:365` (Monitor recipe sources it live — must
   change), `docs/doing/BACKLOG.md` rows, dated records (keep the old path per
   AGENTS.md). `scripts/new-project.sh`, `scripts/lib/feed.sh`,
-  `scripts/lib/roster.sh` mention it in COMMENTS only; they are legacy and stay
-  byte-identical — their comments age, which TASK-088 already accepts ("dated
-  records keep the old path").
+  `scripts/lib/roster.sh` mention it in COMMENTS only; they are legacy, and
+  slice 3 swaps the name in those comments (R1). They cannot stay
+  byte-identical: a BASE-form mention of a ported path fails the comparison.
 
 ## 3. Design of `scripts/lib/state-dir.mts`
 
@@ -130,20 +138,23 @@ fallbacks (`blueprint.mts` and `dod-gate.mts` ship and can run against a
 partial pull — the guard is load-bearing), the same inherited stderr. Not a
 static import: a managed `.mts` that refuses to start when its sibling is
 absent turns a partial pull into a CLI that cannot self-heal. The wake
-snippets become `BP_STATE_ROOT="$(node "$ROOT/scripts/lib/state-dir.mts"
-bp-state-root)" || exit 9` etc. — still resolved per dispatch (BUG-020's
+snippets become `BP_STATE_ROOT="$(<env prefix> node
+"$ROOT/scripts/lib/state-dir.mts" bp-state-root)" || exit 9` etc. The prefix is
+required there too: the launchers export neither `BP_CODE_ROOT` nor
+`BP_STATE_ROOT`, so without it every dispatch exits 9 (review finding). — still resolved per dispatch (BUG-020's
 "not baked in" design is preserved).
 
 **Docblock:** the incident record (A-09, BUG-020, BUG-019, TASK-021, the
 `BP_CODE_ROOT`-required rationale) is ported as TS comments, except that the
 one client-identifying line (`:16`) says "the peer stream" per TASK-091's
 convention. Line `:133` names linkedin-watcher-agent, the founder's own
-project, and is kept. The name leaves the tree when slice 4 deletes the `.sh`.
+project, and is kept. The name leaves the tree when slice 3 deletes the `.sh`.
 
 ## 4. Slices
 
-Every slice lands on `main` as its own commit(s); nothing calls the new code
-until slice 4 (dark code, no branches). Port method proofs per slice: **full
+Every slice lands on `main` as its own commit(s); no PRODUCTION caller reaches
+the new code until slice 3 (dark code, no branches) — tests reach it from
+slice 2. Port method proofs per slice: **full
 suite**, **old-vs-new differential**, **mutant** (PLAN-TASK-067 §"The port
 method" rule 5). Owner must be a provider that can run fixture-git suites (rule
 6 — not Codex).
@@ -165,8 +176,6 @@ apart).
   control).
 - `tests/state-root`: snippets drive the CLI when the `.mts` exists; the :345
   lib sweep skips `state-dir.mts` alongside `state-dir.sh`.
-- `tests/shell-inventory`: cases for the slice-2 checker changes (below) and
-  for the Markus-Q4 rule (every `sub` in the table is a `case` in its `.mts`).
 - Proof: full suite against the unported tree — nothing weakened.
 
 ### Slice 2 — checker row + widening, and the dark port
@@ -179,19 +188,27 @@ reach it), plus in `scripts/shell-inventory-check.mts`:
    (the row applies only when the lib is in D), satisfying "one reviewed,
    mutant-tested table row landed before the commit that deletes its shell
    file".
-2. **Widening for `pipeline.sh`'s shape** (this is §4.2's finding): its source
+2. **Widening for `pipeline.sh`'s shape:** its source
    line is `. "$_PIPE_LIB/state-dir.sh"` — `$_PIPE_LIB` already ends in
    `scripts/lib`, so neither R3 (requires the literal `scripts/lib/` in the
    path) nor R1 (path token likewise; basename token blocked by the preceding
    `/`) recognises it, and a repoint is REFUSED today. Widen, keyed to
    table-lib stems only: R3 accepts `. "$VAR/<stem>.sh"` for a stem in
    `SOURCED_LIBS` (prefix captured for R4 as today), and R1 accepts
-   `"$VAR/<stem>.sh"` as a token for table libs. Mutants: same shape with a
+   `"$VAR/<stem>.sh"` as a token for table libs, only for the variable BASE's
+   own R3 line used. R4 gains the matching HEAD form `node "$VAR/<stem>.mts"
+   sub` with that same variable: today's R4 appends the full
+   `scripts/lib/<stem>.mts` to the prefix, which for `$_PIPE_LIB/` names a path
+   that does not exist, and `pipeline.sh:67` would swallow the failure
+   (review finding). Mutants: a different variable in HEAD refused; same shape with a
    non-table stem refused; a non-source `$VAR/stem.sh` reference that swaps
    nothing else refused; the dod-gate/gate rows' existing corpus unchanged.
    The alternative — porting `pipeline.sh` — is rejected: 562 lines sourced by
    two legacy hooks, i.e. BUG-147's Option D boundary the founder already
    refused, for a feed-path default.
+- `tests/shell-inventory`: the cases for both checker changes, and for the
+  Markus-Q4 rule (every `sub` in the table is a `case` in its `.mts`). They
+  land here, with the change they test; in slice 1 they would be red.
 - Differential corpus, old shell vs new CLI, over: each terminator kind;
   ceiling unset/set/misplaced; symlinked root and nested repo;
   `AGENT_STATE_HOME` / `AGENT_SIGNAL_FILE` set, empty, unset; arity 0/1/2 per
@@ -210,7 +227,10 @@ Deletes `scripts/lib/state-dir.sh` and its `shell-inventory.json` legacy row
   `<env> node "PFX/scripts/lib/state-dir.mts" <sub>` (R4), swap comment tokens
   `.sh` → `.mts` (R1 — required: a BASE-form mention left in HEAD fails the
   comparison).
-- The 5 `.mts` bridges and 3 wake snippets per §3.
+- The 3 comment-only legacy files (`feed.sh`, `roster.sh`, `new-project.sh`):
+  the name swapped in their comments, nothing else.
+- The 5 `.mts` bridges and 3 wake snippets per §3, and the mentions in
+  `contamination.mts` (its BLOCK message included) and `scratch-tmpdir.mts`.
 - `AGENT_SIGNAL.md` §"Reactivity" recipe: the source line +
   `agent_signal_file_for` become one `node scripts/lib/state-dir.mts
   agent-signal-file-for "$PWD"` call (env prefix per §3).
@@ -236,7 +256,8 @@ rewrite) stays the founder's decision, out of scope.
    so a watcher started before slice 3 lands sources a deleted file on its
    next dispatch and the dispatch dies at exit 9. Trigger: any watcher older
    than the pull. Mitigation: restart watchers after the pull; slice 4's
-   handover says so.
+   handover says so, and the Orchestrator restarts this checkout's three
+   watchers right after slice 3 lands.
 2. **The `pipeline.sh` widening blesses more than intended.** Trigger: a later
    push sources `$VAR/gate.sh`-shaped text expecting refusal. Mitigation: the
    form is keyed to table stems and reviewed with the slice-2 mutants.
@@ -264,3 +285,19 @@ rewrite) stays the founder's decision, out of scope.
 | 2 — checker + dark port | `state-dir.mts` ~300 (from 287 shell, ~95 code), checker ~80, inventory tests ~120 | ~500 |
 | 3 — switch-over | ~20: 8 shell repoints (~35 ln), 8 `.mts` (~60 ln), `AGENT_SIGNAL.md` ~6, suite sweeps | ~150 |
 | 4 — lifecycle | 3 docs | ~20 |
+
+## 7. Review synthesis (2026-10-12)
+
+Christian (Claude) and Alexey (Codex) reviewed independently and agree: one
+file is the right port set, and the plan needed these changes, all folded in
+above. Each has a real trigger.
+
+| Finding | Trigger | Where it went |
+|---|---|---|
+| Three legacy files mention the old path in comments and were left untouched | Measured in a scratch clone: the checker reports them `CHANGED` at switch-over, so the push is refused | §1, §2, slice 3 |
+| The wake snippets called the new CLI without the env prefix | Every dispatch would exit 9 | §3 |
+| The `pipeline.sh` widening accepted the edit but produced a path that does not exist | The gate's state root would silently fall back | slice 2, item 2 |
+| Two `.mts` files naming the old path were missing | A BLOCK message would point at a deleted file | §2, slice 3 |
+| The widening's test cases sat in slice 1 | They are red until slice 2's change exists | slices 1 and 2 |
+
+Not checked by either reviewer: the full suite, and §2's test list.

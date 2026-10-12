@@ -109,11 +109,12 @@ const PRELUDE = existsSync(MTS)
         MTS +
         '" "$@"; }',
       'bp_state_root() { sd bp-state-root; }',
-      'agent_state_dir() { sd agent-state-dir; }',
+      // the no-argument functions forward "$@" so their arity refusal is reachable (#C1)
+      'agent_state_dir() { sd agent-state-dir "$@"; }',
       'agent_state_dir_for() { sd agent-state-dir-for "$@"; }',
-      'agent_signal_file() { sd agent-signal-file; }',
+      'agent_signal_file() { sd agent-signal-file "$@"; }',
       'agent_signal_file_for() { sd agent-signal-file-for "$@"; }',
-      'agent_signal_journal() { sd agent-signal-journal; }',
+      'agent_signal_journal() { sd agent-signal-journal "$@"; }',
       'agent_signal_journal_for() { sd agent-signal-journal-for "$@"; }',
     ].join('; ')
   : `. "${LIB}"`

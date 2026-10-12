@@ -641,6 +641,67 @@ esac
       })
     })
 
+    // TASK-092 slice 2 — scripts/lib/pipeline.sh:62-67 and its bare `$VAR/<stem>` shape.
+    const SD_ENV = SOURCED_LIBS.find((l) => l.sh === 'scripts/lib/state-dir.sh')?.env ?? ''
+    const SD_FILES = { ported: ['scripts/lib/state-dir.sh'], mts: ['scripts/lib/state-dir.mts'] }
+    const PIPE_BASE = `#!/bin/sh
+_PIPE_LIB="\${_PIPE_LIBDIR:-\${BP_CODE_ROOT:-.}/scripts/lib}"
+if [ -z "\${BP_STATE_ROOT:-}" ] && [ -r "$_PIPE_LIB/state-dir.sh" ]; then
+  . "$_PIPE_LIB/state-dir.sh"
+  : "\${BP_CODE_ROOT:=$(pwd)}"
+  BP_STATE_ROOT="$(bp_state_root)" || BP_STATE_ROOT=""
+fi
+`
+    const pipeHead = (v = '$_PIPE_LIB', stem = 'state-dir') => `#!/bin/sh
+_PIPE_LIB="\${_PIPE_LIBDIR:-\${BP_CODE_ROOT:-.}/scripts/lib}"
+if [ -z "\${BP_STATE_ROOT:-}" ] && [ -r "${v}/${stem}.mts" ]; then
+  : "\${BP_CODE_ROOT:=$(pwd)}"
+  BP_STATE_ROOT="$(${SD_ENV}node "${v}/${stem}.mts" bp-state-root)" || BP_STATE_ROOT=""
+fi
+`
+
+    it('N21 the bare $VAR/<stem> shape (pipeline.sh) is repointed: guard, source line and call', async () => {
+      await scenario('shell-inventory-n21', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/lib/pipeline.sh', base: PIPE_BASE, head: pipeHead(), ...SD_FILES })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
+    it('N22 a different variable in HEAD than BASE\'s own source line used is refused', async () => {
+      await scenario('shell-inventory-n22', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/lib/pipeline.sh', base: PIPE_BASE, head: pipeHead('$OTHER_LIB'), ...SD_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*pipeline\.sh/)
+      })
+    })
+
+    it('N23 the same shape with a stem that is not in the table is refused', async () => {
+      await scenario('shell-inventory-n23', async (s) => {
+        const base = PIPE_BASE.replaceAll('state-dir', 'other')
+        const head = pipeHead('$_PIPE_LIB', 'other')
+        const r = await refEdit(s, { caller: 'scripts/lib/pipeline.sh', base, head, ported: ['scripts/lib/other.sh'], mts: ['scripts/lib/other.mts'] })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*pipeline\.sh/)
+      })
+    })
+
+    it('N24 a non-source $VAR/<stem>.sh reference swapped alone is refused (no source line, no variable)', async () => {
+      await scenario('shell-inventory-n24', async (s) => {
+        const r = await refEdit(s, { caller: 'scripts/lib/pipeline.sh', base: callerWith('echo "$_PIPE_LIB/state-dir.sh"'), head: callerWith('echo "$_PIPE_LIB/state-dir.mts"'), ...SD_FILES })
+        expect(r.code).not.toBe(0)
+        expect(r.output).toMatch(/CHANGED:.*pipeline\.sh/)
+      })
+    })
+
+    it('N25 the usual scripts/lib/ prefix still works for the state-dir row', async () => {
+      await scenario('shell-inventory-n25', async (s) => {
+        const base = '#!/bin/sh\n# shellcheck source=scripts/lib/state-dir.sh\n. "$root/scripts/lib/state-dir.sh"\nR="$(bp_state_root)" || exit 9\n'
+        const head = `#!/bin/sh\nR="$(${SD_ENV}node "$root/scripts/lib/state-dir.mts" bp-state-root)" || exit 9\n`
+        const r = await refEdit(s, { caller: 'scripts/signal-set.sh', base, head, ...SD_FILES })
+        expect(r.code, r.output).toBe(0)
+      })
+    })
+
     // The case labels of main()'s switch only: comments and strings do not count.
     function mainSwitchBody(src: string): string {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')

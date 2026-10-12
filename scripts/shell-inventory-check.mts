@@ -217,6 +217,21 @@ export const SOURCED_LIBS: readonly SourcedLib[] = [
       dod_stage_judgement: 'judgement',
     },
   },
+  {
+    sh: 'scripts/lib/state-dir.sh',
+    mts: 'scripts/lib/state-dir.mts',
+    // The callers hold these as unexported locals; the prefix carries them into the child.
+    env: 'BP_CODE_ROOT="${BP_CODE_ROOT:-}" BP_STATE_ROOT="${BP_STATE_ROOT:-}" AGENT_STATE_HOME="${AGENT_STATE_HOME:-}" AGENT_SIGNAL_FILE="${AGENT_SIGNAL_FILE:-}" BP_STATE_ROOT_CEILING="${BP_STATE_ROOT_CEILING:-}" ',
+    fns: {
+      bp_state_root: 'bp-state-root',
+      agent_state_dir: 'agent-state-dir',
+      agent_state_dir_for: 'agent-state-dir-for',
+      agent_signal_file: 'agent-signal-file',
+      agent_signal_file_for: 'agent-signal-file-for',
+      agent_signal_journal: 'agent-signal-journal',
+      agent_signal_journal_for: 'agent-signal-journal-for',
+    },
+  },
 ]
 
 // D: a shell path P is ported when it is not tracked and its stem's .mts is.
@@ -239,7 +254,11 @@ const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const SENTINEL = /[\u0001\u0002]/
 const PH_SPLIT = /\u0001([TUB])(\d+)\u0002/
 const DIRECTIVE = /^\s*# shellcheck source=\S+\s*$/
-const R3_Q = String.raw`"?((?:\$\{?\w+\}?/)?)scripts/lib/([\w-]+)\.sh"?`
+// Group 1 is the DIRECTORY PREFIX: the usual `[$VAR/]scripts/lib/`, or a bare
+// `$VAR/` (pipeline.sh: `. "$_PIPE_LIB/state-dir.sh"`, where the variable
+// already ends in scripts/lib). The bare form is only acted on for a stem in
+// SOURCED_LIBS (r3 below).
+const R3_Q = String.raw`"?((?:\$\{?\w+\}?/)?scripts/lib/|\$\{?\w+\}?/)([\w-]+)\.sh"?`
 const R3_RE = new RegExp(String.raw`^\s*(?:\[ -[rf] ${R3_Q} \] && )?(?:\.|source) ${R3_Q}\s*$`)
 
 function gitList(root: string, args: string[]): string[] {
@@ -342,6 +361,7 @@ function canonicalise(
     if (!m) return undefined
     const [, gp, gl, pfx = '', stem] = m
     if (gl !== undefined && (gl !== stem || gp !== pfx)) return undefined
+    // the bare `$VAR/` form counts for table stems only, which is checked here.
     const li = SOURCED_LIBS.findIndex((l) => l.sh === `scripts/lib/${stem}.sh`)
     return li >= 0 && libInD(li) ? { li, pfx } : undefined
   }
@@ -352,6 +372,15 @@ function canonicalise(
     }
   }
   const active = [...SOURCED_LIBS.entries()].filter(([li]) => prefixes.has(li))
+  // The bare `$VAR/<stem>` references (pipeline.sh's shape): the variable BASE's
+  // own R3 line used, a table lib in D, and nothing else.
+  const bare = active.flatMap(([li, lib]) => {
+    const vars = [...(prefixes.get(li) ?? [])].filter((p) => !p.endsWith('scripts/lib/'))
+    const k = d.members.find((m) => m.sh === lib.sh)?.k
+    if (vars.length === 0 || k === undefined) return []
+    const name = baseName(side === 'base' ? lib.sh : lib.mts)
+    return [{ k, re: new RegExp(String.raw`(?<=${vars.map(esc).join('|')})${esc(name)}(?![-\w]|\.(?!\s|$))`, 'g') }]
+  })
   const coupled = new Set<number>()
   const resolved = new Set<number>()
   const lines: string[] = []
@@ -380,10 +409,11 @@ function canonicalise(
           })
         } else {
           const pf = [...(prefixes.get(li) ?? [])].map(esc).join('|')
-          l = l.replace(new RegExp(String.raw`\[ -r "(?:${pf})${esc(lib.mts)}" \] && `, 'g'), `\u0001G${li}\u0002`)
+          const mts = esc(baseName(lib.mts))
+          l = l.replace(new RegExp(String.raw`\[ -r "(?:${pf})${mts}" \] && `, 'g'), `\u0001G${li}\u0002`)
           fns.forEach((fn, fi) => {
             const re = new RegExp(
-              `${esc(lib.env)}node "(?:${pf})${esc(lib.mts)}" ${esc(lib.fns[fn] ?? '')}(?![\\w-])`,
+              `${esc(lib.env)}node "(?:${pf})${mts}" ${esc(lib.fns[fn] ?? '')}(?![\\w-])`,
               'g',
             )
             l = l.replace(re, () => {
@@ -394,6 +424,7 @@ function canonicalise(
         }
       }
     }
+    for (const { k, re } of bare) l = l.replace(re, `\u0001T${k}\u0002`)
     l = l.replace(tok.re, (_m, p?: string, b?: string) => `\u0001T${p !== undefined ? tok.byName.get(p) : tok.byBase.get(b ?? '')}\u0002`)
     const interp = side === 'base' ? 'bash|sh' : 'node'
     l = l.replace(
